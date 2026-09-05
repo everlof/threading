@@ -70,9 +70,12 @@ struct RemoteAttachmentGallery: View {
         _currentID = State(initialValue: initialID)
         _thumbnails = StateObject(wrappedValue: RemoteAttachmentThumbnailStore(
             isOffered: offersThumbnails,
+            client: client,
             seed: seedThumbnails,
-            fetch: { id in
-                try await client.attachmentThumbnail(sessionID: sessionID, id: id)
+            fetch: { id, current in
+                // The client the store holds *now*, never the one this view was first built
+                // with: the model moves the phone between routes under a gallery that stays open.
+                try await (current ?? client).attachmentThumbnail(sessionID: sessionID, id: id)
             }
         ))
     }
@@ -96,6 +99,11 @@ struct RemoteAttachmentGallery: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        // This view is rebuilt with the model's current client on every route move; the store
+        // it owns is not, so it is told. Keyed on the origin rather than the client value, which
+        // carries a bearer and is deliberately not `Equatable`.
+        .onAppear { thumbnails.adopt(client: client) }
+        .onChange(of: client.link.baseURL) { _, _ in thumbnails.adopt(client: client) }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 RemoteAttachmentGalleryTitle(

@@ -2018,7 +2018,13 @@ final class PromptInputTests: XCTestCase {
             try XCTUnwrap(augmented.first { $0.name == "skills" }).id,
             ConversationComposerCommands.skillsID
         )
-        XCTAssertTrue(augmented.filter { $0.name == "status" || $0.name == "skills" }
+        XCTAssertEqual(
+            try XCTUnwrap(augmented.first { $0.name == "usage" }).id,
+            ConversationComposerCommands.usageID
+        )
+        XCTAssertTrue(augmented.filter {
+            $0.name == "status" || $0.name == "skills" || $0.name == "usage"
+        }
             .allSatisfy(\.isEnabled))
     }
 

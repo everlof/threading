@@ -2003,6 +2003,17 @@
         }
       }
     },
+    "%lld existing “continue on reset” messages for this account will be released only after Codex confirms new headroom. No message will be created or sent for any other chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld befintliga ”fortsätt vid återställning”-meddelanden för det här kontot släpps först när Codex har bekräftat nytt utrymme. Inget meddelande skapas eller skickas för någon annan chatt."
+          }
+        }
+      }
+    },
     "%lld explicit redactions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7899,6 +7910,17 @@
         }
       }
     },
+    "Banked usage reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparad användningsåterställning"
+          }
+        }
+      }
+    },
     "Baseline" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9835,6 +9857,17 @@
         }
       }
     },
+    "Checking banked reset…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar sparad återställning…"
+          }
+        }
+      }
+    },
     "Checking for Updates…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11375,6 +11408,28 @@
         }
       }
     },
+    "Codex confirmed that reset was already used, but the account still reports a full usage window." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex bekräftade att återställningen redan hade använts, men kontot rapporterar fortfarande ett fullt användningsfönster."
+          }
+        }
+      }
+    },
+    "Codex confirmed that reset was already used." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex bekräftade att återställningen redan hade använts."
+          }
+        }
+      }
+    },
     "Codex could not be launched." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11397,6 +11452,17 @@
         }
       }
     },
+    "Codex did not report individual credits, so Codex will choose which reset to use." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex rapporterade inte enskilda krediter, så Codex väljer vilken återställning som används."
+          }
+        }
+      }
+    },
     "Codex exited with status %lld." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11404,6 +11470,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Codex avslutades med status %lld."
+          }
+        }
+      }
+    },
+    "Codex found no banked reset available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex hittade ingen tillgänglig sparad återställning."
+          }
+        }
+      }
+    },
+    "Codex found no eligible limit to reset." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex hittade ingen kvalificerad gräns att återställa."
           }
         }
       }
@@ -11481,6 +11569,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Codex-sessioner startar i"
+          }
+        }
+      }
+    },
+    "Codex used the banked reset." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex använde den sparade återställningen."
+          }
+        }
+      }
+    },
+    "Codex used the reset · %lld continuations released." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex använde återställningen · %lld fortsättningar släpptes."
+          }
+        }
+      }
+    },
+    "Codex used the reset, but Threading could not release waiting continuations." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex använde återställningen, men Threading kunde inte släppa väntande fortsättningar."
+          }
+        }
+      }
+    },
+    "Codex used the reset, but the account still reports a full usage window. Waiting chats were not released." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex använde återställningen, men kontot rapporterar fortfarande ett fullt användningsfönster. Väntande chattar släpptes inte."
           }
         }
       }
@@ -14224,6 +14356,17 @@
         }
       }
     },
+    "Credit: %@ · %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kredit: %@ · %@."
+          }
+        }
+      }
+    },
     "Crossfade" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16277,6 +16420,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Elementrapport"
+          }
+        }
+      }
+    },
+    "Eligible windows: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kvalificerade fönster: %@."
+          }
+        }
+      }
+    },
+    "Eligible windows: determined by Codex." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kvalificerade fönster: bestäms av Codex."
           }
         }
       }
@@ -25862,6 +26027,17 @@
         }
       }
     },
+    "No chat message will be created or sent by this reset." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget chattmeddelande skapas eller skickas av återställningen."
+          }
+        }
+      }
+    },
     "No checks" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28685,6 +28861,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna inställningarna"
+          }
+        }
+      }
+    },
+    "Open usage, limits, and banked resets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna användning, gränser och sparade återställningar"
           }
         }
       }
@@ -39238,6 +39425,17 @@
         }
       }
     },
+    "Spend one banked reset on this account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förbruka en sparad återställning för det här kontot"
+          }
+        }
+      }
+    },
     "Split the current work into small reviewable PRs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43440,6 +43638,17 @@
         }
       }
     },
+    "The next reset date for an affected window may move." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nästa återställningsdatum för ett påverkat fönster kan flyttas."
+          }
+        }
+      }
+    },
     "The note stays in Threading and is never exposed to the web page." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46362,6 +46571,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detta tar permanent bort ditt konto hos Threadings tjänst, återkallar direktåtkomst för alla parkopplade iPhone-enheter och loggar ut denna Mac. Lokala chattar och inställningar finns kvar på denna Mac."
+          }
+        }
+      }
+    },
+    "This permanently spends 1 of %lld banked resets for %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detta förbrukar permanent 1 av %lld sparade återställningar för %@."
           }
         }
       }
@@ -49314,6 +49534,17 @@
         }
       }
     },
+    "Use Banked Reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd sparad återställning"
+          }
+        }
+      }
+    },
     "Use Claude's Setting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49424,6 +49655,28 @@
         }
       }
     },
+    "Use Reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd återställning"
+          }
+        }
+      }
+    },
+    "Use Reset · %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd återställning · %lld"
+          }
+        }
+      }
+    },
     "Use Share Chat… from that chat’s ⋯ menu." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49453,6 +49706,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd webbplatsens favicon…"
+          }
+        }
+      }
+    },
+    "Use a banked reset?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd en sparad återställning?"
           }
         }
       }
@@ -49519,6 +49783,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd kompakt rubrik"
+          }
+        }
+      }
+    },
+    "Use reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd återställning"
           }
         }
       }
@@ -49662,6 +49937,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använder valet Konversationshastighet i inställningarna under Allmänt."
+          }
+        }
+      }
+    },
+    "Using Reset…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder återställning…"
+          }
+        }
+      }
+    },
+    "Using banked reset…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder sparad återställning…"
           }
         }
       }
@@ -53996,6 +54293,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ingen OS-orienterad funktioner"
+          }
+        }
+      }
+    },
+    "no expiry reported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "inget utgångsdatum rapporterat"
           }
         }
       }

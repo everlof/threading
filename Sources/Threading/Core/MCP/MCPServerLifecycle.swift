@@ -75,21 +75,37 @@ extension MCPServer {
         }
 
         if event == .turnFinished {
+            ThreadingLogger.mcp.debug(
+                "Codex/Claude turn finish received for \(sessionID.uuidString, privacy: .public)"
+            )
             DispatchQueue.main.async {
+                // Stamped before the checkout fence below can move ownership: this report's
+                // `cwd` names where the finished turn ran, and after a commit that is the
+                // checkout the chat has just left. See `HookLifecycleReport.capturedOwnershipEpoch`.
+                let report = Self.stamped(report)
                 self.gitTurnCheckpointStoreProvider().finishTurn(
                     sessionID: sessionID,
                     assistantTurnID: report.turnID,
                     providerTurnID: report.turnID,
                     settlePendingCheckoutMove: false
-                ) { _ in
+                ) { checkpoint in
+                    ThreadingLogger.mcp.debug(
+                        "Turn finish checkpoint settled for \(sessionID.uuidString, privacy: .public): \(checkpoint?.status.rawValue ?? "none", privacy: .public)"
+                    )
                     // Stop is the provider's authoritative interactive-turn boundary even when
                     // it reports work left running. Acknowledge before replacing the runtime:
                     // the reporting curl is a child of that process and must be allowed to exit.
                     // Keep the lifecycle relay closed until the durable checkout fence settles,
                     // so no watcher or outbox can admit the next prompt into the old checkout.
                     respond(.accepted)
-                    SessionCheckoutCoordinator.shared.finishPendingMove(sessionID: sessionID) { _ in
+                    SessionCheckoutCoordinator.shared.finishPendingMove(sessionID: sessionID) { succeeded in
+                        ThreadingLogger.mcp.debug(
+                            "Turn finish checkout fence settled for \(sessionID.uuidString, privacy: .public): \(succeeded, privacy: .public)"
+                        )
                         HookLifecycleRelay.deliver(report)
+                        ThreadingLogger.mcp.debug(
+                            "Turn finish relayed for \(sessionID.uuidString, privacy: .public)"
+                        )
                     }
                 }
             }
@@ -99,12 +115,13 @@ extension MCPServer {
         guard event == .turnStarted else {
             respond(.accepted)
             DispatchQueue.main.async {
-                HookLifecycleRelay.deliver(report)
+                HookLifecycleRelay.deliver(Self.stamped(report))
             }
             return
         }
 
         DispatchQueue.main.async {
+            let report = Self.stamped(report)
             self.gitTurnCheckpointStoreProvider().prepareTurn(
                 sessionID: sessionID,
                 userTurnID: report.turnID,
@@ -134,5 +151,18 @@ extension MCPServer {
         }
 
         return HookLifecycleEvent(rawValue: value)
+    }
+
+    /// Stamps a report with the checkout ownership it arrived under.
+    ///
+    /// Read on the main actor, and read *before* any checkout fence the same request goes on to
+    /// run: the value is only meaningful as "ownership as it was when this hook fired", and the
+    /// tracker discards the report if that has moved by the time it is classified.
+    @MainActor
+    private static func stamped(_ report: HookLifecycleReport) -> HookLifecycleReport {
+        var stamped = report
+        stamped.capturedOwnershipEpoch = SessionExecutionLocusTracker.shared
+            .ownershipEpoch(forSessionID: report.sessionID)
+        return stamped
     }
 }

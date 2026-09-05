@@ -2499,8 +2499,10 @@ Codex Chat enables the operations it can execute through app-server — **/compa
 **/review [instructions]** — plus the skills available in the current checkout. Familiar Codex
 TUI commands are still identified: unsupported ones are shown disabled with a Terminal
 explanation instead of being sent accidentally as prompts. **/status** is handled locally for a
-provider/model/run-state/context summary, and **/skills** is the shared skill browser. Running a
-skill keeps its instructions and local path inside Codex on the Mac.
+provider/model/run-state/context summary, **/usage** opens **Settings > Usage** at that session's
+exact account, and **/skills** is the shared skill browser. Running a skill keeps its instructions
+and local path inside Codex on the Mac. A remotely submitted `/usage` does not open a window behind
+the owner's back; use the iPhone's Usage sheet instead.
 
 The iPhone conversation composer receives the same live catalog. Its plus button browses all
 entries, and typing `/`, `$`, or `/skills` works as on the Mac. The phone receives presentation
@@ -2650,8 +2652,8 @@ fail over or adopt another advertised address without being paired again.
 
 ### Faster return to a chat on iPhone
 
-When you leave a chat, the iPhone normally keeps up to three authenticated connections warm for
-60 seconds. It does not keep the terminal running on the phone: while held, that connection gets
+When you leave a chat, the iPhone normally keeps up to five authenticated connections warm for
+two minutes. It does not keep the terminal running on the phone: while held, that connection gets
 no output or conversation updates, owns no terminal size, and does not appear as a viewer on the
 Mac. Returning to the same chat reuses the secure connection and then receives a fresh screen or
 conversation snapshot. Older Mac builds that cannot park safely disconnect as usual.
@@ -2812,7 +2814,10 @@ with the columns that reached the limit in red; scheduled resets are counted in
 the rows beneath the chart rather than ruled through it. Each **Current
 capacity** bar also carries the thin time mark from the Mac: usage before it is under pace and
 usage beyond it is ahead of linearly elapsed window time. Usage is owner-only;
-a one-chat guest never sees the menu item or the whole-Mac data behind it.
+a one-chat guest never sees the menu item or the whole-Mac data behind it. When the selected Codex
+login has inventory, **Use Banked Reset** asks the same explicit confirmation as the Mac and the
+Mac performs the account mutation. Retrying a lost response cannot spend a second credit, and no
+waiting chat is released until the Mac has read back real headroom.
 
 For a shared session, choose its live input mode in the Mac's **Sharing** pane (or from the
 control menu on iPhone/browser):
@@ -2873,14 +2878,16 @@ the prompt first. Either way the lines arrive as one paste when the program supp
 Claude Code shows as a single "[Pasted text]" token. A view-only link can copy but not quote.
 
 The key bar under the terminal is two rows: a tight run of key caps against the keyboard, and
-an action row above it carrying the paperclip, the Direct/Compose switch and the `⌨︎…` key
-editor. The caps are customizable per agent, per device — a Termius-style keyboard
+an action row above it carrying any keys placed there beside the paperclip, the Direct/Compose
+switch and the `⌨︎…` key editor. The caps are customizable per agent, per device — a Termius-style keyboard
 that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
 agent (Claude Code's leads with ⇧⇥, the permission-mode cycle its TUI answers to), and the
 action row's `⌨︎…` control — or **Settings → On this iPhone → Terminal keys** — opens the
 editor: add chord keys such as ⌃→ or ⇧⇥ from the catalogue, add snippet keys that type saved
 text (optionally submitting it with Return; long-press such a key to insert without running),
-relabel any key, drag to reorder with Edit, swipe to delete, and reset to the stock layout. The
+place any key on the top or bottom row, relabel it, drag to reorder with Edit, swipe to delete,
+and reset to the stock layout. A submitting snippet types its text before sending Return as a
+separate terminal action, so agent TUIs run it instead of treating the whole key as pasted text. The
 ⌃ and ⌥ keys latch: tap once to apply to the next key — from the bar or typed on the system
 keyboard — tap twice to lock, tap again to release. Arrows, Home and End follow the TUI's
 application-cursor mode, so full-screen programs receive the sequences they asked for. Layouts
@@ -4953,7 +4960,12 @@ window ended, and a five-hour window's projection card says projection is for we
 inventory for that account: a positive count includes the nearest known expiry, zero says none are
 available, and **Unavailable** means the provider reported no count. A banked marker on the chart
 is historical evidence that a credit count decreased across a proven early clear; it is not the
-same fact as inventory and never means Threading will apply a reset automatically.
+same fact as inventory and never means Threading will apply a reset automatically. For a Codex
+account with inventory, choose **Use Banked Reset** and confirm the exact credit Threading selected.
+If Codex withheld individual credit details, the confirmation says Codex will choose. Threading
+re-reads the account after redemption; only then, when every reported current window has headroom,
+it releases existing `continue on reset` messages for that same login. It never creates one for a
+chat that did not already owe one.
 
 The report is built in the background, deduplicates copied, resumed and subagent responses, and is
 remembered between launches. The page keeps the last completed snapshot visible while a rebuild

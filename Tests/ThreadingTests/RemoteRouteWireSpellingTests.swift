@@ -20,6 +20,7 @@ final class RemoteRouteWireSpellingTests: XCTestCase {
         XCTAssertEqual(RemoteRouter.apiSessionsPath, "/api/me")
         XCTAssertEqual(RemoteRouter.usagePath, "/api/usage")
         XCTAssertEqual(RemoteRouter.usageLimitPath, "/api/usage/limit")
+        XCTAssertEqual(RemoteRouter.usageResetPath, "/api/usage/reset")
         XCTAssertEqual(RemoteRouter.createSessionPath, "/api/session")
         XCTAssertEqual(RemoteRouter.notificationRegistrationPath, "/api/notifications")
         XCTAssertEqual(RemoteRouter.diagnosticUploadPath, "/api/diagnostics")

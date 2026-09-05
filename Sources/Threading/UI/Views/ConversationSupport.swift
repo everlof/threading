@@ -37,6 +37,12 @@ protocol ConversationViewControllerDelegate: AnyObject {
         _ controller: ConversationViewController,
         didRequestOpenSession sessionID: SessionID
     )
+
+    /// The app-owned `/usage` command asked the window to open Limit history for this login.
+    func conversation(
+        _ controller: ConversationViewController,
+        didRequestUsageFor accountID: AccountID?
+    )
 }
 
 // MARK: - Flipped Clip View

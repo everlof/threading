@@ -270,6 +270,15 @@ final class SessionCheckoutCoordinator {
         if let departure = departures[sessionID],
            departure.worktreeIdentity == checkout.worktreeIdentity,
            now().timeIntervalSince(departure.at) < SessionCheckoutDefaults.reversalDwell {
+            // Recorded rather than silently refused: a damped reversal is the one reading that
+            // says the two execution signals still disagree after a commit, and an audit that
+            // cannot count them can only infer the oscillation from the moves it did not stop.
+            EventLog.shared.record(.session, "Checkout move reversal damped", [
+                "session": sessionID.uuidString,
+                "observed": checkout.root,
+                "departed_at": ISO8601DateFormatter().string(from: departure.at),
+                "dwell": String(Int(SessionCheckoutDefaults.reversalDwell))
+            ])
             return .denied
         }
 

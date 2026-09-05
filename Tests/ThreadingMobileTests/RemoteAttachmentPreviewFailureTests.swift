@@ -19,6 +19,51 @@ final class RemoteAttachmentPreviewFailureTests: XCTestCase {
     }
 }
 
+/// Which transport failures are worth one more attempt at once, and which are not.
+final class RemoteTransientTransportFailureTests: XCTestCase {
+    /// `url.-1005`, twenty-seven times in one day's audit: the pooled connection the host had
+    /// just closed, reused a moment too late.
+    func testALostConnectionIsTransient() {
+        XCTAssertTrue(RemoteTransientTransportFailure.isTransient(URLError(.networkConnectionLost)))
+    }
+
+    /// The same fact can arrive as the POSIX reset beneath whichever error wrapped it.
+    func testAResetOrBrokenPipeBeneathAWrapperIsTransient() {
+        for code in [ECONNRESET, EPIPE] {
+            let posix = NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+            let wrapped = NSError(
+                domain: NSURLErrorDomain,
+                code: URLError.cannotConnectToHost.rawValue,
+                userInfo: [NSUnderlyingErrorKey: posix]
+            )
+            XCTAssertTrue(RemoteTransientTransportFailure.isTransient(wrapped), "\(code)")
+        }
+    }
+
+    /// Asking again at once does not make an absent route, a slow host or a refusal better,
+    /// and a cancellation is the caller's own doing.
+    func testEverythingElseIsNot() {
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(URLError(.timedOut)))
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(URLError(.cannotFindHost)))
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(URLError(.cancelled)))
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(CancellationError()))
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(
+            RemoteClientError.decodedRefusal(status: 404, data: Data())
+        ))
+    }
+
+    /// The chain walk is bounded: a reset buried deeper than the limit is not found, so a
+    /// hostile or runaway `userInfo` cannot make the classifier walk forever.
+    func testTheUnderlyingChainWalkIsBounded() {
+        var error = NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNRESET))
+        for _ in 0..<(RemoteClientDefaults.underlyingErrorDepthLimit + 1) {
+            error = NSError(domain: "wrapper", code: 1, userInfo: [NSUnderlyingErrorKey: error])
+        }
+        XCTAssertFalse(RemoteTransientTransportFailure.isTransient(error))
+    }
+}
+
 final class RemoteAttachmentPreviewLoadTests: XCTestCase {
 
     /// The report this pins: an image whose ledger thumbnail arrived, whose page never did.

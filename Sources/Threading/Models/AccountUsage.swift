@@ -6,22 +6,45 @@ import Foundation
 ///
 /// Claude and Codex both meter subscriptions by rolling windows but report them in different
 /// shapes; everything downstream (the toolbar pill, its popover) reads this one model.
-public struct AccountUsage: Equatable {
+public struct AccountUsage: Equatable, Sendable {
 
-    public struct ResetCredit: Equatable, Identifiable {
+    public struct ResetCredit: Equatable, Identifiable, Sendable {
         public let id: String
         public let title: String
+        public let description: String?
         public let grantedAt: Date?
         public let expiresAt: Date?
         public let status: String
+        public let resetType: String
 
-        public var isAvailable: Bool { status.lowercased() == "available" }
+        public init(
+            id: String,
+            title: String,
+            description: String? = nil,
+            grantedAt: Date?,
+            expiresAt: Date?,
+            status: String,
+            resetType: String = "codexRateLimits"
+        ) {
+            self.id = id
+            self.title = title
+            self.description = description
+            self.grantedAt = grantedAt
+            self.expiresAt = expiresAt
+            self.status = status
+            self.resetType = resetType
+        }
+
+        public var isAvailable: Bool {
+            status.caseInsensitiveCompare("available") == .orderedSame
+                && resetType == "codexRateLimits"
+        }
     }
 
     // MARK: - Window
 
     /// One rolling rate-limit window, e.g. the 5-hour session limit.
-    public struct Window: Equatable, Identifiable {
+    public struct Window: Equatable, Identifiable, Sendable {
         public let id: String
         public let label: String
 
@@ -106,7 +129,7 @@ public struct AccountUsage: Equatable {
 
     /// Where a reading came from, which sets how often re-reading is worthwhile: a local
     /// cache costs a file read, an API call costs a network round trip.
-    public enum Source: Equatable {
+    public enum Source: Equatable, Sendable {
         case api
         case localCache
     }
@@ -203,7 +226,7 @@ public struct AccountUsage: Equatable {
     /// configured default withholds the number that binds the choice made two clicks later: an
     /// account whose Fable window is at 89% looks identical to one at 12% until it is too late
     /// to pick the other login.
-    public enum ScopedWindows {
+    public enum ScopedWindows: Sendable {
         /// Only the windows metering the named model.
         case metering
         /// Every scoped window on the account, whatever it will run.

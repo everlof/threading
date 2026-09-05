@@ -206,6 +206,45 @@ in order — records the successful route, and can move to another advertised ro
 a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
 
+**A refresh says why it is asking, and names what it already holds.** The audit of 4–5 Sep 2026
+counted 384 full refreshes in a day, 158 of them within ten seconds of the previous one, against
+an event socket that was healthy nearly all of that time and already delivering every row change:
+a dashboard coming back on screen ran the whole race and pulled a complete 78-row catalogue, and
+so did the scene activating a moment later. Every caller now passes a `MobileRefreshReason`, and
+`MobileRefreshPolicy` — pure, unit-tested — decides what that reason costs from what the phone
+already knows. With a catalogue in hand and the event socket authenticated, a dashboard appearing
+asks nothing. A foreground, a socket recovery or an opened target re-validates with **one
+conditional request on the route that answered last**: the catalogue carries a
+`RemoteCatalogueRevisionDTO` (a per-process epoch and a count the Mac advances on every
+invalidation), the phone sends it back as `If-None-Match`, and the Mac answers `304 Not Modified`
+with no body when nothing changed or the whole catalogue when it did. Only if that one route fails
+does the race start. Every `sessionsChanged` delta carries the edition it produced, so a phone
+that merges deltas stays current for its next conditional request; a delta from another epoch is a
+Mac restart the phone slept through and schedules a full refresh (`revisionGap`). A person pulling
+to refresh, a host change, a structural change and a mutation follow-up always pay the full race.
+`hostRefreshStarted` records the reason and the decision, and `hostRefreshSucceeded` records the
+status — `200` or `304` — so the next audit can attribute every refresh. `Cache-Control:
+no-store` stays on every response: this is application-level freshness, not a shared cache.
+
+**An address that keeps refusing is rested.** The same audit counted 758 attempts against two of
+one Mac's three Tailscale origins — its IPv4 address and its MagicDNS name — every one `url.-1200`
+inside 30 ms while the third origin and the LAN address answered, because a race retried both on
+every refresh and nothing remembered. `MobileRouteHealthLedger` counts identical TLS refusals per
+origin (the `-1200…-1206` family, an address answering and saying no; never a timeout, which is a
+fact about the network); after three in a row the origin sits out the race for five minutes,
+doubling to an hour on each further refusal and cleared by one success. A rested origin is tried
+once more when its rest ends, is journalled as `hostRouteEnded … result: skipped, reason: cooldown`
+meanwhile, and when every origin is resting none is skipped, since a race with no lanes is not a
+race. A failed attempt also records in `detail` the pin verdict the delegate reached for that host
+and the TLS status beneath the error (`trust.notPinned`, `trust.accepted:tls.-9807`), which is the
+difference between a pin this phone never registered and a listener the Mac is not actually
+serving on — the two fixes the audit could not choose between.
+
+The body itself is encoded once per catalogue edition and authorization on a worker, never on the
+main queue, and served gzip-compressed to any client whose `Accept-Encoding` allows it, which
+`URLSession` and every browser do by default. See the mobile dashboard scaling contract in
+[`performance.md`](architecture/performance.md).
+
 The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
 including dormant sessions. The navigation title names the connected Mac and carries its live
 connection status; the leading Mac button switches paired hosts, so the dashboard does not repeat
@@ -454,10 +493,31 @@ exactly like the attachment route it shrinks and advertised as
 `BoundedImageDecodePolicy.thumbnail` at no more than `RemoteAttachmentThumbnail.maximumPixelDimension`
 a side whatever was asked (`RemoteAttachmentThumbnailRenderer`), answers a JPEG, and 404s every
 other kind, which the ledger draws as the kind's glyph. The phone asks per cell as the lazy row
-brings it on screen, once per attachment (a failure is not retried), through a cache bounded at
-`RemoteAttachmentThumbnailStore.capacity`; a Mac that does not advertise the feature is never
-asked, and a notification that names one attachment opens the gallery on it with the listing
-that resolved it as the set.
+brings it on screen, through a cache bounded at `RemoteAttachmentThumbnailStore.capacity`; a Mac
+that does not advertise the feature is never asked, and a notification that names one attachment
+opens the gallery on it with the listing that resolved it as the set.
+
+**A lost connection is not a lost attachment.** The audit of 4–5 Sep 2026 found 27 previews
+failed with `URLError.networkConnectionLost` while the catalogue and terminal sockets beside them
+were healthy — the shape of a burst of short-lived connections racing a pool, not of a bad link.
+Four things made it: every ledger cell and every materialised page fired its own GET into one
+shared `URLSession` with no bound; the Mac answered each thumbnail with `Connection: close`, so
+thirty pictures were thirty connection setups and teardowns; `RemoteAttachmentThumbnailStore`
+captured the client of the gallery's first build and went on dialling that origin after the model
+had moved the phone to another; and a failure of any kind was suppressed for the store's lifetime.
+So: `RemoteTransientTransportFailure` names the failures worth one more attempt at once — a lost
+connection, or a reset or broken pipe beneath whatever wrapped it — and every attachment GET
+(`attachmentData`, `attachmentThumbnail`, `attachmentVideoData`) makes that one retry on a fresh
+connection; `MobileMediaDownloadLimiter` bounds thumbnails to four in flight and whole files to
+two, with a waiter that scrolls away leaving the queue rather than taking a turn; the request
+session keeps at most `RemoteClientDefaults.maximumConnectionsPerHost` connections to a Mac; the
+store is told the current client whenever the route moves (`adopt(client:)`) and forgets its
+*transient* failures then — a refusal the Mac gave stays refused, since the Mac has not changed;
+and the Mac keeps a thumbnail's connection open (`RemoteRouter.data(closesConnection: false)`),
+because a ≤256 px JPEG sits far under the send high-water mark that closing a whole file guards.
+A lost thumbnail now leaves an `attachmentPreviewFailed` record with `kind: thumbnail`, the
+transport and origin it was lost on, and `detail: transient` or `terminal`, where before it
+reached only the unified log.
 
 **A page stops asking for its bytes only once it holds them** — never because an attempt is
 already running. `RemoteAttachmentPreviewLoad.shouldRequestBytes` is the whole rule, and it
@@ -919,9 +979,13 @@ diagnostics are useful without a Mac and stay available from the dashboard's `�
 pairing. The stock icon picker is manual because iOS confirms every icon change; when a connected
 Mac uses a built-in style, the picker names that style as the matching choice.
 
-**Settings → Advanced** controls the bounded warm-session pool. Its defaults are 60 seconds and
-three connections; hold time can be set from 5–300 seconds and size from 0–8, with zero disabling
-reuse. Popping a chat parks only its authenticated WebSocket. The host first removes it from PTY
+**Settings → Advanced** controls the bounded warm-session pool. Its defaults are two minutes and
+five connections — the audit of 4–5 Sep 2026 saw 33 warm resumptions at a 31 ms median against
+222 fresh hellos across 44 sessions, several reopened repeatedly, on the old minute and three;
+hold time can be set from 5–300 seconds and size from 0–8, with zero disabling reuse. Eviction
+is by parking order, which is recency of use: a chat taken from the pool leaves it and is parked
+again, at the end, when it is popped. The pool's counters travel in the phone's diagnostics
+capture as `connectionPoolMetrics`, so an audit reads the hit rate without asking the phone. Popping a chat parks only its authenticated WebSocket. The host first removes it from PTY
 and conversation fan-out, releases its viewport, presence, typing and input-control state, and the
 phone retains no terminal renderer. Reopening that same chat resumes through the ordinary hello
 and bounded replay/snapshot path. A Mac that does not advertise `sessionConnectionParking` is
@@ -1593,11 +1657,12 @@ or remote access stopping — so two messages can never land on one composer lin
 When the terminal is solo, the same bar can switch between that Compose surface and Direct TUI
 input; collaboration temporarily requires Compose and does not overwrite the saved solo choice.
 
-The key bar is two rows. The row against the keyboard holds only the tight key caps, plus the
-way back from the keyboard at its trailing edge — small targets stay a dense strip, and reaching
-a cap never means reaching past a utility. The action row above carries everything that is not a
-keystroke: the attachment paperclip, the Direct/Compose switch and the key editor. The
-customizable run itself is a Termius-style keyboard, and deliberately exceeds Termius's
+The key bar is two rows. The row against the keyboard starts with the stock cap run and keeps the
+way back from the keyboard at its trailing edge; every key may instead be placed on the top row,
+where it scrolls through the room between the fixed attachment, Direct/Compose and editor controls.
+Small targets stay a dense strip in either place. Apple Color Emoji exceeds the text face's
+nominal line box, so both rows retain a 34-point cap well rather than clipping a user-authored
+emoji. The customizable run itself is a Termius-style keyboard, and deliberately exceeds Termius's
 model where agent TUIs need it: a key can be a *chord* (⇧⇥ — Claude Code's permission-mode
 cycle, which Termius cannot put on its bar at all), a snippet that types saved text and
 optionally submits it, a raw escape sequence, or a latching ⌃/⌥ that arms for the next key —
@@ -1610,13 +1675,16 @@ device-local on purpose — a phone and an iPad earn different bars — and the 
 agent kind returns on reset. The archive has one 1 MiB encoded ceiling plus layout/key/string
 cardinality checks; duplicate key identities and oversized actions are refused without replacing
 the active or durable layout. Keys ride the existing `input` frame, so the server's
-capability/Focused-mode/size checks apply unchanged and no protocol bump was needed.
+capability/Focused-mode/size checks apply unchanged. A submitting snippet uses the existing
+`terminalSubmit` path instead: the host writes its text and Return separately, the same measured
+rule as the Compose surface above. Non-submitting snippets and every ordinary key stay on `input`.
+No protocol bump was needed.
 
 A named cap takes its bytes from SwiftTerm's live encoder rather than stopping at that classic
 fallback. Codex negotiates kitty keyboard event reporting before `/model`; under that contract a
 touch arrow is a press followed by a release, and enhanced functional-key spelling takes
 precedence over DECCKM. The bar owns both ends of a touch and sends both events in one ordered PTY
-write. Snippets and hand-authored raw sequences remain verbatim by definition.
+write. Non-submitting snippets and hand-authored raw sequences remain verbatim by definition.
 
 Modifier caps have two compatible lifetimes. A completed tap still cycles off → armed → locked →
 off, but the cap is also active from touch-down to touch-up, so holding ⌃ or ⌥ with one finger and

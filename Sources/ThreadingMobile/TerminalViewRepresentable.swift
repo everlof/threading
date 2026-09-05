@@ -295,7 +295,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         func attach(to view: RemoteTerminalView, in layoutView: RemoteTerminalLayoutView) {
             terminalView = view
             self.layoutView = layoutView
-            keyBridge.terminalView = view
+            keyBridge.attachTerminalView(view)
             view.scrollOwnershipDidChange = { [weak self] in
                 self?.refreshScrollToEndPresence()
             }
@@ -318,9 +318,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             contentOffsetObservation?.invalidate()
             contentOffsetObservation = nil
             terminalView?.scrollOwnershipDidChange = nil
-            if keyBridge.terminalView === terminalView {
-                keyBridge.terminalView = nil
-            }
+            if let terminalView { keyBridge.detachTerminalView(terminalView) }
             terminalView = nil
             layoutView = nil
         }

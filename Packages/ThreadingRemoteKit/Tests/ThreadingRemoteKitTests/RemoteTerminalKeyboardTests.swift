@@ -150,7 +150,10 @@ final class RemoteTerminalKeyboardTests: XCTestCase {
         let layout = RemoteTerminalKeyboardLayout(keys: [
             RemoteTerminalKeyDefinition(action: .named(.tab, [.shift, .control])),
             RemoteTerminalKeyDefinition(customLabel: "int", action: .sequence("\u{3}")),
-            RemoteTerminalKeyDefinition(action: .snippet(text: "/review", submits: true)),
+            RemoteTerminalKeyDefinition(
+                action: .snippet(text: "/review", submits: true),
+                row: .top
+            ),
             RemoteTerminalKeyDefinition(action: .latch(.alt)),
         ])
         let decoded = try JSONDecoder().decode(
@@ -158,6 +161,17 @@ final class RemoteTerminalKeyboardTests: XCTestCase {
             from: JSONEncoder().encode(layout)
         )
         XCTAssertEqual(decoded, layout)
+        XCTAssertEqual(decoded.keys(in: .top).map(\.action), [
+            .snippet(text: "/review", submits: true),
+        ])
+    }
+
+    func testAnArchivedKeyWithoutARowKeepsItsOriginalBottomPlacement() throws {
+        let payload = Data(#"{"id":"6F1E9C7A-1111-2222-3333-444455556666","action":{"kind":"snippet","text":"🍕","submits":false}}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(RemoteTerminalKeyDefinition.self, from: payload)
+
+        XCTAssertEqual(decoded.row, .bottom)
     }
 
     /// An action kind this build does not know must refuse to decode — a key that cannot
@@ -202,6 +216,8 @@ final class RemoteTerminalKeyboardTests: XCTestCase {
         for kind in ["claude", "codex", "grok", "opencode", "unknown"] {
             let layout = RemoteTerminalKeyboardLayout.standard(forAgentKind: kind)
             let actions = layout.keys.map(\.action)
+            XCTAssertEqual(layout.keys(in: .bottom), layout.keys)
+            XCTAssertTrue(layout.keys(in: .top).isEmpty)
             XCTAssertEqual(actions.first, .named(.escape, []), "esc leads for \(kind)")
             XCTAssertTrue(actions.contains(.named(.tab, [])), "tab present for \(kind)")
             XCTAssertTrue(actions.contains(.latch(.control)), "⌃ latch present for \(kind)")

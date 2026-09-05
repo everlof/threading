@@ -1,5 +1,11 @@
 import Foundation
 
+/// A local surface asked the retained Usage page to reveal Limit history for one login.
+struct UsageFocusRequested: AppEvent {
+    static let name = Notification.Name("ThreadingUsageFocusRequested")
+    let accountID: AccountID?
+}
+
 /// Named output budgets for the Usage presentation boundary. Source scans may be much larger,
 /// but neither AppKit nor a future wire bridge receives those externally-sized collections.
 enum UsageDashboardProjectionDefaults {
@@ -128,6 +134,11 @@ struct UsageLimitDashboardRangeProjection: Equatable, Sendable {
 /// classified events are prepared off-main; the chart only decides how to ink them.
 struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
     let id: String
+    /// Stable routing identities. Display names are deliberately kept separate: actions must
+    /// never recover an account by parsing a localized chooser title or the series key.
+    let runtimeID: String?
+    let accountID: String?
+    let windowID: String?
     let runtimeName: String
     let accountName: String
     let windowLabel: String
@@ -149,6 +160,9 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
     /// uses `UsageDashboardProjector.limits`, which performs this work on a utility task.
     init(
         id: String,
+        runtimeID: String? = nil,
+        accountID: String? = nil,
+        windowID: String? = nil,
         runtimeName: String,
         accountName: String,
         windowLabel: String,
@@ -163,6 +177,9 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
     ) {
         self.init(
             id: id,
+            runtimeID: runtimeID,
+            accountID: accountID,
+            windowID: windowID,
             runtimeName: runtimeName,
             accountName: accountName,
             windowLabel: windowLabel,
@@ -182,6 +199,9 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
 
     init(
         id: String,
+        runtimeID: String? = nil,
+        accountID: String? = nil,
+        windowID: String? = nil,
         runtimeName: String,
         accountName: String,
         windowLabel: String,
@@ -194,6 +214,9 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
         nextResetCreditExpiresAt: Date?
     ) {
         self.id = id
+        self.runtimeID = runtimeID
+        self.accountID = accountID
+        self.windowID = windowID
         self.runtimeName = runtimeName
         self.accountName = accountName
         self.windowLabel = windowLabel
@@ -217,6 +240,9 @@ struct UsageLimitDashboardProjection: Equatable, Sendable {
 
 struct UsageLimitDashboardSeriesSummaryProjection: Equatable, Sendable, Identifiable {
     let id: String
+    let runtimeID: String?
+    let accountID: String?
+    let windowID: String?
     let runtimeName: String
     let accountName: String
     let windowLabel: String
@@ -227,6 +253,34 @@ struct UsageLimitDashboardSeriesSummaryProjection: Equatable, Sendable, Identifi
     let nextResetCreditExpiresAt: Date?
 
     var title: String { "\(runtimeName) · \(accountName) · \(windowLabel)" }
+
+    init(
+        id: String,
+        runtimeID: String? = nil,
+        accountID: String? = nil,
+        windowID: String? = nil,
+        runtimeName: String,
+        accountName: String,
+        windowLabel: String,
+        currentFraction: Double?,
+        resetsAt: Date?,
+        windowDuration: TimeInterval?,
+        resetCreditCount: Int?,
+        nextResetCreditExpiresAt: Date?
+    ) {
+        self.id = id
+        self.runtimeID = runtimeID
+        self.accountID = accountID
+        self.windowID = windowID
+        self.runtimeName = runtimeName
+        self.accountName = accountName
+        self.windowLabel = windowLabel
+        self.currentFraction = currentFraction
+        self.resetsAt = resetsAt
+        self.windowDuration = windowDuration
+        self.resetCreditCount = resetCreditCount
+        self.nextResetCreditExpiresAt = nextResetCreditExpiresAt
+    }
 }
 
 struct UsageLimitDashboardIndexProjection: Equatable, Sendable {
@@ -300,6 +354,9 @@ enum UsageDashboardProjector {
             let events = (resetsBySeries[id] ?? []).sorted { $0.detectedAt < $1.detectedAt }
             result.append(UsageLimitDashboardSeries(
                 id: id,
+                runtimeID: runtimeID,
+                accountID: accountID,
+                windowID: windowID,
                 runtimeName: AgentKind(rawValue: runtimeID)?.displayName ?? runtimeID,
                 accountName: latest.accountName ?? accountID,
                 windowLabel: latest.windowLabel ?? windowID,
@@ -345,6 +402,9 @@ enum UsageDashboardProjector {
                   let windowID = latest.windowID else { return nil }
             return UsageLimitDashboardSeriesSummaryProjection(
                 id: id,
+                runtimeID: runtimeID,
+                accountID: accountID,
+                windowID: windowID,
                 runtimeName: AgentKind(rawValue: runtimeID)?.displayName ?? runtimeID,
                 accountName: latest.accountName ?? accountID,
                 windowLabel: latest.windowLabel ?? windowID,
@@ -400,6 +460,9 @@ enum UsageDashboardProjector {
 
         return UsageLimitDashboardSeries(
             id: seriesID,
+            runtimeID: runtimeID,
+            accountID: accountID,
+            windowID: windowID,
             runtimeName: AgentKind(rawValue: runtimeID)?.displayName ?? runtimeID,
             accountName: latest.accountName ?? accountID,
             windowLabel: latest.windowLabel ?? windowID,

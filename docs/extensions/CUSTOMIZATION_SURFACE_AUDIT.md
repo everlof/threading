@@ -46,6 +46,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
 | All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, bounded scrolling and popover lifecycle | Host-only |
 | Usage analytics section switch | — | host-only | selected native analysis, retained chart state, keyboard and accessibility navigation | Host-only |
+| Banked usage reset actions | — | host-only | exact account and credit identity, fresh confirmation, provider idempotency, authoritative post-read, owed-continuation release | Host-only |
 | Curfew surfaces (draft moon button and chip, chat chip, sidebar Curfew fold, strip source, Settings section) | — | host-only | the deadline and its instance identity, hold admission, the wind-down record, interrupt/stop decisions and their receipts, the watched-turn rule, Lift | Host-only |
 | Account setup and reconnect | — | host-only | exhaustive supported-runtime identity, truthful sign-in owner, isolated-home routing, child-process lifecycle, login verification, credential non-capture, native failure and installation fallback | Host-only |
 | Custom-limit authoring | — | host-only | account/window identity, numeric validation, rule semantics, persistence, bounded history work, keyboard and accessibility contract | Host-only |
@@ -161,10 +162,11 @@ descriptions and options, and the host owns the catalogue projection, the identi
 against real commands, and the reveal. There is no new seam here and no new declaration to make: an
 extension that can already put a field on a settings page can already be found by its name.
 
-The mobile terminal key bar is host-only even though its key layout and solo Direct/Compose choice
-are deliberately customizable by the person using that phone. Its presentation is inseparable
-from the collaboration rule that temporarily requires atomic Compose, permission-gated PTY
-writes, DECCKM/xterm encoding, latching and live two-finger modifier state, touch cancellation,
+The mobile terminal key bar is host-only even though its key order, top-or-bottom row placement
+and solo Direct/Compose choice are deliberately customizable by the person using that phone. Its
+presentation is inseparable from the collaboration rule that temporarily requires atomic
+Compose, permission-gated PTY writes, DECCKM/xterm encoding, latching and live two-finger
+modifier state, touch cancellation,
 haptic and accessibility feedback, attachment upload/custody and path insertion, and the
 device-local archive's validated fallback. Letting an extension replace that shell could show a
 key, file, input mode or pressed state that the host did not authorize. Threading owns those
@@ -248,6 +250,12 @@ Consumption and Limit-history truth. Threading owns which retained native column
 keyboard and accessibility state, and the promise that switching does not rebuild or reset either
 chart. Extension-contributed Usage settings remain additive sections outside this switch; a
 replacement switch must not gain authority to hide or relabel their content.
+
+Banked usage reset actions remain host-only because their presentation is part of an irreversible
+account-mutation boundary. Threading owns the exact login and provider credit, the fresh
+confirmation, the idempotency key, the authoritative post-read and the account-scoped release of
+work that already owed a continuation. An extension may add explanatory Usage content, but cannot
+replace the action, report an unverified success or expose it as an agent-callable tool.
 
 Session Overview is host-only because its two sections expose host-owned operational truth rather
 than a presentation-only document: exact versus observed work attribution, transcript-accounted

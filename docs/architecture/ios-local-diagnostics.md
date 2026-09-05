@@ -67,6 +67,13 @@ existing Threading-window renderer, are JPEG-compressed below 420 KiB, and are p
 files. A consent generation token cancels a capture that was already waiting when either switch
 is turned off. There is no attempt to render after a crash, suspension, or termination.
 
+Capture preparation never reads the journal on the main actor. The journal's serial worker walks
+days and JSONL records newest-first and stops at the upload count or one global 8-MiB read budget;
+it does not decode and sort the full retained history before taking a suffix. Support-report
+encoding and file output use the same asynchronous boundary on iPhone and Mac. Because capture
+state can change while that worker runs, the phone repeats the consent, owner, active-host, LAN
+route, and connection-identity checks immediately before upload.
+
 The default request uses `latestIncident`: it never takes a screenshot merely because a checkup
 ran. `current` is an explicit tool argument and renders the current Threading window at request
 time. `none` sends no image.

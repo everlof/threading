@@ -46,6 +46,47 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         XCTAssertFalse(TerminalKeyBridge().isKeyboardShowing)
     }
 
+    func testDetachReconcilesAvailabilityAfterTheDismantleTurn() async {
+        let view = RemoteTerminalView(
+            frame: Fixture.windowFrame,
+            font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
+        )
+        let bridge = TerminalKeyBridge()
+        bridge.attachTerminalView(view)
+        XCTAssertTrue(bridge.canShowKeyboard)
+
+        bridge.detachTerminalView(view)
+
+        XCTAssertNil(bridge.terminalView)
+        // The published value is intentionally left alone in the representable's dismantle
+        // stack. Its next-turn reconciliation is the exclusivity boundary under test.
+        XCTAssertTrue(bridge.canShowKeyboard)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertFalse(bridge.canShowKeyboard)
+    }
+
+    func testAReplacementAttachmentWinsOverADeferredDetach() async {
+        let first = RemoteTerminalView(
+            frame: Fixture.windowFrame,
+            font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
+        )
+        let replacement = RemoteTerminalView(
+            frame: Fixture.windowFrame,
+            font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
+        )
+        let bridge = TerminalKeyBridge()
+        bridge.attachTerminalView(first)
+
+        bridge.detachTerminalView(first)
+        bridge.attachTerminalView(replacement)
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertTrue(bridge.terminalView === replacement)
+        XCTAssertTrue(bridge.canShowKeyboard)
+    }
+
     /// An unknown SF Symbol leaves the button's full slot in the bar but draws no glyph. That
     /// made the show-keyboard action present and accessible while visibly indistinguishable from
     /// empty space, so every symbol owned by this control is checked against the shipping SDK.
@@ -100,7 +141,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         )
         view.feed(text: "\u{1b}[?1h\u{1b}[>7u")
         let bridge = TerminalKeyBridge()
-        bridge.terminalView = view
+        bridge.attachTerminalView(view)
 
         XCTAssertEqual(
             bridge.encodedBytes(for: .named(.down, [])),
@@ -117,12 +158,33 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         )
         view.feed(text: "\u{1b}[?1h")
         let bridge = TerminalKeyBridge()
-        bridge.terminalView = view
+        bridge.attachTerminalView(view)
 
         XCTAssertEqual(
             bridge.encodedBytes(for: .named(.down, [])),
             Array("\u{1b}OB".utf8)
         )
+    }
+
+    func testAnEmojiSnippetWithSubmitOffStaysRawInputWithoutReturn() {
+        let bridge = TerminalKeyBridge()
+
+        XCTAssertNil(terminalKeySubmissionText(.snippet(text: "🍕", submits: false)))
+        XCTAssertEqual(
+            bridge.encodedBytes(for: .snippet(text: "🍕", submits: false)),
+            Array("🍕".utf8)
+        )
+    }
+
+    /// A single raw PTY write containing text plus Return is read as a paste by agent TUIs. The
+    /// key bar must recognize the submitting shape and hand only its text to the atomic route,
+    /// whose host side writes Return separately.
+    func testASubmittingSnippetUsesAtomicTerminalSubmission() {
+        XCTAssertEqual(
+            terminalKeySubmissionText(.snippet(text: "continue", submits: true)),
+            "continue"
+        )
+        XCTAssertNil(terminalKeySubmissionText(.named(.enter, [])))
     }
 
     /// These are composite symbols whose chassis do not share a bounding box: the
@@ -192,7 +254,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         window.addSubview(view)
         window.makeKeyAndVisible()
         let bridge = TerminalKeyBridge()
-        bridge.terminalView = view
+        bridge.attachTerminalView(view)
         XCTAssertTrue(view.becomeFirstResponder())
         return (window, view, bridge)
     }

@@ -592,6 +592,28 @@ enum AgentLauncher {
         return launchPlan(command: command, in: folder, resumeState: .unavailable)
     }
 
+    /// Starts a short-lived app-server against exactly one Codex login, without a conversation.
+    ///
+    /// Account-level operations must not borrow a live chat's process: Usage exists with no
+    /// session open, and a session may be routed to a different login. The shared routing prefix
+    /// also clears an inherited `CODEX_HOME` for the default account, which is the identity
+    /// guarantee a destructive account operation needs.
+    static func codexAccountAppServerPlan(for account: AgentAccount) -> AgentLaunchPlan {
+        precondition(account.provider.supports(.bankedUsageReset))
+        var command = ShellCommand()
+        appendManagedCodexInvocation(to: &command)
+        command.append(word: "app-server")
+        command.append(flag: "--listen", value: "stdio://")
+
+        var routed = AgentAccountRouting.prefix(for: .codex, account: account)
+        routed.append(contentsOf: command)
+        return launchPlan(
+            command: routed,
+            in: FileManager.default.temporaryDirectory.path,
+            resumeState: .unavailable
+        )
+    }
+
     /// Builds the one-shot, headless run behind the AI settings search, on whichever runtime
     /// claims `.headlessResearch`.
     ///

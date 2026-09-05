@@ -122,6 +122,13 @@ public enum RemoteTerminalLatchingModifier: String, Codable, CaseIterable, Senda
     }
 }
 
+/// Which of the terminal bar's two rows owns a key. Raw values are device-local storage
+/// identity: changing one would move saved keys back to the fallback row.
+public enum RemoteTerminalKeyRow: String, Codable, CaseIterable, Sendable {
+    case top
+    case bottom
+}
+
 /// What pressing a key does. `named` is the curated catalogue; `sequence` is the escape
 /// hatch for a hand-written byte string; `snippet` types text and optionally submits it;
 /// `latch` arms a modifier for whatever comes next.
@@ -215,25 +222,59 @@ public struct RemoteTerminalKeyDefinition: Codable, Equatable, Identifiable, Sen
     public var id: UUID
     public var customLabel: String?
     public var action: RemoteTerminalKeyAction
+    public var row: RemoteTerminalKeyRow
 
-    public init(id: UUID = UUID(), customLabel: String? = nil, action: RemoteTerminalKeyAction) {
+    public init(
+        id: UUID = UUID(),
+        customLabel: String? = nil,
+        action: RemoteTerminalKeyAction,
+        row: RemoteTerminalKeyRow = .bottom
+    ) {
         self.id = id
         self.customLabel = customLabel
         self.action = action
+        self.row = row
     }
 
     public var label: String {
         if let customLabel, !customLabel.isEmpty { return customLabel }
         return action.defaultLabel
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, customLabel, action, row
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        customLabel = try container.decodeIfPresent(String.self, forKey: .customLabel)
+        action = try container.decode(RemoteTerminalKeyAction.self, forKey: .action)
+        // Every archive written before row placement existed described the original bottom run.
+        row = try container.decodeIfPresent(RemoteTerminalKeyRow.self, forKey: .row) ?? .bottom
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(customLabel, forKey: .customLabel)
+        try container.encode(action, forKey: .action)
+        if row != .bottom {
+            try container.encode(row, forKey: .row)
+        }
+    }
 }
 
-/// An ordered run of keys — what the bar renders, left to right.
+/// One ordered key catalogue. Each row preserves the relative order of the keys assigned to it.
 public struct RemoteTerminalKeyboardLayout: Codable, Equatable, Sendable {
     public var keys: [RemoteTerminalKeyDefinition]
 
     public init(keys: [RemoteTerminalKeyDefinition]) {
         self.keys = keys
+    }
+
+    public func keys(in row: RemoteTerminalKeyRow) -> [RemoteTerminalKeyDefinition] {
+        keys.filter { $0.row == row }
     }
 
     /// The stock bar for one agent kind, keyed by the `agentKind` string the wire already

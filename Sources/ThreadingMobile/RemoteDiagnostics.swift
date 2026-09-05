@@ -94,6 +94,49 @@ enum MobileDiagnostics {
         DispatchTime.now().uptimeNanoseconds
     }
 
+    /// The `status` a refresh records when the host sent the whole catalogue, beside the `304`
+    /// a conditional request records when it did not.
+    static let fullCatalogueStatus = "200"
+
+    /// The `wave` of a conditional refresh's single attempt: not one of the race's three passes
+    /// but the route that answered last, tried alone before any race is started.
+    static let warmRouteWave = "warm"
+
+    /// The `reason` a route attempt records when `MobileRouteHealthLedger` kept it out of a walk.
+    static let routeCooldownReason = "cooldown"
+
+    /// What a failed attempt can say about *why*, as one bounded token: the pin verdict the
+    /// delegate reached for this host, if a challenge ran, and the TLS status beneath a
+    /// secure-connection failure, if URL loading recorded one.
+    ///
+    /// The two answer opposite questions. `trust.notPinned` beside `url.-1200` is an address the
+    /// phone holds no pin for, so stock evaluation refused the Mac's self-signed leaf — a
+    /// registration bug on this side. `trust.accepted` beside a `tls.` status is the address
+    /// itself ending the handshake — a listener bug on the Mac's side. The audit of 4–5 Sep 2026
+    /// counted 758 refusals from two of one Mac's addresses and could not say which.
+    static func transportDetail(for error: Error, host: String?) -> String? {
+        var parts: [String] = []
+        if let host, let verdict = RemoteHostTrust.liveVerdict(host.lowercased()) {
+            parts.append(RemoteHostTrust.token(for: verdict))
+        }
+        let cocoa = error as NSError
+        if let domain = cocoa.userInfo[DiagnosticKeys.streamErrorDomain] as? Int,
+           domain == DiagnosticKeys.streamErrorDomainSSL,
+           let status = cocoa.userInfo[DiagnosticKeys.streamErrorCode] as? Int {
+            parts.append("tls.\(status)")
+        }
+        guard !parts.isEmpty else { return nil }
+        return machineToken(parts.joined(separator: ":"))
+    }
+
+    private enum DiagnosticKeys {
+        /// CFNetwork's private-but-stable keys naming the stream error beneath a URL error.
+        static let streamErrorDomain = "_kCFStreamErrorDomainKey"
+        static let streamErrorCode = "_kCFStreamErrorCodeKey"
+        /// `kCFStreamErrorDomainSSL`.
+        static let streamErrorDomainSSL = 3
+    }
+
     static func elapsedMilliseconds(since startedAt: UInt64) -> String {
         let now = monotonicNow()
         return String(now >= startedAt ? (now - startedAt) / nanosecondsPerMillisecond : 0)
@@ -296,9 +339,23 @@ enum MobileDiagnostics {
 
     static func supportReport(
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
-    ) throws -> URL {
+    ) async throws -> URL {
         let info = Bundle.main.infoDictionary
-        return try journal.writeSupportReport(
+        return try await journal.writeSupportReportAsync(
+            appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
+            appBuild: info?["CFBundleVersion"] as? String ?? "?",
+            operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+            protocolVersion: RemoteProtocol.current,
+            minimumProtocolVersion: RemoteProtocol.minimumSupported,
+            additionalDetails: additionalDetails
+        )
+    }
+
+    static func supportReportValue(
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+    ) async -> RemoteDiagnosticReport {
+        let info = Bundle.main.infoDictionary
+        return await journal.supportReportAsync(
             appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
             appBuild: info?["CFBundleVersion"] as? String ?? "?",
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
@@ -492,7 +549,9 @@ final class MobileDiagnosticSharingController: ObservableObject {
         MobileDiagnostics.journal.record(.diagnosticSharingStarted, fields: [
             .reason: "user",
         ])
-        pending = MobileDiagnostics.journal.records()
+        pending = await MobileDiagnostics.journal.recentRecords(
+            maximumCount: RemoteDiagnosticJournal.defaultMaximumReportRecords
+        )
 
         do {
             try await flush()
@@ -718,16 +777,18 @@ struct RemoteDiagnosticsView: View {
                 }
 
                 Button {
-                    do {
-                        MobileDiagnostics.record(.issueReportExported, fields: [
-                            .reason: "diagnostics-only",
-                        ])
-                        let url = try MobileDiagnostics.supportReport()
-                        sharePayload = DiagnosticsSharePayload(items: [url])
-                    } catch {
-                        exportError = MobileL10n.string(
-                            "The support report could not be prepared."
-                        )
+                    Task { @MainActor in
+                        do {
+                            MobileDiagnostics.record(.issueReportExported, fields: [
+                                .reason: "diagnostics-only",
+                            ])
+                            let url = try await MobileDiagnostics.supportReport()
+                            sharePayload = DiagnosticsSharePayload(items: [url])
+                        } catch {
+                            exportError = MobileL10n.string(
+                                "The support report could not be prepared."
+                            )
+                        }
                     }
                 } label: {
                     Label("Share diagnostics only", systemImage: "square.and.arrow.up")

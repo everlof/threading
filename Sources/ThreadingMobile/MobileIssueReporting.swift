@@ -421,7 +421,7 @@ struct MobileIssueReportView: View {
                 .surface: "developerInbox",
             ])
             do {
-                let submission = try makeSubmission(destination: "developerInbox")
+                let submission = try await makeSubmission(destination: "developerInbox")
                 let result = try await MobileIssueReportOutbox.shared.enqueueAndDeliver(submission)
                 switch result {
                 case .delivered(let receipt):
@@ -500,7 +500,7 @@ struct MobileIssueReportView: View {
         Task { @MainActor in
             defer { activeAction = nil }
             do {
-                let submission = try makeSubmission(destination: "pairedMac")
+                let submission = try await makeSubmission(destination: "pairedMac")
                 let handoff = try MobileDeveloperReportHandoff.prepare(
                     submission,
                     supportsAtomicReportOpening: model.me?.features?.contains(
@@ -535,7 +535,9 @@ struct MobileIssueReportView: View {
         }
     }
 
-    private func makeSubmission(destination: String) throws -> PublicIssueReportSubmissionDTO {
+    private func makeSubmission(
+        destination: String
+    ) async throws -> PublicIssueReportSubmissionDTO {
         let extra = includeAdditionalDetails
             ? MobileDiagnostics.additionalDetails(model: model, notifications: notifications)
             : [:]
@@ -545,8 +547,7 @@ struct MobileIssueReportView: View {
             .surface: destination,
         ])
 
-        let reportURL = try MobileDiagnostics.supportReport(additionalDetails: extra)
-        let report = try RemoteDiagnosticJournal.readSupportReport(at: reportURL)
+        let report = await MobileDiagnostics.supportReportValue(additionalDetails: extra)
         let screenshotData: Data?
         if includeScreenshot, let screenshot = request.screenshot {
             screenshotData = screenshot.publicReportPreview(
@@ -576,42 +577,50 @@ struct MobileIssueReportView: View {
 
     private func prepareShare() {
         activeAction = .share
-        do {
-            let extra = includeAdditionalDetails
-                ? MobileDiagnostics.additionalDetails(model: model, notifications: notifications)
-                : [:]
-            MobileDiagnostics.record(.issueReportExported, fields: [
-                .reason: request.trigger.rawValue,
-                .enabledKindCount: String(extra.count),
-                .surface: includeScreenshot ? "screenshot" : "none",
-            ])
+        Task { @MainActor in
+            defer { activeAction = nil }
+            do {
+                let extra = includeAdditionalDetails
+                    ? MobileDiagnostics.additionalDetails(
+                        model: model,
+                        notifications: notifications
+                    )
+                    : [:]
+                MobileDiagnostics.record(.issueReportExported, fields: [
+                    .reason: request.trigger.rawValue,
+                    .enabledKindCount: String(extra.count),
+                    .surface: includeScreenshot ? "screenshot" : "none",
+                ])
 
-            let diagnosticsURL = try MobileDiagnostics.supportReport(additionalDetails: extra)
-            let reporterNoteURL = try MobileDiagnostics.writeReporterNote(reporterNote)
-            let screenshotURL: URL?
-            if includeScreenshot, let screenshot = request.screenshot {
-                screenshotURL = try MobileDiagnostics.writeScreenshot(screenshot)
-            } else {
-                screenshotURL = nil
-            }
-            let preparedURLs = [diagnosticsURL, reporterNoteURL, screenshotURL].compactMap { $0 }
-            defer {
-                for url in preparedURLs {
-                    try? FileManager.default.removeItem(at: url)
+                let diagnosticsURL = try await MobileDiagnostics.supportReport(
+                    additionalDetails: extra
+                )
+                let reporterNoteURL = try MobileDiagnostics.writeReporterNote(reporterNote)
+                let screenshotURL: URL?
+                if includeScreenshot, let screenshot = request.screenshot {
+                    screenshotURL = try MobileDiagnostics.writeScreenshot(screenshot)
+                } else {
+                    screenshotURL = nil
                 }
-            }
+                let preparedURLs = [diagnosticsURL, reporterNoteURL, screenshotURL]
+                    .compactMap { $0 }
+                defer {
+                    for url in preparedURLs {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                }
 
-            let archiveURL = try MobileIssueReportArchive.write(
-                diagnosticsURL: diagnosticsURL,
-                reporterNoteURL: reporterNoteURL,
-                screenshotURL: screenshotURL
-            )
-            sharePayload = DiagnosticsSharePayload(items: [archiveURL])
-        } catch {
-            MobileDiagnostics.logFailure(.issueReportExport, error: error)
-            exportError = MobileL10n.string("The report files could not be prepared.")
+                let archiveURL = try MobileIssueReportArchive.write(
+                    diagnosticsURL: diagnosticsURL,
+                    reporterNoteURL: reporterNoteURL,
+                    screenshotURL: screenshotURL
+                )
+                sharePayload = DiagnosticsSharePayload(items: [archiveURL])
+            } catch {
+                MobileDiagnostics.logFailure(.issueReportExport, error: error)
+                exportError = MobileL10n.string("The report files could not be prepared.")
+            }
         }
-        activeAction = nil
     }
 
     private static let privacyFooter =
@@ -1111,6 +1120,7 @@ extension MobileDiagnostics {
             .connectionState: connectionState(model.phase).rawValue,
             .connectionStateHistory: MobileConnectionStateLog.summary() ?? "none",
             .attachmentPreviewHistory: MobileAttachmentPreviewLog.summary() ?? "none",
+            .connectionPoolMetrics: MobileSessionConnectionPool.shared.metrics.summaryToken,
             .pairedHostCount: String(model.hosts.count),
             .visibleSessionCount: String(model.me?.sessions.count ?? 0),
             .activeScope: model.me?.share.scope.rawValue ?? "none",

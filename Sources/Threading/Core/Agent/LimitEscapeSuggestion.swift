@@ -207,6 +207,7 @@ enum LimitEscapeRanking {
 enum LimitEscapeAction: Equatable, Sendable {
     case moveAccount
     case waitForReset
+    case useBankedReset
 }
 
 /// A standing usage-limit refusal, and what can be done about it: a login to carry on under, a
@@ -258,6 +259,13 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
     /// The window the choice turned on, for the journal. Nil where no login was chosen.
     let decidingWindowName: String?
 
+    /// Provider-reported inventory on the refused login itself. This is an offer to restore the
+    /// account in place, distinct from moving to the optional destination above.
+    let bankedResetCount: Int?
+    let nextBankedResetExpiresAt: Date?
+
+    var offersBankedReset: Bool { (bankedResetCount ?? 0) > 0 }
+
     /// Whether there is a login worth moving to.
     var offersAccountEscape: Bool { accountID != nil }
 
@@ -290,7 +298,9 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
         reading: String? = nil,
         resetHint: String?,
         model: String?,
-        decidingWindowName: String? = nil
+        decidingWindowName: String? = nil,
+        bankedResetCount: Int? = nil,
+        nextBankedResetExpiresAt: Date? = nil
     ) {
         self.sessionID = sessionID
         self.accountID = accountID
@@ -299,6 +309,8 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
         self.resetHint = resetHint
         self.model = model
         self.decidingWindowName = decidingWindowName
+        self.bankedResetCount = bankedResetCount
+        self.nextBankedResetExpiresAt = nextBankedResetExpiresAt
     }
 }
 
@@ -322,10 +334,20 @@ extension LimitEscapeSuggestion {
         guard let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
 
         let model = effectiveModel(for: session)
+        let refusedAccount = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        )
+        let refusedUsage = refusedAccount.flatMap { AccountUsageService.shared.usage(for: $0) }
+        let bankedResetCount = session.kind.supports(.bankedUsageReset)
+            ? refusedUsage?.resetCredits
+            : nil
         let refusalAlone = LimitEscapeSuggestion(
             sessionID: sessionID,
             resetHint: stop.resetHint,
-            model: model
+            model: model,
+            bankedResetCount: bankedResetCount,
+            nextBankedResetExpiresAt: refusedUsage?.nextExpiringResetCredit?.expiresAt
         )
 
         let destinations = SessionMigration.destinations(for: session)
@@ -351,7 +373,9 @@ extension LimitEscapeSuggestion {
                 .compactSummary(metering: model),
             resetHint: stop.resetHint,
             model: model,
-            decidingWindowName: best.decidingWindowName
+            decidingWindowName: best.decidingWindowName,
+            bankedResetCount: bankedResetCount,
+            nextBankedResetExpiresAt: refusedUsage?.nextExpiringResetCredit?.expiresAt
         )
     }
 
@@ -365,6 +389,13 @@ extension LimitEscapeSuggestion {
     @MainActor
     static func warmCandidateReadings(for sessionID: SessionID) {
         guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        if session.kind.supports(.bankedUsageReset),
+           let account = AgentAccountDiscovery.account(
+               for: session.kind,
+               handle: session.accountHandle
+           ) {
+            AccountUsageService.shared.refresh(account)
+        }
         for account in SessionMigration.destinations(for: session) {
             AccountUsageService.shared.refresh(account)
         }
@@ -424,6 +455,12 @@ struct LimitAccountResumeRequested: AppEvent {
 /// continuation is `LimitRecoveryCoordinator`'s, the same routine the automatic policy runs.
 struct LimitWaitForResetRequested: AppEvent {
     static let name = Notification.Name("ThreadingLimitWaitForResetRequested")
+    let sessionID: SessionID
+}
+
+/// The user chose to spend a provider-issued reset credit on the refused account in place.
+struct LimitBankedResetRequested: AppEvent {
+    static let name = Notification.Name("ThreadingLimitBankedResetRequested")
     let sessionID: SessionID
 }
 

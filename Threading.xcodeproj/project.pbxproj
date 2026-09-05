@@ -106,6 +106,9 @@
 		A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */; };
 		A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */; };
 		A71500010000000000000001 /* MobileIdentityPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71500010000000000000002 /* MobileIdentityPickerTests.swift */; };
+		A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71600010000000000000002 /* MobileRefreshPolicyTests.swift */; };
+		A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */; };
+		A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -361,6 +364,9 @@
 		A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDashboardCacheStoreTests.swift; sourceTree = "<group>"; };
 		A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteNotificationPresentationPolicyTests.swift; sourceTree = "<group>"; };
 		A71500010000000000000002 /* MobileIdentityPickerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIdentityPickerTests.swift; sourceTree = "<group>"; };
+		A71600010000000000000002 /* MobileRefreshPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRefreshPolicyTests.swift; sourceTree = "<group>"; };
+		A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileMediaDownloadLimiterTests.swift; sourceTree = "<group>"; };
+		A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRouteHealthLedgerTests.swift; sourceTree = "<group>"; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -400,10 +406,13 @@
 				ThreadingMobile/MobileIssueReporting.swift,
 				ThreadingMobile/MobileLoadingPlaceholder.swift,
 				ThreadingMobile/MobileMarketingTerminalFixture.swift,
+				ThreadingMobile/MobileMediaDownloadLimiter.swift,
 				ThreadingMobile/MobileModelEffortPicker.swift,
 				ThreadingMobile/MobileMorphingTitle.swift,
 				ThreadingMobile/MobileNetworkInterfaces.swift,
 				ThreadingMobile/MobileNewSessionDefaultsStore.swift,
+				ThreadingMobile/MobileRefreshPolicy.swift,
+				ThreadingMobile/MobileRouteHealthLedger.swift,
 				ThreadingMobile/MobileRowSwipe.swift,
 				ThreadingMobile/MobileRunPlanDisclosure.swift,
 				ThreadingMobile/MobileSessionConnectionPool.swift,
@@ -716,6 +725,9 @@
 				A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */,
 				A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */,
 				A71500010000000000000002 /* MobileIdentityPickerTests.swift */,
+				A71600010000000000000002 /* MobileRefreshPolicyTests.swift */,
+				A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */,
+				A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1485,6 +1497,9 @@
 				A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */,
 				A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */,
 				A71500010000000000000001 /* MobileIdentityPickerTests.swift in Sources */,
+				A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */,
+				A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */,
+				A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

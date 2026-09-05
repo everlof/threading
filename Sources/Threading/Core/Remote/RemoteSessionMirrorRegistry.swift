@@ -22,6 +22,12 @@ private enum RemoteSessionStartupDefaults {
     static let maximumWait: Duration = .seconds(60)
 }
 
+private enum RemoteAttachDiagnostics {
+    static let sessionKind = "session"
+    static let terminalKind = "terminal"
+    static let nanosecondsPerMillisecond: UInt64 = 1_000_000
+}
+
 private enum RemoteCatalogueCacheDefaults {
     /// A structural invalidation is already coalesced for 350 ms on iOS. One second lets every
     /// authenticated owner request share the same host projection without turning the catalogue
@@ -198,6 +204,14 @@ final class RemoteSessionMirrorRegistry {
     /// all-session cache.
     private var allSessionsCatalogueCache: [Bool: CachedMeCatalogue] = [:]
 
+    /// The catalogue edition, advanced by every invalidation and minted fresh per process so a
+    /// phone that remembers one from before a relaunch is answered in full rather than `304`.
+    private let catalogueEpoch = RemoteCatalogueRevisionDTO.newEpoch()
+    private var catalogueRevisionNumber: UInt64 = 1
+
+    /// Encoded `/api/me` bodies for the current edition; see `RemoteMeResponseCache`.
+    private var meResponseCache = RemoteMeResponseCache()
+
     private struct Mirror {
         var ring: RemoteRingBuffer
         let surface: RemoteSessionSurface
@@ -360,6 +374,43 @@ final class RemoteSessionMirrorRegistry {
 
     // MARK: - REST
 
+    /// Which edition of the catalogue `/api/me` describes right now.
+    var catalogueRevision: RemoteCatalogueRevisionDTO {
+        RemoteCatalogueRevisionDTO(epoch: catalogueEpoch, revision: catalogueRevisionNumber)
+    }
+
+    /// The main-actor half of answering `/api/me`: the projection, plus the encoded body if one
+    /// was already produced for this authorization at this edition.
+    ///
+    /// The payload is built here because everything it reads is main-actor state. Nothing here
+    /// encodes: a caller that finds `encoded` nil hands `payload` to a worker and stores the
+    /// result with `storeMeResponse`, so the next device asking for the same edition pays
+    /// neither the projection nor the encoder.
+    func meResponseSnapshot(for authorization: RemoteAuthorization) -> RemoteMeResponseSnapshot {
+        let revision = catalogueRevision
+        let key = RemoteMeResponseKey(authorization)
+        if let encoded = meResponseCache.response(for: key, revision: revision) {
+            return RemoteMeResponseSnapshot(payload: nil, encoded: encoded, revision: revision)
+        }
+        return RemoteMeResponseSnapshot(
+            payload: meResponse(for: authorization),
+            encoded: nil,
+            revision: revision
+        )
+    }
+
+    /// Remembers a body a worker encoded. Dropped if the catalogue moved while it was encoding.
+    func storeMeResponse(
+        _ encoded: RemoteMeEncodedResponse,
+        for authorization: RemoteAuthorization
+    ) {
+        meResponseCache.store(
+            encoded,
+            for: RemoteMeResponseKey(authorization),
+            revision: catalogueRevision
+        )
+    }
+
     /// The `/api/me` payload: the share, and the live sessions it reaches.
     func meResponse(for authorization: RemoteAuthorization) -> RemoteMeDTO {
         let catalogue = meCatalogue(for: authorization)
@@ -389,7 +440,8 @@ final class RemoteSessionMirrorRegistry {
             themeCatalog: catalogue.themeCatalog,
             archivedSessions: catalogue.archivedSessions,
             newSessionCatalog: catalogue.newSessionCatalog,
-            features: catalogue.features
+            features: catalogue.features,
+            revision: catalogueRevision
         )
     }
 
@@ -550,6 +602,8 @@ final class RemoteSessionMirrorRegistry {
 
     private func invalidateMeCatalogue() {
         allSessionsCatalogueCache.removeAll(keepingCapacity: true)
+        catalogueRevisionNumber &+= 1
+        meResponseCache.removeAll()
     }
 
     /// One already-authorised catalogue row for an O(changed) mutation response.
@@ -991,6 +1045,15 @@ final class RemoteSessionMirrorRegistry {
         ) else {
             return false
         }
+        let attachStartedAt = DispatchTime.now()
+        defer {
+            recordAttachEnded(
+                kind: RemoteAttachDiagnostics.sessionKind,
+                id: sessionID.uuidString,
+                connection: connection,
+                startedAt: attachStartedAt
+            )
+        }
         var attached = attachTerminal(
             connection,
             sessionID: sessionID,
@@ -1048,6 +1111,15 @@ final class RemoteSessionMirrorRegistry {
         guard authorization.scope.covers(terminalID),
               ProjectStore.shared.terminal(withID: terminalID) != nil,
               let snapshot = beginCapturing(terminalID: terminalID) else { return false }
+        let attachStartedAt = DispatchTime.now()
+        defer {
+            recordAttachEnded(
+                kind: RemoteAttachDiagnostics.terminalKind,
+                id: terminalID.uuidString,
+                connection: connection,
+                startedAt: attachStartedAt
+            )
+        }
 
         let key = ObjectIdentifier(connection)
         terminalMirrors[terminalID]?.subscribers[key] = connection
@@ -1096,6 +1168,30 @@ final class RemoteSessionMirrorRegistry {
             connection.sendBinary(RemoteTerminalModeSeed.bytes(for: modes))
         }
         return true
+    }
+
+    /// What the host spent attaching one socket: from admission to the hello and the bounded
+    /// replay being handed to the connection. The phone measured 1.9 s and 2.5 s to enter a
+    /// terminal on 5 Sep 2026 and could only say the wait was "around admission and replay";
+    /// the host recorded no duration of its own. This is the number that says whether that
+    /// time was spent here — a ring snapshot and a capture on the main actor — or on the wire.
+    private func recordAttachEnded(
+        kind: String,
+        id: String,
+        connection: RemoteConnection,
+        startedAt: DispatchTime
+    ) {
+        let elapsed = DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds
+        var fields: [RemoteDiagnosticField: String] = [
+            .kind: kind,
+            .session: MacRemoteDiagnostics.pseudonym(id, prefix: "session"),
+            .durationMS: String(elapsed / RemoteAttachDiagnostics.nanosecondsPerMillisecond),
+            .transport: "websocket",
+        ]
+        if let device = connection.authenticatedPeer?.deviceID {
+            fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
+        }
+        MacRemoteDiagnostics.record(.terminalAttachEnded, fields: fields)
     }
 
     /// Subscribes a dashboard to app-chrome changes without binding it to a particular session.
@@ -2828,9 +2924,12 @@ final class RemoteSessionMirrorRegistry {
     /// choices together; every client then re-fetches its own scoped snapshot.
     private func broadcastSessionsChanged(_ change: ProjectsDidChange) {
         invalidateMeCatalogue()
+        // Read once after the invalidation: every delta this change produces names the edition
+        // the change created, which is what a client adopts when it applies the delta.
+        let revision = catalogueRevision
         switch change.sidebarImpact {
         case .structure, .projectRemoved, .projectStructure, .projectRow:
-            let message = encode(RemoteSessionsChangedDTO())
+            let message = encode(RemoteSessionsChangedDTO(revision: revision))
             for connection in themeEventSubscribers.values {
                 connection.sendText(message)
             }
@@ -2849,7 +2948,8 @@ final class RemoteSessionMirrorRegistry {
                 }
                 connection.sendText(encode(RemoteSessionsChangedDTO(
                     terminal: visible,
-                    removedTerminalID: visible == nil ? terminalID.uuidString : nil
+                    removedTerminalID: visible == nil ? terminalID.uuidString : nil,
+                    revision: revision
                 )))
             }
         case .sessionRemoved:
@@ -2857,7 +2957,8 @@ final class RemoteSessionMirrorRegistry {
                 guard let authorization = connection.authenticatedPeer?.authorization,
                       let delta = Self.sessionRemovalDelta(
                           for: change,
-                          authorization: authorization
+                          authorization: authorization,
+                          revision: revision
                       ) else { continue }
                 connection.sendText(encode(delta))
             }
@@ -2885,7 +2986,8 @@ final class RemoteSessionMirrorRegistry {
                 guard let delta = Self.sessionMutationDelta(
                     sessionID: sessionID,
                     visibleSummary: visible,
-                    authorization: authorization
+                    authorization: authorization,
+                    revision: revision
                 ) else { continue }
                 connection.sendText(encode(delta))
             }
@@ -2895,19 +2997,23 @@ final class RemoteSessionMirrorRegistry {
     /// Pushes one identity-specific catalogue row for an activity or read-receipt edge.
     private func broadcastSessionRow(_ sessionID: SessionID) {
         invalidateMeCatalogue()
+        let revision = catalogueRevision
         guard let session = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
         for connection in themeEventSubscribers.values {
             guard let authorization = connection.authenticatedPeer?.authorization,
                   RemoteSessionAccess.isVisible(session),
                   authorization.scope.covers(sessionID) else { continue }
-            connection.sendText(encode(RemoteSessionsChangedDTO(session: summary(
-                for: session,
-                projectID: project.id,
-                projectName: project.name,
-                projectLimitRecovery: project.limitRecoveryPolicy,
-                authorization: authorization
-            ))))
+            connection.sendText(encode(RemoteSessionsChangedDTO(
+                session: summary(
+                    for: session,
+                    projectID: project.id,
+                    projectName: project.name,
+                    projectLimitRecovery: project.limitRecoveryPolicy,
+                    authorization: authorization
+                ),
+                revision: revision
+            )))
         }
     }
 
@@ -2916,13 +3022,15 @@ final class RemoteSessionMirrorRegistry {
     /// independently testable without opening a real event socket.
     static func sessionRemovalDelta(
         for change: ProjectsDidChange,
-        authorization: RemoteAuthorization
+        authorization: RemoteAuthorization,
+        revision: RemoteCatalogueRevisionDTO? = nil
     ) -> RemoteSessionsChangedDTO? {
         guard case let .sessionRemoved(_, sessionID) = change.sidebarImpact,
               authorization.scope.covers(sessionID) else { return nil }
         return RemoteSessionsChangedDTO(
             session: nil,
-            removedSessionID: sessionID.uuidString
+            removedSessionID: sessionID.uuidString,
+            revision: revision
         )
     }
 
@@ -2931,12 +3039,14 @@ final class RemoteSessionMirrorRegistry {
     static func sessionMutationDelta(
         sessionID: SessionID,
         visibleSummary: RemoteSessionSummaryDTO?,
-        authorization: RemoteAuthorization
+        authorization: RemoteAuthorization,
+        revision: RemoteCatalogueRevisionDTO? = nil
     ) -> RemoteSessionsChangedDTO? {
         guard authorization.scope.covers(sessionID) else { return nil }
         return RemoteSessionsChangedDTO(
             session: visibleSummary,
-            removedSessionID: visibleSummary == nil ? sessionID.uuidString : nil
+            removedSessionID: visibleSummary == nil ? sessionID.uuidString : nil,
+            revision: revision
         )
     }
 

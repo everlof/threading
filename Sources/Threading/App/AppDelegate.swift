@@ -3493,18 +3493,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// missing the notification row is missing the answer to the most common question about it.
     @MainActor @objc private func createRemoteSupportReport() {
         SystemPrivacyStatusReader().load { [weak self] statuses in
-            self?.writeSupportReport(privacyStatuses: statuses)
+            Task { @MainActor [weak self] in
+                await self?.writeSupportReport(privacyStatuses: statuses)
+            }
         }
     }
 
     @MainActor
     private func writeSupportReport(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus]
-    ) {
+    ) async {
         let details = supportReportDetails(privacyStatuses: privacyStatuses)
 
         do {
-            let report = try MacRemoteDiagnostics.supportReport(
+            let report = try await MacRemoteDiagnostics.supportReport(
                 additionalDetails: details.fields
             )
             NSWorkspace.shared.activateFileViewerSelecting([report])
@@ -3531,7 +3533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         let details = supportReportDetails(privacyStatuses: statuses)
         return PublicIssueReportDiagnosticsDTO(
-            bounding: MacRemoteDiagnostics.report(additionalDetails: details.fields)
+            bounding: await MacRemoteDiagnostics.report(additionalDetails: details.fields)
         )
     }
 

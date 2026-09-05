@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ThreadingRemoteKit
 
@@ -207,7 +208,12 @@ enum RemoteUsageBridge {
             resetsAt: source.resetsAt?.timeIntervalSince1970,
             windowDuration: source.windowDuration,
             bankedResetCount: source.resetCreditCount,
-            nextBankedResetExpiresAt: source.nextResetCreditExpiresAt?.timeIntervalSince1970
+            nextBankedResetExpiresAt: source.nextResetCreditExpiresAt?.timeIntervalSince1970,
+            canRedeemBankedReset: canRedeemReset(
+                runtimeID: source.runtimeID,
+                accountID: source.accountID,
+                count: source.resetCreditCount
+            )
         )
     }
 
@@ -223,7 +229,74 @@ enum RemoteUsageBridge {
             resetsAt: source.resetsAt?.timeIntervalSince1970,
             windowDuration: source.windowDuration,
             bankedResetCount: source.resetCreditCount,
-            nextBankedResetExpiresAt: source.nextResetCreditExpiresAt?.timeIntervalSince1970
+            nextBankedResetExpiresAt: source.nextResetCreditExpiresAt?.timeIntervalSince1970,
+            canRedeemBankedReset: canRedeemReset(
+                runtimeID: source.runtimeID,
+                accountID: source.accountID,
+                count: source.resetCreditCount
+            )
         )
+    }
+
+    nonisolated static func resetOffer(
+        _ source: BankedUsageResetOffer,
+        seriesID: String
+    ) -> RemoteBankedUsageResetOfferDTO {
+        RemoteBankedUsageResetOfferDTO(
+            seriesID: seriesID,
+            accountName: source.accountName,
+            availableCount: source.availableCount,
+            offerFingerprint: resetOfferFingerprint(source, seriesID: seriesID),
+            selectedCreditTitle: source.selectedCreditTitle,
+            selectedCreditExpiresAt: source.selectedCreditExpiresAt?.timeIntervalSince1970,
+            letsProviderChooseCredit: source.letsProviderChooseCredit,
+            eligibleWindowLabels: source.eligibleWindowLabels,
+            owedContinuationCount: source.owedContinuationCount
+        )
+    }
+
+    private nonisolated static func resetOfferFingerprint(
+        _ source: BankedUsageResetOffer,
+        seriesID: String
+    ) -> String {
+        let material = [
+            seriesID,
+            source.accountID.rawValue,
+            source.providerAccountID,
+            source.selectedCreditID ?? "<provider-choice>",
+            String(source.availableCount),
+            String(source.letsProviderChooseCredit)
+        ].joined(separator: "\u{0}")
+        return SHA256.hash(data: Data(material.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    nonisolated static func resetResult(
+        _ source: BankedUsageResetResult
+    ) -> RemoteBankedUsageResetResponseDTO {
+        let outcome: RemoteBankedUsageResetOutcome
+        switch source.outcome {
+        case .reset: outcome = .reset
+        case .alreadyRedeemed: outcome = .alreadyRedeemed
+        case .nothingToReset: outcome = .nothingToReset
+        case .noCredit: outcome = .noCredit
+        }
+        return RemoteBankedUsageResetResponseDTO(
+            outcome: outcome,
+            remainingCreditCount: source.remainingCreditCount,
+            releasedContinuationCount: source.releasedContinuationCount,
+            hasVerifiedHeadroom: source.hasVerifiedHeadroom,
+            continuationReleaseFailed: source.continuationReleaseFailed
+        )
+    }
+
+    private nonisolated static func canRedeemReset(
+        runtimeID: String?,
+        accountID: String?,
+        count: Int?
+    ) -> Bool {
+        guard let runtimeID, let provider = AgentKind(rawValue: runtimeID) else { return false }
+        return accountID != nil && provider.supports(.bankedUsageReset) && (count ?? 0) > 0
     }
 }

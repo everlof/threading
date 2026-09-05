@@ -313,8 +313,65 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                     return RemoteUsageBridge.limit(series: series, days: days, preparedAt: now)
                 }
                 return await preparation.value
+            },
+            usageResetOffer: { seriesID in
+                guard let (account, _) = await bankedResetTarget(
+                    seriesID: seriesID,
+                    usageHistory: usageHistory
+                ) else { return nil }
+                let offer = try await BankedUsageResetService.shared.prepare(account: account)
+                return RemoteUsageBridge.resetOffer(offer, seriesID: seriesID)
+            },
+            usageResetConsumer: { request, idempotencyKey in
+                guard let (account, _) = await bankedResetTarget(
+                    seriesID: request.seriesID,
+                    usageHistory: usageHistory
+                ) else { throw BankedUsageResetError.unsupportedAccount }
+
+                // Fetch again after the phone's confirmation. The provider selection, count,
+                // and fallback mode must still be the exact offer the person reviewed.
+                let offer = try await BankedUsageResetService.shared.prepare(account: account)
+                let prepared = RemoteUsageBridge.resetOffer(offer, seriesID: request.seriesID)
+                guard offer.availableCount == request.availableCount,
+                      prepared.offerFingerprint == request.offerFingerprint,
+                      offer.letsProviderChooseCredit == request.letsProviderChooseCredit else {
+                    throw BankedUsageResetError.offerChanged
+                }
+                let result = try await BankedUsageResetService.shared.redeem(
+                    account: account,
+                    offer: offer,
+                    idempotencyKey: idempotencyKey
+                )
+                return RemoteUsageBridge.resetResult(result)
             }
         )
+    }
+
+    private static func bankedResetTarget(
+        seriesID: String,
+        usageHistory: UsageHistoryStore
+    ) async -> (AgentAccount, UsageLimitDashboardSeries)? {
+        let now = Date()
+        let snapshot = await usageHistory.loadSnapshot(
+            since: now.addingTimeInterval(-90 * 86400),
+            now: now
+        )
+        let series = await Task.detached(priority: .utility) {
+            UsageDashboardProjector.limitSeries(
+                from: snapshot,
+                seriesID: seriesID,
+                now: now
+            )
+        }.value
+        guard let series,
+              let rawAccountID = series.accountID,
+              let accountID = AccountID(rawValue: rawAccountID),
+              accountID.provider.supports(.bankedUsageReset),
+              let account = AgentAccountDiscovery.account(
+                  for: accountID.provider,
+                  handle: accountID.handle
+              ), account.id == accountID else { return nil }
+        return (account, series)
     }
 
     private static func defaultOwnerDeviceStore() -> RemoteOwnerDevicePersisting {

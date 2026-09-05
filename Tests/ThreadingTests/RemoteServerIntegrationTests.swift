@@ -1064,6 +1064,76 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(try XCTUnwrap(get("/api/me", bearer: "wrong")).status, 401)
     }
 
+    /// `/api/me` names the catalogue edition it describes, answers a client that already holds
+    /// that edition with `304` and no body, and compresses a body of any size for a client that
+    /// can inflate it — which `URLSession` says it can by default. `no-store` stays on all of it.
+    func testMeIsConditionalOnItsCatalogueEditionAndCompressedForClientsThatInflate() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-me-revision-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        for index in 0..<12 {
+            XCTAssertNotNil(ProjectStore.shared.addSession(
+                to: project.id,
+                kind: .claude,
+                title: "A conversation with a long enough title to matter \(index)"
+            ))
+        }
+
+        let first = try XCTUnwrap(get("/api/me", bearer: "goodtoken"))
+        XCTAssertEqual(first.status, 200)
+        let entityTag = try XCTUnwrap(header("ETag", in: first))
+        let me = try JSONDecoder().decode(RemoteMeDTO.self, from: first.body)
+        XCTAssertEqual(me.sessions.count, 12)
+        XCTAssertEqual(me.revision?.entityTag, entityTag)
+        XCTAssertEqual(header("Vary", in: first), "Accept-Encoding")
+        XCTAssertEqual(header("Content-Encoding", in: first), "gzip")
+        XCTAssertEqual(header("Cache-Control", in: first), "no-store")
+
+        let unchanged = try XCTUnwrap(get(
+            "/api/me",
+            bearer: "goodtoken",
+            headers: ["If-None-Match": entityTag]
+        ))
+        XCTAssertEqual(unchanged.status, 304)
+        XCTAssertTrue(unchanged.body.isEmpty)
+        XCTAssertEqual(header("ETag", in: unchanged), entityTag)
+
+        let foreign = try XCTUnwrap(get(
+            "/api/me",
+            bearer: "goodtoken",
+            headers: ["If-None-Match": "\"someone-else:1\""]
+        ))
+        XCTAssertEqual(foreign.status, 200)
+        XCTAssertEqual(header("ETag", in: foreign), entityTag, "the edition has not moved")
+
+        XCTAssertNotNil(ProjectStore.shared.addSession(to: project.id, kind: .claude, title: "New"))
+        let moved = try XCTUnwrap(get(
+            "/api/me",
+            bearer: "goodtoken",
+            headers: ["If-None-Match": entityTag]
+        ))
+        XCTAssertEqual(moved.status, 200, "a changed catalogue is served in full")
+        XCTAssertNotEqual(header("ETag", in: moved), entityTag)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteMeDTO.self, from: moved.body).sessions.count,
+            13
+        )
+    }
+
+    /// Header lookup that tolerates whichever casing Foundation surfaces the field under.
+    private func header(_ name: String, in probe: Probe) -> String? {
+        for (key, value) in probe.headers {
+            if (key as? String)?.caseInsensitiveCompare(name) == .orderedSame {
+                return value as? String
+            }
+        }
+        return nil
+    }
+
     func testCreateAndResumeRouteThroughInjectedApplicationCommands() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-commands-\(UUID().uuidString)",
@@ -2289,6 +2359,86 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             )
         }
         XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: "revoked")).status, 401)
+    }
+
+    func testBankedUsageResetRequiresManagingOwnerAndReplaysOneMutation() throws {
+        let offer = RemoteBankedUsageResetOfferDTO(
+            seriesID: "codex|personal|weekly",
+            accountName: "Personal",
+            availableCount: 2,
+            offerFingerprint: String(repeating: "a", count: 64),
+            selectedCreditTitle: "Reset credit",
+            selectedCreditExpiresAt: 300,
+            letsProviderChooseCredit: false,
+            eligibleWindowLabels: ["Weekly"],
+            owedContinuationCount: 1
+        )
+        server.usageResetOfferLoader = { seriesID in
+            seriesID == offer.seriesID ? offer : nil
+        }
+        var consumeCount = 0
+        server.usageResetConsumer = { request, idempotencyKey in
+            consumeCount += 1
+            XCTAssertEqual(request.seriesID, offer.seriesID)
+            XCTAssertEqual(idempotencyKey, "reset-request-one")
+            return RemoteBankedUsageResetResponseDTO(
+                outcome: .reset,
+                remainingCreditCount: 1,
+                releasedContinuationCount: 1,
+                hasVerifiedHeadroom: true,
+                continuationReleaseFailed: false
+            )
+        }
+
+        let prepared = try XCTUnwrap(get(
+            "/api/usage/reset?series=codex%7Cpersonal%7Cweekly",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(prepared.status, 200)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteBankedUsageResetOfferDTO.self, from: prepared.body),
+            offer
+        )
+
+        authority.set(
+            RemoteAuthorization(
+                shareID: "view-owner",
+                capability: .view,
+                scope: .allSessions,
+                principal: .ownerDevice
+            ),
+            forToken: "viewownertoken"
+        )
+        XCTAssertEqual(try XCTUnwrap(get(
+            "/api/usage/reset?series=codex%7Cpersonal%7Cweekly",
+            bearer: "viewownertoken"
+        )).status, 403)
+
+        let request = RemoteBankedUsageResetRequestDTO(
+            seriesID: offer.seriesID,
+            availableCount: offer.availableCount,
+            offerFingerprint: offer.offerFingerprint,
+            letsProviderChooseCredit: false
+        )
+        let body = try JSONEncoder().encode(request)
+        let headers = ["X-Threading-Request-ID": "reset-request-one"]
+        let first = try XCTUnwrap(post(
+            "/api/usage/reset",
+            bearer: "goodtoken",
+            body: body,
+            headers: headers
+        ))
+        let replay = try XCTUnwrap(post(
+            "/api/usage/reset",
+            bearer: "goodtoken",
+            body: body,
+            headers: headers
+        ))
+
+        XCTAssertEqual(first.status, 200)
+        XCTAssertEqual(replay.status, 200)
+        XCTAssertEqual(first.body, replay.body)
+        XCTAssertEqual(consumeCount, 1)
     }
 
     func testUniversalSearchIsAdvertisedAndRoutedOnlyForWholeHostOwners() throws {
@@ -3973,6 +4123,23 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(response.closesConnection)
         XCTAssertTrue(serialized.contains("Content-Type: image/png\r\n"))
         XCTAssertTrue(serialized.contains("Connection: close\r\n"))
+        XCTAssertEqual(response.extraHeaders["Cache-Control"], "no-store")
+        XCTAssertEqual(response.extraHeaders["X-Content-Type-Options"], "nosniff")
+    }
+
+    /// A thumbnail is small by construction, so its connection is kept for the ledger's next
+    /// cell. Closing it after each of thirty pictures was the churn a phone reported as a lost
+    /// network connection.
+    func testAThumbnailResponseKeepsItsConnectionAndStaysHardened() {
+        let response = RemoteRouter.data(
+            Data("jpeg".utf8),
+            contentType: "image/jpeg",
+            closesConnection: false
+        )
+        let serialized = String(decoding: response.serialized, as: UTF8.self)
+
+        XCTAssertFalse(response.closesConnection)
+        XCTAssertTrue(serialized.contains("Connection: keep-alive\r\n"))
         XCTAssertEqual(response.extraHeaders["Cache-Control"], "no-store")
         XCTAssertEqual(response.extraHeaders["X-Content-Type-Options"], "nosniff")
     }

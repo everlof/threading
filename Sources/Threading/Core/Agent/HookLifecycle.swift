@@ -288,12 +288,22 @@ struct HookLifecycleReport {
     /// treated as anything less than a notice worth flagging.
     let notification: HookNotificationKind
 
+    /// Which checkout ownership `workingDirectory` was reported under, as
+    /// `SessionExecutionLocusTracker.ownershipEpoch(forSessionID:)` counted it when the report
+    /// arrived — or nil for a report nobody stamped, which is read as current.
+    ///
+    /// A `var` rather than part of the payload because the payload knows nothing about it: the
+    /// listener stamps the value on the main actor before any checkout fence runs, and the
+    /// tracker compares it afterwards. The Stop hook's report crosses exactly that fence.
+    var capturedOwnershipEpoch: UInt64?
+
     /// Builds a report from a hook's JSON payload, or nil if it names no event.
     init?(sessionID: SessionID, event: HookLifecycleEvent?, payload: [String: Any]) {
         guard let event else { return nil }
 
         self.sessionID = sessionID
         self.event = event
+        self.capturedOwnershipEpoch = nil
         self.agentSessionID = (payload["session_id"] as? String)
             .flatMap { $0.isEmpty ? nil : TranscriptID($0) }
         self.prompt = payload["prompt"] as? String

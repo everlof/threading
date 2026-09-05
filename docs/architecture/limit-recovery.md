@@ -503,6 +503,13 @@ This placement is independent of the composer: a provider refusal normally exits
 hides the prompt, and the former composer-retained placement consequently left the recovery row
 floating deep inside the empty conversation.
 
+When the constrained Codex account reports banked reset inventory, the ribbon adds **Use Reset**
+beside its existing wait or account-migration action. That button enters the shared banked-reset
+confirmation and account single-flight; it never spends directly from the ribbon. After Codex's
+authoritative post-read shows headroom, Threading releases every already-existing `continue on
+reset` message for that exact account, including other chats that were waiting on it. It creates
+no scheduled message for a chat that did not already owe one.
+
 This is deliberately host-only extension surface. The host retains refusal detection, suggestion
 ranking, migration, scheduling, the in-flight state and dismissal; the native presentation uses
 the shared design-system ribbon vocabulary and exposes no extension replacement seam.

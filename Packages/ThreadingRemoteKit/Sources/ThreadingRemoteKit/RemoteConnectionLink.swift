@@ -258,6 +258,15 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         return components?.url ?? endpoint
     }
 
+    public func usageResetURL(seriesID: String) -> URL {
+        let endpoint = routeURL(.usageReset)
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "series", value: seriesID)]
+        return components?.url ?? endpoint
+    }
+
+    public var usageResetURL: URL { routeURL(.usageReset) }
+
     public var appThemeURL: URL {
         routeURL(.theme)
     }

@@ -582,8 +582,8 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         let tracker = controller.activityTracker
 
         // Codex reports the rollout's exact path on its hooks. Remembering that path avoids a
-        // session-tree walk on terminal output and gives the transcript fallback for the one
-        // terminal boundary Codex 0.147.0 omits from hooks: an interrupted turn.
+        // session-tree walk on terminal output and arms the transcript fallback for boundaries
+        // hooks can omit: an automatic start, an interruption, or a finish whose relay was lost.
         controller.noteReportedCodexTranscript(
             path: report.transcriptPath,
             providerSessionID: report.agentSessionID
@@ -1014,6 +1014,12 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         // No notification exists for a discarded controller, so the mirror is told explicitly:
         // a remote watcher must learn the session ended rather than wait on a dead socket.
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+
+        // The runtime being discarded may already have queued a process-table scan of its own
+        // descendants. Those processes are about to die, and where they were working is a fact
+        // about the runtime that is leaving, not about the one a relaunch is about to start —
+        // after a checkout move it is precisely the checkout the chat has just left.
+        SessionExecutionProcessObserver.shared.forget(sessionID: sessionID)
 
         if let conversation = conversations.removeValue(forKey: sessionID) {
             discardedRuntime = true

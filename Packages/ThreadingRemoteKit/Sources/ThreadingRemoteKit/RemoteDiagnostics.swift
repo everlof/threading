@@ -225,6 +225,7 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
     static let maximumJournalReadBytes = 8 * 1_024 * 1_024
     static let maximumRecordBytes = 64 * 1_024
     static let maximumJournalDirectoryEntries = 256
+    public static let defaultMaximumReportRecords = 5_000
     public static let maximumSupportReportBytes = 64 * 1_024 * 1_024
 
     public let directory: URL
@@ -280,7 +281,7 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         directory: URL,
         source: RemoteDiagnosticSource,
         retention: TimeInterval = 7 * 24 * 60 * 60,
-        maximumReportRecords: Int = 5_000,
+        maximumReportRecords: Int = RemoteDiagnosticJournal.defaultMaximumReportRecords,
         storageEventHandler: StorageEventHandler? = nil
     ) {
         precondition(retention >= 0)
@@ -386,6 +387,25 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         }
     }
 
+    /// Reads the newest valid records without making the caller perform journal I/O.
+    ///
+    /// The synchronous ``records()`` API predates Swift concurrency and remains available to
+    /// command-line and test callers. Product UI uses this API instead: enumeration, file reads
+    /// and JSON decoding stay on the journal's serial worker, and the reader stops once it has
+    /// enough records or has consumed the journal-wide byte allowance. The count therefore
+    /// bounds work before the result is constructed rather than applying `suffix` afterwards.
+    public func recentRecords(maximumCount: Int) async -> [RemoteDiagnosticRecord] {
+        precondition(maximumCount >= 0)
+        guard maximumCount > 0 else { return [] }
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(
+                    returning: self.recentRecordsLocked(maximumCount: maximumCount)
+                )
+            }
+        }
+    }
+
     @discardableResult
     public func writeSupportReport(
         appVersion: String,
@@ -419,6 +439,54 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         return url
     }
 
+    /// Builds and writes a support report on the journal worker.
+    ///
+    /// UI callers must use this form. It also uses the count-and-byte bounded recent reader,
+    /// whereas the synchronous compatibility API preserves its historical full-read behavior.
+    public func writeSupportReportAsync(
+        appVersion: String,
+        appBuild: String,
+        operatingSystem: String,
+        protocolVersion: Int,
+        minimumProtocolVersion: Int,
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:],
+        to outputDirectory: URL = FileManager.default.temporaryDirectory
+    ) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    let report = self.makeSupportReport(
+                        appVersion: appVersion,
+                        appBuild: appBuild,
+                        operatingSystem: operatingSystem,
+                        protocolVersion: protocolVersion,
+                        minimumProtocolVersion: minimumProtocolVersion,
+                        additionalDetails: additionalDetails,
+                        records: self.recentRecordsLocked(
+                            maximumCount: self.maximumReportRecords
+                        )
+                    )
+                    let data = try JSONEncoder.pretty.encode(report)
+                    guard data.count <= Self.maximumSupportReportBytes else {
+                        throw RemoteDiagnosticJournalError.reportTooLarge
+                    }
+                    try FileManager.default.createDirectory(
+                        at: outputDirectory,
+                        withIntermediateDirectories: true
+                    )
+                    let url = outputDirectory.appendingPathComponent(
+                        "threading-support-\(self.source.rawValue)-"
+                            + "\(self.fileStampFormatter.string(from: Date())).json"
+                    )
+                    try data.write(to: url, options: .atomic)
+                    continuation.resume(returning: url)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     /// Builds the same share-safe report in memory for a private intake submission.
     ///
     /// Keeping this beside `writeSupportReport` prevents the upload path from reconstructing the
@@ -430,6 +498,53 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         protocolVersion: Int,
         minimumProtocolVersion: Int,
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+    ) -> RemoteDiagnosticReport {
+        makeSupportReport(
+            appVersion: appVersion,
+            appBuild: appBuild,
+            operatingSystem: operatingSystem,
+            protocolVersion: protocolVersion,
+            minimumProtocolVersion: minimumProtocolVersion,
+            additionalDetails: additionalDetails,
+            records: records()
+        )
+    }
+
+    /// Builds an in-memory support report on the journal worker without a temporary-file
+    /// round-trip. This is the form used by the private issue-report submission path.
+    public func supportReportAsync(
+        appVersion: String,
+        appBuild: String,
+        operatingSystem: String,
+        protocolVersion: Int,
+        minimumProtocolVersion: Int,
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+    ) async -> RemoteDiagnosticReport {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self.makeSupportReport(
+                    appVersion: appVersion,
+                    appBuild: appBuild,
+                    operatingSystem: operatingSystem,
+                    protocolVersion: protocolVersion,
+                    minimumProtocolVersion: minimumProtocolVersion,
+                    additionalDetails: additionalDetails,
+                    records: self.recentRecordsLocked(
+                        maximumCount: self.maximumReportRecords
+                    )
+                ))
+            }
+        }
+    }
+
+    private func makeSupportReport(
+        appVersion: String,
+        appBuild: String,
+        operatingSystem: String,
+        protocolVersion: Int,
+        minimumProtocolVersion: Int,
+        additionalDetails: [RemoteDiagnosticExtraField: String],
+        records: [RemoteDiagnosticRecord]
     ) -> RemoteDiagnosticReport {
         RemoteDiagnosticReport(
             schemaVersion: RemoteDiagnosticReport.currentSchemaVersion,
@@ -445,7 +560,7 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
                 : Dictionary(uniqueKeysWithValues: additionalDetails.map {
                     ($0.key.rawValue, Self.safeValue($0.value))
                 }),
-            records: records()
+            records: records
         )
     }
 
@@ -635,10 +750,68 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         directory.appendingPathComponent("remote-diagnostics-\(day).jsonl")
     }
 
+    /// Queue-confined newest-first scan used by asynchronous UI reads.
+    ///
+    /// Journal files and lines are append ordered. Walking both in reverse means a 250-record
+    /// capture normally opens only today's file and decodes only those 250 records. The byte
+    /// allowance is global across the query rather than repeated for every retained day.
+    private func recentRecordsLocked(maximumCount: Int) -> [RemoteDiagnosticRecord] {
+        if !didPrune {
+            pruneExpiredJournals()
+            didPrune = true
+        }
+        guard maximumCount > 0 else { return [] }
+
+        var remainingBytes = Self.maximumJournalReadBytes
+        var newestFirst: [RemoteDiagnosticRecord] = []
+        newestFirst.reserveCapacity(min(maximumCount, 512))
+        var rejectedRecordCount = 0
+
+        for url in journalURLs().reversed() {
+            guard newestFirst.count < maximumCount, remainingBytes > 0 else { break }
+            guard let read = boundedJournalSuffix(
+                at: url,
+                maximumBytes: remainingBytes
+            ) else { continue }
+            remainingBytes -= read.bytesRead
+
+            for line in read.data.split(separator: 0x0A).reversed() {
+                guard newestFirst.count < maximumCount else { break }
+                guard !line.isEmpty, line.count <= Self.maximumRecordBytes else {
+                    if !line.isEmpty { rejectedRecordCount += 1 }
+                    continue
+                }
+                do {
+                    newestFirst.append(try JSONDecoder().decode(
+                        RemoteDiagnosticRecord.self,
+                        from: Data(line)
+                    ))
+                } catch {
+                    rejectedRecordCount += 1
+                }
+            }
+        }
+
+        if rejectedRecordCount > 0 {
+            reportStorageFailure(.decode, affectedCount: rejectedRecordCount)
+        } else {
+            reportStorageRecovery(.decode)
+        }
+        return Array(newestFirst.reversed())
+    }
+
     /// Reads only the newest bounded suffix. Reports retain their newest records, so walking a
     /// multi-day journal from byte zero did unbounded work for data the final `suffix` discarded
     /// anyway. If the read begins mid-record, that fragment is dropped before JSON decoding.
     private func boundedJournalSuffix(at url: URL) -> Data? {
+        boundedJournalSuffix(at: url, maximumBytes: Self.maximumJournalReadBytes)?.data
+    }
+
+    private func boundedJournalSuffix(
+        at url: URL,
+        maximumBytes: Int
+    ) -> (data: Data, bytesRead: Int)? {
+        guard maximumBytes > 0 else { return (Data(), 0) }
         let values: URLResourceValues
         do {
             values = try url.resourceValues(forKeys: [.isRegularFileKey])
@@ -667,18 +840,21 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
 
         do {
             let end = try handle.seekToEnd()
-            let allowance = UInt64(Self.maximumJournalReadBytes)
+            let allowance = UInt64(maximumBytes)
             let start = end > allowance ? end - allowance : 0
             try handle.seek(toOffset: start)
-            guard var data = try handle.read(upToCount: Self.maximumJournalReadBytes) else {
+            guard var data = try handle.read(upToCount: maximumBytes) else {
                 return nil
             }
+            let bytesRead = data.count
             if start > 0 {
-                guard let newline = data.firstIndex(of: 0x0A) else { return Data() }
+                guard let newline = data.firstIndex(of: 0x0A) else {
+                    return (Data(), bytesRead)
+                }
                 data.removeSubrange(data.startIndex...newline)
             }
             reportStorageRecovery(.read)
-            return data
+            return (data, bytesRead)
         } catch {
             reportStorageFailure(.read, error: error)
             return nil

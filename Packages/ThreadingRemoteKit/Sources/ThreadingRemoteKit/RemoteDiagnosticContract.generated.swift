@@ -46,6 +46,10 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
     case authenticationRefused
     case socketConnecting
     case socketConnected
+    /// The host finished attaching one socket to a session or terminal: hello sent, bounded replay
+    /// handed to the connection. durationMS is the host-side attach cost; kind is session or
+    /// terminal.
+    case terminalAttachEnded
     case socketEnded
     case socketFailed
     /// A failed live socket scheduled one bounded exponential retry.
@@ -223,6 +227,9 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
     case connectionStateHistory
     /// A bounded ring of attachment-preview attempt outcomes using closed kind and outcome tokens.
     case attachmentPreviewHistory
+    /// The warm session-connection pool's counters since their last reset, as closed key.value
+    /// tokens.
+    case connectionPoolMetrics
     case pairedHostCount
     case visibleSessionCount
     case activeScope
@@ -253,8 +260,9 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
         .deviceModel, .interfaceIdiom, .locale, .preferredLanguage, .timeZone, .lowPowerMode,
         .thermalState, .physicalMemoryMB, .availableStorageMB, .displayPoints, .displayScale,
         .applicationState, .connectionState, .connectionStateHistory,
-        .attachmentPreviewHistory, .pairedHostCount, .visibleSessionCount, .activeScope,
-        .activeCapability, .notificationAuthorization, .notificationDelivery
+        .attachmentPreviewHistory, .connectionPoolMetrics, .pairedHostCount,
+        .visibleSessionCount, .activeScope, .activeCapability, .notificationAuthorization,
+        .notificationDelivery
     ]
 
     private static let macOSHostReportFields: Set<Self> = [
@@ -277,5 +285,5 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
 
 public enum RemoteDiagnosticContract {
     public static let schemaVersion = 1
-    public static let fingerprint = "d9d6bc3483e1f1515a1d78bfe4f012412e39033bc5e4eddf8accc28bf459278a"
+    public static let fingerprint = "24b81b135b57fdb9293550ae3450f2fbc3cbc936cd72e6e37c53a2b15e2d0e23"
 }

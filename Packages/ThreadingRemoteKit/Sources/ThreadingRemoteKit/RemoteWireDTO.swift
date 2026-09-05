@@ -1533,6 +1533,8 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
     /// Nil means the provider did not report inventory; zero is authoritative empty inventory.
     public let bankedResetCount: Int?
     public let nextBankedResetExpiresAt: Double?
+    /// Optional for compatibility with hosts that exposed inventory before redemption existed.
+    public let canRedeemBankedReset: Bool?
 
     public init(
         id: String,
@@ -1543,7 +1545,8 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
         resetsAt: Double?,
         windowDuration: Double? = nil,
         bankedResetCount: Int?,
-        nextBankedResetExpiresAt: Double?
+        nextBankedResetExpiresAt: Double?,
+        canRedeemBankedReset: Bool? = nil
     ) {
         self.id = id
         self.runtimeName = runtimeName
@@ -1554,9 +1557,97 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
         self.windowDuration = windowDuration
         self.bankedResetCount = bankedResetCount
         self.nextBankedResetExpiresAt = nextBankedResetExpiresAt
+        self.canRedeemBankedReset = canRedeemBankedReset
     }
 
     public var title: String { "\(runtimeName) · \(accountName) · \(windowLabel)" }
+}
+
+/// The authoritative offer a paired owner reviews before sending the mutation.
+public struct RemoteBankedUsageResetOfferDTO: Codable, Equatable, Sendable {
+    public let seriesID: String
+    public let accountName: String
+    public let availableCount: Int
+    /// Opaque binding over the host account and selected provider credit. Raw identities stay on
+    /// the Mac; the phone returns this unchanged after confirmation.
+    public let offerFingerprint: String
+    public let selectedCreditTitle: String?
+    public let selectedCreditExpiresAt: Double?
+    public let letsProviderChooseCredit: Bool
+    public let eligibleWindowLabels: [String]
+    public let owedContinuationCount: Int
+
+    public init(
+        seriesID: String,
+        accountName: String,
+        availableCount: Int,
+        offerFingerprint: String,
+        selectedCreditTitle: String?,
+        selectedCreditExpiresAt: Double?,
+        letsProviderChooseCredit: Bool,
+        eligibleWindowLabels: [String],
+        owedContinuationCount: Int
+    ) {
+        self.seriesID = seriesID
+        self.accountName = accountName
+        self.availableCount = availableCount
+        self.offerFingerprint = offerFingerprint
+        self.selectedCreditTitle = selectedCreditTitle
+        self.selectedCreditExpiresAt = selectedCreditExpiresAt
+        self.letsProviderChooseCredit = letsProviderChooseCredit
+        self.eligibleWindowLabels = eligibleWindowLabels
+        self.owedContinuationCount = owedContinuationCount
+    }
+}
+
+/// Repeats the reviewed selection so the host can fail closed if inventory changed between the
+/// phone's confirmation and the app-server preflight.
+public struct RemoteBankedUsageResetRequestDTO: Codable, Equatable, Sendable {
+    public let seriesID: String
+    public let availableCount: Int
+    public let offerFingerprint: String
+    public let letsProviderChooseCredit: Bool
+
+    public init(
+        seriesID: String,
+        availableCount: Int,
+        offerFingerprint: String,
+        letsProviderChooseCredit: Bool
+    ) {
+        self.seriesID = seriesID
+        self.availableCount = availableCount
+        self.offerFingerprint = offerFingerprint
+        self.letsProviderChooseCredit = letsProviderChooseCredit
+    }
+}
+
+public enum RemoteBankedUsageResetOutcome: String, Codable, Equatable, Sendable {
+    case reset
+    case alreadyRedeemed
+    case nothingToReset
+    case noCredit
+}
+
+public struct RemoteBankedUsageResetResponseDTO: Codable, Equatable, Sendable {
+    public let outcome: RemoteBankedUsageResetOutcome
+    public let remainingCreditCount: Int?
+    public let releasedContinuationCount: Int
+    public let hasVerifiedHeadroom: Bool
+    public let continuationReleaseFailed: Bool
+
+    public init(
+        outcome: RemoteBankedUsageResetOutcome,
+        remainingCreditCount: Int?,
+        releasedContinuationCount: Int,
+        hasVerifiedHeadroom: Bool,
+        continuationReleaseFailed: Bool
+    ) {
+        self.outcome = outcome
+        self.remainingCreditCount = remainingCreditCount
+        self.releasedContinuationCount = releasedContinuationCount
+        self.hasVerifiedHeadroom = hasVerifiedHeadroom
+        self.continuationReleaseFailed = continuationReleaseFailed
+    }
 }
 
 /// The bounded `GET /api/usage` response. The limit index is one page; `nextLimitCursor` is
@@ -1770,6 +1861,10 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
     public let newSessionCatalog: RemoteNewSessionCatalogDTO?
     /// Optional host-wide reads available to this authorization. Guest responses omit it.
     public let features: [String]?
+    /// Which edition of the catalogue this is. A client sends it back as `If-None-Match` and
+    /// compares it against the revision every `sessionsChanged` delta carries. Absent from an
+    /// older host, which a client reads as "always fetch in full".
+    public let revision: RemoteCatalogueRevisionDTO?
 
     public init(
         serverProtocol: RemoteProtocolInfo,
@@ -1781,7 +1876,8 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         themeCatalog: RemoteThemeCatalogDTO? = nil,
         archivedSessions: [RemoteSessionSummaryDTO]? = nil,
         newSessionCatalog: RemoteNewSessionCatalogDTO? = nil,
-        features: [String]? = nil
+        features: [String]? = nil,
+        revision: RemoteCatalogueRevisionDTO? = nil
     ) {
         self.serverProtocol = serverProtocol
         self.share = share
@@ -1793,6 +1889,7 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         self.archivedSessions = archivedSessions
         self.newSessionCatalog = newSessionCatalog
         self.features = features
+        self.revision = revision
     }
 }
 
@@ -2827,18 +2924,24 @@ public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
     public let removedSessionID: String?
     public let terminal: RemoteProjectTerminalSummaryDTO?
     public let removedTerminalID: String?
+    /// The catalogue edition this change produced. A client that applies the delta adopts it, so
+    /// its next conditional `/api/me` can be answered `304`; a client that receives a delta while
+    /// holding no catalogue, or from an older host that sends none, refreshes in full as before.
+    public let revision: RemoteCatalogueRevisionDTO?
 
     public init(
         session: RemoteSessionSummaryDTO? = nil,
         removedSessionID: String? = nil,
         terminal: RemoteProjectTerminalSummaryDTO? = nil,
-        removedTerminalID: String? = nil
+        removedTerminalID: String? = nil,
+        revision: RemoteCatalogueRevisionDTO? = nil
     ) {
         type = "sessionsChanged"
         self.session = session
         self.removedSessionID = removedSessionID
         self.terminal = terminal
         self.removedTerminalID = removedTerminalID
+        self.revision = revision
     }
 }
 

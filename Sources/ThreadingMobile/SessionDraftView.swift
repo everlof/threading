@@ -1770,7 +1770,7 @@ private struct SessionDraftComposerScreen: View {
                     // The refusal is authoritative, while this draft's catalogue may be an old
                     // snapshot. Refresh behind the alert and reconcile only invalid selections;
                     // the prompt and every still-valid choice remain untouched.
-                    await appModel.refresh()
+                    await appModel.refresh(reason: .mutationFollowUp)
                     applyCatalogDefaults()
                 }
             }
@@ -1842,8 +1842,10 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.textContainerInset = SessionDraftPromptMetrics.textInsets(for: font)
         view.textColor = theme.uiLabel
         view.tintColor = theme.uiAccent
-        view.isEditable = isEnabled
-        view.isSelectable = true
+        view.setEditableIfNeeded(isEnabled)
+        if !view.isSelectable {
+            view.isSelectable = true
+        }
         view.minimumIntrinsicHeight = SessionDraftPromptMetrics.controlRow
         view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight(for: font)
         view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth

@@ -107,6 +107,24 @@ Every record has:
 - An optional `detail` beside `code` or `reason`, carrying the bounded machine values behind a
   refusal. A rejected viewport, for example, records the clause that refused and the grid that
   was asked for.
+- On `hostRefreshStarted`, the `reason` a caller gave (`foreground`, `dashboardAppeared`,
+  `pullToRefresh`, `socketRecovery`, …) and in `detail` what the phone decided it would cost
+  (`conditional` or `full`); on `hostRefreshSucceeded`, the `status` the Mac answered — `200` for
+  a catalogue, `304` for "still the edition you hold". A conditional attempt's `hostRouteEnded`
+  carries `wave: warm`. An audit that counts refreshes can therefore say which callers made them
+  and how many cost a body.
+- On `attachmentPreviewFailed`, the `kind` is a preview kind or `thumbnail`, and `detail` says
+  `transient` (a lost connection, retried once) or `terminal` (a refusal), beside the `transport`
+  and `origin` the request was on.
+- On a failed `hostRouteEnded`, `detail` carries the pin verdict the phone's delegate reached for
+  that host and the TLS status beneath the error (`trust.notPinned`, `trust.accepted:tls.-9807`);
+  a `result: skipped` with `reason: cooldown` is an address `MobileRouteHealthLedger` is resting.
+- `terminalAttachEnded` is the host's own timing for attaching one socket to a session or
+  terminal — admission to the hello and bounded replay being handed to the connection — with
+  `kind`, `session`, `peer` and `durationMS`; the phone's hello duration minus this is the wire.
+- The phone's capture carries `connectionPoolMetrics`, the warm session-connection pool's
+  counters as closed `key.value` tokens (`reused`, `misses`, `hitpct`, `peak`, the eviction
+  reasons), so an audit reads the hit rate from the Mac's copy.
 - App/build, OS and remote-protocol versions in the report manifest.
 
 Every connect reaches a terminal event. A socket that opens and is never greeted is ended by a

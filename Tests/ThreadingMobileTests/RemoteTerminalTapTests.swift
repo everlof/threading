@@ -175,7 +175,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         let (window, view) = makeFocusedView()
         defer { window.isHidden = true }
         let bridge = TerminalKeyBridge()
-        bridge.terminalView = view
+        bridge.attachTerminalView(view)
         bridge.dismissKeyboard()
         XCTAssertFalse(bridge.isKeyboardShowing)
 
@@ -201,7 +201,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         let subscription = bridge.objectWillChange.sink { published = true }
         defer { subscription.cancel() }
 
-        bridge.terminalView = view
+        bridge.attachTerminalView(view)
 
         XCTAssertTrue(bridge.canShowKeyboard)
         XCTAssertTrue(published, "the bar cannot re-evaluate for a change nobody published")
@@ -212,7 +212,7 @@ final class RemoteTerminalTapTests: XCTestCase {
     func testInputModeFlipsFollowTheShowControl() {
         let view = makeView()
         let bridge = TerminalKeyBridge()
-        bridge.terminalView = view
+        bridge.attachTerminalView(view)
         XCTAssertTrue(bridge.canShowKeyboard)
 
         view.setAllowsKeyboardInput(false)

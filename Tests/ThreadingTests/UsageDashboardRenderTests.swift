@@ -681,6 +681,9 @@ final class UsageDashboardRenderTests: XCTestCase {
         let latest = samples.last!
         return [UsageLimitDashboardSeries(
             id: "codex|personal|weekly",
+            runtimeID: AgentKind.codex.rawValue,
+            accountID: "codex:personal",
+            windowID: "weekly",
             runtimeName: "Codex",
             accountName: "Personal",
             windowLabel: "Weekly",

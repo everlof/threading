@@ -287,6 +287,18 @@
       "reason": "The spinner reapplies its shape-layer stroke from draw(_:) on every theme refresh."
     },
     {
+      "path": "Sources/ThreadingMobile/SessionDashboard.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "borderColor",
+      "reason": "The collection plate is UIKit decoration chrome; plateTheme explicitly reapplies every mounted decoration and invalidates the layout on each live theme change, while reused decorations reapply from layout attributes."
+    },
+    {
+      "path": "Sources/ThreadingMobile/SessionDashboard.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "shadowColor",
+      "reason": "The collection plate glow shares the border's UIKit refresh path: plateTheme restates it on every mounted decoration and reused decorations restate it from layout attributes."
+    },
+    {
       "path": "Sources/Threading/UI/Design/ThemedIndicators.swift",
       "kind": "motionDuration",
       "symbol": "duration",

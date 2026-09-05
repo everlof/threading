@@ -89,6 +89,8 @@ enum ConfirmationPrompt: String, CaseIterable {
     case stopSessionProcess
     case takeOverSingleInstanceLock
     case endOrphanedAgentProcesses
+    /// Spends one provider-issued credit. The capacity may return, but the credit cannot.
+    case consumeBankedUsageReset
 
     // MARK: Security grants
 
@@ -264,6 +266,9 @@ enum ConfirmationPrompt: String, CaseIterable {
              // each is somebody's conversation: whatever it was mid-turn on is gone. It sits on
              // the same branch as the takeover above and for the same reason.
              .endOrphanedAgentProcesses,
+             // The provider consumes this credit permanently. Even if a future window would
+             // have reset on its own, Threading cannot put the banked credit back.
+             .consumeBankedUsageReset,
              // Regranting authority is possible, but the complete supervision graph this
              // operation closes has no one-step restore in the app. Default to Cancel like
              // the other broad removals whose recovery requires rebuilding state by hand.

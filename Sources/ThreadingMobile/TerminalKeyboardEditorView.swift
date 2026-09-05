@@ -226,10 +226,34 @@ private struct TerminalKeyRow: View {
                     theme.controlResting,
                     in: RoundedRectangle(cornerRadius: theme.controlRadius)
                 )
-            Text(terminalKeyDescription(for: key.action))
-                .font(.subheadline)
-                .foregroundStyle(theme.secondaryLabel)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                Text(terminalKeyDescription(for: key.action))
+                    .font(.subheadline)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .lineLimit(1)
+                Text(terminalKeyRowName(key.row))
+                    .font(.caption)
+                    .foregroundStyle(theme.tertiaryLabel)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+private func terminalKeyRowName(_ row: RemoteTerminalKeyRow) -> String {
+    MobileL10n.string(row == .top ? "Top row" : "Bottom row")
+}
+
+private struct TerminalKeyRowPicker: View {
+    @Binding var row: RemoteTerminalKeyRow
+
+    var body: some View {
+        ThemedSettingsSection {
+            Picker(MobileL10n.string("Row"), selection: $row) {
+                ForEach(RemoteTerminalKeyRow.allCases, id: \.rawValue) { option in
+                    Text(terminalKeyRowName(option)).tag(option)
+                }
+            }
         }
     }
 }
@@ -319,9 +343,12 @@ private struct TerminalKeyCatalogView: View {
     @State private var includesControl = false
     @State private var includesAlt = false
     @State private var includesShift = false
+    @State private var row = RemoteTerminalKeyRow.bottom
 
     var body: some View {
         List {
+            TerminalKeyRowPicker(row: $row)
+
             ThemedSettingsSection {
                 Toggle(MobileL10n.string("Control"), isOn: $includesControl)
                 Toggle(MobileL10n.string("Option"), isOn: $includesAlt)
@@ -337,11 +364,17 @@ private struct TerminalKeyCatalogView: View {
             ThemedSettingsSection {
                 ForEach(RemoteTerminalNamedKey.allCases, id: \.rawValue) { key in
                     Button {
-                        onAdd(RemoteTerminalKeyDefinition(action: .named(key, modifiers)))
+                        onAdd(RemoteTerminalKeyDefinition(
+                            action: .named(key, modifiers),
+                            row: row
+                        ))
                         dismiss()
                     } label: {
                         TerminalKeyRow(
-                            key: RemoteTerminalKeyDefinition(action: .named(key, modifiers))
+                            key: RemoteTerminalKeyDefinition(
+                                action: .named(key, modifiers),
+                                row: row
+                            )
                         )
                     }
                     .buttonStyle(.plain)
@@ -353,11 +386,17 @@ private struct TerminalKeyCatalogView: View {
             ThemedSettingsSection {
                 ForEach(RemoteTerminalLatchingModifier.allCases, id: \.rawValue) { modifier in
                     Button {
-                        onAdd(RemoteTerminalKeyDefinition(action: .latch(modifier)))
+                        onAdd(RemoteTerminalKeyDefinition(
+                            action: .latch(modifier),
+                            row: row
+                        ))
                         dismiss()
                     } label: {
                         TerminalKeyRow(
-                            key: RemoteTerminalKeyDefinition(action: .latch(modifier))
+                            key: RemoteTerminalKeyDefinition(
+                                action: .latch(modifier),
+                                row: row
+                            )
                         )
                     }
                     .buttonStyle(.plain)
@@ -393,6 +432,7 @@ private struct TerminalSnippetForm: View {
     @State private var label = ""
     @State private var text = ""
     @State private var submits = false
+    @State private var row = RemoteTerminalKeyRow.bottom
 
     var body: some View {
         List {
@@ -415,6 +455,8 @@ private struct TerminalSnippetForm: View {
                     "A long-press on a submitting snippet key inserts its text without running it."
                 ))
             }
+
+            TerminalKeyRowPicker(row: $row)
         }
         .themedSettingsPage(theme)
         .navigationTitle(MobileL10n.string("Add Snippet"))
@@ -425,7 +467,8 @@ private struct TerminalSnippetForm: View {
                     let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
                     onAdd(RemoteTerminalKeyDefinition(
                         customLabel: trimmedLabel.isEmpty ? nil : trimmedLabel,
-                        action: .snippet(text: text, submits: submits)
+                        action: .snippet(text: text, submits: submits),
+                        row: row
                     ))
                     dismiss()
                 }
@@ -447,6 +490,7 @@ private struct TerminalKeyEditForm: View {
     @State private var includesControl: Bool
     @State private var includesAlt: Bool
     @State private var includesShift: Bool
+    @State private var row: RemoteTerminalKeyRow
 
     init(key: RemoteTerminalKeyDefinition, onSave: @escaping (RemoteTerminalKeyDefinition) -> Void) {
         self.onSave = onSave
@@ -468,10 +512,13 @@ private struct TerminalKeyEditForm: View {
             _includesAlt = State(initialValue: false)
             _includesShift = State(initialValue: false)
         }
+        _row = State(initialValue: key.row)
     }
 
     var body: some View {
         List {
+            TerminalKeyRowPicker(row: $row)
+
             ThemedSettingsSection {
                 TextField(
                     MobileL10n.string("Optional — the key names itself otherwise"),
@@ -528,6 +575,7 @@ private struct TerminalKeyEditForm: View {
         var updated = key
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.customLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
+        updated.row = row
         switch key.action {
         case .snippet:
             if !snippetText.isEmpty {

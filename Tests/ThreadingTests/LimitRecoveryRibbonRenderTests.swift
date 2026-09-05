@@ -18,6 +18,7 @@ final class LimitRecoveryRibbonRenderTests: XCTestCase {
         static var offer: LimitEscapeStripView.Offer {
             LimitEscapeStripView.Offer(
                 offersWaitForReset: true,
+                bankedResetCount: 2,
                 resetHint: "12:40am (Europe/Stockholm)"
             )
         }

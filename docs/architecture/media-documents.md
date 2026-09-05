@@ -423,6 +423,15 @@ authenticated pieces to `AVPlayer`; it uses the ordinary pinned `RemoteClient`, 
 the asset URL or AVFoundation's private HTTP-header options. Only the current gallery page creates
 a player, so paging past one recording does not leave neighbour decoders or range streams alive.
 
+Every one of those requests is a read a lost connection may interrupt, and a lost connection is
+not a lost file: each attachment GET on the phone is retried once on a fresh connection when the
+failure was `networkConnectionLost` or a reset beneath it (`RemoteTransientTransportFailure`),
+whole-file and thumbnail downloads are queued through `MobileMediaDownloadLimiter` (two and four
+in flight) rather than fired per materialised page and cell, the request session keeps a bounded
+number of connections to one Mac, and the Mac keeps a thumbnail's connection open instead of
+closing it as it does after a whole file. The reasons are in
+[`REMOTE_ACCESS.md`](../REMOTE_ACCESS.md) under the gallery.
+
 Movies are therefore listed regardless of the whole-file limit. Every non-video attachment still
 obeys `RemoteAccessDefaults.maximumAttachmentBytes` (24 MB), and a large movie requested without a
 range is refused rather than allocated. The host advertises `attachment-video-streaming`; an older

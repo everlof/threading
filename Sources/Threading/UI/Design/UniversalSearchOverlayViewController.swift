@@ -33,12 +33,21 @@ struct UniversalSearchOverlayState: Equatable {
 final class UniversalSearchOverlayViewController: NSViewController {
     private enum Layout {
         static let width: CGFloat = 720
+        /// How far the list may grow before it scrolls instead of the panel getting taller.
         static let preferredListHeight: CGFloat = 470
+        /// The floor a *cramped window* may squeeze the list to — never a floor on a short
+        /// result set, which is the mistake it used to be: a query with three matches drew a
+        /// hundred and eighty points of empty panel below them because the list was a fixed
+        /// 470 and this was a required 160 under it. A palette is the size of its answer.
         static let minimumListHeight: CGFloat = 160
         @MainActor static var resultHeight: CGFloat {
             SearchResultRowView.preferredTableRowHeight
         }
-        static let groupHeight: CGFloat = 30
+        /// A group name is a section start, so its row carries the air *above* it and sets the
+        /// label on its own baseline at the bottom. Given the same 10 points as the gap between
+        /// two results, "Conversations" read as another row of the list rather than as the
+        /// heading of what follows it.
+        static let groupHeight: CGFloat = 38
         static let messageHeight: CGFloat = 36
         static let column = NSUserInterfaceItemIdentifier("universalSearch.column")
         static let result = NSUserInterfaceItemIdentifier("universalSearch.result")
@@ -73,10 +82,13 @@ final class UniversalSearchOverlayViewController: NSViewController {
         queryError: nil
     )
     private var isApplyingState = false
+    private var listFittedHeight: NSLayoutConstraint?
+    private var listCrushFloor: NSLayoutConstraint?
     private let appEvents = AppEventObservations()
 
     override func loadView() {
-        let root = NSView()
+        let root = UniversalSearchOverlayRootView()
+        root.onDismiss = { [weak self] in self?.onDismiss?() }
         root.translatesAutoresizingMaskIntoConstraints = false
         view = root
 
@@ -99,14 +111,24 @@ final class UniversalSearchOverlayViewController: NSViewController {
             self.onScopeChange?(self.state.scopes[index].id)
         }
 
+        // A mark rather than a control: `Emphasis.tertiary` is what the vocabulary says a close
+        // button is, and it was drawing a bordered button's plate beside a field and a scope run
+        // that both already carry one — three surfaces across a row that asks one question.
+        closeButton.emphasis = .tertiary
         closeButton.target = self
         closeButton.action = #selector(dismissSearch)
 
-        let header = NSStackView(views: [searchField, scopeControl, closeButton])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = Design.Spacing.small
-        searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // A row, not a stack: the field, the scope run and the ✕ each used to state their own
+        // height — 32, 26 and 26 — so the two controls beside the query floated three points
+        // clear of its top and bottom edges, and the mismatch changed with the theme because
+        // only one of the three numbers was the theme's. The row owns the height and every
+        // member takes it, and the query takes the slack rather than the air after it.
+        let header = ControlRowView(
+            scale: .field,
+            leading: [searchField],
+            trailing: [scopeControl, closeButton],
+            stretching: searchField
+        )
         searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         tableView.dataSource = self
@@ -127,6 +149,9 @@ final class UniversalSearchOverlayViewController: NSViewController {
             self.tableView.noteHeightOfRows(
                 withIndexesChanged: IndexSet(integersIn: 0 ..< self.state.rows.count)
             )
+            // The panel is the size of those rows, so the sweep that re-measures them has to
+            // re-measure the panel as well.
+            self.applyListHeight()
         }
 
         let scroll = ThemedScrollView()
@@ -160,10 +185,17 @@ final class UniversalSearchOverlayViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         surface.addSubview(stack)
 
-        let preferredHeight = scroll.heightAnchor.constraint(equalToConstant: Layout.preferredListHeight)
+        // The list is as tall as its answer, up to the point where it scrolls instead. Both
+        // constants are written by `apply(_:)`; these are the shapes, not the numbers.
+        let fittedHeight = scroll.heightAnchor.constraint(equalToConstant: Layout.preferredListHeight)
         // A covering surface may consume the room the window already has, never resize the
         // window to satisfy its preferred result count.
-        preferredHeight.priority = .init(rawValue: 499)
+        fittedHeight.priority = .init(rawValue: 499)
+        listFittedHeight = fittedHeight
+        let crushFloor = scroll.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: Layout.minimumListHeight
+        )
+        listCrushFloor = crushFloor
         let preferredWidth = surface.widthAnchor.constraint(equalToConstant: Layout.width)
         preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
@@ -188,10 +220,50 @@ final class UniversalSearchOverlayViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -Design.Spacing.pane),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.minimumListHeight),
-            preferredHeight,
+            crushFloor,
+            fittedHeight,
             footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
+        applyListHeight()
+    }
+
+    /// Sizes the list to what it is showing.
+    ///
+    /// The table is asked rather than told: `tile()` re-derives the document view's height from
+    /// the rows it is currently holding, which is the same O(rows) pass over the same capped
+    /// array `reloadData` already makes, and is the *table's* arithmetic rather than a second
+    /// copy of it — a sum written here would be a few points out the moment a style added an
+    /// inset, and a list a few points short of its own content scrolls. Re-derived on every
+    /// apply and on a theme change, because a row's height is a live type measure.
+    private func applyListHeight() {
+        tableView.tile()
+        let content = tableView.frame.height + listVerticalInset
+        listFittedHeight?.constant = min(content, Layout.preferredListHeight)
+        // The floor is the window running out of room, not the query running out of matches:
+        // a list already shorter than the floor is asking for nothing and must not be padded
+        // up to it.
+        listCrushFloor?.constant = min(content, Layout.minimumListHeight)
+    }
+
+    /// How tall each kind of row stands. The table asks; the panel does not, because it asks
+    /// the table for the total instead — one owner of this arithmetic, and a list sized from a
+    /// second copy of it is a list a few points short of its own last row.
+    private func height(ofRow row: Int) -> CGFloat {
+        guard state.rows.indices.contains(row) else { return Layout.messageHeight }
+        switch state.rows[row] {
+        case .group: return Layout.groupHeight
+        case .result: return Layout.resultHeight
+        case .message: return Layout.messageHeight
+        }
+    }
+
+    /// The room the scroll view needs beyond its rows — its own content insets and the rule it
+    /// is drawn with. Read from the scroll view rather than accumulated from its current height,
+    /// which would make the answer a function of the constant it is being used to write.
+    private var listVerticalInset: CGFloat {
+        guard let scroll = tableView.enclosingScrollView else { return 0 }
+        return scroll.contentInsets.top + scroll.contentInsets.bottom
+            + Design.Radius.border * 2
     }
 
     func apply(_ state: UniversalSearchOverlayState) {
@@ -211,6 +283,7 @@ final class UniversalSearchOverlayViewController: NSViewController {
         errorLabel.isHidden = state.queryError == nil
         statusLabel.stringValue = state.status ?? ""
         tableView.reloadData()
+        applyListHeight()
         restoreSelection(state.selectedHitID)
         isApplyingState = false
     }
@@ -296,14 +369,7 @@ extension UniversalSearchOverlayViewController: NSTableViewDataSource {
 }
 
 extension UniversalSearchOverlayViewController: NSTableViewDelegate {
-    func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard state.rows.indices.contains(row) else { return Layout.messageHeight }
-        switch state.rows[row] {
-        case .group: return Layout.groupHeight
-        case .result: return Layout.resultHeight
-        case .message: return Layout.messageHeight
-        }
-    }
+    func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat { height(ofRow: row) }
 
     func tableView(_: NSTableView, shouldSelectRow row: Int) -> Bool {
         guard state.rows.indices.contains(row) else { return false }
@@ -319,22 +385,20 @@ extension UniversalSearchOverlayViewController: NSTableViewDelegate {
         guard state.rows.indices.contains(row) else { return nil }
         switch state.rows[row] {
         case let .group(_, title):
-            let label = (tableView.makeView(withIdentifier: Layout.group, owner: self) as? NSTextField)
-                ?? NSTextField(labelWithString: "")
-            label.identifier = Layout.group
-            label.applyFont(.detail(weight: .semibold))
-            label.textColor = Design.Text.secondary
-            label.stringValue = title
-            return label
+            let header = (tableView.makeView(withIdentifier: Layout.group, owner: self)
+                as? SearchListLabelRow)
+                ?? SearchListLabelRow(alignment: .sectionName)
+            header.identifier = Layout.group
+            header.show(title, font: .detail(weight: .semibold), ink: Design.Text.secondary)
+            return header
 
         case let .message(_, text):
-            let label = (tableView.makeView(withIdentifier: Layout.message, owner: self) as? NSTextField)
-                ?? NSTextField(labelWithString: "")
-            label.identifier = Layout.message
-            label.applyFont(.caption)
-            label.textColor = Design.Text.tertiary
-            label.stringValue = text
-            return label
+            let row = (tableView.makeView(withIdentifier: Layout.message, owner: self)
+                as? SearchListLabelRow)
+                ?? SearchListLabelRow(alignment: .centred)
+            row.identifier = Layout.message
+            row.show(text, font: .caption, ink: Design.Text.tertiary)
+            return row
 
         case let .result(result):
             let resultView: SearchResultRowView
@@ -366,5 +430,127 @@ extension UniversalSearchOverlayViewController: NSTableViewDelegate {
             return
         }
         onSelectionChange?(result.id)
+    }
+}
+
+// MARK: - List Labels
+
+/// A row of the results list that is words rather than a result: a section name, or the note
+/// saying the group was capped.
+///
+/// It exists because a bare `NSTextField` returned as a cell view is centred in its row by
+/// AppKit, and both of these rows want something else. A section name wants the air *above* it,
+/// so that "Conversations" reads as the heading of what follows rather than as another entry
+/// between two results — given equal air it read as the latter, which is what the list looked
+/// like. Both want their ink on the same leading edge as a result's title, which a label pinned
+/// to the row's own edge misses by `SearchResultRowView`'s inset.
+private final class SearchListLabelRow: NSView {
+
+    /// Where the words sit in the row's height.
+    enum Alignment {
+        /// On the bottom, so the row's spare height becomes the section's air above.
+        case sectionName
+        /// In the middle, for a line that belongs to the rows around it equally.
+        case centred
+    }
+
+    private let label = NSTextField(labelWithString: "")
+
+    init(alignment: Alignment) {
+        super.init(frame: .zero)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.lineBreakMode = .byTruncatingTail
+        label.setAccessibilityElement(false)
+        addSubview(label)
+
+        let vertical: NSLayoutConstraint
+        switch alignment {
+        case .sectionName:
+            vertical = label.lastBaselineAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -SearchListLabelRowLayout.baselineFromBottom
+            )
+        case .centred:
+            vertical = label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        }
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: SearchListLabelRowLayout.leadingInset
+            ),
+            label.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+            vertical
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func show(_ text: String, font: Design.FontRole, ink: NSColor) {
+        label.applyFont(font)
+        label.textColor = ink
+        label.stringValue = text
+    }
+}
+
+@MainActor
+private enum SearchListLabelRowLayout {
+    /// The same inset `SearchResultRowView` gives its own labels, so a heading and the titles
+    /// under it stand on one edge.
+    static let leadingInset: CGFloat = Design.Spacing.small
+
+    /// How far a section name's baseline sits above the results that follow it — the gap a
+    /// result row already keeps between its own two lines, so the heading joins the rhythm of
+    /// the list instead of setting a second one.
+    static let baselineFromBottom: CGFloat = Design.Spacing.small
+}
+
+// MARK: - Escape
+
+@MainActor
+private enum UniversalSearchOverlayKeys {
+    static let escape: UInt16 = 53
+}
+
+/// The surface's own root, which is where Escape is answered.
+///
+/// Universal Search bound Escape on the query field's `control(_:textView:doCommandBy:)` seam
+/// and nowhere else, so the key closed the palette from the one place the palette had put the
+/// caret and from none of the others: click a result, tab to the scope run, or let anything else
+/// in the window take the keyboard, and Escape reached a responder that had never heard of the
+/// surface covering it. The three overrides are the same set `CompareInspectorView` arrived at,
+/// for the same reason — a plain Escape is not a key equivalent, so it is offered to the first
+/// responder as `keyDown` and turned into `cancelOperation(_:)` only by whatever calls
+/// `interpretKeyEvents`. `cancelOperation` is the one that carries in the app; `keyDown` catches
+/// a control that passed the key up itself; `performKeyEquivalent` is what a fixture pressing
+/// Escape by hand goes through. Escape belongs to the transient surface, not to whichever child
+/// happens to hold focus inside it.
+private final class UniversalSearchOverlayRootView: NSView {
+
+    var onDismiss: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) { onDismiss?() }
+
+    override func keyDown(with event: NSEvent) {
+        guard event.keyCode == UniversalSearchOverlayKeys.escape else {
+            super.keyDown(with: event)
+            return
+        }
+        onDismiss?()
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              event.keyCode == UniversalSearchOverlayKeys.escape else {
+            return super.performKeyEquivalent(with: event)
+        }
+        onDismiss?()
+        return true
     }
 }

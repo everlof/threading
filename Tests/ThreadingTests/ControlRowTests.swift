@@ -295,6 +295,93 @@ final class ControlRowTests: XCTestCase {
         XCTAssertEqual(placed(caption, in: row).minX, row.bounds.minX, accuracy: 0.5)
     }
 
+    // MARK: - Where The Slack Goes
+
+    /// A row built around a field wants the spare width *in* the field, not after it.
+    ///
+    /// The scope run is the reason this needs a constraint rather than a hugging priority:
+    /// `ThemedSegmentedControl` states `noIntrinsicMetric` for its width, and a view with no
+    /// intrinsic width has no hugging constraint to outrank, so the slack landed there however
+    /// weakly the field hugged.
+    @MainActor
+    func testTheNamedMemberTakesTheRowsSlackRatherThanTheAirBesideIt() {
+        let loose = makeQueryRow(stretching: false)
+        _ = laidOut(loose.row, height: 60)
+        let unstretched = loose.field.frame.width
+
+        let taut = makeQueryRow(stretching: true)
+        let row = taut.row
+        _ = laidOut(row, height: 60)
+
+        XCTAssertGreaterThan(
+            taut.field.frame.width, unstretched + Fixture.width / 4,
+            "the named member did not take the row's spare width"
+        )
+        XCTAssertEqual(
+            placed(taut.field, in: row).minX, row.bounds.minX, accuracy: 0.5
+        )
+        XCTAssertEqual(
+            placed(taut.close, in: row).maxX, row.bounds.maxX, accuracy: 0.5,
+            "stretching one member pushed the trailing run off the row's edge"
+        )
+        XCTAssertEqual(
+            placed(taut.picker, in: row).minX - placed(taut.field, in: row).maxX,
+            Design.Spacing.medium,
+            accuracy: 1,
+            "the runs should still be held apart by the row's own gap"
+        )
+    }
+
+    /// The members beside the stretching one keep their own width — a scope run that grew with
+    /// the row would put its three segments at whatever the window happens to be.
+    @MainActor
+    func testStretchingOneMemberLeavesTheRestAtTheirOwnWidth() {
+        let narrow = makeQueryRow(stretching: true)
+        _ = laidOut(narrow.row, width: Fixture.width)
+
+        let wide = makeQueryRow(stretching: true)
+        _ = laidOut(wide.row, width: Fixture.width * 2)
+
+        XCTAssertEqual(wide.picker.frame.width, narrow.picker.frame.width, accuracy: 0.5)
+        XCTAssertGreaterThan(
+            wide.field.frame.width, narrow.field.frame.width + Fixture.width / 2,
+            "the extra width went somewhere other than the named member"
+        )
+    }
+
+    /// A row narrower than its own content still compresses: both the spring's hold and the
+    /// member's wish are optional, so the shortfall reaches the members rather than making the
+    /// layout unsatisfiable.
+    @MainActor
+    func testAStretchedRowStillCompressesIntoANarrowPane() {
+        let taut = makeQueryRow(stretching: true)
+        _ = laidOut(taut.row, width: Fixture.narrowWidth)
+
+        XCTAssertLessThanOrEqual(taut.row.frame.width, Fixture.narrowWidth)
+        XCTAssertLessThanOrEqual(
+            placed(taut.field, in: taut.row).maxX,
+            placed(taut.picker, in: taut.row).minX,
+            "the field ran under the scope run instead of compressing"
+        )
+    }
+
+    /// Naming a member and then reconfiguring without it puts the slack back where it was.
+    @MainActor
+    func testReconfiguringWithoutTheStretchingMemberReturnsTheSlackToTheSpring() {
+        let taut = makeQueryRow(stretching: true)
+        let host = laidOut(taut.row)
+        let stretched = taut.field.frame.width
+
+        taut.row.configure(leading: [taut.field], trailing: [taut.picker, taut.close])
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(taut.row.stretchingView)
+        XCTAssertLessThan(
+            taut.field.frame.width, stretched,
+            "the field kept the slack after the row stopped naming it"
+        )
+    }
+
     // MARK: - The Reported Surface
 
     /// The Compare tab itself, which is where this was seen. The mode chip, the export and the
@@ -640,6 +727,28 @@ final class ControlRowTests: XCTestCase {
             target: .inline,
             inkSource: .chrome
         )
+    }
+
+    /// Universal Search's header: a query, the scope run and a close, in that arrangement.
+    /// Fresh controls each time — a `ControlRowView` takes its members out of whatever row held
+    /// them, so two rows sharing instances measure the second one twice.
+    @MainActor
+    private func makeQueryRow(
+        stretching: Bool
+    ) -> (row: ControlRowView, field: ThemedSearchField, picker: ThemedSegmentedControl,
+          close: ThemedIconButton) {
+        let field = ThemedSearchField()
+        field.placeholderString = "Search"
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let picker = makeSegments()
+        let close = makeAction("xmark")
+        let row = ControlRowView(
+            scale: .field,
+            leading: [field],
+            trailing: [picker, close],
+            stretching: stretching ? field : nil
+        )
+        return (row, field, picker, close)
     }
 
     @MainActor

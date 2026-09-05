@@ -1125,8 +1125,9 @@ final class RemoteSessionConnection: ObservableObject {
         )
     }
 
-    /// Submits a device-local terminal draft as one PTY write. A host must advertise the
-    /// capability because older hosts only understand shared raw keystrokes.
+    /// Submits a device-local terminal line as one acknowledged transaction. The host writes its
+    /// text and Return to the PTY separately so agent TUIs do not classify the line as a paste. A
+    /// host must advertise the capability because older hosts only understand shared raw keys.
     @discardableResult
     func submitTerminalLine(
         _ text: String,

@@ -404,6 +404,8 @@ final class RemoteAppModel: ObservableObject {
     private var routeWalkFailures = 0
     private var routeWalksInFlight = 0
     private let hostRefreshSingleFlight = MobileHostRefreshSingleFlight()
+    /// Addresses that have refused this phone's identity check repeatedly, rested for a while.
+    private let routeHealth = MobileRouteHealthLedger()
     private var activeHostedLink: RemoteConnectionLink?
     private var activeHostedHostID: String?
     /// Provisioning is a low-frequency control-plane operation. A service outage must not turn
@@ -651,7 +653,7 @@ final class RemoteAppModel: ObservableObject {
         phase = .idle
         if let host = activeHost {
             ensureThemeEvents(for: host)
-            Task { await refresh() }
+            Task { await refresh(reason: .hostChanged) }
         }
     }
 
@@ -667,6 +669,18 @@ final class RemoteAppModel: ObservableObject {
               let cached = cachedDashboardCatalogues[activeHostID],
               cached.isUsable() else { return nil }
         return cached
+    }
+
+    /// Publishes an authoritative refresh only when it changes the value SwiftUI observes.
+    ///
+    /// `@Published` sends before `didSet`, so an equality guard inside the observer would be too
+    /// late: an identical recovery response would still invalidate every dashboard consumer.
+    /// Keep the guard at the assignment boundary instead.
+    @discardableResult
+    func adoptRefreshedCatalogueIfChanged(_ response: RemoteMeDTO) -> Bool {
+        guard me != response else { return false }
+        me = response
+        return true
     }
 
     func dashboardSession(id: String) -> RemoteSessionSummaryDTO? {
@@ -1111,7 +1125,7 @@ final class RemoteAppModel: ObservableObject {
         // `pair` stores the durable hosted credential through this temporary tunnel. Move the
         // live app socket onto that durable route before the temporary pairing tunnel closes.
         disconnectThemeEvents()
-        await refresh()
+        await refresh(reason: .hostChanged)
     }
 
     func selectHost(_ id: String) {
@@ -1151,7 +1165,12 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
-    func refresh() async {
+    /// Brings the catalogue up to date, at the cost `MobileRefreshPolicy` decides for the reason.
+    ///
+    /// `.userCheck` is the default because a caller that does not say why is a person pressing
+    /// a button, and that always earns the full race. Every other caller names its reason so the
+    /// journal can attribute the refresh and the policy can decline or cheapen it.
+    func refresh(reason: MobileRefreshReason = .userCheck) async {
         guard !isDemo else { return }
         guard let host = activeHost else {
             discardPendingSessionDeltas()
@@ -1164,8 +1183,21 @@ final class RemoteAppModel: ObservableObject {
         let hostID = host.id
         await hostRefreshSingleFlight.run(hostID: hostID) { [weak self] in
             guard let self, self.activeHostID == hostID else { return }
-            await self.performRefresh(from: host)
+            await self.performRefresh(from: host, reason: reason)
         }
+    }
+
+    /// The catalogue edition in hand, which a conditional refresh names to the Mac. Nil until a
+    /// host that knows editions has answered, and nil again after a local rebuild could not say
+    /// which edition it corresponds to.
+    var catalogueEdition: RemoteCatalogueRevisionDTO? {
+        me?.revision
+    }
+
+    /// Whether the dashboard's event socket is authenticated and delivering for this host, which
+    /// is what makes the catalogue in hand authoritative without asking.
+    func isEventSocketHealthy(for hostID: String) -> Bool {
+        themeEventsTask != nil && themeEventsDidReceiveHello && themeEventsHostID == hostID
     }
 
     /// Resolves a cached navigation id against an authoritative catalogue before any resume or
@@ -1173,7 +1205,7 @@ final class RemoteAppModel: ObservableObject {
     /// the dashboard's single-flight reconnect does the network work.
     func liveSessionForOpening(id: String) async throws -> RemoteSessionSummaryDTO {
         if phase != .online || me == nil {
-            await refresh()
+            await refresh(reason: .openTarget)
         }
         guard let response = me else {
             if let failure = phase.failure { throw failure }
@@ -1188,7 +1220,7 @@ final class RemoteAppModel: ObservableObject {
 
     func liveTerminalForOpening(id: String) async throws -> RemoteProjectTerminalSummaryDTO {
         if phase != .online || me == nil {
-            await refresh()
+            await refresh(reason: .openTarget)
         }
         guard let response = me else {
             if let failure = phase.failure { throw failure }
@@ -1217,7 +1249,7 @@ final class RemoteAppModel: ObservableObject {
                 dashboardRecoveryPending: isDashboardRecoveryPending(for: hostID)
             )
         {
-            await refresh()
+            await refresh(reason: .socketRecovery)
         }
         guard activeHostID == hostID else { return nil }
         return client
@@ -1239,11 +1271,21 @@ final class RemoteAppModel: ObservableObject {
         client.map { MobileRouteIdentity(origin: $0.link.baseURL, endpointKind: $0.endpointKind) }
     }
 
-    private func performRefresh(from host: PairedRemoteHost) async {
+    private func performRefresh(from host: PairedRemoteHost, reason: MobileRefreshReason) async {
+        let hostID = host.id
+        let warm = warmCandidate(for: host)
+        let edition = catalogueEdition
+        let decision = MobileRefreshPolicy.decide(
+            reason: reason,
+            hasCatalogue: phase == .online && me != nil,
+            eventSocketHealthy: isEventSocketHealthy(for: hostID),
+            canRefreshConditionally: warm != nil && edition != nil
+        )
+        guard decision != .skip else { return }
+
         discardPendingSessionDeltas()
         refreshGeneration &+= 1
         let generation = refreshGeneration
-        let hostID = host.id
         let refreshTrace = MobileDiagnostics.connectivityTrace()
         let refreshStartedAt = MobileDiagnostics.monotonicNow()
         let refreshBaseFields: [RemoteDiagnosticField: String] = [
@@ -1253,7 +1295,11 @@ final class RemoteAppModel: ObservableObject {
         ]
         MobileDiagnostics.recordConnectivity(
             .hostRefreshStarted,
-            fields: refreshBaseFields.merging([.result: "started"]) { current, _ in current }
+            fields: refreshBaseFields.merging([
+                .result: "started",
+                .reason: reason.rawValue,
+                .detail: decision.rawValue,
+            ]) { current, _ in current }
         )
         catalogueRefreshInFlightGeneration = generation
         defer {
@@ -1263,6 +1309,29 @@ final class RemoteAppModel: ObservableObject {
             }
         }
         let wasOnline = phase == .online && me != nil
+
+        // The cheap path first: one request on the route that answered last, naming the edition
+        // in hand. A `304` settles the refresh; a full body is adopted like any race winner; a
+        // transport failure on that one route says nothing about the others and falls through
+        // to the race below.
+        if decision == .conditional, let warm, let edition {
+            switch await refreshConditionally(
+                from: host,
+                candidate: warm,
+                edition: edition,
+                generation: generation,
+                wasOnline: wasOnline,
+                trace: refreshTrace,
+                baseFields: refreshBaseFields,
+                startedAt: refreshStartedAt
+            ) {
+            case .settled:
+                return
+            case .fallBackToFullRace:
+                break
+            }
+        }
+
         if !wasOnline {
             phase = .connecting
             connectionProgress = .preparingRoutes
@@ -1392,7 +1461,7 @@ final class RemoteAppModel: ObservableObject {
             )
             return
         }
-        me = response
+        adoptRefreshedCatalogueIfChanged(response)
         if connectionRecoveryAttempt != 0 {
             connectionRecoveryAttempt = 0
         }
@@ -1411,6 +1480,7 @@ final class RemoteAppModel: ObservableObject {
             .hostRefreshSucceeded,
             fields: refreshBaseFields.merging([
                 .result: "succeeded",
+                .status: MobileDiagnostics.fullCatalogueStatus,
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
                 .transport: connection.kind.rawValue,
                 .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
@@ -1499,7 +1569,7 @@ final class RemoteAppModel: ObservableObject {
     /// socket; only a failed socket starts bounded exponential recovery.
     func activateDashboard() async {
         guard !isDemo else { return }
-        await refresh()
+        await refresh(reason: .dashboardAppeared)
     }
 
     func suspendHostedConnections() {
@@ -2070,7 +2140,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private func performNotificationOpen(generation: Int) async {
-        await refresh()
+        await refresh(reason: .notificationOpen)
         guard !Task.isCancelled,
               let pending = pendingNotificationOpen,
               pending.generation == generation,
@@ -2287,6 +2357,214 @@ final class RemoteAppModel: ObservableObject {
         let metrics: RemoteRequestMetrics?
     }
 
+    /// How a conditional refresh ended.
+    private enum ConditionalRefreshOutcome {
+        /// Answered — with the same edition or a new catalogue — or discarded as stale. Either
+        /// way the refresh is over.
+        case settled
+        /// The known route did not answer. Nothing is known about the others yet.
+        case fallBackToFullRace
+    }
+
+    /// What the one known route said to a request that named the edition in hand.
+    private enum ConditionalAnswer {
+        case catalogue(SuccessfulConnection)
+        case unchanged(link: RemoteConnectionLink, kind: RemoteHostEndpointKind, isHosted: Bool, metrics: RemoteRequestMetrics?)
+    }
+
+    /// The route that answered last, as one candidate — the whole of a conditional refresh's
+    /// route plan. Nil until something has answered, and nil for a hosted route whose tunnel is
+    /// no longer standing, since dialling a rendezvous is the race's job.
+    private func warmCandidate(for host: PairedRemoteHost) -> ConnectionCandidate? {
+        guard let last = lastConnection, last.hostID == host.id else { return nil }
+        if last.isHosted {
+            guard activeHostedHostID == host.id, let link = activeHostedLink else { return nil }
+            return ConnectionCandidate(
+                link: link,
+                isHosted: true,
+                kind: RemoteHostEndpointKind.hosted,
+                doorID: nil
+            )
+        }
+        return ConnectionCandidate(
+            link: host.link,
+            isHosted: false,
+            kind: host.activeEndpointKind ?? PairedRemoteHost.endpointKind(for: host.link.baseURL),
+            doorID: host.link.baseURL.absoluteString
+        )
+    }
+
+    private func refreshConditionally(
+        from host: PairedRemoteHost,
+        candidate: ConnectionCandidate,
+        edition: RemoteCatalogueRevisionDTO,
+        generation: Int,
+        wasOnline: Bool,
+        trace refreshTrace: String,
+        baseFields refreshBaseFields: [RemoteDiagnosticField: String],
+        startedAt refreshStartedAt: UInt64
+    ) async -> ConditionalRefreshOutcome {
+        let hostID = host.id
+        let answer: ConditionalAnswer
+        do {
+            answer = try await fetchMeConditionally(
+                candidate: candidate,
+                edition: edition,
+                trace: refreshTrace
+            )
+        } catch is CancellationError {
+            MobileDiagnostics.recordConnectivity(
+                .hostRefreshFailed,
+                level: .warning,
+                fields: refreshBaseFields.merging([
+                    .result: "cancelled",
+                    .code: "swift.cancelled",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
+                ]) { current, _ in current }
+            )
+            return .settled
+        } catch {
+            return activeHostID == hostID && refreshGeneration == generation
+                ? .fallBackToFullRace
+                : .settled
+        }
+        switch answer {
+        case let .catalogue(connection):
+            await applyRefreshSuccess(
+                connection,
+                host: host,
+                hostID: hostID,
+                generation: generation,
+                wasOnline: wasOnline,
+                trace: refreshTrace,
+                baseFields: refreshBaseFields,
+                startedAt: refreshStartedAt
+            )
+        case let .unchanged(link, kind, isHosted, metrics):
+            guard activeHostID == hostID, refreshGeneration == generation else {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRefreshFailed,
+                    level: .warning,
+                    fields: refreshBaseFields.merging([
+                        .result: "discarded",
+                        .code: "refresh.generationChanged",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(
+                            since: refreshStartedAt
+                        ),
+                    ]) { current, _ in current }
+                )
+                return .settled
+            }
+            if connectionRecoveryAttempt != 0 {
+                connectionRecoveryAttempt = 0
+            }
+            phase = .online
+            lastConnection = MobileConnectionRecord(
+                hostID: hostID,
+                kind: kind,
+                baseURL: link.baseURL,
+                isHosted: isHosted,
+                connectedAt: Date(),
+                metrics: metrics,
+                serverProtocol: me?.serverProtocol
+            )
+            MobileDiagnostics.recordConnectivity(
+                .hostRefreshSucceeded,
+                fields: refreshBaseFields.merging([
+                    .result: "succeeded",
+                    .status: String(RemoteClientDefaults.notModifiedStatus),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
+                    .transport: kind.rawValue,
+                    .origin: MobileDiagnostics.originDigest(link.baseURL),
+                ]) { current, _ in current }
+            )
+            // The catalogue stands; what a resume or a recovery still owes is the socket.
+            ensureThemeEvents(for: host)
+        }
+        return .settled
+    }
+
+    /// One request on one route, naming the edition in hand, with the same journal shape as an
+    /// attempt in the race so a report reads both alike. `wave` says which it was.
+    private func fetchMeConditionally(
+        candidate: ConnectionCandidate,
+        edition: RemoteCatalogueRevisionDTO,
+        trace: String
+    ) async throws -> ConditionalAnswer {
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let timeout = RemoteClientDefaults.requestTimeoutSeconds
+        let baseFields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .transport: candidate.kind.rawValue,
+            .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
+            .phase: "request",
+            .kind: candidate.isHosted ? "hosted" : "candidate",
+            .wave: MobileDiagnostics.warmRouteWave,
+            .attempt: "1",
+            .total: "1",
+            .timeoutMS: MobileDiagnostics.milliseconds(timeout),
+        ]
+        noteRouteAttempt(candidate)
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: baseFields.merging([.result: "started"]) { current, _ in current }
+        )
+        let metrics = RemoteRequestMetricsCollector()
+        do {
+            let fetched = try await RemoteClient(
+                link: candidate.link,
+                endpointKind: candidate.kind
+            ).fetchCatalogue(
+                timeout: timeout,
+                metrics: metrics,
+                ifNoneMatch: edition.entityTag
+            )
+            let status: String
+            let answer: ConditionalAnswer
+            switch fetched {
+            case let .catalogue(response):
+                status = MobileDiagnostics.fullCatalogueStatus
+                answer = .catalogue(SuccessfulConnection(
+                    response: response,
+                    link: candidate.link,
+                    isHosted: candidate.isHosted,
+                    kind: candidate.kind,
+                    metrics: metrics.snapshot
+                ))
+            case .notModified:
+                status = String(RemoteClientDefaults.notModifiedStatus)
+                answer = .unchanged(
+                    link: candidate.link,
+                    kind: candidate.kind,
+                    isHosted: candidate.isHosted,
+                    metrics: metrics.snapshot
+                )
+            }
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                fields: baseFields.merging(metrics.fields) { current, _ in current }.merging([
+                    .result: "succeeded",
+                    .status: status,
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { current, _ in current }
+            )
+            return answer
+        } catch {
+            let cancelled = error is CancellationError || Task.isCancelled
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                level: cancelled ? .info : .warning,
+                fields: baseFields.merging(metrics.fields) { current, _ in current }.merging([
+                    .result: cancelled ? "cancelled" : "failed",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    .code: cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error),
+                ]) { current, _ in current }
+            )
+            if cancelled { throw CancellationError() }
+            throw error
+        }
+    }
+
     private func fetchMe(
         from host: PairedRemoteHost,
         reportsProgress: Bool,
@@ -2295,7 +2573,25 @@ final class RemoteAppModel: ObservableObject {
         beginRouteWalk()
         defer { endRouteWalk() }
         let expectedRouteCount = max(host.connectionOptionLabels.count, 1)
-        let remoteCandidates = host.candidates(preferring: discoveredAddresses[host.id])
+        let remoteCandidates = routeHealth.admitting(
+            host.candidates(preferring: discoveredAddresses[host.id]),
+            origin: { $0.link.baseURL },
+            skipped: { candidate in
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    fields: [
+                        .trace: trace,
+                        .transport: candidate.kind.rawValue,
+                        .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
+                        .phase: "request",
+                        .kind: "candidate",
+                        .wave: candidate.wave.rawValue,
+                        .result: "skipped",
+                        .reason: MobileDiagnostics.routeCooldownReason,
+                    ]
+                )
+            }
+        )
         let diagnosticPositions = Dictionary(uniqueKeysWithValues: remoteCandidates.enumerated().map {
             ($0.element.link, $0.offset + 1)
         })
@@ -2659,6 +2955,7 @@ final class RemoteAppModel: ObservableObject {
                     .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
                 ]) { current, _ in current }
             )
+            routeHealth.noteSuccess(origin: candidate.link.baseURL)
             return SuccessfulConnection(
                 response: response,
                 link: candidate.link,
@@ -2669,16 +2966,30 @@ final class RemoteAppModel: ObservableObject {
         } catch {
             let cancelled = error is CancellationError || Task.isCancelled
             if !cancelled { noteRouteFailure() }
+            let code = cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error)
             var fields = baseFields.merging([
                 .result: cancelled ? "cancelled" : "failed",
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
-                .code: cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error),
+                .code: code,
             ]) { current, _ in current }
             fields.merge(metrics.fields) { current, _ in current }
             if let remote = error as? RemoteClientError,
                case let .server(status, _, _) = remote
             {
                 fields[.status] = String(status)
+            }
+            if !cancelled {
+                // Which of two opposite fixes: a pin the phone never registered for this
+                // address, or a handshake the address itself ended. The audit could not tell.
+                if let detail = MobileDiagnostics.transportDetail(
+                    for: error,
+                    host: candidate.link.baseURL.host
+                ) {
+                    fields[.detail] = detail
+                }
+                if !candidate.isHosted {
+                    routeHealth.noteFailure(origin: candidate.link.baseURL, code: code)
+                }
             }
             MobileDiagnostics.recordConnectivity(
                 .hostRouteEnded,
@@ -2897,7 +3208,11 @@ final class RemoteAppModel: ObservableObject {
             preparationError = error
             await hostedConnectionFailed(hostID: host.id)
         }
-        for candidate in host.candidates(preferring: discoveredAddresses[host.id])
+        let admitted = routeHealth.admitting(
+            host.candidates(preferring: discoveredAddresses[host.id]),
+            origin: { $0.link.baseURL }
+        )
+        for candidate in admitted
             where !candidates.contains(where: { $0.link == candidate.link })
         {
             candidates.append(ConnectionCandidate(
@@ -3357,7 +3672,7 @@ final class RemoteAppModel: ObservableObject {
         themeEventsRecoveryTask = nil
         themeEventsRecoveryHostID = nil
         guard !isDemo, activeHostID == hostID, themeEventsTask == nil else { return }
-        await refresh()
+        await refresh(reason: .socketRecovery)
         if activeHostID == hostID, themeEventsTask == nil {
             scheduleThemeEventsRecovery(for: hostID)
         }
@@ -3415,7 +3730,10 @@ final class RemoteAppModel: ObservableObject {
         return fields
     }
 
-    private func scheduleSessionsChangedRefresh(for hostID: String) {
+    private func scheduleSessionsChangedRefresh(
+        for hostID: String,
+        reason: MobileRefreshReason = .structuralChange
+    ) {
         guard activeHostID == hostID, sessionsChangedRefreshTask == nil else { return }
         sessionsChangedRefreshGeneration &+= 1
         let generation = sessionsChangedRefreshGeneration
@@ -3428,7 +3746,8 @@ final class RemoteAppModel: ObservableObject {
             guard !Task.isCancelled else { return }
             await self?.refreshSessionsChanged(
                 for: hostID,
-                generation: generation
+                generation: generation,
+                reason: reason
             )
         }
     }
@@ -3479,6 +3798,10 @@ final class RemoteAppModel: ObservableObject {
         let updated = await Task.detached(priority: .userInitiated) {
             current.applying(updates)
         }.value
+        // Deltas from a Mac process the edition in hand does not know are a restart this phone
+        // slept through. The rows still apply; what they cannot vouch for is everything else.
+        let editionWasKnown = current.revision != nil
+        let editionLost = editionWasKnown && updated.revision == nil
         guard activeHostID == hostID,
               sessionDeltaApplicationGeneration == generation else { return }
         guard catalogueRevision == revision else {
@@ -3496,6 +3819,9 @@ final class RemoteAppModel: ObservableObject {
         }
         me = updated
         sessionDeltaApplicationTask = nil
+        if editionLost {
+            scheduleSessionsChangedRefresh(for: hostID, reason: .revisionGap)
+        }
         startSessionDeltaApplicationIfNeeded(for: hostID)
     }
 
@@ -3516,10 +3842,14 @@ final class RemoteAppModel: ObservableObject {
         pendingSessionDeltas.removeAll(keepingCapacity: true)
     }
 
-    private func refreshSessionsChanged(for hostID: String, generation: Int) async {
+    private func refreshSessionsChanged(
+        for hostID: String,
+        generation: Int,
+        reason: MobileRefreshReason
+    ) async {
         guard activeHostID == hostID,
               sessionsChangedRefreshGeneration == generation else { return }
-        await refresh()
+        await refresh(reason: reason)
         if sessionsChangedRefreshGeneration == generation {
             sessionsChangedRefreshTask = nil
         }
@@ -3995,7 +4325,29 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private static func demoResponse(for mode: String) -> RemoteMeDTO {
-        MobileDemoFixture.isMarketing(mode) ? marketingResponse(forMode: mode) : demoResponse
+        let response = MobileDemoFixture.isMarketing(mode)
+            ? marketingResponse(forMode: mode)
+            : demoResponse
+        guard ["sessions", "project-sessions"].contains(mode) else { return response }
+        var features = response.features ?? []
+        if !features.contains(RemoteRESTFeature.universalSearch.rawValue) {
+            features.append(RemoteRESTFeature.universalSearch.rawValue)
+        }
+        // These DEBUG fixtures exercise the dashboard's complete bottom chrome. Search has its
+        // own functional fixture; here the advertised capability keeps a missing pill from
+        // escaping visual review again.
+        return RemoteMeDTO(
+            serverProtocol: response.serverProtocol,
+            share: response.share,
+            sessions: response.sessions,
+            terminals: response.terminals,
+            host: response.host,
+            theme: response.theme,
+            themeCatalog: response.themeCatalog,
+            archivedSessions: response.archivedSessions,
+            newSessionCatalog: response.newSessionCatalog,
+            features: features
+        )
     }
 
     private static func marketingResponse(forMode mode: String) -> RemoteMeDTO {
@@ -4415,8 +4767,29 @@ extension RemoteMeDTO {
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions,
             newSessionCatalog: newSessionCatalog,
-            features: features
+            features: features,
+            revision: revision.map { current in
+                Self.editionAfterApplying(updates, to: current)
+            } ?? nil
         )
+    }
+
+    /// The edition the catalogue is at once these deltas are applied, or nil when the deltas
+    /// come from a Mac process the current edition does not know — a restart — so the next
+    /// refresh is a full one rather than a conditional request the host would answer `304`.
+    ///
+    /// A delta with no revision is an older Mac's, and the catalogue keeps the edition it had:
+    /// such a host never answers `304`, so an edition that is not advanced costs nothing.
+    static func editionAfterApplying(
+        _ updates: [RemoteSessionsChangedDTO],
+        to current: RemoteCatalogueRevisionDTO
+    ) -> RemoteCatalogueRevisionDTO? {
+        var latest = current
+        for revision in updates.compactMap(\.revision) {
+            guard revision.epoch == current.epoch else { return nil }
+            if revision.revision > latest.revision { latest = revision }
+        }
+        return latest
     }
 
     func replacing(theme: RemoteThemeDTO) -> RemoteMeDTO {
@@ -4430,7 +4803,8 @@ extension RemoteMeDTO {
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions,
             newSessionCatalog: newSessionCatalog,
-            features: features
+            features: features,
+            revision: revision
         )
     }
 
@@ -4479,7 +4853,8 @@ extension RemoteMeDTO {
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions,
             newSessionCatalog: newSessionCatalog,
-            features: features
+            features: features,
+            revision: revision
         )
     }
 

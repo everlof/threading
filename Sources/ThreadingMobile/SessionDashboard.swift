@@ -1,5 +1,6 @@
 import SwiftUI
 import ThreadingRemoteKit
+import UIKit
 
 struct MobileSnoozeChoice: Identifiable {
     let id: String
@@ -82,7 +83,8 @@ enum DashboardContentType: String, Hashable {
 ///
 /// Chats and terminals stand in one list the way they do in the Mac sidebar, told apart by their
 /// mark rather than by separate plates and a heading over one of them. The dashboard builds the
-/// list as values in the order the arrangement asks for, and the plate draws each row lazily.
+/// list as values in the order the arrangement asks for, and its collection mounts only visible
+/// row hosts.
 enum DashboardRowItem: Identifiable, Equatable {
     case chat(RemoteSessionSummaryDTO)
     case terminal(RemoteProjectTerminalSummaryDTO)
@@ -653,6 +655,469 @@ struct ShareChatRequest: Identifiable {
     var id: String { session.id }
 }
 
+private enum DashboardCollectionItemID: Hashable {
+    case demoBanner
+    case connectionRecovery
+    case loading
+    case empty
+    case notificationOnboarding
+    case projectHeader(String)
+    case typeHeader(DashboardContentType)
+    case row(String)
+}
+
+private enum DashboardCollectionSectionKind: Equatable {
+    case chrome(estimatedHeight: CGFloat)
+    case plate
+
+    var estimatedHeight: CGFloat {
+        switch self {
+        case .chrome(let estimatedHeight): return estimatedHeight
+        case .plate: return 58
+        }
+    }
+
+    var drawsPlate: Bool {
+        if case .plate = self { return true }
+        return false
+    }
+}
+
+private struct DashboardCollectionSection: Equatable {
+    let id: String
+    let kind: DashboardCollectionSectionKind
+    let items: [DashboardCollectionItemID]
+    let spacingAfter: CGFloat
+}
+
+private struct DashboardCollectionRow {
+    let item: DashboardRowItem
+    let hasDivider: Bool
+    let isFirst: Bool
+    let isLast: Bool
+}
+
+private struct DashboardCollectionModel {
+    let sections: [DashboardCollectionSection]
+    let rows: [String: DashboardCollectionRow]
+}
+
+/// The dashboard's one scroll owner.
+///
+/// SwiftUI previously put a lazy stack of project groups around another lazy stack of rows. A
+/// group is one outer item, so returning through an interactive navigation transition made
+/// SwiftUI estimate the whole group's height and call every bridged title's `sizeThatFits`. This
+/// collection owns one diffable item per row instead. `UIHostingConfiguration` keeps the existing
+/// authored row content, but only visible cells have a hosting tree or morphing title.
+private struct MobileDashboardCollection: UIViewControllerRepresentable {
+    let model: DashboardCollectionModel
+    let theme: RemoteThemePalette
+    let bottomContentInset: CGFloat
+    let content: @MainActor (DashboardCollectionItemID) -> AnyView
+    let refresh: @MainActor () async -> Void
+
+    func makeUIViewController(context _: Context) -> MobileDashboardCollectionViewController {
+        MobileDashboardCollectionViewController(
+            sections: model.sections,
+            theme: theme,
+            bottomContentInset: bottomContentInset,
+            content: content,
+            refresh: refresh
+        )
+    }
+
+    func updateUIViewController(
+        _ controller: MobileDashboardCollectionViewController,
+        context _: Context
+    ) {
+        controller.update(
+            sections: model.sections,
+            theme: theme,
+            bottomContentInset: bottomContentInset,
+            content: content,
+            refresh: refresh
+        )
+    }
+}
+
+@MainActor
+private final class MobileDashboardCollectionViewController: UIViewController {
+    private static let plateDecorationKind = "threading.mobile.dashboard.plate"
+
+    private var sections: [DashboardCollectionSection]
+    private var theme: RemoteThemePalette
+    private var bottomContentInset: CGFloat
+    private var content: @MainActor (DashboardCollectionItemID) -> AnyView
+    private var refreshAction: @MainActor () async -> Void
+    private var refreshTask: Task<Void, Never>?
+    private var dataSource: UICollectionViewDiffableDataSource<
+        String,
+        DashboardCollectionItemID
+    >!
+    private var cellRegistration: UICollectionView.CellRegistration<
+        UICollectionViewCell,
+        DashboardCollectionItemID
+    >!
+
+    private lazy var collectionView: DashboardCollectionUIKitView = {
+        let layout = makeLayout()
+        let view = DashboardCollectionUIKitView(
+            frame: .zero,
+            collectionViewLayout: layout
+        )
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.backgroundColor = theme.uiGround
+        view.alwaysBounceVertical = true
+        view.contentInset = UIEdgeInsets(
+            top: MobileDesign.Spacing.large,
+            left: 0,
+            bottom: bottomContentInset,
+            right: 0
+        )
+        view.verticalScrollIndicatorInsets = UIEdgeInsets(
+            top: MobileDesign.Spacing.large,
+            left: 0,
+            bottom: bottomContentInset,
+            right: 0
+        )
+        view.plateTheme = theme
+        let refreshControl = UIRefreshControl()
+        refreshControl.tintColor = theme.uiAccent
+        refreshControl.addTarget(self, action: #selector(refreshRequested), for: .valueChanged)
+        view.refreshControl = refreshControl
+        return view
+    }()
+
+    init(
+        sections: [DashboardCollectionSection],
+        theme: RemoteThemePalette,
+        bottomContentInset: CGFloat,
+        content: @escaping @MainActor (DashboardCollectionItemID) -> AnyView,
+        refresh: @escaping @MainActor () async -> Void
+    ) {
+        self.sections = sections
+        self.theme = theme
+        self.bottomContentInset = bottomContentInset
+        self.content = content
+        refreshAction = refresh
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit {
+        refreshTask?.cancel()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = theme.uiGround
+        view.addSubview(collectionView)
+        NSLayoutConstraint.activate([
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        configureDataSource()
+        applySnapshot(preservingVisibleAnchor: false)
+    }
+
+    func update(
+        sections: [DashboardCollectionSection],
+        theme: RemoteThemePalette,
+        bottomContentInset: CGFloat,
+        content: @escaping @MainActor (DashboardCollectionItemID) -> AnyView,
+        refresh: @escaping @MainActor () async -> Void
+    ) {
+        let structureChanged = self.sections != sections
+        let themeChanged = self.theme != theme
+        let bottomInsetChanged = self.bottomContentInset != bottomContentInset
+        self.sections = sections
+        self.theme = theme
+        self.bottomContentInset = bottomContentInset
+        self.content = content
+        refreshAction = refresh
+
+        guard isViewLoaded else { return }
+        collectionView.backgroundColor = theme.uiGround
+        collectionView.refreshControl?.tintColor = theme.uiAccent
+        if bottomInsetChanged {
+            collectionView.contentInset.bottom = bottomContentInset
+            collectionView.verticalScrollIndicatorInsets.bottom = bottomContentInset
+        }
+        if themeChanged {
+            collectionView.plateTheme = theme
+        }
+        if structureChanged {
+            collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+            applySnapshot(preservingVisibleAnchor: true)
+        } else {
+            reconfigureVisibleItems()
+        }
+    }
+
+    private func makeLayout() -> UICollectionViewCompositionalLayout {
+        let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, _ in
+            guard let self, sections.indices.contains(sectionIndex) else { return nil }
+            let descriptor = sections[sectionIndex]
+            let itemSize = NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .estimated(descriptor.kind.estimatedHeight)
+            )
+            let item = NSCollectionLayoutItem(layoutSize: itemSize)
+            let group = NSCollectionLayoutGroup.vertical(layoutSize: itemSize, subitems: [item])
+            let section = NSCollectionLayoutSection(group: group)
+            section.interGroupSpacing = 0
+            section.contentInsets = NSDirectionalEdgeInsets(
+                top: 0,
+                leading: MobileDesign.Spacing.large,
+                bottom: descriptor.spacingAfter,
+                trailing: MobileDesign.Spacing.large
+            )
+            if descriptor.kind.drawsPlate {
+                let background = NSCollectionLayoutDecorationItem.background(
+                    elementKind: Self.plateDecorationKind
+                )
+                background.contentInsets = NSDirectionalEdgeInsets(
+                    top: 0,
+                    leading: MobileDesign.Spacing.large,
+                    bottom: descriptor.spacingAfter,
+                    trailing: MobileDesign.Spacing.large
+                )
+                section.decorationItems = [background]
+            }
+            return section
+        }
+        layout.register(
+            DashboardPlateDecorationView.self,
+            forDecorationViewOfKind: Self.plateDecorationKind
+        )
+        return layout
+    }
+
+    private func configureDataSource() {
+        cellRegistration = UICollectionView.CellRegistration { [weak self]
+            (cell: UICollectionViewCell, _: IndexPath, item: DashboardCollectionItemID) in
+            guard let self else { return }
+            cell.backgroundColor = .clear
+            cell.contentView.backgroundColor = .clear
+            cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
+            cell.contentConfiguration = UIHostingConfiguration {
+                self.content(item)
+            }
+            .margins(.all, 0)
+        }
+        dataSource = UICollectionViewDiffableDataSource(
+            collectionView: collectionView
+        ) { [weak self] collectionView, indexPath, item in
+            guard let self else { return nil }
+            return collectionView.dequeueConfiguredReusableCell(
+                using: cellRegistration,
+                for: indexPath,
+                item: item
+            )
+        }
+    }
+
+    private func applySnapshot(preservingVisibleAnchor: Bool) {
+        let anchor = preservingVisibleAnchor ? visibleAnchor() : nil
+        var snapshot = NSDiffableDataSourceSnapshot<String, DashboardCollectionItemID>()
+        for section in sections where !section.items.isEmpty {
+            snapshot.appendSections([section.id])
+            snapshot.appendItems(section.items, toSection: section.id)
+        }
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            guard let self else { return }
+            collectionView.layoutIfNeeded()
+            restore(anchor)
+        }
+    }
+
+    private func reconfigureVisibleItems() {
+        let visible = collectionView.indexPathsForVisibleItems.compactMap {
+            dataSource.itemIdentifier(for: $0)
+        }
+        guard !visible.isEmpty else { return }
+        var snapshot = dataSource.snapshot()
+        let retained = visible.filter { snapshot.indexOfItem($0) != nil }
+        guard !retained.isEmpty else { return }
+        snapshot.reconfigureItems(retained)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private struct VisibleAnchor {
+        let item: DashboardCollectionItemID
+        let offset: CGFloat
+    }
+
+    private func visibleAnchor() -> VisibleAnchor? {
+        guard !collectionView.isDragging,
+              !collectionView.isDecelerating,
+              let indexPath = collectionView.indexPathsForVisibleItems.min(),
+              let item = dataSource.itemIdentifier(for: indexPath),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+            return nil
+        }
+        return VisibleAnchor(
+            item: item,
+            offset: attributes.frame.minY - collectionView.contentOffset.y
+        )
+    }
+
+    private func restore(_ anchor: VisibleAnchor?) {
+        guard let anchor,
+              let indexPath = dataSource.indexPath(for: anchor.item),
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+            return
+        }
+        collectionView.setContentOffset(
+            CGPoint(
+                x: collectionView.contentOffset.x,
+                y: attributes.frame.minY - anchor.offset
+            ),
+            animated: false
+        )
+    }
+
+    @objc
+    private func refreshRequested() {
+        refreshTask?.cancel()
+        refreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await refreshAction()
+            guard !Task.isCancelled else { return }
+            collectionView.refreshControl?.endRefreshing()
+            refreshTask = nil
+        }
+    }
+}
+
+private final class DashboardCollectionUIKitView: UICollectionView {
+    var plateTheme = RemoteThemePalette(nil) {
+        didSet {
+            guard plateTheme != oldValue else { return }
+            for case let plate as DashboardPlateDecorationView in subviews {
+                plate.apply(theme: plateTheme)
+            }
+            collectionViewLayout.invalidateLayout()
+        }
+    }
+}
+
+private final class DashboardPlateDecorationView: UICollectionReusableView {
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        applyEnclosingTheme()
+    }
+
+    override func apply(_ layoutAttributes: UICollectionViewLayoutAttributes) {
+        super.apply(layoutAttributes)
+        applyEnclosingTheme()
+    }
+
+    func apply(theme: RemoteThemePalette) {
+        backgroundColor = theme.uiPanel
+        layer.cornerRadius = theme.panelRadius
+        layer.cornerCurve = .continuous
+        layer.borderColor = theme.uiBorder.cgColor
+        layer.borderWidth = theme.borderWidth
+        layer.masksToBounds = false
+        if let glow = theme.glow,
+           let color = UIColor(remoteHex: glow.color) {
+            layer.shadowColor = color.cgColor
+            layer.shadowOpacity = Float(glow.opacity)
+            layer.shadowRadius = CGFloat(glow.radius)
+            layer.shadowOffset = CGSize(
+                width: CGFloat(glow.offsetX ?? 0),
+                height: CGFloat(-(glow.offsetY ?? 0))
+            )
+        } else {
+            layer.shadowColor = nil
+            layer.shadowOpacity = 0
+            layer.shadowRadius = 0
+            layer.shadowOffset = .zero
+        }
+    }
+
+    private func applyEnclosingTheme() {
+        var ancestor = superview
+        while let view = ancestor {
+            if let collection = view as? DashboardCollectionUIKitView {
+                apply(theme: collection.plateTheme)
+                return
+            }
+            ancestor = view.superview
+        }
+    }
+}
+
+#if DEBUG
+struct MobileDashboardCollectionPerformanceMetrics: Equatable {
+    let snapshotItemCount: Int
+    let configuredCellCount: Int
+    let mountedCellCount: Int
+}
+
+/// A deterministic scaling gate for the dashboard's collection owner.
+///
+/// This deliberately exercises the real diffable data source and hosting-cell registration with
+/// a catalogue far larger than a phone viewport. It is kept out of the shipping binary; the
+/// regression test asserts that snapshot size may grow while mounted SwiftUI hosts do not.
+@MainActor
+enum MobileDashboardCollectionPerformanceProbe {
+    static func exercise(
+        rowCount: Int,
+        viewport: CGSize = CGSize(width: 393, height: 852)
+    ) -> MobileDashboardCollectionPerformanceMetrics {
+        precondition(rowCount >= 0)
+        let items = (0..<rowCount).map { DashboardCollectionItemID.row("probe:\($0)") }
+        let sections = items.isEmpty ? [] : [DashboardCollectionSection(
+            id: "probe",
+            kind: .plate,
+            items: items,
+            spacingAfter: 0
+        )]
+        var configuredCellCount = 0
+        let controller = MobileDashboardCollectionViewController(
+            sections: sections,
+            theme: RemoteThemePalette(nil),
+            bottomContentInset: 0,
+            content: { item in
+                configuredCellCount += 1
+                return AnyView(
+                    Text(String(describing: item))
+                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                )
+            },
+            refresh: {}
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(origin: .zero, size: viewport)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        return controller.performanceMetrics(
+            configuredCellCount: configuredCellCount
+        )
+    }
+}
+
+private extension MobileDashboardCollectionViewController {
+    func performanceMetrics(
+        configuredCellCount: Int
+    ) -> MobileDashboardCollectionPerformanceMetrics {
+        collectionView.layoutIfNeeded()
+        return MobileDashboardCollectionPerformanceMetrics(
+            snapshotItemCount: dataSource.snapshot().numberOfItems,
+            configuredCellCount: configuredCellCount,
+            mountedCellCount: collectionView.visibleCells.count
+        )
+    }
+}
+#endif
+
 struct SessionDashboard: View {
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var notifications: RemoteNotificationManager
@@ -800,81 +1265,223 @@ struct SessionDashboard: View {
     }
 
     private var dashboardScrollView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
-                let visibleFailure = visibleConnectionFailure
-                let showsConnectionNotice = visibleFailure != nil || model.phase.failure != nil
+        let collectionModel = dashboardCollectionModel
+        return MobileDashboardCollection(
+            model: collectionModel,
+            theme: theme,
+            bottomContentInset: dashboardCollectionBottomInset,
+            content: { item in
+                dashboardCollectionContent(item, rows: collectionModel.rows)
+            },
+            refresh: { await model.refresh(reason: .pullToRefresh) }
+        )
+    }
 
-                if projectName == nil, showsDemoBanner {
-                    demoBanner
-                }
+    /// The collection paints behind the floating controls, while this extra scroll extent lets
+    /// the last row move fully above them. A SwiftUI `safeAreaInset` used to provide the latter,
+    /// but a UIKit representable stops painting at that inset and exposes an opaque page-width
+    /// strip—the bottom-bar regression the overlay avoids.
+    private var dashboardCollectionBottomInset: CGFloat {
+        let breathingRoom = MobileDesign.Spacing.pane + MobileDesign.Spacing.medium
+        guard showsDashboardFloatingBar else { return breathingRoom }
+        return breathingRoom
+            + MobileDesign.Size.floatingBarControl
+            + 2 * MobileDesign.Spacing.small
+    }
 
-                if let failure = visibleFailure {
-                    connectionRecoveryCard(failure)
-                } else if model.phase.failure != nil {
-                    // Automatic recovery is already scheduled. Keep the compact progress
-                    // anatomy and state that fact rather than flashing the full error card.
-                    loadingCard
-                }
+    private var showsDashboardFloatingBar: Bool {
+        model.canUseUniversalSearch || model.canManageSessions
+    }
 
-                if model.dashboardCatalogue == nil {
-                    if !showsConnectionNotice {
-                        loadingCard
-                    }
-                } else if sessions.isEmpty, terminals.isEmpty {
-                    emptyCard
-                } else if organization == .type {
-                    // By type is the one arrangement that separates the kinds, so it is the one
-                    // that names them: a plate per kind, each under its heading, in the chosen
-                    // direction. Every other arrangement stands chats and terminals in one list.
-                    ForEach(typeDirection.contentTypes, id: \.self) { type in
-                        typeGroup(for: type)
-                    }
-                } else if projectName == nil, organization == .project {
-                    ForEach(groupedProjects, id: \.projectName) { project in
-                        ProjectWorkGroup(
-                            projectName: project.projectName,
-                            title: project.title,
-                            sessions: project.sessions,
-                            terminals: project.terminals,
-                            isArchived: showsArchived,
-                            isCatalogueLive: model.dashboardCatalogue?.isLive == true,
-                            showsActions: model.canManageSessions,
-                            action: perform,
-                            startNewSession: model.canManageSessions && !showsArchived
-                                ? { startDraft(in: project.projectName) }
-                                : nil
-                        )
-                    }
-                } else {
-                    // One list, a project's chats and then its terminals — the Mac's order.
-                    DashboardRowGroup(
-                        rows: DashboardRowItem.rows(
-                            sessions: sessions,
-                            terminals: terminals,
-                            order: [.chats, .terminals]
-                        ),
-                        showsProjectName: projectName == nil,
-                        isArchived: showsArchived,
-                        isCatalogueLive: model.dashboardCatalogue?.isLive == true,
-                        showsActions: model.canManageSessions,
-                        action: perform
-                    )
-                }
+    private var dashboardCollectionModel: DashboardCollectionModel {
+        var sections: [DashboardCollectionSection] = []
+        var rowModels: [String: DashboardCollectionRow] = [:]
 
-                // Only the live catalogue can offer notification setup. Cached rows stay useful
-                // during recovery without implying that the Mac can accept configuration changes.
-                if projectName == nil, model.me != nil, shouldOfferNotificationOnboarding {
-                    NotificationOnboardingCard()
-                }
-            }
-            // The first plate belongs to the scrolling page, not to the navigation bar. The
-            // breathing room also keeps a material glow inside the viewport instead of clipping
-            // it against the bar's edge.
-            .padding(.top, MobileDesign.Spacing.large)
-            .padding(.horizontal, MobileDesign.Spacing.large)
-            .padding(.bottom, 36)
+        func appendChrome(
+            _ item: DashboardCollectionItemID,
+            id: String,
+            estimatedHeight: CGFloat,
+            spacingAfter: CGFloat = MobileDesign.Spacing.pane
+        ) {
+            sections.append(DashboardCollectionSection(
+                id: id,
+                kind: .chrome(estimatedHeight: estimatedHeight),
+                items: [item],
+                spacingAfter: spacingAfter
+            ))
         }
+
+        func appendPlate(
+            _ rows: [DashboardRowItem],
+            id: String,
+            spacingAfter: CGFloat = MobileDesign.Spacing.pane
+        ) {
+            guard !rows.isEmpty else { return }
+            let items = rows.enumerated().map { offset, row in
+                rowModels[row.id] = DashboardCollectionRow(
+                    item: row,
+                    hasDivider: offset > 0,
+                    isFirst: offset == 0,
+                    isLast: offset == rows.count - 1
+                )
+                return DashboardCollectionItemID.row(row.id)
+            }
+            sections.append(DashboardCollectionSection(
+                id: id,
+                kind: .plate,
+                items: items,
+                spacingAfter: spacingAfter
+            ))
+        }
+
+        let visibleFailure = visibleConnectionFailure
+        let showsConnectionNotice = visibleFailure != nil || model.phase.failure != nil
+        if projectName == nil, showsDemoBanner {
+            appendChrome(.demoBanner, id: "demo", estimatedHeight: 72)
+        }
+        if visibleFailure != nil {
+            appendChrome(.connectionRecovery, id: "connection-recovery", estimatedHeight: 280)
+        } else if model.phase.failure != nil {
+            appendChrome(.loading, id: "connection-loading", estimatedHeight: 96)
+        }
+
+        if model.dashboardCatalogue == nil {
+            if !showsConnectionNotice {
+                appendChrome(.loading, id: "catalogue-loading", estimatedHeight: 96)
+            }
+        } else if sessions.isEmpty, terminals.isEmpty {
+            appendChrome(.empty, id: "empty", estimatedHeight: 190)
+        } else if organization == .type {
+            for type in typeDirection.contentTypes {
+                let rows = DashboardRowItem.rows(
+                    sessions: sessions,
+                    terminals: terminals,
+                    order: [type]
+                )
+                guard !rows.isEmpty else { continue }
+                appendChrome(
+                    .typeHeader(type),
+                    id: "type-header:\(type.rawValue)",
+                    estimatedHeight: 28,
+                    spacingAfter: MobileDesign.Spacing.small
+                )
+                appendPlate(rows, id: "type-plate:\(type.rawValue)")
+            }
+        } else if projectName == nil, organization == .project {
+            for project in groupedProjects {
+                appendChrome(
+                    .projectHeader(project.projectName),
+                    id: "project-header:\(project.projectName)",
+                    estimatedHeight: MobileDesign.Size.minimumTapTarget,
+                    spacingAfter: 10
+                )
+                appendPlate(
+                    DashboardRowItem.rows(
+                        sessions: project.sessions,
+                        terminals: project.terminals,
+                        order: [.chats, .terminals]
+                    ),
+                    id: "project-plate:\(project.projectName)"
+                )
+            }
+        } else {
+            appendPlate(
+                DashboardRowItem.rows(
+                    sessions: sessions,
+                    terminals: terminals,
+                    order: [.chats, .terminals]
+                ),
+                id: "flat-plate"
+            )
+        }
+
+        if projectName == nil, model.me != nil, shouldOfferNotificationOnboarding {
+            appendChrome(
+                .notificationOnboarding,
+                id: "notification-onboarding",
+                estimatedHeight: 180,
+                spacingAfter: 0
+            )
+        }
+        return DashboardCollectionModel(sections: sections, rows: rowModels)
+    }
+
+    private func dashboardCollectionContent(
+        _ item: DashboardCollectionItemID,
+        rows: [String: DashboardCollectionRow]
+    ) -> AnyView {
+        let content: AnyView
+        switch item {
+        case .demoBanner:
+            content = AnyView(demoBanner)
+        case .connectionRecovery:
+            if let failure = visibleConnectionFailure {
+                content = AnyView(connectionRecoveryCard(failure))
+            } else {
+                content = AnyView(EmptyView())
+            }
+        case .loading:
+            content = AnyView(loadingCard)
+        case .empty:
+            content = AnyView(emptyCard)
+        case .notificationOnboarding:
+            content = AnyView(NotificationOnboardingCard())
+        case .projectHeader(let name):
+            let section = groupedProjects.first { $0.projectName == name }
+            content = AnyView(DashboardProjectHeader(
+                projectName: name,
+                title: section?.title ?? name,
+                startNewSession: model.canManageSessions && !showsArchived
+                    ? { startDraft(in: name) }
+                    : nil
+            ))
+        case .typeHeader(let type):
+            content = AnyView(DashboardTypeHeader(type: type))
+        case .row(let id):
+            if let row = rows[id] {
+                content = AnyView(dashboardCollectionRow(row))
+            } else {
+                content = AnyView(EmptyView())
+            }
+        }
+        return AnyView(
+            content
+                .environmentObject(model)
+                .environmentObject(notifications)
+                .mobileTheme(theme)
+        )
+    }
+
+    private func dashboardCollectionRow(_ row: DashboardCollectionRow) -> some View {
+        VStack(spacing: 0) {
+            if row.hasDivider {
+                ThemedRowDivider(
+                    leadingInset: DashboardRowMetrics.textLeadingEdge,
+                    trailingInset: 0
+                )
+            }
+            switch row.item {
+            case .chat(let session):
+                SessionListItem(
+                    session: session,
+                    isArchived: showsArchived,
+                    isCatalogueLive: model.dashboardCatalogue?.isLive == true,
+                    showsActions: model.canManageSessions,
+                    action: perform
+                )
+            case .terminal(let terminal):
+                TerminalListItem(
+                    terminal: terminal,
+                    showsProjectName: projectName == nil,
+                    isCatalogueLive: model.dashboardCatalogue?.isLive == true
+                )
+            }
+        }
+        .clipShape(DashboardCollectionRowClip(
+            roundsTop: row.isFirst,
+            roundsBottom: row.isLast,
+            radius: theme.panelRadius
+        ))
     }
 
     private var shouldOfferNotificationOnboarding: Bool {
@@ -886,28 +1493,6 @@ struct SessionDashboard: View {
             }
         #endif
         return notifications.shouldOfferOnboarding
-    }
-
-    /// One kind's plate under its heading, for the by-type arrangement. Nothing is drawn for a
-    /// kind with no rows: a heading over an empty plate would announce an absence.
-    @ViewBuilder
-    private func typeGroup(for type: DashboardContentType) -> some View {
-        let rows = DashboardRowItem.rows(sessions: sessions, terminals: terminals, order: [type])
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-                Label(type.title, systemImage: type.symbol)
-                    .font(.headline)
-                    .foregroundStyle(theme.label)
-                DashboardRowGroup(
-                    rows: rows,
-                    showsProjectName: projectName == nil,
-                    isArchived: showsArchived,
-                    isCatalogueLive: model.dashboardCatalogue?.isLive == true,
-                    showsActions: model.canManageSessions,
-                    action: perform
-                )
-            }
-        }
     }
 
     /// Demo state must say so on every visit — canned sessions that read as a live Mac would
@@ -937,8 +1522,7 @@ struct SessionDashboard: View {
 
     private var dashboardNavigation: some View {
         dashboardContent
-            .refreshable { await model.refresh() }
-            .safeAreaInset(edge: .bottom, spacing: 0) { dashboardFloatingBar }
+            .overlay(alignment: .bottom) { dashboardFloatingBar }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { dashboardToolbar }
@@ -1817,125 +2401,69 @@ struct NewSessionButton: View {
     }
 }
 
-/// A project's heading and, under it, its chats and terminals on one plate — the Mac sidebar's
-/// arrangement, where a project's terminals stand in the same list as its chats and are told
-/// apart by their mark. A "Terminals" heading used to sit over the terminals alone, so one kind
-/// was labelled inside the project and the other was not.
-private struct ProjectWorkGroup: View {
-    let projectName: String
-    let title: String
-    let sessions: [RemoteSessionSummaryDTO]
-    let terminals: [RemoteProjectTerminalSummaryDTO]
-    let isArchived: Bool
-    let isCatalogueLive: Bool
-    let showsActions: Bool
-    let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
-    /// Starts a chat in this project from its heading. `nil` for a share that may not manage
-    /// sessions, and for the archive, where nothing is started.
-    var startNewSession: (() -> Void)? = nil
+private struct DashboardTypeHeader: View {
+    let type: DashboardContentType
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: MobileDesign.Spacing.small) {
-                NavigationLink(value: MobileNavigationRoute.project(projectName)) {
-                    HStack(spacing: MobileDesign.Spacing.tight) {
-                        // One line, always. A project is a folder on the Mac, and a folder name
-                        // can be anything the Mac's filesystem allows - a managed workspace
-                        // carries a UUID, so the name ran to three wrapped lines and pushed the
-                        // chats it heads down the screen. The header names the group; the full
-                        // name is still what VoiceOver reads and what the project's own screen
-                        // shows.
-                        Label(title, systemImage: "folder")
-                            .font(.headline)
-                            .foregroundStyle(theme.label)
-                            .lineLimit(1)
-                        // Beside the name rather than at the far edge: the chevron says the
-                        // name opens something, and the far edge is where the plus stands.
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(theme.tertiaryLabel)
-                    }
-                    .frame(minHeight: MobileDesign.Size.minimumTapTarget)
-                    .contentShape(Rectangle())
+        Label(type.title, systemImage: type.symbol)
+            .font(.headline)
+            .foregroundStyle(theme.label)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DashboardProjectHeader: View {
+    let projectName: String
+    let title: String
+    let startNewSession: (() -> Void)?
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            NavigationLink(value: MobileNavigationRoute.project(projectName)) {
+                HStack(spacing: MobileDesign.Spacing.tight) {
+                    Label(title, systemImage: "folder")
+                        .font(.headline)
+                        .foregroundStyle(theme.label)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.tertiaryLabel)
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint(MobileL10n.string("Shows this project’s sessions"))
-                Spacer(minLength: MobileDesign.Spacing.tight)
-                if let startNewSession {
-                    NewSessionButton(
-                        accessibilityLabel: MobileL10n.string("New session in %@", projectName),
-                        action: startNewSession
-                    )
-                }
+                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                .contentShape(Rectangle())
             }
-            DashboardRowGroup(
-                rows: DashboardRowItem.rows(
-                    sessions: sessions,
-                    terminals: terminals,
-                    order: [.chats, .terminals]
-                ),
-                showsProjectName: false,
-                isArchived: isArchived,
-                isCatalogueLive: isCatalogueLive,
-                showsActions: showsActions,
-                action: action
-            )
+            .buttonStyle(.plain)
+            .accessibilityHint(MobileL10n.string("Shows this project’s sessions"))
+            Spacer(minLength: MobileDesign.Spacing.tight)
+            if let startNewSession {
+                NewSessionButton(
+                    accessibilityLabel: MobileL10n.string(
+                        "New session in %@",
+                        projectName
+                    ),
+                    action: startNewSession
+                )
+            }
         }
     }
 }
 
-/// The dashboard's rows — a project's, one kind's, or every one on the Mac — on one plate.
-///
-/// Every chat used to be its own card: a border, a corner radius and eight points of air per row,
-/// which is a stack of panels rather than a list, and on a phone five of them filled the screen.
-/// The rows now sit on one `ThemedRowGroup` and are told apart by a hairline, the way iOS's own
-/// grouped tables are; the rule starts where the row's text starts, so it reads as belonging to
-/// the words rather than to the card, and runs to the card's trailing edge. Chats and terminals
-/// share the plate and the hairline, because they share the row.
-///
-/// The rows are built lazily inside the plate. A project holds a handful of rows, but the flat
-/// list holds every chat and terminal on the Mac, and that list was lazy before it had a plate;
-/// the plate does not take that away. An empty list draws no plate.
-private struct DashboardRowGroup: View {
-    let rows: [DashboardRowItem]
-    let showsProjectName: Bool
-    let isArchived: Bool
-    let isCatalogueLive: Bool
-    let showsActions: Bool
-    let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
+private struct DashboardCollectionRowClip: Shape {
+    let roundsTop: Bool
+    let roundsBottom: Bool
+    let radius: CGFloat
 
-    var body: some View {
-        if !rows.isEmpty {
-            ThemedRowGroup {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { offset, row in
-                        if offset > 0 {
-                            ThemedRowDivider(
-                                leadingInset: DashboardRowMetrics.textLeadingEdge,
-                                trailingInset: 0
-                            )
-                        }
-                        switch row {
-                        case let .chat(session):
-                            SessionListItem(
-                                session: session,
-                                isArchived: isArchived,
-                                isCatalogueLive: isCatalogueLive,
-                                showsActions: showsActions,
-                                action: action
-                            )
-                        case let .terminal(terminal):
-                            TerminalListItem(
-                                terminal: terminal,
-                                showsProjectName: showsProjectName,
-                                isCatalogueLive: isCatalogueLive
-                            )
-                        }
-                    }
-                }
-            }
-        }
+    func path(in rect: CGRect) -> Path {
+        var corners: UIRectCorner = []
+        if roundsTop { corners.formUnion([.topLeft, .topRight]) }
+        if roundsBottom { corners.formUnion([.bottomLeft, .bottomRight]) }
+        return Path(UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        ).cgPath)
     }
 }
 

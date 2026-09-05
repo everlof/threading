@@ -183,11 +183,36 @@ data. The phone fetches data only while the Usage sheet is visible:
 - `GET /api/usage/limit?series=<id>&days=<7|30|90>` prepares only the selected account/window and
   returns at most 280 observations and 118 reset-evidence markers. The encoded detail response is
   capped at 192 KiB.
+- `GET /api/usage/reset?series=<id>` prepares the exact reset choice and confirmation facts;
+  `POST /api/usage/reset` spends only that confirmed choice. Both are owner-only, and POST uses
+  the remote request replay cache as well as the provider idempotency key.
 
 Both routes authorize before loading report or journal data. A view-only or interactive one-chat
 guest receives 403 and never sees the feature identifier; a revoked bearer follows the existing
 401 path. The bridge omits raw transcript cells, filesystem paths, provider credentials, credit
 identity and the raw history journal.
+
+### Spending a banked reset
+
+Banked reset redemption is a host-owned account mutation, exposed from the Mac Usage page, the
+limit-recovery ribbon, the native `/usage` command and the owner-only iPhone Usage sheet. Every
+entry point prepares fresh provider facts and shows the same irreversible confirmation before it
+can spend anything. There is no automatic redemption path and no agent or extension tool that can
+invoke it.
+
+For Codex, Threading launches a short-lived `codex app-server` in the selected account's exact
+`CODEX_HOME`. It checks the bounded local `auth.json` account id against every app-server rate-limit
+response, so a stale or misrouted login fails closed. When credit detail rows exist, the available
+`codexRateLimits` credit expiring soonest is named and sent as `creditId`; when Codex reports only
+the count, Threading omits `creditId` and the confirmation says that Codex will choose. Detail rows
+that contain no eligible Codex reset never fall through to that omission.
+
+Immediately before spending, app-server re-reads the offer. The consume request carries one
+idempotency key, and an ambiguous lost response receives at most one new-process retry with that
+same key. Threading then performs an authoritative post-read and publishes it before changing any
+scheduled work. Only already-existing `continue on reset` messages for chats on that exact account
+are released, and only when every current reported window has verified headroom. Redemption never
+creates a continuation for a chat that did not already owe one.
 
 `RemoteUsageDashboardView` uses a lazy vertical stack and adaptive metric grids. Overview range
 and metric changes are local because all three bounded ranges arrive together. Limit range changes
@@ -691,6 +716,6 @@ still alive when the next file opened.
   banked-reset inventory, remote encoded-size/page ceilings and three matched 100k/250k/50k
   projection passes.
 - `RemoteProtocolTests` and `RemoteServerIntegrationTests`: additive DTO compatibility, owner-only
-  feature and route authorization, URL construction and response ceilings.
+  feature and route authorization, reset mutation replay, URL construction and response ceilings.
 - `RemoteUsageDashboardTests`: deterministic mobile range/chart budgets, fleet grouping/status,
   plus positive, zero and unavailable banked-reset states.

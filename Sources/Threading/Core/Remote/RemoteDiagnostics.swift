@@ -75,9 +75,9 @@ enum MacRemoteDiagnostics {
 
     static func supportReport(
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
-    ) throws -> URL {
+    ) async throws -> URL {
         let info = Bundle.main.infoDictionary
-        return try journal.writeSupportReport(
+        return try await journal.writeSupportReportAsync(
             appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
             appBuild: info?["CFBundleVersion"] as? String ?? "?",
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
@@ -89,9 +89,9 @@ enum MacRemoteDiagnostics {
 
     static func report(
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
-    ) -> RemoteDiagnosticReport {
+    ) async -> RemoteDiagnosticReport {
         let info = Bundle.main.infoDictionary
-        return journal.supportReport(
+        return await journal.supportReportAsync(
             appVersion: info?["CFBundleShortVersionString"] as? String ?? "?",
             appBuild: info?["CFBundleVersion"] as? String ?? "?",
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,

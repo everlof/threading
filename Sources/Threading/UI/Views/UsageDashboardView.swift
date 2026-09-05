@@ -64,6 +64,8 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private var selectedLimitDays = 30
     private var selectedLimitID: String?
     private var selectedDashboardSection = DashboardSection.consumption
+    private var bankedResetBusyAccountIDs: Set<String> = []
+    private var bankedResetStatusAccountID: String?
     private var hasPresentedUsage = false
     private var hasPresentedLimits = false
     private let relativeDateFormatter: RelativeDateTimeFormatter = {
@@ -87,12 +89,22 @@ final class UsageDashboardView: NSView, ThemedComponent {
 
     private let limitChooser = ThemedPopUp()
     private let limitRangeControl = ThemedSegmentedControl()
+    private lazy var bankedResetButton = ThemedButton(
+        title: L10n.string("Use reset"),
+        target: self,
+        action: #selector(bankedResetPressed)
+    )
+    private let bankedResetStatus = NSTextField(labelWithString: "")
     private let limitChart = ThemedTimeSeriesChartView()
     private let limitCards = (0..<4).map { _ in UsageMetricCardView() }
 
     private let column = NSStackView()
     private let overviewColumn = NSStackView()
     private let limitColumn = NSStackView()
+
+    /// Presentation owns confirmation; the dashboard only reports which stable series was
+    /// pressed. This also keeps provider process work out of a reusable design surface.
+    var onUseBankedReset: ((UsageLimitDashboardSeries) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -230,6 +242,33 @@ final class UsageDashboardView: NSView, ThemedComponent {
         limitRangeControl.selectedIndex = index
         selectedLimitDays = days
         refreshLimits(animated: false)
+    }
+
+    func focusLimitHistory(accountID: AccountID?) {
+        selectDashboardSection(.limitHistory)
+        if let rawAccountID = accountID?.rawValue,
+           let series = limits.first(where: { $0.accountID == rawAccountID }) {
+            selectedLimitID = series.id
+            configureLimitChooser()
+            refreshLimits(animated: false)
+        }
+    }
+
+    func setBankedResetState(
+        accountID: AccountID,
+        isBusy: Bool,
+        status: String? = nil
+    ) {
+        if isBusy {
+            bankedResetBusyAccountIDs.insert(accountID.rawValue)
+        } else {
+            bankedResetBusyAccountIDs.remove(accountID.rawValue)
+        }
+        if let status {
+            bankedResetStatusAccountID = status.isEmpty ? nil : accountID.rawValue
+            bankedResetStatus.stringValue = status
+        }
+        refreshBankedResetControl()
     }
 
     private func setup() {
@@ -414,7 +453,13 @@ final class UsageDashboardView: NSView, ThemedComponent {
             self?.refreshLimits(animated: true)
         }
 
-        let controls = NSStackView(views: [limitChooser, limitRangeControl])
+        bankedResetButton.setAccessibilityIdentifier("usage.limit.use-banked-reset")
+        bankedResetStatus.applyFont(.detail())
+        bankedResetStatus.textColor = Design.Text.secondary
+        bankedResetStatus.lineBreakMode = .byTruncatingTail
+        bankedResetStatus.isHidden = true
+
+        let controls = NSStackView(views: [bankedResetStatus, bankedResetButton, limitChooser, limitRangeControl])
         controls.orientation = .horizontal
         controls.spacing = Design.Spacing.medium
         return controls
@@ -472,6 +517,12 @@ final class UsageDashboardView: NSView, ThemedComponent {
         refreshLimits(animated: true)
     }
 
+    @objc private func bankedResetPressed() {
+        guard let selected = limits.first(where: { $0.id == selectedLimitID }),
+              bankedResetButton.isEnabled else { return }
+        onUseBankedReset?(selected)
+    }
+
     private func configureLimitChooser() {
         let oldID = selectedLimitID
         limitChooser.removeAllItems()
@@ -482,6 +533,25 @@ final class UsageDashboardView: NSView, ThemedComponent {
             limitChooser.selectItem(at: index)
         }
         limitChooser.isEnabled = !limits.isEmpty
+        refreshBankedResetControl()
+    }
+
+    private func refreshBankedResetControl() {
+        guard let selected = limits.first(where: { $0.id == selectedLimitID }),
+              let runtimeID = selected.runtimeID,
+              let provider = AgentKind(rawValue: runtimeID),
+              provider.supports(.bankedUsageReset),
+              (selected.resetCreditCount ?? 0) > 0,
+              let accountID = selected.accountID else {
+            bankedResetButton.isEnabled = false
+            bankedResetButton.isHidden = true
+            bankedResetStatus.isHidden = true
+            return
+        }
+        bankedResetButton.isHidden = false
+        bankedResetButton.isEnabled = !bankedResetBusyAccountIDs.contains(accountID)
+        bankedResetStatus.isHidden = bankedResetStatus.stringValue.isEmpty
+            || bankedResetStatusAccountID != accountID
     }
 
     private func refreshUsage(animated: Bool) {
@@ -764,6 +834,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     }
 
     private func refreshLimits(animated: Bool) {
+        refreshBankedResetControl()
         guard let selected = limits.first(where: { $0.id == selectedLimitID }) else {
             for (index, card) in limitCards.enumerated() {
                 let titles = [

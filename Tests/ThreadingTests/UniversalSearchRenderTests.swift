@@ -191,6 +191,178 @@ final class UniversalSearchRenderTests: XCTestCase {
         )
     }
 
+    // MARK: - Escape
+
+    /// **Escape belongs to the surface, not to whichever child is holding the caret.**
+    ///
+    /// Search bound the key on the query field's `control(_:textView:doCommandBy:)` seam and
+    /// nowhere else, so it closed the palette from the one responder the palette had placed and
+    /// from none of the others: click a result and the table has the keyboard, tab to the scope
+    /// run and a segment does, and Escape then travelled a responder chain in which nothing had
+    /// heard of the surface covering the window. Delivered here the way a window delivers a
+    /// plain Escape — `cancelOperation(_:)` from the responder that actually holds focus — which
+    /// is the route `CompareInspectorView` shipped without and had to be given.
+    @MainActor
+    func testEscapeClosesSearchFromEveryPlaceInsideItTheKeyboardCanBe() throws {
+        let places: [(String, (NSView) throws -> NSResponder)] = [
+            ("the results list", { try XCTUnwrap(self.firstTable(in: $0)) }),
+            ("a scope segment", {
+                let run = try XCTUnwrap(self.descendants(of: $0, type: ThemedSegmentedControl.self).first)
+                return try XCTUnwrap(run.segment(at: 0))
+            }),
+            ("the close button", {
+                try XCTUnwrap(self.descendants(of: $0, type: ThemedButton.self).first {
+                    $0.accessibilityLabel() == "Close Search"
+                })
+            }),
+            ("the surface itself", { $0 }),
+        ]
+
+        for (place, responder) in places {
+            var dismissals = 0
+            let controller = UniversalSearchOverlayViewController()
+            controller.onDismiss = { dismissals += 1 }
+            controller.apply(Self.presentation)
+            let host = Self.host(controller)
+            host.layoutSubtreeIfNeeded()
+
+            try responder(controller.view)
+                .doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+
+            XCTAssertEqual(
+                dismissals, 1,
+                "Escape from \(place) did not close Search"
+            )
+        }
+    }
+
+    // MARK: - The Header
+
+    /// The reported picture: a 32pt query beside a 26pt scope run and a 26pt ✕, each floating
+    /// three points clear of the other two.
+    @MainActor
+    func testTheQueryTheScopeRunAndTheCloseStandAtOneHeight() throws {
+        let controller = UniversalSearchOverlayViewController()
+        controller.apply(Self.presentation)
+        let host = Self.host(controller)
+        host.layoutSubtreeIfNeeded()
+
+        let field = try XCTUnwrap(descendants(of: controller.view, type: ThemedSearchField.self).first)
+        let scope = try XCTUnwrap(
+            descendants(of: controller.view, type: ThemedSegmentedControl.self).first
+        )
+        let close = try XCTUnwrap(
+            descendants(of: controller.view, type: ThemedButton.self).first {
+                $0.accessibilityLabel() == "Close Search"
+            }
+        )
+
+        for member in [field, scope, close] as [NSView] {
+            XCTAssertEqual(
+                member.frame.height, Design.Size.fieldHeight, accuracy: 0.5,
+                "\(type(of: member)) stood at \(member.frame.height) in a "
+                    + "\(Design.Size.fieldHeight)pt row"
+            )
+        }
+        for member in [scope, close] as [NSView] {
+            XCTAssertEqual(
+                member.convert(member.bounds, to: nil).midY,
+                field.convert(field.bounds, to: nil).midY,
+                accuracy: 0.5,
+                "\(type(of: member)) is off the query's centreline"
+            )
+        }
+    }
+
+    /// The query is the row; the controls beside it are what it is narrowed by. Held at its
+    /// placeholder's width it left a hole between the words and the scope run.
+    @MainActor
+    func testTheQueryTakesTheHeadersSpareWidth() throws {
+        let controller = UniversalSearchOverlayViewController()
+        controller.apply(Self.presentation)
+        let host = Self.host(controller)
+        host.layoutSubtreeIfNeeded()
+
+        let field = try XCTUnwrap(descendants(of: controller.view, type: ThemedSearchField.self).first)
+        let scope = try XCTUnwrap(
+            descendants(of: controller.view, type: ThemedSegmentedControl.self).first
+        )
+        let gap = scope.convert(scope.bounds, to: nil).minX - field.convert(field.bounds, to: nil).maxX
+
+        XCTAssertGreaterThan(field.frame.width, scope.frame.width)
+        XCTAssertLessThanOrEqual(
+            gap, Design.Spacing.large,
+            "the header left \(gap)pt of air between the query and the scope run"
+        )
+    }
+
+    // MARK: - The List
+
+    /// A palette is the size of its answer. The list was a fixed 470 points with a required 160
+    /// under it, so three matches drew a hundred and eighty points of empty panel below them —
+    /// the largest single thing in the picture this was reported from.
+    @MainActor
+    func testTheListIsTheSizeOfItsAnswerAndStopsGrowingWhereItScrolls() throws {
+        let short = UniversalSearchOverlayViewController()
+        short.apply(Self.oneResult)
+        let shortHost = Self.host(short)
+        shortHost.layoutSubtreeIfNeeded()
+        let shortList = try XCTUnwrap(firstTable(in: short.view)?.enclosingScrollView)
+
+        let long = UniversalSearchOverlayViewController()
+        long.apply(Self.manyResults)
+        let longHost = Self.host(long)
+        longHost.layoutSubtreeIfNeeded()
+        let longList = try XCTUnwrap(firstTable(in: long.view)?.enclosingScrollView)
+
+        XCTAssertLessThan(
+            shortList.frame.height, longList.frame.height / 2,
+            "a two-row answer took the same panel as a full one"
+        )
+        XCTAssertGreaterThanOrEqual(
+            shortList.frame.height,
+            SearchResultRowView.preferredTableRowHeight,
+            "the list is shorter than the single result it is showing"
+        )
+        XCTAssertLessThanOrEqual(
+            longList.frame.height, Render.size.height,
+            "a long answer grew the panel past the window instead of scrolling"
+        )
+        XCTAssertGreaterThan(
+            longList.frame.height, shortList.frame.height,
+            "the list did not grow with its content at all"
+        )
+    }
+
+    // MARK: - Helpers
+
+    /// The surface in a window it can lay out in, parked where nothing draws on screen.
+    @MainActor
+    private static func host(_ controller: UniversalSearchOverlayViewController) -> NSView {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Render.size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: NSRect(origin: .zero, size: Render.size))
+        window.contentView = root
+        controller.view.frame = root.bounds
+        controller.view.autoresizingMask = [.width, .height]
+        root.addSubview(controller.view)
+        return root
+    }
+
+    @MainActor
+    private func descendants<T: NSView>(of root: NSView, type: T.Type) -> [T] {
+        var found: [T] = []
+        for view in root.subviews {
+            if let match = view as? T { found.append(match) }
+            found += descendants(of: view, type: type)
+        }
+        return found
+    }
+
     private func firstTable(in view: NSView) -> NSTableView? {
         if let table = view as? NSTableView { return table }
         for child in view.subviews {
@@ -198,6 +370,40 @@ final class UniversalSearchRenderTests: XCTestCase {
         }
         return nil
     }
+
+    private static let oneResult = UniversalSearchOverlayState(
+        query: "auth",
+        scopes: presentation.scopes,
+        selectedScopeID: "project",
+        rows: [
+            .group(id: "destinations", title: "Destinations"),
+            .result(UniversalSearchResultRow(
+                id: SearchHitID(rawValue: "session"),
+                title: "Fix auth callback",
+                detail: "Threading › Codex › auth"
+            )),
+        ],
+        selectedHitID: nil,
+        status: nil,
+        queryError: nil
+    )
+
+    private static let manyResults = UniversalSearchOverlayState(
+        query: "auth",
+        scopes: presentation.scopes,
+        selectedScopeID: "project",
+        rows: [.group(id: "destinations", title: "Destinations")]
+            + (0 ..< 40).map { index in
+                .result(UniversalSearchResultRow(
+                    id: SearchHitID(rawValue: "session-\(index)"),
+                    title: "Fix auth callback \(index)",
+                    detail: "Threading › Codex › auth"
+                ))
+            },
+        selectedHitID: nil,
+        status: nil,
+        queryError: nil
+    )
 
     private static let presentation = UniversalSearchOverlayState(
         query: "auth",

@@ -242,11 +242,13 @@ the gaps between plates swallowed touches that plainly pointed at a runtime, and
 was answered by nothing at all. `MobileIdentityPickerHitTest` divides each surface by arithmetic
 the way `MobileModelEffortPicker` divides its matrix: every point inside a group belongs to exactly
 one item, including the padding around what is drawn, so the touch target is the whole cell while
-the plate stays inset. One `DragGesture(minimumDistance: 0)` per group then gives press, drag and
-lift one meaning — the item under the finger lights up, a selection tick fires at each crossing,
-and lifting commits with the impact the matrix uses. A tap is that gesture with no travel. While a
-finger is down the scrubbed item is the one that reads as chosen, and the committed login keeps
-its checkmark throughout, so the panel says both what is current and what lifting now would take.
+the plate stays inset. One tap-first exclusive gesture per group gives tap and scrub their own
+recognition: `SpatialTapGesture` commits a stationary touch, while a `DragGesture` takes over once
+the finger travels and lights the item under it, firing a selection tick at each crossing before
+the lift commits with the matrix's impact. Asking a zero-distance drag to stand in for both made
+ordinary taps disappear on the shipping popover. While a finger is down the scrubbed item is the
+one that reads as chosen, and the committed login keeps its checkmark throughout, so the panel
+says both what is current and what lifting now would take.
 A point outside a surface resolves to nothing, so a drag that wanders off holds the last item it
 crossed rather than snapping to an edge the finger has left. Logins past what the cap can show
 scroll instead, and scroll only: a pan inside a scroll view belongs to the scroll view, and a
@@ -393,7 +395,13 @@ transition scene and flash before settling on the destination. It explicitly ass
 light/dark answer from the resolved colour scheme before becoming first responder. This keeps the
 keyboard in the push without delaying focus or changing the composer's entrance choreography.
 
-What *is* ours is the strip above the keyboard. `TerminalKeyBar` is fully themed, and
+What *is* ours is the strip above the keyboard. `TerminalKeyBar` is fully themed, and each
+device-local key chooses its top or bottom row while the host keeps the action controls fixed.
+Apple Color Emoji outgrows the text face's nominal line box, so a compact cap preserves a
+34-point ink well rather than clipping user-authored emoji. A snippet that submits travels through
+the host's atomic terminal-submit path: its text and Return are separate PTY writes, because agent
+TUIs treat a single combined chunk as pasted content and leave it unsent. A non-submitting snippet
+remains raw terminal input. Finally,
 `RemoteTerminalView.dropBuiltInKeyboardAccessory()` removes SwiftTerm's own esc/ctrl/tab/arrow
 accessory so the two do not stack. A fully theme-coloured pad remains possible — SwiftTerm
 exposes `inputView` as a settable seam and already ships a symbol/function-key pad — but a

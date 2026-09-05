@@ -362,6 +362,11 @@ struct AgentCapabilities: OptionSet {
   /// have — so offering the choice for it would name a control that does not exist. Grok,
   /// OpenCode and Cursor have no measured equivalent.
   static let selectableTerminalRenderer = Self(rawValue: 1 << 37)
+
+  /// The runtime exposes account-scoped, idempotent consumption of earned usage-reset credits
+  /// through its supported control protocol. Codex only: app-server publishes the inventory,
+  /// consumes one credit, and returns an authoritative post-reset rate-limit snapshot.
+  static let bankedUsageReset = Self(rawValue: 1 << 38)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -463,7 +468,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
-        .lifecycleReportedWorkingDirectory, .detectableExternalResume
+        .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset
       ]
     case .grok:
       return [

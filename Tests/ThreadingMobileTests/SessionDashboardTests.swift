@@ -1,3 +1,4 @@
+import Combine
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
@@ -17,6 +18,34 @@ final class SessionDashboardTests: XCTestCase {
     func testDashboardOrganizationIncludesProjectRecentAndType() {
         XCTAssertEqual(SessionOrganization.allCases, [.project, .recent, .type])
         XCTAssertEqual(SessionOrganization.type.title, "By type")
+    }
+
+    @MainActor
+    func testDashboardMountsOnlyAViewportOfAThousandRows() {
+        let metrics = MobileDashboardCollectionPerformanceProbe.exercise(rowCount: 1_000)
+
+        XCTAssertEqual(metrics.snapshotItemCount, 1_000)
+        XCTAssertGreaterThan(metrics.mountedCellCount, 0)
+        XCTAssertLessThan(metrics.mountedCellCount, 40)
+        XCTAssertLessThan(metrics.configuredCellCount, 40)
+    }
+
+    @MainActor
+    func testAnIdenticalRefreshCatalogueIsNotPublishedAgain() throws {
+        let model = RemoteAppModel()
+        model.startDemo()
+        let response = try XCTUnwrap(model.me)
+        var publications = 0
+        let subscription = model.$me.dropFirst().sink { _ in publications += 1 }
+        defer { subscription.cancel() }
+
+        XCTAssertFalse(model.adoptRefreshedCatalogueIfChanged(response))
+        XCTAssertEqual(publications, 0)
+
+        XCTAssertTrue(model.adoptRefreshedCatalogueIfChanged(
+            response.replacing(theme: RemoteAppModel.demoLightTheme)
+        ))
+        XCTAssertEqual(publications, 1)
     }
 
     /// An over-height UIKit menu has no dependable scroll gesture: the drag can dismiss it and

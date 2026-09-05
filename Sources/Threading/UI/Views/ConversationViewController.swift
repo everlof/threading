@@ -102,6 +102,7 @@ struct RemoteConversationRowProjection {
 enum ConversationComposerCommands {
     static let skillsID = RemoteComposerCatalog.skillsCommandID
     static let statusID = "threading.command:status"
+    static let usageID = "threading.command:usage"
     static let skills = ComposerCapability(
         id: skillsID,
         name: "skills",
@@ -118,6 +119,14 @@ enum ConversationComposerCommands {
         trigger: .slash,
         presentation: .command
     )
+    static let usage = ComposerCapability(
+        id: usageID,
+        name: "usage",
+        description: L10n.string("Open usage, limits, and banked resets"),
+        kind: .command,
+        trigger: .slash,
+        presentation: .command
+    )
 
     /// Provider catalogs win when they can execute a command. Otherwise Threading replaces a
     /// disabled expectation with the local equivalent, which is how Codex's documented
@@ -127,6 +136,7 @@ enum ConversationComposerCommands {
     ) -> [ComposerCapability] {
         var capabilities = providerCapabilities
         replaceDisabledOrInsert(status, in: &capabilities)
+        replaceDisabledOrInsert(usage, in: &capabilities)
 
         if capabilities.contains(where: \.isAvailableInSkillCatalog) {
             replaceDisabledOrInsert(skills, in: &capabilities)
@@ -631,6 +641,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         limitEscapeStrip.onWaitForReset = { [weak self] in
             guard let self else { return }
             NotificationCenter.default.post(LimitWaitForResetRequested(sessionID: self.sessionID))
+        }
+        limitEscapeStrip.onUseBankedReset = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(LimitBankedResetRequested(sessionID: self.sessionID))
         }
         limitEscapeStrip.onDismiss = { [weak self] in
             guard let self else { return }
@@ -2603,6 +2617,20 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
             }
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+            return true
+        }
+
+        // Native `/usage` is navigation, not an agent turn. A paired participant cannot make
+        // the owner's Mac leave its current surface, so the remote route refuses it while the
+        // phone keeps its own dedicated Usage screen.
+        if invocation?.capability.id == ConversationComposerCommands.usageID {
+            guard authorization == nil else { return false }
+            promptView.clear()
+            SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
+            let accountID = currentSession.map {
+                AccountID(provider: $0.kind, handle: $0.accountHandle)
+            }
+            delegate?.conversation(self, didRequestUsageFor: accountID)
             return true
         }
 

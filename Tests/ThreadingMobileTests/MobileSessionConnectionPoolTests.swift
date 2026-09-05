@@ -4,13 +4,31 @@ import XCTest
 
 final class MobileSessionConnectionPoolTests: XCTestCase {
     @MainActor
-    func testDefaultsAreSixtySecondsAndThreeConnections() {
+    func testDefaultsAreTwoMinutesAndFiveConnections() {
         let fixture = makePool()
         defer { fixture.cleanUp() }
 
-        XCTAssertEqual(fixture.pool.retentionSeconds, 60)
-        XCTAssertEqual(fixture.pool.capacity, 3)
+        XCTAssertEqual(fixture.pool.retentionSeconds, 120)
+        XCTAssertEqual(fixture.pool.capacity, 5)
         XCTAssertEqual(fixture.pool.occupancy, 0)
+    }
+
+    /// The counters travel in a diagnostics capture as one closed token list, so an audit reads
+    /// the hit rate from the Mac's copy. Only token characters, and the counters it says.
+    @MainActor
+    func testTheMetricsSummaryIsOneClosedTokenList() throws {
+        let fixture = makePool()
+        defer { fixture.cleanUp() }
+        let key = MobileConnectionPoolKey(hostID: "mac", sessionID: "chat")
+        fixture.pool.park(PoolConnectionDouble(), for: key)
+        _ = try XCTUnwrap(fixture.pool.take(key))
+        XCTAssertNil(fixture.pool.take(MobileConnectionPoolKey(hostID: "mac", sessionID: "other")))
+
+        let summary = fixture.pool.metrics.summaryToken
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".:_-"))
+        XCTAssertTrue(summary.unicodeScalars.allSatisfy { allowed.contains($0) }, summary)
+        XCTAssertTrue(summary.contains("reused.1:misses.1:"), summary)
+        XCTAssertTrue(summary.contains(":hitpct.50:"), summary)
     }
 
     @MainActor
@@ -65,13 +83,16 @@ final class MobileSessionConnectionPoolTests: XCTestCase {
         let connection = PoolConnectionDouble()
         fixture.pool.park(connection, for: key(1))
 
-        fixture.clock.date.addTimeInterval(61)
+        // One second past the default hold, whatever that default is.
+        fixture.clock.date.addTimeInterval(
+            TimeInterval(MobileSessionConnectionPool.defaultRetentionSeconds + 1)
+        )
         fixture.pool.expireStaleEntries()
 
         XCTAssertEqual(connection.disconnectCalls, 1)
         XCTAssertEqual(fixture.pool.occupancy, 0)
         XCTAssertEqual(fixture.pool.metrics.expiredWithoutReuse, 1)
-        XCTAssertEqual(fixture.pool.metrics.unusedByAge.under120Seconds, 1)
+        XCTAssertEqual(fixture.pool.metrics.unusedByAge.atLeast120Seconds, 1)
     }
 
     @MainActor

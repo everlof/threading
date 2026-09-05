@@ -75,6 +75,20 @@ final class MobileTerminalKeyboardStore: ObservableObject {
     /// The bar a session of this agent kind shows: the custom layout when one exists and
     /// still holds at least one key, the stock layout for that kind otherwise.
     func layout(forAgentKind agentKind: String) -> RemoteTerminalKeyboardLayout {
+#if DEBUG
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
+            == "terminal-custom-key-layout-custom-dark",
+           agentKind == "codex"
+        {
+            var keys = RemoteTerminalKeyboardLayout.standard(forAgentKind: agentKind).keys
+            keys.insert(RemoteTerminalKeyDefinition(
+                customLabel: "🍕",
+                action: .snippet(text: "🍕", submits: false),
+                row: .top
+            ), at: 0)
+            return RemoteTerminalKeyboardLayout(keys: keys)
+        }
+#endif
         if let custom = customLayouts[agentKind], !custom.keys.isEmpty {
             return custom
         }

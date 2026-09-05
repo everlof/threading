@@ -38,7 +38,7 @@ struct ThreadingMobileHostedRoot: View {
                     model.startDiscovery()
                     Task {
                         await notifications.clearTurnCompletionsOnApplicationActivation()
-                        await model.refresh()
+                        await model.refresh(reason: .foreground)
                         if !model.isEphemeralTerminalWireFixture {
                             await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
                             await notifications.refreshAuthorization()

@@ -113,6 +113,8 @@ enum RemoteAccessDefaults {
 
     /// A request that never completes must not grow a connection's buffer forever.
     static let maximumRequestBytes = 1 * 1024 * 1024
+    /// A reset mutation carries four scalar fields. Refuse oversized JSON before decoding.
+    static let maximumUsageResetRequestBytes = 4 * 1024
 
     /// How long one silent stretch of the HTTP phase may last before the connection is closed:
     /// from accept to a complete request, from a request to its response leaving, and from a

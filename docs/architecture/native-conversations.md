@@ -1188,6 +1188,13 @@ submission keeps its PTY-before-replay-receipt ordering. `AppEnvironment` builds
 capability from its injected runtime and `AppDelegate` installs it before the listener starts;
 Core/Remote never obtains an `AgentSessionViewController`, `TerminalSession`, or window.
 
+A reconnect keeps the last complete terminal screen softened while replay and resize repair are
+held behind the ordered `terminalReady` boundary. Crossing that boundary starts the reveal in the
+same main-actor turn as buffered replay is delivered. SwiftTerm is live at that point, so the
+departing blur is capped at 100 milliseconds—short enough to polish the handoff without making the
+newly active screen look trapped underneath a lock whose correctness work is already finished.
+Reduce Motion removes the transition entirely.
+
 The iOS input surface follows the host's participant roster, not the mere presence of protocol
 features. Input-control chrome and the atomic terminal-line composer appear only after another
 reply-capable participant identity has accepted access; an unused invitation and another device
@@ -1204,6 +1211,13 @@ presence, input authority, submission receipts and keyboard constraint. It subsc
 connection, notification preferences and active host directly, coalescing changes onto one main
 queue render. Draft and viewport continuity still use the host-and-session-scoped store; changing
 the rendering owner did not change which client owns that working state.
+
+The native text editor keeps one UIKit editing session while its availability is unchanged.
+`textViewDidChange` still refreshes send state, persistence and completions after every edit, but
+that render may not reapply `isEditable`: a held system Backspace is a sequence of native
+`deleteBackward()` callbacks, and resetting the input contract after the first callback stops the
+keyboard's repeat. Threading does not implement its own deletion timer or string indexing; UIKit
+continues to own marked text and composed-character deletion.
 
 Phone terminal keys and native-conversation buttons share one `MobileButtonFeedback`: a light
 `UIImpactFeedbackGenerator` impact at intensity 0.85. The UIKit adapter prepares that one generator

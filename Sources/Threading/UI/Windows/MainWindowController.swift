@@ -5128,6 +5128,14 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 extension MainWindowController: TerminalContainerViewControllerDelegate {
     func terminalContainer(
         _: TerminalContainerViewController,
+        didRequestUsageFor accountID: AccountID?
+    ) {
+        showSettingsPage(id: SettingsPages.usageID)
+        NotificationCenter.default.post(UsageFocusRequested(accountID: accountID))
+    }
+
+    func terminalContainer(
+        _: TerminalContainerViewController,
         startScheduledMessageNow id: ScheduledMessageID
     ) {
         sessionCoordinator.startScheduledMessageNow(id)

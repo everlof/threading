@@ -165,6 +165,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             LimitRecoveryCoordinator.shared.armWaitForReset(for: event.sessionID)
         }
 
+        appEvents.observe(LimitBankedResetRequested.self) { [weak self] event in
+            self?.performBankedUsageReset(for: event.sessionID)
+        }
+
         // And once more, for the clock the user set: `SessionCurfewCenter` owns when a curfew's
         // grace has run out and announces it, because stopping a turn is a gesture on a
         // conversation surface and Core's ratchet on concrete controllers is exact. What became

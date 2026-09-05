@@ -857,7 +857,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             && connection.conversationCanSend
             && !connection.isPromptSubmissionPending
         let hasText = !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        textView.isEditable = enabled
+        textView.setEditableIfNeeded(enabled)
         capabilityButton.isEnabled = connection.capability == .interact
             && !connection.composerCapabilities.isEmpty
         // Hidden rather than disabled when the host does not offer uploads: a guest or view-only
@@ -1447,6 +1447,20 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
     /// A compact editor may opt into a shorter insertion mark than UIKit's full typographic line
     /// box. Nil preserves the native caret everywhere else that shares this text view.
     var preferredCaretHeight: CGFloat?
+
+    /// Changes the input contract only when its availability actually changed.
+    ///
+    /// `textViewDidChange` refreshes the chat composer after every edit. Reapplying `isEditable`
+    /// from the first Backspace callback interrupts UIKit's held-key transaction, so the system
+    /// keyboard deletes once instead of continuing its native repeat. UIKit still owns deletion,
+    /// marked text and composed characters; this method only keeps an unchanged editing session
+    /// untouched.
+    @discardableResult
+    func setEditableIfNeeded(_ editable: Bool) -> Bool {
+        guard isEditable != editable else { return false }
+        isEditable = editable
+        return true
+    }
 
     private var measuredWidth: CGFloat = 0
     private var appliedFirstLineAccessoryLayout: [CGFloat] = []

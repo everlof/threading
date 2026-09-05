@@ -12,9 +12,8 @@ final class TerminalKeyBridge: ObservableObject {
     @Published private(set) var latch = RemoteTerminalLatchState()
     private(set) var touchHeldModifiers: RemoteTerminalKeyModifiers = []
     private var touchModifiersUsedByAKey: RemoteTerminalKeyModifiers = []
-    weak var terminalView: RemoteTerminalView? {
-        didSet { refreshKeyboardAvailability() }
-    }
+    private(set) weak var terminalView: RemoteTerminalView?
+    private var terminalAttachmentGeneration: UInt64 = 0
 
     /// Whether the person wants the keyboard up in this terminal: raised whenever the terminal
     /// takes the keyboard, lowered only by the bar's own dismiss. A pop, a sheet or the app
@@ -34,6 +33,36 @@ final class TerminalKeyBridge: ObservableObject {
                 guard let self, self.terminalView?.isFirstResponder == true else { return }
                 self.keyboardWantedUp = true
             }
+        }
+    }
+
+    /// Attaches the live emulator outside a SwiftUI graph teardown.
+    ///
+    /// A property observer used to publish `canShowKeyboard` for both attach and detach. SwiftUI
+    /// dismantles representables while invalidating that same observation graph, so the detach
+    /// publication re-entered AttributeGraph and tripped Swift's exclusivity runtime. Attachment
+    /// is an ordinary update and may publish immediately.
+    func attachTerminalView(_ view: RemoteTerminalView) {
+        terminalAttachmentGeneration &+= 1
+        terminalView = view
+        refreshKeyboardAvailability()
+    }
+
+    /// Clears one exact emulator without publishing from `dismantleUIView`'s call stack.
+    ///
+    /// The following main-actor turn reconciles the bar if it survived the teardown. A new view
+    /// attached in between advances the generation and cannot be overwritten by this stale
+    /// detach.
+    func detachTerminalView(_ view: RemoteTerminalView) {
+        guard terminalView === view else { return }
+        terminalAttachmentGeneration &+= 1
+        let generation = terminalAttachmentGeneration
+        terminalView = nil
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.terminalAttachmentGeneration == generation,
+                  self.terminalView == nil else { return }
+            self.refreshKeyboardAvailability()
         }
     }
 
@@ -260,6 +289,13 @@ func terminalKeyDisplayLabel(_ key: RemoteTerminalKeyDefinition) -> String {
     return prefix + label
 }
 
+/// Submitting snippets are not ordinary encoded key input. They need the host's atomic terminal
+/// submission route so their text and Return reach the PTY as two writes.
+func terminalKeySubmissionText(_ action: RemoteTerminalKeyAction) -> String? {
+    guard case .snippet(let text, true) = action else { return nil }
+    return text
+}
+
 /// SF Symbols used by the terminal key bar. Keeping these names testable matters because an
 /// unknown symbol produces an empty `Image` while the button continues reserving its full slot.
 enum TerminalKeyBarSymbols {
@@ -284,7 +320,10 @@ private enum TerminalKeyBarMetrics {
     /// The key row hugs the keyboard, so its caps are deliberately shorter and tighter than a
     /// full-height control: a cap is one of many small targets in a dense strip, and the action
     /// row above carries the bar's full-height utilities.
-    static let keyHeight: CGFloat = 30
+    /// Apple Color Emoji outgrows the text face's nominal line box. Thirty points clipped the
+    /// artwork on a real phone, so the compact cap keeps the original 34-point ink well while
+    /// the two-row split still supplies the density.
+    static let keyHeight: CGFloat = 34
     static let keyPadding: CGFloat = 8
     /// The tight ink padding would let a lone arrow collapse to a sliver; a cap never gets
     /// narrower than a comfortable square.
@@ -389,11 +428,10 @@ struct TerminalKeyBarActionControls: View {
     }
 }
 
-/// The two-row strip under the remote terminal. The bottom row hugs the keyboard and holds
-/// only the tight key caps — layout comes from `MobileTerminalKeyboardStore` (stock per agent
-/// kind until edited), latch keys arm or lock the next press — plus the way back from the
-/// keyboard at its trailing edge. The action row above carries everything that is not a key:
-/// attachments, the Direct/Compose switch and the key editor.
+/// The two-row strip under the remote terminal. The bottom row hugs the keyboard and starts with
+/// the stock key run; a person may move any cap to the top row to put it beside attachments,
+/// Direct/Compose and the key editor. The way back from the keyboard stays fixed at the bottom
+/// row's trailing edge, and latch keys arm or lock the next press from either row.
 struct TerminalKeyBar: View {
     @ObservedObject var connection: RemoteSessionConnection
     @ObservedObject var bridge: TerminalKeyBridge
@@ -456,14 +494,32 @@ struct TerminalKeyBar: View {
             && connection.inputControl?.canWrite != false
     }
 
-    /// The bar's full-height utilities: what is not a keystroke lives here, off the key row,
-    /// so the caps below can stay small.
+    private var layout: RemoteTerminalKeyboardLayout {
+        keyboards.layout(forAgentKind: agentKind)
+    }
+
+    /// The bar's full-height utilities and the optional top key run. Fixed controls keep their
+    /// slots while the person's keys scroll through whatever width remains between them.
     private var actionRow: some View {
         HStack(spacing: 0) {
             if showsAttachmentKey {
                 attachmentButton
             }
-            Spacer(minLength: 0)
+            if layout.keys(in: .top).isEmpty {
+                Spacer(minLength: 0)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: MobileDesign.Spacing.tight) {
+                        ForEach(layout.keys(in: .top)) { key in
+                            button(for: key)
+                        }
+                    }
+                    .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
+                    .frame(minHeight: TerminalKeyBarMetrics.actionHeight)
+                }
+                .disabled(!canSend)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             TerminalKeyBarActionControls(
                 customize: customize,
                 showsInputModeControl: connection.supportsAtomicTerminalSubmission
@@ -483,7 +539,7 @@ struct TerminalKeyBar: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MobileDesign.Spacing.tight) {
-                    ForEach(keyboards.layout(forAgentKind: agentKind).keys) { key in
+                    ForEach(layout.keys(in: .bottom)) { key in
                         button(for: key)
                     }
                 }
@@ -621,6 +677,15 @@ struct TerminalKeyBar: View {
     }
 
     private func press(_ key: RemoteTerminalKeyDefinition) {
+        if let text = terminalKeySubmissionText(key.action) {
+            // Text and Return must be separate PTY writes. In one write Claude Code and Codex
+            // treat the whole chunk as pasted input and leave the line sitting in the composer.
+            // The atomic route already owns that split, focused-input admission and retries.
+            guard connection.submitTerminalLine(text) != nil else { return }
+            keyFeedback.perform()
+            bridge.consumeModifiersAfterKey()
+            return
+        }
         guard let bytes = bridge.encodedBytes(for: key.action) else { return }
         keyFeedback.perform()
         connection.sendTerminalKey(String(decoding: bytes, as: UTF8.self))
@@ -630,6 +695,7 @@ struct TerminalKeyBar: View {
     private func keyCap(_ label: String) -> some View {
         Text(label)
             .font(.system(.footnote, design: .monospaced).weight(.medium))
+            .lineLimit(1)
             .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
             .frame(minWidth: TerminalKeyBarMetrics.minimumKeyWidth)
             .frame(height: TerminalKeyBarMetrics.keyHeight)

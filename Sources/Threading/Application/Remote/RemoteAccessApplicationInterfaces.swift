@@ -208,4 +208,44 @@ struct RemoteAccessServerServices {
     let mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore
     let usageDashboard: RemoteUsageDashboardLoader
     let usageLimit: RemoteUsageLimitLoader
+    let usageResetOffer: RemoteUsageResetOfferLoader
+    let usageResetConsumer: RemoteUsageResetConsumer
+
+    init(
+        sessionQueries: any RemoteSessionQuerying,
+        sessionMutations: any RemoteSessionMutating,
+        runtimeStatus: any RemoteRuntimeStatus,
+        settings: any RemoteSettingsMutating,
+        eventLog: any RemoteEventRecording,
+        mirrors: RemoteSessionMirrorRegistry,
+        notifications: RemoteNotificationService,
+        archiveSync: ProviderArchiveSync,
+        snoozeCenter: SessionSnoozeCenter,
+        attachments: SessionAttachmentStore,
+        extensions: ExtensionManager,
+        mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore,
+        usageDashboard: @escaping RemoteUsageDashboardLoader,
+        usageLimit: @escaping RemoteUsageLimitLoader,
+        usageResetOffer: @escaping RemoteUsageResetOfferLoader = { _ in nil },
+        usageResetConsumer: @escaping RemoteUsageResetConsumer = { _, _ in
+            throw BankedUsageResetError.unsupportedAccount
+        }
+    ) {
+        self.sessionQueries = sessionQueries
+        self.sessionMutations = sessionMutations
+        self.runtimeStatus = runtimeStatus
+        self.settings = settings
+        self.eventLog = eventLog
+        self.mirrors = mirrors
+        self.notifications = notifications
+        self.archiveSync = archiveSync
+        self.snoozeCenter = snoozeCenter
+        self.attachments = attachments
+        self.extensions = extensions
+        self.mobileDiagnosticsCaptures = mobileDiagnosticsCaptures
+        self.usageDashboard = usageDashboard
+        self.usageLimit = usageLimit
+        self.usageResetOffer = usageResetOffer
+        self.usageResetConsumer = usageResetConsumer
+    }
 }

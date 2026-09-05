@@ -97,6 +97,17 @@ final class SessionExecutionLocusTracker {
 
     private var drifts: [SessionID: SessionExecutionDrift] = [:]
 
+    /// How many times each session's ownership has moved beneath this tracker.
+    ///
+    /// The number itself means nothing; equality does. A lifecycle report is stamped with the
+    /// epoch current when it *arrived*, and is classified only if ownership has not moved since.
+    /// The Stop hook is the case this exists for: its checkout fence commits the pending move
+    /// first and the same report is relayed afterwards, so its `cwd` — the directory the old
+    /// root process was launched in — would otherwise be read against the checkout the chat has
+    /// just moved to, and name the source as fresh drift 0.6 s after every observed commit. The
+    /// dwell in `SessionCheckoutCoordinator` refused that reversal; this stops it being asked.
+    private var ownershipEpochs: [SessionID: UInt64] = [:]
+
     /// How many reported directories have been resolved and classified.
     ///
     /// The one seam tests have on a step that is deliberately asynchronous: the classification
@@ -136,6 +147,20 @@ final class SessionExecutionLocusTracker {
     /// sidebar assert the chat came home when nothing said so.
     func observe(_ report: HookLifecycleReport) {
         guard let reported = report.workingDirectory else { return }
+
+        // A report that arrived before ownership moved describes the checkout the chat has just
+        // left, however truthfully. It is not evidence about the new ownership, and reading it as
+        // such is the reversal the whole damping section of `sessions.md` was written about.
+        if let captured = report.capturedOwnershipEpoch,
+           captured != ownershipEpoch(forSessionID: report.sessionID) {
+            EventLog.shared.record(.session, "Checkout observation discarded", [
+                "session": report.sessionID.uuidString,
+                "event": report.event.rawValue,
+                "reason": "ownershipMoved"
+            ])
+            return
+        }
+
         guard lastReportedPath[report.sessionID] != reported else { return }
 
         // Asked *before* the path is recorded, and the order is load-bearing. Recording first
@@ -218,6 +243,11 @@ final class SessionExecutionLocusTracker {
         drifts[sessionID] ?? .none
     }
 
+    /// The value a report arriving now should be stamped with; see `ownershipEpochs`.
+    func ownershipEpoch(forSessionID sessionID: SessionID) -> UInt64 {
+        ownershipEpochs[sessionID] ?? 0
+    }
+
     /// Drops a session's observation.
     ///
     /// Called when its ownership moves and when it ends. A committed move makes every stored
@@ -225,6 +255,7 @@ final class SessionExecutionLocusTracker {
     /// what it is measured *against* has, so keeping the old classification would leave a
     /// just-repaired chat marked as drifting until its next turn.
     func forget(sessionID: SessionID) {
+        ownershipEpochs[sessionID, default: 0] &+= 1
         lastReportedPath[sessionID] = nil
         lastProcessPathSignature[sessionID] = nil
         SessionExecutionProcessObserver.shared.forget(sessionID: sessionID)

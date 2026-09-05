@@ -19,6 +19,13 @@ typealias RemoteUsageLimitLoader = @MainActor @Sendable (
     _ seriesID: String,
     _ days: Int
 ) async -> RemoteUsageLimitDTO?
+typealias RemoteUsageResetOfferLoader = @MainActor @Sendable (
+    _ seriesID: String
+) async throws -> RemoteBankedUsageResetOfferDTO?
+typealias RemoteUsageResetConsumer = @MainActor @Sendable (
+    _ request: RemoteBankedUsageResetRequestDTO,
+    _ idempotencyKey: String
+) async throws -> RemoteBankedUsageResetResponseDTO
 typealias RemoteUniversalSearchLoader = @MainActor @Sendable (
     _ request: RemoteSearchRequestDTO,
     _ deviceID: String
@@ -75,6 +82,8 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
 
     private var usageDashboardLoaderStorage: RemoteUsageDashboardLoader?
     private var usageLimitLoaderStorage: RemoteUsageLimitLoader?
+    private var usageResetOfferLoaderStorage: RemoteUsageResetOfferLoader?
+    private var usageResetConsumerStorage: RemoteUsageResetConsumer?
     private var universalSearchLoaderStorage: RemoteUniversalSearchLoader?
     private var universalSearchResolverStorage: RemoteUniversalSearchResolver?
 
@@ -111,6 +120,16 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     var usageLimitLoader: RemoteUsageLimitLoader? {
         get { lock.withLock { usageLimitLoaderStorage } }
         set { lock.withLock { usageLimitLoaderStorage = newValue } }
+    }
+
+    var usageResetOfferLoader: RemoteUsageResetOfferLoader? {
+        get { lock.withLock { usageResetOfferLoaderStorage } }
+        set { lock.withLock { usageResetOfferLoaderStorage = newValue } }
+    }
+
+    var usageResetConsumer: RemoteUsageResetConsumer? {
+        get { lock.withLock { usageResetConsumerStorage } }
+        set { lock.withLock { usageResetConsumerStorage = newValue } }
     }
 
     var universalSearchLoader: RemoteUniversalSearchLoader? {
@@ -177,6 +196,16 @@ final class RemoteAccessServer: @unchecked Sendable {
     var usageLimitLoader: RemoteUsageLimitLoader? {
         get { dependencies.usageLimitLoader }
         set { dependencies.usageLimitLoader = newValue }
+    }
+
+    var usageResetOfferLoader: RemoteUsageResetOfferLoader? {
+        get { dependencies.usageResetOfferLoader }
+        set { dependencies.usageResetOfferLoader = newValue }
+    }
+
+    var usageResetConsumer: RemoteUsageResetConsumer? {
+        get { dependencies.usageResetConsumer }
+        set { dependencies.usageResetConsumer = newValue }
     }
 
     var universalSearchLoader: RemoteUniversalSearchLoader? {
@@ -514,6 +543,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         if request.method == "GET", path == RemoteRouter.usageLimitPath {
             handleUsageLimit(request, respond: respond)
+            return
+        }
+
+        if request.method == "GET", path == RemoteRouter.usageResetPath {
+            handleUsageResetOffer(request, respond: respond)
+            return
+        }
+
+        if request.method == "POST", path == RemoteRouter.usageResetPath {
+            handleUsageReset(request, respond: respond)
             return
         }
 
@@ -929,10 +968,57 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func handleMe(_ request: HTTPRequest, respond: @escaping @Sendable (RemoteRouteDecision) -> Void) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
+        respondWithCatalogue(for: authorization, request: request, respond: respond)
+    }
 
+    /// Answers with this authorization's catalogue, doing on the main queue only what has to be
+    /// there.
+    ///
+    /// The projection reads main-actor state and stays on it, behind the registry's one-second
+    /// shared owner cache. Everything after that — comparing the client's validator, encoding
+    /// the JSON, compressing it — is either one comparison or work a `userInitiated` worker
+    /// does on an immutable value. The encoded body is handed back to the registry so the next
+    /// device asking for the same catalogue edition is served bytes that already exist. Measured
+    /// during a session-relaunch storm at 2.65 s of `serverWaitMS` per phone refresh when all of
+    /// this ran inline on main; see `docs/architecture/performance.md`.
+    private func respondWithCatalogue(
+        for authorization: RemoteAuthorization,
+        request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        let acceptsGzip = RemoteRouter.acceptsGzip(request)
+        let requestedRevision = RemoteRouter.requestedCatalogueRevision(request)
         DispatchQueue.main.async {
-            let payload = self.services.mirrors.meResponse(for: authorization)
-            respond(.respond(RemoteRouter.json(payload)))
+            let snapshot = self.services.mirrors.meResponseSnapshot(for: authorization)
+            if snapshot.revision.matches(ifNoneMatch: requestedRevision) {
+                respond(.respond(RemoteRouter.notModified(snapshot.revision)))
+                return
+            }
+            if let encoded = snapshot.encoded {
+                respond(.respond(RemoteRouter.encodedJSON(encoded, acceptsGzip: acceptsGzip)))
+                return
+            }
+            guard let payload = snapshot.payload else {
+                respond(.respond(RemoteRouter.error(500, "Internal Server Error")))
+                return
+            }
+            let revision = snapshot.revision
+            DispatchQueue.global(qos: .userInitiated).async {
+                let encoded: RemoteMeEncodedResponse
+                do {
+                    encoded = try RemoteMeEncodedResponse.encode(payload, revision: revision)
+                } catch {
+                    ThreadingLogger.remote.error(
+                        "Remote catalogue encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                    respond(.respond(RemoteRouter.error(500, "Internal Server Error")))
+                    return
+                }
+                respond(.respond(RemoteRouter.encodedJSON(encoded, acceptsGzip: acceptsGzip)))
+                DispatchQueue.main.async {
+                    self.services.mirrors.storeMeResponse(encoded, for: authorization)
+                }
+            }
         }
     }
 
@@ -1098,6 +1184,91 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 payload,
                 maximumBytes: RemoteUsageBridge.maximumLimitResponseBytes
             )))
+        }
+    }
+
+    private func handleUsageResetOffer(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let seriesID = RemoteRouter.queryValue(named: "series", in: request.path),
+              !seriesID.isEmpty,
+              seriesID.utf8.count <= 512 else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        let loader = usageResetOfferLoader ?? services.usageResetOffer
+        Task { @MainActor in
+            do {
+                guard let payload = try await loader(seriesID) else {
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                    return
+                }
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    respond(.respond(RemoteRouter.error(401, "Unauthorized")))
+                    return
+                }
+                respond(.respond(RemoteRouter.json(payload)))
+            } catch {
+                respond(.respond(Self.usageResetErrorResponse(error)))
+            }
+        }
+    }
+
+    private func handleUsageReset(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard request.body.count <= RemoteAccessDefaults.maximumUsageResetRequestBytes,
+              let payload = try? JSONDecoder().decode(
+                  RemoteBankedUsageResetRequestDTO.self,
+                  from: request.body
+              ), !payload.seriesID.isEmpty,
+              payload.seriesID.utf8.count <= 512,
+              payload.availableCount > 0,
+              payload.offerFingerprint.utf8.count == 64,
+              let requestID = request.header(RemoteRouter.requestIDHeader).flatMap(
+                  RemoteInboundPolicy.normalizedMutationRequestID
+              ) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        let consumer = usageResetConsumer ?? services.usageResetConsumer
+        Task { @MainActor in
+            do {
+                let response = try await consumer(payload, requestID)
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    respond(.respond(RemoteRouter.error(401, "Unauthorized")))
+                    return
+                }
+                respond(.respond(RemoteRouter.json(response)))
+            } catch {
+                respond(.respond(Self.usageResetErrorResponse(error)))
+            }
+        }
+    }
+
+    private static func usageResetErrorResponse(_ error: Error) -> HTTPResponse {
+        switch error as? BankedUsageResetError {
+        case .noCredit, .offerChanged, .busy:
+            return RemoteRouter.error(409, "Usage reset changed")
+        case .unsupportedAccount:
+            return RemoteRouter.error(404, "Not Found")
+        case .accountIdentityUnavailable, .accountMismatch, .updateCodex,
+             .transport, .malformedResponse:
+            return RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)
+        case nil:
+            return RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)
         }
     }
 
@@ -1881,9 +2052,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 .theme: appliedThemeID.rawValue,
                 .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -1915,9 +2084,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     .setting: identity,
                     .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                 ])
-                respond(.respond(RemoteRouter.json(
-                    self.services.mirrors.meResponse(for: authorization)
-                )))
+                self.respondWithCatalogue(for: authorization, request: request, respond: respond)
             case .unknownSetting:
                 respond(.respond(RemoteRouter.error(404, "Unknown Setting", code: .unknownSetting)))
             case .notMutable:
@@ -1994,9 +2161,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 .theme: themeID?.rawValue ?? "inherit",
                 .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -2050,9 +2215,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 .session: sessionID.uuidString,
                 .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -2106,9 +2269,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 sessionID: sessionID,
                 archived: false
             )
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -2149,9 +2310,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                             .session: sessionID.uuidString,
                             .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                         ])
-                    respond(.respond(RemoteRouter.json(
-                        self.services.mirrors.meResponse(for: authorization)
-                    )))
+                    self.respondWithCatalogue(for: authorization, request: request, respond: respond)
                 case let .failure(failure):
                     if case .persistenceUnavailable = failure {
                         respond(.respond(self.persistenceRefusalResponse()))
@@ -2230,9 +2389,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             } else {
                 self.services.snoozeCenter.unsnooze(sessionID)
             }
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -2305,9 +2462,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 .surface: choice.surface.rawValue,
                 .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -2359,9 +2514,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     .account: choice.accountID,
                     .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                 ])
-                respond(.respond(RemoteRouter.json(
-                    self.services.mirrors.meResponse(for: authorization)
-                )))
+                self.respondWithCatalogue(for: authorization, request: request, respond: respond)
             case .failure(.sessionNotFound):
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
             case .failure(.accountNotFound), .failure(.unsupportedRuntime):
@@ -2562,9 +2715,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                         .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                     ]
                 )
-                respond(.respond(RemoteRouter.json(
-                    self.services.mirrors.meResponse(for: authorization)
-                )))
+                self.respondWithCatalogue(for: authorization, request: request, respond: respond)
             case .targetNotFound:
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
             case .unsupportedValue:
@@ -2699,9 +2850,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             hostCommands.revokeSessionShares(sessionID)
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -2782,9 +2931,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             hostCommands.revokeTerminalShares(terminalID)
-            respond(.respond(RemoteRouter.json(
-                self.services.mirrors.meResponse(for: authorization)
-            )))
+            self.respondWithCatalogue(for: authorization, request: request, respond: respond)
         }
     }
 
@@ -3135,7 +3282,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     respond(.respond(RemoteRouter.error(404, "Not Found")))
                     return
                 }
-                respond(.respond(RemoteRouter.data(data, contentType: "image/jpeg")))
+                // A thumbnail is bounded to a few tens of kilobytes by its pixel ceiling, far
+                // under the ordinary send high-water mark, so the connection stays open for the
+                // next cell's request instead of being cut after every picture — the churn a
+                // phone reported as its network connection lost, twenty-seven times in a day.
+                respond(.respond(RemoteRouter.data(
+                    data,
+                    contentType: "image/jpeg",
+                    closesConnection: false
+                )))
             }
         }
     }

@@ -141,6 +141,11 @@ final class AccountUsageService {
     /// a filesystem walk and its answer does not change between readings.
     private var seededHistory: Set<AccountID> = []
 
+    /// Invalidates provider reads that began before an authoritative mutation result landed.
+    /// Without this, a slow pre-reset fetch can finish after the post-reset app-server read and
+    /// put the spent window back on screen.
+    private var authoritativeGenerations: [AccountID: UInt64] = [:]
+
     /// Last known open-turn fact per session, retained only for the process-exit fallback.
     private let observations = AppEventObservations()
     private var lastOpenTurn: [SessionID: Bool] = [:]
@@ -180,6 +185,26 @@ final class AccountUsageService {
 
     func errorMessage(for account: AgentAccount) -> String? {
         reading(for: account).error?.message
+    }
+
+    /// Publishes a provider-authoritative reading produced as part of an account mutation.
+    ///
+    /// This deliberately bypasses ordinary refresh pacing: the mutation already paid for the
+    /// read, and every consumer must see the result before recovery continuations are released.
+    func acceptAuthoritative(_ usage: AccountUsage, for account: AgentAccount) {
+        let accountID = account.id
+        authoritativeGenerations[accountID, default: 0] &+= 1
+
+        var entry = entries[accountID] ?? Entry()
+        entry.reading = .current(usage)
+        entry.lastAttemptAt = Date()
+        entry.notBefore = nil
+        entry.consecutiveRateLimits = 0
+        entries[accountID] = entry
+
+        UsageHistoryStore.shared.record(usage, for: account)
+        seedHistoryIfThin(account, usage: usage)
+        NotificationCenter.default.post(AccountUsageDidChange(accountID: accountID))
     }
 
     /// Fetches when the cached value has aged out, or sooner when `force` asks — though
@@ -248,6 +273,7 @@ final class AccountUsageService {
             activeRefreshes.insert(id)
             entries[id, default: Entry()].lastAttemptAt = Date()
             let fetcher = self.fetcher
+            let generation = authoritativeGenerations[id, default: 0]
 
             Task.detached(priority: .utility) { [self] in
                 let result: Result<AccountUsage, UsageFetchError>
@@ -259,7 +285,7 @@ final class AccountUsageService {
                     result = .failure(.network(error.localizedDescription))
                 }
 
-                await finish(account: account, result: result)
+                await finish(account: account, result: result, generation: generation)
             }
         }
 
@@ -280,10 +306,20 @@ final class AccountUsageService {
             : UsageDefaults.refreshInterval
     }
 
-    private func finish(account: AgentAccount, result: Result<AccountUsage, UsageFetchError>) {
+    private func finish(
+        account: AgentAccount,
+        result: Result<AccountUsage, UsageFetchError>,
+        generation: UInt64
+    ) {
         let accountID = account.id
         activeRefreshes.remove(accountID)
         inFlight.remove(accountID)
+
+        guard generation == authoritativeGenerations[accountID, default: 0] else {
+            for settled in settlementWaiters.removeValue(forKey: accountID) ?? [] { settled() }
+            drainRefreshQueue()
+            return
+        }
 
         var entry = entries[accountID] ?? Entry()
         entry.reading = entry.reading.recording(result)

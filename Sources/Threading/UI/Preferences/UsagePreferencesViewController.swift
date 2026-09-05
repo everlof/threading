@@ -14,9 +14,13 @@ final class UsagePreferencesViewController: NSViewController {
     private let accountsProvider: AccountsProvider
     private let readingProvider: ReadingProvider
     private let refreshProvider: RefreshProvider
+    private let bankedResetService: BankedUsageResetService
     private var accountsByID: [AccountID: AgentAccount] = [:]
     private var overviewProjection: UsageDashboardOverviewProjection?
     private var limitSeries: [UsageLimitDashboardSeries] = []
+    /// `/usage` can arrive while the journal projection is still loading. Retain the stable
+    /// account identity until a matching series exists instead of silently focusing the first.
+    private var pendingUsageFocusAccountID: AccountID?
     private var overviewTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
 
@@ -29,11 +33,13 @@ final class UsagePreferencesViewController: NSViewController {
         },
         refreshProvider: @escaping RefreshProvider = {
             AccountUsageService.shared.refresh($0, force: $1)
-        }
+        },
+        bankedResetService: BankedUsageResetService = .shared
     ) {
         self.accountsProvider = accountsProvider
         self.readingProvider = readingProvider
         self.refreshProvider = refreshProvider
+        self.bankedResetService = bankedResetService
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -61,6 +67,9 @@ final class UsagePreferencesViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        dashboard.onUseBankedReset = { [weak self] series in
+            self?.useBankedReset(for: series)
+        }
         appEvents.observe(TranscriptUsageDidChange.self) { [weak self] _ in
             self?.prepareOverview(animated: true)
         }
@@ -79,6 +88,18 @@ final class UsagePreferencesViewController: NSViewController {
         }
         appEvents.observe(UsageLimitHistoryDidChange.self) { [weak self] _ in
             self?.loadLimitHistory(animated: true)
+        }
+        appEvents.observe(BankedUsageResetStateDidChange.self) { [weak self] event in
+            guard let self else { return }
+            self.dashboard.setBankedResetState(
+                accountID: event.accountID,
+                isBusy: self.bankedResetService.isBusy(event.accountID)
+            )
+        }
+        appEvents.observe(UsageFocusRequested.self) { [weak self] event in
+            guard let self else { return }
+            self.pendingUsageFocusAccountID = event.accountID
+            self.dashboard.focusLimitHistory(accountID: event.accountID)
         }
         prepareOverview(animated: false)
         reloadLiveCapacity()
@@ -107,6 +128,12 @@ final class UsagePreferencesViewController: NSViewController {
             scanProgress: TranscriptUsageService.shared.scanProgress,
             animated: animated
         )
+        if let accountID = pendingUsageFocusAccountID {
+            dashboard.focusLimitHistory(accountID: accountID)
+            if limitSeries.contains(where: { $0.accountID == accountID.rawValue }) {
+                pendingUsageFocusAccountID = nil
+            }
+        }
     }
 
     private func prepareOverview(animated: Bool) {
@@ -181,6 +208,63 @@ final class UsagePreferencesViewController: NSViewController {
         TranscriptUsageService.shared.refresh(force: true)
         refreshAuthoritativeLimits(force: true)
         loadLimitHistory(animated: true)
+    }
+
+    private func useBankedReset(for series: UsageLimitDashboardSeries) {
+        guard let rawAccountID = series.accountID,
+              let accountID = AccountID(rawValue: rawAccountID),
+              let account = accountsByID[accountID],
+              account.provider.supports(.bankedUsageReset) else {
+            return
+        }
+
+        dashboard.setBankedResetState(
+            accountID: accountID,
+            isBusy: true,
+            status: L10n.string("Checking banked reset…")
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let offer = try await bankedResetService.prepare(account: account)
+                dashboard.setBankedResetState(accountID: accountID, isBusy: true, status: "")
+                guard await confirmBankedReset(offer) else {
+                    dashboard.setBankedResetState(accountID: accountID, isBusy: false, status: "")
+                    return
+                }
+
+                dashboard.setBankedResetState(
+                    accountID: accountID,
+                    isBusy: true,
+                    status: L10n.string("Using banked reset…")
+                )
+                let result = try await bankedResetService.redeem(
+                    account: account,
+                    offer: offer
+                )
+                dashboard.setBankedResetState(
+                    accountID: accountID,
+                    isBusy: false,
+                    status: BankedUsageResetConfirmation.resultMessage(result)
+                )
+                loadLimitHistory(animated: true)
+            } catch {
+                dashboard.setBankedResetState(
+                    accountID: accountID,
+                    isBusy: false,
+                    status: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func confirmBankedReset(_ offer: BankedUsageResetOffer) async -> Bool {
+        await withCheckedContinuation { continuation in
+            ConfirmationAlert.ask(
+                BankedUsageResetConfirmation.request(for: offer),
+                in: view.window
+            ) { continuation.resume(returning: $0) }
+        }
     }
 
 }

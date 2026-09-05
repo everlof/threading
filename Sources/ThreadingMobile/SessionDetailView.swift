@@ -231,7 +231,7 @@ enum SessionDetailMetrics {
     /// How the last terminal screen stands under the reconnect loader.
     static var reconnectDim: Double { 0.55 }
     static var reconnectBlurRadius: CGFloat { 6 }
-    static var reconnectRevealDuration: TimeInterval { 0.25 }
+    static var reconnectRevealDuration: TimeInterval { 0.10 }
     /// How long a reconnect may take before its plate says so. A quick one never shows a
     /// spinner: the dim is the lock, the plate is "this is taking a moment".
     static var reconnectPlateDelay: Duration { .milliseconds(500) }
@@ -1695,6 +1695,9 @@ struct TerminalRemoteView: View {
                     .background(terminalBackground)
             }
         }
+        // Hydration releases buffered replay and the presentation lock in the same main-actor
+        // turn. Keep this polish shorter than a visible beat: SwiftTerm is already live beneath
+        // the departing blur, so a longer reveal looks like the lock outlived its work.
         .animation(
             reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
             value: presentation

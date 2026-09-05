@@ -463,11 +463,15 @@ struct RemoteAttachmentPreviewContent: View {
         let generation = loadGeneration
         errorMessage = nil
         MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .start)
+        let client = self.client
+        let sessionID = self.sessionID
+        let attachmentID = attachment.id
         do {
-            let fetched = try await client.attachmentData(
-                sessionID: sessionID,
-                id: attachment.id
-            )
+            // Bounded alongside every other page the lazy scroller has materialised: a swipe
+            // through a gallery is a queue of whole-file requests, not a burst of them.
+            let fetched = try await MobileMediaDownloadLimiter.previews.run {
+                try await client.attachmentData(sessionID: sessionID, id: attachmentID)
+            }
             MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .ok)
             guard generation == loadGeneration else { return }
             data = fetched
@@ -482,6 +486,11 @@ struct RemoteAttachmentPreviewContent: View {
             MobileDiagnostics.record(.attachmentPreviewFailed, level: .warning, fields: [
                 .kind: MobileAttachmentPreviewLog.kindToken(for: attachment.kind).rawValue,
                 .code: MobileDiagnostics.errorCode(error),
+                .detail: RemoteTransientTransportFailure.isTransient(error)
+                    ? RemoteAttachmentThumbnailDefaults.transientDetail
+                    : RemoteAttachmentThumbnailDefaults.terminalDetail,
+                .transport: client.endpointKind.rawValue,
+                .origin: MobileDiagnostics.originDigest(client.link.baseURL),
             ])
             MobileDiagnostics.logDegraded(.attachmentContent, error: error)
             guard generation == loadGeneration else { return }

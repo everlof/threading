@@ -254,10 +254,19 @@ extension RemoteAppModel {
                 .map { ($0, .current) }
         }
 
-        let records = Array(MobileDiagnostics.journal.records().suffix(
-            RemoteDiagnosticUploadPolicy.maximumRecordsPerUpload
-        ))
+        let records = await MobileDiagnostics.journal.recentRecords(
+            maximumCount: RemoteDiagnosticUploadPolicy.maximumRecordsPerUpload
+        )
         guard !records.isEmpty else { return }
+        // The journal read deliberately leaves the main actor. Consent, pairing and route may
+        // all change while it is suspended, so the authority checked before the read is not a
+        // licence to upload afterwards.
+        guard MobileDiagnosticsStatus.shared.isEnabled,
+              activeHostID == hostID,
+              activeHost?.isOwnerDevice == true,
+              activeHost?.activeEndpointKind == RemoteHostEndpointKind.lan,
+              self.client?.link == client.link,
+              self.client?.endpointKind == client.endpointKind else { return }
         let info = Bundle.main.infoDictionary
         let capture = RemoteMobileDiagnosticsCaptureDTO(
             captureID: UUID().uuidString.lowercased(),

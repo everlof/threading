@@ -322,6 +322,53 @@ final class SessionExecutionLocusTests: XCTestCase {
         XCTAssertEqual(tracker.drift(forSessionID: session.id), .none)
     }
 
+    /// The Stop hook's report crosses its own checkout fence: the fence commits the pending
+    /// move and wipes this tracker, and the same report is relayed afterwards. Its `cwd` is the
+    /// launch directory of the root process that just finished — after a commit, the checkout
+    /// the chat has now *left* — so read against the new ownership it names the source as fresh
+    /// drift. That was the reversal measured 0.6 s after every observed commit on 2026-09-04.
+    /// A report is therefore stamped with the ownership epoch current when it arrived, and one
+    /// stamped before a move is not evidence about the ownership that replaced it.
+    func testAReportStampedBeforeOwnershipMovedIsNotClassified() throws {
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let sibling = siblingCheckout()
+        let tracker = makeTracker(resolving: [ownedPath: ownedCheckout, sibling.root: sibling])
+
+        var stale = report(session.id, cwd: sibling.root)
+        stale.capturedOwnershipEpoch = tracker.ownershipEpoch(forSessionID: session.id)
+        // The commit lands between the hook firing and its report being relayed.
+        tracker.forget(sessionID: session.id)
+        tracker.observe(stale)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(tracker.classificationsApplied, 0, "a stale report must not be resolved")
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .none)
+
+        // The next report from the runtime that now owns the chat is read as ever.
+        var fresh = report(session.id, cwd: sibling.root)
+        fresh.capturedOwnershipEpoch = tracker.ownershipEpoch(forSessionID: session.id)
+        tracker.observe(fresh)
+        try waitForClassification(of: session.id, in: tracker)
+
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .siblingCheckout(sibling))
+    }
+
+    /// A report nobody stamped is read as current. Every path that does not cross a fence
+    /// relays on the same main-actor turn it arrived on, and the tests above build them bare.
+    func testAnUnstampedReportIsReadAsCurrent() throws {
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let sibling = siblingCheckout()
+        let tracker = makeTracker(resolving: [ownedPath: ownedCheckout, sibling.root: sibling])
+
+        tracker.forget(sessionID: session.id)
+        let bare = report(session.id, cwd: sibling.root)
+        XCTAssertNil(bare.capturedOwnershipEpoch)
+        tracker.observe(bare)
+        try waitForClassification(of: session.id, in: tracker)
+
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .siblingCheckout(sibling))
+    }
+
     // MARK: - Fixture
 
     private var ownedPath: String { project.folderPath }

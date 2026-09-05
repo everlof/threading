@@ -28,6 +28,14 @@ enum RemoteDeviceIdentity {
 enum RemoteClientDefaults {
     static let requestTimeoutSeconds: TimeInterval = 20
     static let resourceTimeoutSeconds: TimeInterval = 30
+    /// The conditional-request header carrying the catalogue edition in hand, and the status a
+    /// host answers with when that edition is still current.
+    static let ifNoneMatchHeader = "If-None-Match"
+    static let notModifiedStatus = 304
+    /// Concurrent connections the request session keeps to one Mac. Enough for a catalogue,
+    /// a few media downloads and a mutation side by side; few enough that a gallery cannot
+    /// spend the host's admission cap on its own.
+    static let maximumConnectionsPerHost = 6
     /// A support report carries a bounded journal and may carry a screenshot preview, so its
     /// upload is given longer than a control-plane request before the whole transfer is abandoned.
     static let reportResourceTimeoutSeconds: TimeInterval = 60
@@ -63,6 +71,13 @@ enum RemoteLocalNetworkAddress {
         default: return false
         }
     }
+}
+
+/// What `/api/me` answered a request that named the edition already in hand.
+enum RemoteCatalogueFetch: Sendable {
+    case catalogue(RemoteMeDTO)
+    /// The host's catalogue is still the edition the request named; the body was not sent.
+    case notModified
 }
 
 enum RemoteClientError: LocalizedError {
@@ -500,6 +515,40 @@ struct RemoteConnectionFailure: Equatable {
     ]
 }
 
+/// A failure that says nothing about the route or the host: the connection under one request
+/// went away, and the next connection is expected to work.
+///
+/// Distinguished from every other transport error because it is the one worth repeating at
+/// once. A pooled keep-alive socket the host has just closed — after a `Connection: close`
+/// response, at its idle bound, or past its admission cap — surfaces as
+/// `URLError.networkConnectionLost` on the phone (`url.-1005` in the journal, 27 times in one
+/// day's audit), or as a reset or a broken pipe beneath whichever URL-loading error wrapped it.
+enum RemoteTransientTransportFailure {
+    static func isTransient(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cancelled: return false
+            case .networkConnectionLost: return true
+            default: break
+            }
+        }
+        var current: NSError? = error as NSError
+        var depth = 0
+        while let candidate = current, depth < RemoteClientDefaults.underlyingErrorDepthLimit {
+            if candidate.domain == NSPOSIXErrorDomain,
+               resetCodes.contains(Int32(candidate.code)) {
+                return true
+            }
+            current = candidate.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+        return false
+    }
+
+    private static let resetCodes: Set<Int32> = [ECONNRESET, EPIPE]
+}
+
 /// Why the rest of one door's sticky-port walk is not worth trying.
 ///
 /// The walk exists for exactly one situation: the Mac's listener took another port of the sticky
@@ -800,6 +849,10 @@ struct RemoteClient {
         // becomes the failure that advances the walk to the next candidate. Every REST attempt
         // must terminalize promptly; the route loop, not URLSession, owns waiting and failover.
         configuration.waitsForConnectivity = false
+        // One Mac, one pool. A gallery burst of a dozen thumbnails must queue behind a bounded
+        // number of connections rather than open one each against a host that admits 32 in
+        // total and closes every attachment response.
+        configuration.httpMaximumConnectionsPerHost = RemoteClientDefaults.maximumConnectionsPerHost
         return URLSession(
             configuration: configuration,
             delegate: pinningDelegate,
@@ -867,15 +920,47 @@ struct RemoteClient {
         timeout: TimeInterval? = nil,
         metrics: RemoteRequestMetricsCollector? = nil
     ) async throws -> RemoteMeDTO {
+        switch try await fetchCatalogue(timeout: timeout, metrics: metrics) {
+        case let .catalogue(me):
+            return me
+        case .notModified:
+            // Not asked for: no validator was sent, so a host answering this way is not one
+            // this client can reason about.
+            throw RemoteClientError.invalidResponse
+        }
+    }
+
+    /// The catalogue, or the host's word that the edition this phone named is still current.
+    ///
+    /// `ifNoneMatch` is the entity tag of the catalogue in hand. The Mac answers `304` with no
+    /// body when its catalogue is still that edition, which costs one round trip and no
+    /// decoding; an older Mac that knows no validators ignores the header and answers in full,
+    /// which is also correct. `URLSession` advertises gzip and inflates a compressed body
+    /// before it reaches here, so nothing on this side reads `Content-Encoding`. This runs off
+    /// the caller's actor — `RemoteClient` is not isolated — so a large body is decoded on a
+    /// worker even when the model awaits it from the main actor.
+    func fetchCatalogue(
+        timeout: TimeInterval? = nil,
+        metrics: RemoteRequestMetricsCollector? = nil,
+        ifNoneMatch: String? = nil
+    ) async throws -> RemoteCatalogueFetch {
         var request = request(url: link.meURL)
         if let timeout { request.timeoutInterval = timeout }
+        if let ifNoneMatch {
+            request.setValue(ifNoneMatch, forHTTPHeaderField: RemoteClientDefaults.ifNoneMatchHeader)
+        }
         let (data, response): (Data, URLResponse)
         if let metrics {
             (data, response) = try await Self.session.data(for: request, delegate: metrics)
         } else {
             (data, response) = try await Self.session.data(for: request)
         }
-        return try decodeMe(data: data, response: response)
+        if ifNoneMatch != nil,
+           let http = response as? HTTPURLResponse,
+           http.statusCode == RemoteClientDefaults.notModifiedStatus {
+            return .notModified
+        }
+        return .catalogue(try decodeMe(data: data, response: response))
     }
 
     func fetchUsage(
@@ -892,6 +977,31 @@ struct RemoteClient {
         try await get(
             RemoteUsageLimitDTO.self,
             from: link.usageLimitURL(seriesID: seriesID, days: days)
+        )
+    }
+
+    func fetchBankedUsageResetOffer(
+        seriesID: String
+    ) async throws -> RemoteBankedUsageResetOfferDTO {
+        try await get(
+            RemoteBankedUsageResetOfferDTO.self,
+            from: link.usageResetURL(seriesID: seriesID)
+        )
+    }
+
+    func consumeBankedUsageReset(
+        _ offer: RemoteBankedUsageResetOfferDTO,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteBankedUsageResetResponseDTO {
+        try await postResponse(
+            RemoteBankedUsageResetRequestDTO(
+                seriesID: offer.seriesID,
+                availableCount: offer.availableCount,
+                offerFingerprint: offer.offerFingerprint,
+                letsProviderChooseCredit: offer.letsProviderChooseCredit
+            ),
+            to: link.usageResetURL,
+            requestID: requestID
         )
     }
 
@@ -1213,7 +1323,7 @@ struct RemoteClient {
         guard let url = link.attachmentURL(sessionID: sessionID, id: id) else {
             throw RemoteClientError.invalidResponse
         }
-        let (data, response) = try await Self.session.data(for: request(url: url))
+        let (data, response) = try await dataRetryingTransientFailure(for: request(url: url))
         _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return data
     }
@@ -1240,7 +1350,7 @@ struct RemoteClient {
             "bytes=\(range.lowerBound)-\(range.upperBound - 1)",
             forHTTPHeaderField: "Range"
         )
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await dataRetryingTransientFailure(for: request)
         let http = try validate(data: data, response: response, accepted: 206 ... 206)
         guard data.count == Int(length),
               http.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased() == "bytes",
@@ -1257,9 +1367,29 @@ struct RemoteClient {
         guard let url = link.attachmentThumbnailURL(sessionID: sessionID, id: id) else {
             throw RemoteClientError.invalidResponse
         }
-        let (data, response) = try await Self.session.data(for: request(url: url))
+        let (data, response) = try await dataRetryingTransientFailure(for: request(url: url))
         _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return data
+    }
+
+    /// One more attempt for a read whose connection was lost under it.
+    ///
+    /// A GET is safe to repeat, and `networkConnectionLost` is the error a pooled connection
+    /// produces when the host closed it — after an attachment response, at its idle bound, or
+    /// past its admission cap — a moment before this request reused it. The second attempt
+    /// takes a fresh connection. Anything else is thrown as it was: a timeout or an unreachable
+    /// host is not made better by asking again at once, and the route loop owns that.
+    private func dataRetryingTransientFailure(
+        for request: URLRequest
+    ) async throws -> (Data, URLResponse) {
+        do {
+            return try await Self.session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch where RemoteTransientTransportFailure.isTransient(error) {
+            try Task.checkCancellation()
+            return try await Self.session.data(for: request)
+        }
     }
 
     /// Hands one composer attachment to the Mac, a chunk at a time, and answers its upload id.

@@ -133,6 +133,7 @@ struct RemoteRouter {
     static let searchResolvePath = RemoteRoute.search.prefix + "resolve"
     static let usagePath = RemoteRoute.usage.absolutePath
     static let usageLimitPath = RemoteRoute.usageLimit.absolutePath
+    static let usageResetPath = RemoteRoute.usageReset.absolutePath
     static let createSessionPath = RemoteRoute.session.absolutePath
     static let notificationRegistrationPath = RemoteRoute.notifications.absolutePath
     static let diagnosticUploadPath = RemoteRoute.diagnostics.absolutePath
@@ -399,7 +400,76 @@ struct RemoteRouter {
         )
     }
 
-    static func data(_ body: Data, contentType: String) -> HTTPResponse {
+    /// A JSON body that was encoded elsewhere — on a worker, or earlier for another device —
+    /// served under its catalogue validator, compressed when the client said it could inflate.
+    ///
+    /// `Cache-Control: no-store` still applies through `harden`: the validator lets a client
+    /// ask "is it still this one?" and be told `304`; it does not license anything to keep the
+    /// body. `Vary` is set so that a proxy which ignored that would at least not hand a gzip
+    /// body to a client that never asked for one.
+    static func encodedJSON(
+        _ encoded: RemoteMeEncodedResponse,
+        acceptsGzip: Bool
+    ) -> HTTPResponse {
+        var response = HTTPResponse(
+            status: 200,
+            reason: "OK",
+            contentType: "application/json",
+            body: acceptsGzip ? (encoded.gzip ?? encoded.json) : encoded.json
+        )
+        response.extraHeaders[Header.entityTag] = encoded.revision.entityTag
+        response.extraHeaders[Header.vary] = Header.acceptEncoding
+        if acceptsGzip, encoded.gzip != nil {
+            response.extraHeaders[Header.contentEncoding] = Header.gzip
+        }
+        return harden(response, isDocument: false)
+    }
+
+    /// The answer to a conditional request whose validator still names the current catalogue.
+    static func notModified(_ revision: RemoteCatalogueRevisionDTO) -> HTTPResponse {
+        var response = HTTPResponse(
+            status: 304,
+            reason: "Not Modified",
+            contentType: nil,
+            body: Data()
+        )
+        response.extraHeaders[Header.entityTag] = revision.entityTag
+        response.extraHeaders[Header.vary] = Header.acceptEncoding
+        return harden(response, isDocument: false)
+    }
+
+    /// Whether the client can inflate a gzip body. `URLSession` and every browser say so by
+    /// default; a bare `curl` does not, and receives the plain bytes.
+    static func acceptsGzip(_ request: HTTPRequest) -> Bool {
+        guard let header = request.header(Header.acceptEncoding) else { return false }
+        return header
+            .split(separator: ",")
+            .map { $0.split(separator: ";", maxSplits: 1)[0].trimmingCharacters(in: .whitespaces) }
+            .contains { $0.lowercased() == Header.gzip }
+    }
+
+    /// The catalogue revision a client says it already holds, if it sent one.
+    static func requestedCatalogueRevision(_ request: HTTPRequest) -> String? {
+        request.header(Header.ifNoneMatch)
+    }
+
+    private enum Header {
+        static let entityTag = "ETag"
+        static let ifNoneMatch = "If-None-Match"
+        static let acceptEncoding = "Accept-Encoding"
+        static let contentEncoding = "Content-Encoding"
+        static let vary = "Vary"
+        static let gzip = "gzip"
+    }
+
+    /// One file-backed body. A whole attachment retires its connection afterwards; a small
+    /// derived body such as a thumbnail keeps it, so a ledger of thirty asks over a few pooled
+    /// connections rather than opening, closing and reopening one per picture.
+    static func data(
+        _ body: Data,
+        contentType: String,
+        closesConnection: Bool = true
+    ) -> HTTPResponse {
         var response = HTTPResponse(
             status: 200,
             reason: "OK",
@@ -408,7 +478,7 @@ struct RemoteRouter {
         )
         // A visual file can be much larger than the live WebSocket backlog ceiling. Send it as
         // one bounded HTTP response and retire this connection after the body is processed.
-        response.closesConnection = true
+        response.closesConnection = closesConnection
         return harden(response, isDocument: false)
     }
 

@@ -18,6 +18,44 @@ saw the betas.
 
 ## [Unreleased]
 
+### Fixed
+
+- A chat Threading followed into a sibling worktree can no longer be pulled straight back by the
+  hook report that fired the move. The Stop hook's own working directory was being read after the
+  checkout had changed, naming the checkout the chat had just left, and the earlier relaunch let
+  the exiting processes be sampled there too. Both readings are now discarded, and a refused
+  reversal is written to the diagnostics log so an audit can count them.
+- The iPhone's session list no longer downloads the whole catalogue every time it comes back on
+  screen or the app returns to the foreground. While the live connection is delivering changes,
+  coming back asks nothing; returning to the app asks the Mac one question on the route that
+  worked last — "is it still this edition?" — and receives a one-line yes instead of every row.
+  A Mac restart, a pull to refresh, or a structural change still fetches everything.
+- The Mac answers that catalogue request without holding up everything else it is doing: the
+  rows are encoded and compressed off its main queue, kept until the catalogue changes, and sent
+  compressed. On a slow cellular link a 78-session list that took several seconds to arrive is
+  now a fraction of the bytes.
+- Attachment thumbnails and previews on the iPhone no longer stay blank after a dropped
+  connection. A request whose connection was cut under it is retried once on a fresh one,
+  downloads are queued a few at a time instead of all at once, the Mac keeps the connection open
+  between thumbnails, and a thumbnail lost while the phone was moving between networks is asked
+  for again once the new route is in use.
+- The iPhone stops knocking on a Mac address that keeps refusing it. Two of one Mac's Tailscale
+  addresses refused every one of 758 attempts in a day while its other addresses answered; an
+  address that refuses three times running now sits out the route race for five minutes,
+  doubling to an hour, and is tried once more when that rest ends. A refusal also records
+  whether the phone held a pin for that address and what the handshake said, so the next report
+  can tell a phone-side registration gap from a Mac-side listener fault.
+- Reopened chats on the iPhone reuse their warm connection more often: the pool keeps five
+  connections for two minutes instead of three for one. Its counters now travel in the phone's
+  diagnostics capture, and the Mac records how long it spent attaching each terminal socket.
+
+### Added
+
+- Codex banked usage resets can now be reviewed and used from Mac Usage, `/usage`, a limit-recovery
+  strip, or the owner-only iPhone Usage sheet. Threading always confirms the exact account and
+  credit, reads the result back from Codex, and only then releases existing chats that were already
+  waiting to continue on that account.
+
 ### Changed
 
 - On iPhone, the account button in a new session's navigation bar now opens one small panel

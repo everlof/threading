@@ -26,6 +26,7 @@ extension LimitEscapeStripView.Offer {
             offersWaitForReset: !LimitRecoveryCoordinator.hasOwedContinuation(
                 for: suggestion.sessionID
             ),
+            bankedResetCount: suggestion.bankedResetCount,
             resetHint: suggestion.resetHint,
             problem: suggestion.problem,
             busy: suggestion.busy

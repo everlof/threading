@@ -439,7 +439,7 @@
       "priority": "critical",
       "title": "Limit recovery ribbon",
       "description": "The real native conversation after a provider refusal has ended the agent and hidden its reply composer, proving the recovery state remains a pane-width top ribbon rather than floating in the exited composer's retained layout.",
-      "states": ["Agent exited", "Reply composer hidden", "Wait for Reset available"],
+      "states": ["Agent exited", "Reply composer hidden", "Wait for Reset available", "Banked reset available"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
@@ -1200,7 +1200,7 @@
       "priority": "important",
       "title": "Usage dashboard",
       "description": "The Consumption-first Usage dashboard and its separate Limit History state, with Current Capacity below, bounded chart data, and real virtualized account and breakdown tables under contrasting materials.",
-      "states": ["Consumption default", "Limit History selected", "Current capacity below analysis"],
+      "states": ["Consumption default", "Limit History selected", "Current capacity below analysis", "Banked reset action"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Classic Player"],
         "appearances": ["Theme representative appearance"],

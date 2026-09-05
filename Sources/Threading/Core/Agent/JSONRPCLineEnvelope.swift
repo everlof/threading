@@ -66,7 +66,7 @@ enum JSONRPCLineEnvelope: @unchecked Sendable {
 
 // MARK: - Request Identity
 
-enum JSONRPCRequestID: Hashable {
+enum JSONRPCRequestID: Hashable, Sendable {
     case integer(Int64)
     case string(String)
     case null

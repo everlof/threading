@@ -254,6 +254,44 @@ final class MobileIdentityPickerTests: XCTestCase {
         XCTAssertNil(MobileIdentityPickerHitTest.row(at: 10, rowHeight: 56, count: 0))
     }
 
+    func testEveryPointAcrossALoginCellBelongsToItsRow() {
+        let size = CGSize(width: 324, height: 168)
+        var missed: [CGPoint] = []
+        for x in stride(from: CGFloat(0), to: size.width, by: 2) {
+            for y in stride(from: CGFloat(0), to: size.height, by: 2) {
+                let point = CGPoint(x: x, y: y)
+                if MobileIdentityPickerHitTest.row(
+                    at: point,
+                    in: size,
+                    rowHeight: 56,
+                    count: 3
+                ) == nil {
+                    missed.append(point)
+                }
+            }
+        }
+        XCTAssertEqual(missed, [], "the blank width around row content remains tappable")
+    }
+
+    func testALoginPointOutsideTheSurfaceBelongsToNothing() {
+        let size = CGSize(width: 324, height: 168)
+        for point in [
+            CGPoint(x: -1, y: 28),
+            CGPoint(x: 324, y: 28),
+            CGPoint(x: 162, y: -1),
+            CGPoint(x: 162, y: 168),
+        ] {
+            XCTAssertNil(
+                MobileIdentityPickerHitTest.row(
+                    at: point,
+                    in: size,
+                    rowHeight: 56,
+                    count: 3
+                )
+            )
+        }
+    }
+
     /// A drag that crosses the strip visits every runtime in order, which is what makes the
     /// selection tick at each crossing rather than jumping.
     func testADragAcrossTheStripVisitsEveryRuntimeInOrder() {

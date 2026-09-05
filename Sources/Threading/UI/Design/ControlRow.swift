@@ -113,6 +113,25 @@ public final class ControlRowView: NSView {
         /// The least room between the two runs, so a long caption truncates rather than
         /// growing under the actions at the other end.
         static let runGap: CGFloat = Design.Spacing.medium
+
+        /// What holds the spring at that floor once a member has been named to take the slack
+        /// instead. Optional, so a row narrower than its own content compresses rather than
+        /// becoming unsatisfiable — and above the wish below, so the runs keep their gap even
+        /// while the named member is asking for everything.
+        static let springHeld: NSLayoutConstraint.Priority = .defaultHigh
+
+        /// The named member's standing wish to be as wide as the row.
+        ///
+        /// A **wish**, rather than the lowest hugging priority in the row, because hugging only
+        /// relates a view to its *intrinsic* size and half the controls here have no intrinsic
+        /// width at all: `ThemedSegmentedControl` states `noIntrinsicMetric`, and the absence of
+        /// a constraint is looser than any priority, so the slack went to the scope run however
+        /// weakly the field hugged. Something has to *ask* for the width. Above ordinary hugging
+        /// (`.defaultLow`) so the member actually grows, below the spring's hold so it does not
+        /// grow through the gap between the runs.
+        static let stretchWish: NSLayoutConstraint.Priority = .init(
+            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+        )
     }
 
     // MARK: - Properties
@@ -124,6 +143,17 @@ public final class ControlRowView: NSView {
 
     public private(set) var leadingViews: [NSView] = []
     public private(set) var trailingViews: [NSView] = []
+
+    /// The member the row's slack lands in, when one of them should have it.
+    ///
+    /// Nil is the ordinary row: two runs pushed to opposite edges with air between them, which
+    /// is what a row of chips and buttons is. A row built around a **field** is the other shape
+    /// — the field *is* the row and the controls beside it are what it is narrowed by — and
+    /// there the air after the field is exactly what should not exist: Universal Search's header
+    /// held its query at the width of the word "Search" with a hole where the results' width
+    /// was. Named here rather than set as a hugging priority at the call site, for the same
+    /// reason the height is: the spring is private, so only the row can say what outranks it.
+    public private(set) var stretchingView: NSView?
 
     /// **One stack, not two, with a spring in the middle.**
     ///
@@ -166,6 +196,18 @@ public final class ControlRowView: NSView {
     private lazy var heightConstraint = heightAnchor.constraint(
         equalToConstant: metrics.height
     )
+
+    /// The named member's wish to be the width of the row, alive only while one is named.
+    private var stretchWish: NSLayoutConstraint?
+
+    /// Pins the spring *at* the floor it is otherwise only kept above, for as long as a member
+    /// is carrying the row's slack. Inactive on an ordinary row, which is the shape where the
+    /// air between the runs is the point.
+    private lazy var springHoldsItsFloor: NSLayoutConstraint = {
+        let held = spring.widthAnchor.constraint(equalToConstant: Layout.runGap)
+        held.priority = Layout.springHeld
+        return held
+    }()
     private let appEvents = AppEventObservations()
 
     /// The height the row last handed out, so a layout pass that changes nothing writes nothing.
@@ -176,13 +218,19 @@ public final class ControlRowView: NSView {
     // MARK: - Initialization
 
     /// Both arrays run leading to trailing. The first leading view and the last trailing view
-    /// touch the row's edges with their full interaction surfaces.
-    public init(scale: ControlRowScale = .compact, leading: [NSView] = [], trailing: [NSView] = []) {
+    /// touch the row's edges with their full interaction surfaces. `stretching` names the one
+    /// member the spare width belongs to, and must be one of them — see `stretchingView`.
+    public init(
+        scale: ControlRowScale = .compact,
+        leading: [NSView] = [],
+        trailing: [NSView] = [],
+        stretching: NSView? = nil
+    ) {
         self.scale = scale
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
-        configure(leading: leading, trailing: trailing)
+        configure(leading: leading, trailing: trailing, stretching: stretching)
 
         // The compact height is authored by the material, so a style switch resizes the row and
         // everything standing in it. Without this the row kept the height of the theme it was
@@ -215,13 +263,17 @@ public final class ControlRowView: NSView {
     /// intermediate state constrained against a run that is on its way out. Hosts whose row
     /// changes shape with its content — the Compare tab swaps a mode chip in for images and out
     /// for a text diff — call this each time.
-    public func configure(leading: [NSView], trailing: [NSView]) {
+    public func configure(leading: [NSView], trailing: [NSView], stretching: NSView? = nil) {
         for view in leadingViews + trailingViews where !leading.contains(view)
             && !trailing.contains(view) {
             view.removeFromSuperview()
         }
         leadingViews = leading
         trailingViews = trailing
+        // Released before the members move and re-made after they have landed: a width relation
+        // between a view and the stack it is not in yet has no common ancestor, and AppKit
+        // raises rather than waiting for one.
+        releaseStretch()
 
         fill(runs, with: leading + [spring] + trailing)
         // No stack spacing around the spring: the gap between the runs is the spring's own
@@ -234,6 +286,7 @@ public final class ControlRowView: NSView {
         }
         if let last = leading.last { runs.setCustomSpacing(0, after: last) }
         runs.setCustomSpacing(0, after: spring)
+        applyStretch(to: stretching, among: leading + trailing)
         applyMetrics(force: true)
     }
 
@@ -264,6 +317,37 @@ public final class ControlRowView: NSView {
             // views to relate: they are the members either side of it.
             spring.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.runGap)
         ])
+    }
+
+    /// Points the spare width at one member, or puts it back in the air between the runs.
+    ///
+    /// Two writes, because either alone leaves the solver free to choose: the spring is held
+    /// *at* its floor rather than above it, so there is spare width to place at all, and the
+    /// named member is given a standing wish for the row's whole width, so there is one thing
+    /// asking for it. Nothing about the member itself is changed — a control keeps the hugging
+    /// priority its own component set, and moving it out of the row takes the wish with it.
+    /// A member that is not in the row is not a member, and naming one is a call-site mistake
+    /// rather than a silently different layout.
+    private func applyStretch(to view: NSView?, among members: [NSView]) {
+        if let view, !members.contains(view) {
+            assertionFailure("a control row was asked to stretch a view it does not hold")
+            return applyStretch(to: nil, among: members)
+        }
+        releaseStretch()
+        stretchingView = view
+        springHoldsItsFloor.isActive = view != nil
+        guard let view else { return }
+        let wish = view.widthAnchor.constraint(equalTo: runs.widthAnchor)
+        wish.priority = Layout.stretchWish
+        wish.isActive = true
+        stretchWish = wish
+    }
+
+    private func releaseStretch() {
+        stretchWish?.isActive = false
+        stretchWish = nil
+        stretchingView = nil
+        springHoldsItsFloor.isActive = false
     }
 
     private func fill(_ stack: NSStackView, with views: [NSView]) {

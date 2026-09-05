@@ -2921,6 +2921,11 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
         _ container: TerminalContainerViewController,
         didRequestOpenSession sessionID: SessionID
     )
+    /// A native conversation invoked the app-owned `/usage` command.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestUsageFor accountID: AccountID?
+    )
     /// The empty state's one action: begin a session, the same route ⌘N takes.
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController)
     /// The launch-failure surface asked to file this failure, with its captured output as
@@ -2969,6 +2974,13 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
         didRequestOpenSession sessionID: SessionID
     ) {
         delegate?.terminalContainer(self, didRequestOpenSession: sessionID)
+    }
+
+    func conversation(
+        _: ConversationViewController,
+        didRequestUsageFor accountID: AccountID?
+    ) {
+        delegate?.terminalContainer(self, didRequestUsageFor: accountID)
     }
 
     func conversationDidChangeActivity(_ controller: ConversationViewController) {

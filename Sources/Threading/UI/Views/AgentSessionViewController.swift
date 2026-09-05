@@ -102,6 +102,9 @@ final class AgentSessionViewController: NSViewController {
     private var transcriptRecheckGeneration: [String: Int] = [:]
     private var agentTitleRefreshWorkItem: DispatchWorkItem?
     private var codexTranscriptURL: URL?
+    private var codexTranscriptBoundaryObserver: CodexTranscriptBoundaryObserver?
+    private var codexTranscriptResolutionTask: Task<Void, Never>?
+    private var codexTranscriptObservationGeneration = 0
     private var codexTurnBoundaryRefreshWorkItem: DispatchWorkItem?
     private var codexContinuationBoundaryRefreshWorkItem: DispatchWorkItem?
     private var codexContinuationBoundaryRefreshIsOutputPrompted = false
@@ -309,6 +312,10 @@ final class AgentSessionViewController: NSViewController {
         limitEscapeStrip.onWaitForReset = { [weak self] in
             guard let self else { return }
             NotificationCenter.default.post(LimitWaitForResetRequested(sessionID: self.sessionID))
+        }
+        limitEscapeStrip.onUseBankedReset = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(LimitBankedResetRequested(sessionID: self.sessionID))
         }
         limitEscapeStrip.onDismiss = { [weak self] in
             guard let self else { return }
@@ -577,10 +584,11 @@ final class AgentSessionViewController: NSViewController {
     /// **What activity this re-derives, and what it cannot.** The tracker is a new one, so there
     /// is no stale `working` to correct — the staleness R7 names comes from hooks posted into a
     /// dead socket while the app was closed, and those never reached a tracker that did not
-    /// exist. From here the ordinary readings resume: output inference for every runtime, and
-    /// Claude's and Codex's transcript boundary readers as their own output callbacks re-arm
-    /// them. Grok and OpenCode have no transcript boundary to read and stay on output inference,
-    /// which is R7's accepted cost; no second reconciliation is invented here.
+    /// exist. From here the ordinary readings resume: output inference for every runtime,
+    /// Claude's transcript readers when output re-arms them, and Codex's rollout observer as soon
+    /// as its stored conversation id resolves. Grok and OpenCode have no transcript boundary to
+    /// read and stay on output inference, which is R7's accepted cost; no second reconciliation
+    /// is invented here.
     ///
     /// **Output inference is the only thing that can say a reattached session is busy**, and it
     /// has to survive the replay to do it. A turn that began before the relaunch raised its
@@ -591,10 +599,10 @@ final class AgentSessionViewController: NSViewController {
     /// for the replay and ended at the replay's own boundary, which the link reports. Claude's
     /// readers still cannot stand in for it — `ClaudeTranscriptTurnRefusal` and
     /// `ClaudeTranscriptInterruption` recover a turn that *ended*, and Claude's transcript
-    /// records no open one. Codex's rollout does, and `CodexTranscriptTurnBoundary` now reads
-    /// it, so a reattached Codex session recovers a running turn exactly rather than by
-    /// inference — but only once its rollout path is known, which arrives on its own hooks.
-    /// The grace is what covers everything before that, for every runtime.
+    /// records no open one. Codex's rollout does, and `CodexTranscriptTurnBoundary` reads it, so
+    /// a reattached Codex session recovers a running turn exactly rather than by inference once
+    /// its stored rollout resolves off-main. The grace covers that lookup and every runtime that
+    /// has no such durable boundary.
     @discardableResult
     func reattachToBackgroundHost(
         socketPath: String,
@@ -634,6 +642,7 @@ final class AgentSessionViewController: NSViewController {
         // no evidence either way.
         resetTranscriptFallbackObservation()
         activityTracker.markRunning()
+        beginCodexTranscriptBoundaryObservation()
         // Nobody is looking, and the replay is a repaint: without this the reattach's first
         // burst reads as a finished turn and marks every recovered session unread. Same reason
         // `launchInBackground` does it — but here it is armed for the replay only, and
@@ -869,6 +878,7 @@ final class AgentSessionViewController: NSViewController {
         armLaunchSurvivalCheck()
         resetTranscriptFallbackObservation()
         activityTracker.markRunning()
+        beginCodexTranscriptBoundaryObservation()
 
         // The command line, before it runs. A launch that takes the app down with it leaves
         // this as the only account of what was being started.
@@ -1074,9 +1084,66 @@ final class AgentSessionViewController: NSViewController {
             return
         }
 
-        codexTranscriptURL = url
-        scheduleCodexTurnBoundaryRefresh()
+        adoptCodexTranscriptURL(url)
         scheduleRunProgressTranscriptRefresh()
+    }
+
+    /// Resolves a resumed rollout once per process lifetime, with the externally growing
+    /// session-tree discovery off the main actor. Fresh sessions have no provider id yet and earn
+    /// their exact path from the first lifecycle report instead.
+    private func beginCodexTranscriptBoundaryObservation() {
+        guard codexTranscriptURL == nil,
+              codexTranscriptResolutionTask == nil,
+              let lookup = attachmentTranscriptLookup() else { return }
+
+        let generation = codexTranscriptObservationGeneration
+        codexTranscriptResolutionTask = Task { @MainActor [weak self] in
+            let url = await Task.detached(priority: .utility) { lookup() }.value
+            guard let self else { return }
+            self.codexTranscriptResolutionTask = nil
+            guard !Task.isCancelled,
+                  self.isRunning,
+                  generation == self.codexTranscriptObservationGeneration,
+                  let url else { return }
+            self.adoptCodexTranscriptURL(url)
+        }
+    }
+
+    /// Makes one validated rollout the controller's event-driven lifecycle source.
+    ///
+    /// The observer remains alive for the process rather than only for an open turn: Codex goal
+    /// mode can append its next `task_started` while the tracker is between turns, with no start
+    /// hook and no user input to recreate a watcher.
+    private func adoptCodexTranscriptURL(_ url: URL) {
+        codexTranscriptResolutionTask?.cancel()
+        codexTranscriptResolutionTask = nil
+
+        if codexTranscriptURL != url {
+            codexTranscriptBoundaryObserver?.stop()
+            codexTranscriptBoundaryObserver = nil
+            codexTranscriptURL = url
+        }
+
+        if codexTranscriptBoundaryObserver == nil {
+            let observer = CodexTranscriptBoundaryObserver(url: url) { [weak self] in
+                guard let self, self.isRunning, self.codexTranscriptURL == url else { return }
+                self.scheduleCodexTurnBoundaryRefresh()
+            }
+            if observer.start() {
+                codexTranscriptBoundaryObserver = observer
+            } else {
+                ThreadingLogger.agent.error(
+                    "Could not observe Codex rollout for \(self.sessionID.uuidString, privacy: .public)"
+                )
+                EventLog.shared.record(.hooks, "Codex rollout observation failed", [
+                    "session": sessionID.uuidString
+                ])
+            }
+        }
+
+        // Also schedules an immediate quiet-edge read. The observer starts first, so an append
+        // between path adoption and this read is either already visible or wakes a trailing one.
+        scheduleCodexTurnBoundaryRefresh()
     }
 
     /// Looks past Codex's `Stop` for the `task_started` record goal mode writes shortly after it.
@@ -1115,7 +1182,7 @@ final class AgentSessionViewController: NSViewController {
                 guard let self, let url,
                       generation == self.runProgressGeneration else { return }
                 if self.agentKind.supports(.lifecycleReportedTranscriptPath) {
-                    self.codexTranscriptURL = url
+                    self.adoptCodexTranscriptURL(url)
                 }
                 self.scanRunProgressTranscript(at: url, generation: generation)
             }
@@ -1179,8 +1246,9 @@ final class AgentSessionViewController: NSViewController {
         }
     }
 
-    /// Revalidates once after an output burst settles. The transcript reader performs the stat
-    /// and capped tail scan off-main; this main-queue work is only cancellation and scheduling.
+    /// Coalesces rollout events and terminal-output hints into one quiet-edge revalidation. The
+    /// transcript reader performs the stat and capped tail scan off-main; this main-queue work is
+    /// only cancellation and scheduling.
     ///
     /// Deliberately **not** gated on a turn being in flight, unlike its Claude sibling: the
     /// boundary this exists for most is a turn that began without anybody being told, so a
@@ -1380,10 +1448,16 @@ final class AgentSessionViewController: NSViewController {
         return claudeTranscriptURL
     }
 
-    /// Drops both transcript fallbacks. A new process re-earns them: its rollout path arrives on
-    /// its own hooks, and its transcript is resolved again from whatever the session record says
-    /// by then — a resumed conversation and a migrated account both change the answer.
+    /// Drops both transcript fallbacks. A new process re-earns them: Codex's rollout arrives from
+    /// its own hooks or stored conversation id, and Claude's transcript is resolved again from
+    /// whatever the session record says by then — a resume and an account migration both change
+    /// the answer.
     private func resetTranscriptFallbackObservation() {
+        codexTranscriptObservationGeneration &+= 1
+        codexTranscriptResolutionTask?.cancel()
+        codexTranscriptResolutionTask = nil
+        codexTranscriptBoundaryObserver?.stop()
+        codexTranscriptBoundaryObserver = nil
         codexTurnBoundaryRefreshWorkItem?.cancel()
         codexTurnBoundaryRefreshWorkItem = nil
         codexContinuationBoundaryRefreshWorkItem?.cancel()
@@ -1560,10 +1634,15 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
-        SessionExecutionProcessObserver.shared.noteOutput(
-            sessionID: sessionID,
-            rootPID: session.shellPid
-        )
+        // A terminated runtime still drains its last bytes through here while its processes
+        // exit. Registering that output would have the process observer sample a tree that is
+        // dying in the checkout a move just left, and read it as fresh drift.
+        if isRunning {
+            SessionExecutionProcessObserver.shared.noteOutput(
+                sessionID: sessionID,
+                rootPID: session.shellPid
+            )
+        }
         if let acceptedByteCount = activityTracker.recordOutput(byteCount: byteCount) {
             AgentWorkloadMonitor.shared.recordActivity(
                 sessionID: sessionID,
@@ -1689,6 +1768,7 @@ extension AgentSessionViewController: AgentTerminalRuntimeSurface {
         guard isRunning, session.detachFromHost(by: deadline) else { return false }
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         isRunning = false
+        resetTranscriptFallbackObservation()
         return true
     }
 

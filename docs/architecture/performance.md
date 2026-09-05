@@ -187,6 +187,54 @@ through to a later one, a longer key not satisfying a shorter one.
 attachments, because the recorder is only reached when something was found and so cannot tell
 "scanned and found nothing" from "did not scan".
 
+## The iOS dashboard-return hangs, 2026-09-05
+
+Three reports that felt like one problem had different owners.
+
+- Ten of eleven symbolicated UIKit hangs around 1.3 seconds entered
+  `RemoteAppModel.performMobileDiagnosticsCapture` on the main actor, then synchronously waited in
+  `RemoteDiagnosticJournal.records()`. The journal enumerated files, read bounded suffixes,
+  decoded every retained JSON line, sorted timestamps, and only then took the newest records.
+- The kill-level watchdog stacks while returning to the main chat list were in
+  `LazyVStack.measureEstimates` and `PlatformViewLayoutEngine.sizeThatFits`. The dashboard nested
+  one lazy project-group stack around lazy row stacks. To the outer stack each project was one
+  giant virtual row, so navigation-transition estimation measured every bridged
+  `MobileMorphingTitle` in a 76-session catalogue.
+- A separate SIGABRT was Swift exclusivity enforcement: representable dismantling cleared the
+  terminal weak reference, its property observer published keyboard availability, and that
+  publication re-entered the same AttributeGraph teardown.
+
+The repairs preserve three independent boundaries:
+
+1. Product callers use `recentRecords(maximumCount:)`, `supportReportAsync`, or
+   `writeSupportReportAsync`. The journal's existing serial queue owns directory enumeration,
+   file reads, JSON decoding, report encoding, and report writes. The recent reader walks journal
+   days and lines newest-first, stops when the requested count is satisfied, and shares one
+   8-MiB allowance across the whole query. A diagnostics capture rechecks consent, owner, active
+   host, LAN route, and connection identity after the worker hop before it uploads.
+2. `MobileDashboardCollectionViewController` is the dashboard's only scroll owner. Its diffable
+   snapshot has one stable item per chat or terminal; project/type chrome and themed plates are
+   collection sections, and `UIHostingConfiguration` mounts the authored SwiftUI row only for a
+   visible cell. Updates with unchanged identities reconfigure visible rows, structural updates
+   preserve the first visible item and offset, and pull-to-refresh is the collection's native
+   refresh control. There is no nested-stack fallback. The deterministic 1,000-row scaling test
+   requires all identities in the snapshot while fewer than 40 cells and row hosts are mounted in
+   a 393 x 852 viewport.
+   The collection continues painting to the page's bottom edge; Search and New are a true overlay,
+   with their height added only to the collection's scroll extent. Reserving them with SwiftUI's
+   `safeAreaInset` makes a UIKit representable stop at the inset and exposes an opaque full-width
+   strip instead of floating pills.
+   An authoritative reconnect also compares its `RemoteMeDTO` before assignment: the equality
+   guard is outside the `@Published` observer, because that wrapper sends before `didSet` and an
+   observer guard would still invalidate the dashboard for an identical catalogue.
+3. `TerminalKeyBridge` has explicit attach/detach operations. Detach clears the weak view without
+   publishing in `dismantleUIView`; a generation-checked main-actor task reconciles availability
+   after the teardown returns, and cannot overwrite a replacement attachment.
+
+Package tests pin newest-record order, count and the oversized-journal tail. Mobile tests pin the
+1,000-row mount bound and both sides of deferred terminal detach. Appearance remains covered by
+the real iOS dashboard evidence rather than by the structural performance fixture.
+
 ## The transcript index rewrote itself continuously, 2026-09-01
 
 Found in the same session as the typing lag above and unrelated to it: this one never touches the
@@ -466,6 +514,29 @@ The reproducible owner-fan-out fixture is
 same Debug fixture fell from 32 main-actor projections and 16,876.973 ms to one projection and
 705.818 ms (23.9x). The metric covers `meResponse` projection and per-device response assembly; it
 does not claim to measure HTTP transport or JSON transfer time.
+
+**The bytes, 2026-09-05.** An audit of a day's phone diagnostics put the worst sustained
+slowdown on `/api/me`: 34 refreshes at 2.2–3.4 s with about 2.65 s of it `serverWaitMS`, during a
+session-relaunch storm that invalidated the one-second projection cache on every relaunch, and the
+slowest single refresh at 4.65 s with 3.42 s of it transferring a 78-row catalogue over cellular.
+Two things were on the main queue that did not need to be: `JSONEncoder` over the whole catalogue
+inside the same `DispatchQueue.main.async` block as the projection, and again for every one of
+the thirteen mutation handlers that answer with the catalogue. Now (`RemoteAccessServer
+.respondWithCatalogue`) the main-actor phase is the projection plus one comparison; the encoding
+and gzip run on a `userInitiated` worker on an immutable payload, and the encoded body is shelved
+in `RemoteMeResponseCache` per authorization and catalogue edition until the next invalidation,
+bounded by the connection cap. The catalogue names its edition (`RemoteCatalogueRevisionDTO`), a
+client sends it back as `If-None-Match`, and an unchanged catalogue is answered `304` with no body
+at all. Same Debug fixture, 1,000 sessions: the 32-client fan-out is still one projection
+(411.000 ms); one body is 1,225,121 bytes of JSON, 69,750 bytes as gzip (17.6x), encoded once in
+57.696 ms off the main actor, and a shelved lookup for the next device is 0.004 ms. The
+`THREADING_PERF remote-catalogue-body` line of `RemoteCatalogueScalingTests` is the regression
+boundary. At the audit's 78 rows that is roughly 95 KB down to 6 KB on the wire, and nothing at
+all for the refreshes that the phone's `MobileRefreshPolicy` now answers from the edition in hand.
+Slimming the rows themselves — the two `RemoteTerminalThemeDTO` palettes carried per session are
+most of a row's bytes and the dashboard list never draws them — is the next lever if a measured
+cellular refresh still exceeds a second after this; `MobileDashboardCacheSnapshot.Session` already
+names the thirteen fields the list needs.
 
 Standalone project terminals add one bounded summary per durable terminal to initial and
 structural catalogues. Their dashboard group is lazy and keeps no socket, emulator, polling task

@@ -535,14 +535,16 @@ Claude side chat, the coordinator moves the smallest connected closure of unlaun
 parents and children; a side chat that has already launched is independent.
 
 After commit, branch state is read again from the destination and one `SessionCheckoutDidMove`
-event carries the move's authority basis to the window. A move somebody **asked** for
-(`explicit_user_request`, `agent_initiated`) replaces the calling session's runtime, because the
-process is still running in the checkout it was launched in and has to be restarted to reach the
-new one. An `observed_execution` move replaces nothing: ownership is catching up with a process
-that is already executing in the destination, so replacing it would kill a working agent in order
-to reinstate it where it already is. The transient input fence is released either way — that
-release is what `runtimeRelaunchDidStart` exists for, and a session whose runtime was deliberately
-left alone must not stay fenced. A native outbox is handed across a replacement; the provider
+event carries the move's authority basis to the window. Every basis replaces the calling
+session's runtime, `observed_execution` included: a move somebody **asked** for
+(`explicit_user_request`, `agent_initiated`) has a process still running in the checkout it was
+launched in, and an observed move has a *root* still there too — a tool descendant's cwd proved
+where the finished turn worked, but the provider root process is what the next turn launches
+from, and leaving it in the source would have the very next turn drift straight back. (An earlier
+revision left an observed move's runtime alone for the opposite reason, that the agent was "already
+executing in the destination"; it was not, and the replacement is what makes the destination
+true.) The transient input fence is released once replacement has started — that release is what
+`runtimeRelaunchDidStart` exists for. A native outbox is handed across a replacement; the provider
 resume ID is unchanged. The just-finished checkpoint is marked `checkoutChanged`
 and cannot be presented as Last Turn because Threading cannot prove where every external command
 ran across the boundary. The next turn captures normally in the destination. Git Review, files,
@@ -613,20 +615,37 @@ nobody asked for is the wrong trade.
 
 **Following execution is a feedback loop, and it needs damping.** Committing a move changes what
 the next observation is measured against, and `forget` deliberately clears the memo that would
-otherwise suppress a repeat — so the two signals can chase each other. They do: an agent whose own
-root and whose tool descendants sit in different checkouts produces readings that disagree
-permanently, and nothing in the classifier arbitrates between them. On 2026-09-04 one chat
-committed **88 moves and 89 agent relaunches in 4m34s**, alternating between two worktrees, while
-the coalesced drift band showed a single unremarkable sentence. Three rules, in
-`SessionCheckoutDefaults`, and all three apply **only** to `observed_execution` — a move somebody
-asked for is an instruction and is never rate-limited:
+otherwise suppress a repeat — so the two signals can chase each other. They did: on 2026-09-04 one
+chat committed **88 moves and 89 agent relaunches in 4m34s** (08:26–08:31), and 39 more in three
+minutes that afternoon, alternating between two worktrees every ~3.5 s while the coalesced drift
+band showed a single unremarkable sentence. The journal gave the shape exactly: `Checkout move
+committed` → 0.6 s → `Chat observed in another checkout` naming the checkout just *left* → `Checkout
+move queued` back. The reading was never a disagreement between the root and its tools; it was the
+**same Stop report read twice**. `MCPServer.routeLifecycle` runs the Stop hook's checkout fence
+(`finishPendingMove`, which commits and calls `forget`) and only then relays the report to the
+tracker, and that report's `cwd` is the launch directory of the root process that just finished —
+after a commit, the checkout the chat has now left. Classified against the new ownership it is
+drift back to the source, and the relaunch that every commit performs then let the process
+observer sample the dying runtime's descendants in that same directory.
 
-- **No relaunch** (above) removes the amplifier: without a respawn there is no fresh
-  `sessionStarted`, so a settled chat stops generating new evidence about itself.
+The source is removed, and two rules remain as the backstop for whatever shape is found next. All
+of it applies **only** to `observed_execution` — a move somebody asked for is an instruction and
+is never rate-limited:
+
+- **A report is evidence about the ownership it arrived under.** `SessionExecutionLocusTracker`
+  keeps an ownership epoch per session that `forget` advances; the listener stamps every report
+  with the epoch current on arrival (`HookLifecycleReport.capturedOwnershipEpoch`), on the main
+  actor and before any fence, and the tracker journals `Checkout observation discarded` instead
+  of classifying a report whose epoch has moved. A report nobody stamped is read as current. The
+  same fence on the process side: `AgentRuntime.discard` forgets the observer's pending scan for
+  the runtime it is discarding, and a terminated `AgentSessionViewController` stops registering
+  the bytes its processes drain on the way out.
 - **A reversal dwell.** A chat that just left a checkout will not be observed straight back into
-  it. Only a reversal is damped; walking onwards to a third checkout is information, not two
-  signals disagreeing. `SessionCheckoutCoordinator` keeps this memory itself rather than the
-  tracker, precisely because `forget` wipes the tracker at the moment worth remembering.
+  it for `reversalDwell`. Only a reversal is damped; walking onwards to a third checkout is
+  information, not two signals disagreeing. `SessionCheckoutCoordinator` keeps this memory itself
+  rather than the tracker, precisely because `forget` wipes the tracker at the moment worth
+  remembering, and it journals `Checkout move reversal damped` each time it refuses one, so an
+  audit counts the disagreement instead of inferring it from the moves that got through.
 - **A ceiling.** Past `observedMoveCeiling` observed moves inside `observedMoveWindow`, Threading
   stops following that chat for the rest of the run and says so once, in a band with its own
   replacement key. The dwell stops the oscillation that was found; the ceiling is reason-neutral
@@ -634,6 +653,11 @@ asked for is an instruction and is never rate-limited:
   expire between damped moves would make the ceiling unreachable for the pattern it exists to
   catch. Nothing is lost when it trips — the chat keeps running and the row menu still moves it by
   hand.
+
+Reading the journal for any of this: the hosted test bundle writes to the same file, so a
+`Checkout move following abandoned` or a six-move burst whose `checkout` sits under
+`/var/folders/…/SessionCheckoutCoordinatorTests-…` is `testFollowingIsAbandonedOnceTheCeilingIsReached`
+running, not a chat. Every such line since the fix shipped has been one.
 
 **The integrated route is atomic, not required for correctness.**
 `create_session_worktree(branch, authority_basis, reason)` still creates through

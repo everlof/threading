@@ -63,6 +63,27 @@ struct MobileConnectionPoolMetrics: Codable, Equatable {
 
     var requests: Int { misses + reused }
     var hitRate: Double { requests == 0 ? 0 : Double(reused) / Double(requests) }
+
+    /// The counters as one closed `key.value` token list for a diagnostics capture, so an
+    /// audit reads the pool's hit rate from the copy on the Mac without asking the phone — the
+    /// 4–5 Sep 2026 audit could not, because the phone disconnected during that final read.
+    var summaryToken: String {
+        [
+            "reused.\(reused)",
+            "misses.\(misses)",
+            "parked.\(parked)",
+            "peak.\(peakOccupancy)",
+            "hitpct.\(Int((hitRate * 100).rounded()))",
+            "expired.\(expiredWithoutReuse)",
+            "capacity.\(capacityEvictions)",
+            "background.\(backgroundEvictions)",
+            "memory.\(memoryPressureEvictions)",
+            "hostchange.\(hostChangeEvictions)",
+            "invalidated.\(invalidatedWhileHeld)",
+            "unsupported.\(unsupported)",
+            "failedtopark.\(failedToPark)",
+        ].joined(separator: ":")
+    }
     var heldWithoutReuse: Int {
         expiredWithoutReuse + capacityEvictions + configurationEvictions
             + backgroundEvictions + memoryPressureEvictions + hostChangeEvictions
@@ -204,8 +225,12 @@ struct MobileConnectionPoolMetrics: Codable, Equatable {
 final class MobileSessionConnectionPool: ObservableObject {
     static let shared = MobileSessionConnectionPool()
 
-    static let defaultRetentionSeconds = 60
-    static let defaultCapacity = 3
+    /// Two minutes and five connections. The audit of 4–5 Sep 2026 saw 33 warm resumptions at a
+    /// 31 ms median against 222 fresh hellos, across 44 sessions several of which were reopened
+    /// again and again: a person moving between a handful of chats spends longer than a minute
+    /// away from each, and comes back to more than three. Both stay within the settings' bounds.
+    static let defaultRetentionSeconds = 120
+    static let defaultCapacity = 5
     static let minimumRetentionSeconds = 5
     static let maximumRetentionSeconds = 300
     static let maximumCapacity = 8

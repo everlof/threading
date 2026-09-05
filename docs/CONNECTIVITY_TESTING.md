@@ -84,6 +84,14 @@ journal under a fixed deadline and passes only after a new matching event appear
 | `handoff` | guided Wi-Fi off/on | non-LAN `hostRefreshSucceeded`, then recovery with Wi-Fi |
 | `conditioned` | guided Network Link Conditioner on/off | terminal refresh result under impairment, then success |
 
+A refresh after a resume is usually **conditional** now: one request on the route that answered
+last, carrying the catalogue edition in hand, answered `304` when nothing changed
+(`MobileRefreshPolicy`, [`REMOTE_ACCESS.md`](REMOTE_ACCESS.md)). It still records
+`hostRefreshStarted` and `hostRefreshSucceeded` — with `status: 304` rather than `200` — so every
+checkpoint above keeps its marker. A dashboard that merely comes back on screen while the event
+socket is healthy records nothing, because it asks nothing; a lane that needs a refresh must
+suspend, kill, or cut the network, all of which end the socket.
+
 The default evidence root is `.build/connectivity-hardware/<UTC stamp>/`. It contains every
 `devicectl` JSON result, the copied journal and the exact record that satisfied each checkpoint.
 On failure, the runner prints the post-marker timeline and leaves the evidence intact.

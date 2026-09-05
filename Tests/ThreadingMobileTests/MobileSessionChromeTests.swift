@@ -828,7 +828,7 @@ final class RemoteAttachmentGalleryTests: XCTestCase {
         let image = try XCTUnwrap(UIImage(systemName: "photo"))
         let seed = Dictionary(uniqueKeysWithValues: (0..<(RemoteAttachmentThumbnailStore.capacity + 5))
             .map { ("attachment-\($0)", image) })
-        let store = RemoteAttachmentThumbnailStore(isOffered: true, seed: seed) { _ in Data() }
+        let store = RemoteAttachmentThumbnailStore(isOffered: true, seed: seed) { _, _ in Data() }
 
         // A dictionary seed has no first; the bound is the invariant, not which one went.
         XCTAssertEqual(store.images.count, RemoteAttachmentThumbnailStore.capacity)
@@ -839,7 +839,7 @@ final class RemoteAttachmentGalleryTests: XCTestCase {
     @MainActor
     func testAMacWithoutThumbnailsIsNeverAsked() async throws {
         var fetches = 0
-        let store = RemoteAttachmentThumbnailStore(isOffered: false) { _ in
+        let store = RemoteAttachmentThumbnailStore(isOffered: false) { _, _ in
             fetches += 1
             return Data()
         }

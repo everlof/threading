@@ -254,6 +254,38 @@ final class ScheduledMessageStore {
         return true
     }
 
+    /// Releases existing limit-recovery promises for a set of sessions after an authoritative
+    /// account reset. No record is created: a chat that never asked to continue stays silent.
+    ///
+    /// One durable commit keeps an account-wide reset from releasing only half its chats. The
+    /// scheduler observes the normal store-change event and retains ownership of exactly-once
+    /// claiming, curfews, custom limits, and busy-session retries.
+    func releaseLimitRecoveryContinuations(
+        for sessionIDs: Set<SessionID>,
+        dueAt: Date
+    ) -> Int? {
+        guard !sessionIDs.isEmpty else { return 0 }
+        var updated = messages
+        var released = 0
+
+        for index in updated.indices {
+            guard let sessionID = updated[index].target.sessionID,
+                  sessionIDs.contains(sessionID),
+                  updated[index].isOwedLimitRecoveryContinuation,
+                  case .time(var trigger) = updated[index].trigger
+            else { continue }
+
+            trigger.dueAt = dueAt
+            updated[index].trigger = .time(trigger)
+            updated[index].state = .armed
+            released += 1
+        }
+
+        guard released > 0 else { return 0 }
+        guard commit(updated) else { return nil }
+        return released
+    }
+
     /// Rewrites a waiting send in place, keeping its identity.
     @discardableResult
     func replace(_ id: ScheduledMessageID, with message: ScheduledMessage) -> Bool {

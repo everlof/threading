@@ -60,6 +60,10 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         /// filed — the scheduled-message strip names that.
         let offersWaitForReset: Bool
 
+        /// Provider-issued inventory on the refused login. The strip offers spending one only
+        /// after the authoritative Usage service has reported at least one.
+        let bankedResetCount: Int?
+
         /// When the refused account comes back, in the provider's own words. Nil where the
         /// provider refused without saying, and then the clause is simply absent.
         let resetHint: String?
@@ -90,6 +94,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             accountName: String? = nil,
             reading: String? = nil,
             offersWaitForReset: Bool = false,
+            bankedResetCount: Int? = nil,
             resetHint: String? = nil,
             curfewLine: String? = nil,
             problem: String? = nil,
@@ -99,6 +104,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             self.accountName = accountName
             self.reading = reading
             self.offersWaitForReset = offersWaitForReset
+            self.bankedResetCount = bankedResetCount
             self.resetHint = resetHint
             self.curfewLine = curfewLine
             self.problem = problem
@@ -111,6 +117,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         /// Whether a login is named, which is what decides if the account button is on the row
         /// at all. A refusal with nothing to move to keeps the wait offer and the sentence.
         var offersAccountEscape: Bool { accountName != nil }
+        var offersBankedReset: Bool { (bankedResetCount ?? 0) > 0 }
     }
 
     // MARK: - Properties
@@ -122,6 +129,9 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     /// resets. Reported as an intention like every other gesture here — answering the CLI's
     /// chooser and filing the continuation is `LimitRecoveryCoordinator`'s.
     var onWaitForReset: (() -> Void)?
+
+    /// Spend one banked reset on this login, after the shared irreversible confirmation.
+    var onUseBankedReset: (() -> Void)?
 
     /// Put the offer away until the next refusal.
     var onDismiss: (() -> Void)?
@@ -145,6 +155,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
 
     /// The button that waits it out, readable for the same reason.
     var waitControl: ThemedButton { waitButton }
+    var bankedResetControl: ThemedButton { bankedResetButton }
 
     /// The ✕.
     var dismissControl: ThemedIconButton { dismissButton }
@@ -165,6 +176,12 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         target: self,
         action: #selector(waitPressed)
     )
+    private lazy var bankedResetButton = ThemedButton(
+        title: LimitEscapeStripStrings.useBankedReset,
+        target: self,
+        action: #selector(bankedResetPressed)
+    )
+    private let immediateActions = NSStackView()
     /// Holds whichever of the two answers this refusal actually has. Structural only: it chooses
     /// no styling, and both of its members are themed controls.
     private let actions = NSStackView()
@@ -273,6 +290,19 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             : LimitEscapeStripStrings.waitForReset
         waitButton.toolTip = LimitEscapeStripStrings.waitToolTip
 
+        bankedResetButton.isHidden = !offer.offersBankedReset
+        bankedResetButton.isEnabled = offer.offersContinuation && !offer.isBusy
+        if offer.busy == .useBankedReset {
+            bankedResetButton.title = LimitEscapeStripStrings.usingBankedReset
+        } else if let count = offer.bankedResetCount {
+            bankedResetButton.title = L10n.format("Use Reset · %lld", Int64(count))
+        } else {
+            bankedResetButton.title = LimitEscapeStripStrings.useBankedReset
+        }
+        bankedResetButton.toolTip = LimitEscapeStripStrings.bankedResetToolTip
+        configureActionLayout(twoRows: offer.offersBankedReset
+            && (offer.offersAccountEscape || offer.offersWaitForReset))
+
         applyTheme()
     }
 
@@ -308,7 +338,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             for: .horizontal
         )
 
-        for button in [continueButton, waitButton] {
+        for button in [continueButton, bankedResetButton, waitButton] {
             button.emphasis = .secondary
             button.translatesAutoresizingMaskIntoConstraints = false
             button.setContentHuggingPriority(.required, for: .horizontal)
@@ -316,20 +346,20 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         }
         continueButton.setAccessibilityIdentifier(LimitEscapeStripDefaults.continueIdentifier)
         waitButton.setAccessibilityIdentifier(LimitEscapeStripDefaults.waitIdentifier)
+        bankedResetButton.setAccessibilityIdentifier(LimitEscapeStripDefaults.bankedResetIdentifier)
 
-        // A stack rather than a constraint chain because either action can be absent, and a
-        // hidden view in a chain still holds its own gap open. The row carries two answers at
-        // most, a fixed pair, so a retained stack is the right shape here.
+        // A stack rather than a constraint chain because every answer can be absent. A banked
+        // reset makes a second action row instead of compressing three full verbs into one.
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = Design.Spacing.small
         actions.translatesAutoresizingMaskIntoConstraints = false
         actions.setContentHuggingPriority(.required, for: .horizontal)
         actions.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        // The immediate answer first and the deferred one after it: moving login carries on now,
-        // while waiting is what is left when nothing can. Reading order is the ranking.
-        actions.addArrangedSubview(continueButton)
-        actions.addArrangedSubview(waitButton)
+        immediateActions.orientation = .horizontal
+        immediateActions.alignment = .centerY
+        immediateActions.spacing = Design.Spacing.small
+        configureActionLayout(twoRows: false)
 
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
@@ -437,7 +467,8 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         // terminal's palette, which the app theme knows nothing about, so the ribbon has to own an
         // opaque pane-chrome ground and a closing rule.
         applySurface(fill: Design.Surface.background, radius: .fixed(0))
-        let rowHeight = LimitEscapeStripDefaults.rowHeight
+        let rowHeight = offer.map(LimitEscapeStripDefaults.rowHeight(for:))
+            ?? LimitEscapeStripDefaults.rowHeight
         if appliedRowHeight != rowHeight {
             appliedRowHeight = rowHeight
             minimumHeightConstraint.constant = rowHeight
@@ -517,6 +548,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             parts.append(actionTitle(for: offer))
         }
         if offer.offersWaitForReset { parts.append(LimitEscapeStripStrings.waitToolTip) }
+        if offer.offersBankedReset { parts.append(LimitEscapeStripStrings.bankedResetToolTip) }
         return parts.joined(separator: ". ")
     }
 
@@ -538,6 +570,34 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     }
 
     @objc private func waitPressed() { onWaitForReset?() }
+
+    @objc private func bankedResetPressed() { onUseBankedReset?() }
+
+    private func configureActionLayout(twoRows: Bool) {
+        for view in actions.arrangedSubviews {
+            actions.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for view in immediateActions.arrangedSubviews {
+            immediateActions.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        if twoRows {
+            immediateActions.addArrangedSubview(bankedResetButton)
+            immediateActions.addArrangedSubview(continueButton)
+            actions.orientation = .vertical
+            actions.alignment = .trailing
+            actions.addArrangedSubview(immediateActions)
+            actions.addArrangedSubview(waitButton)
+        } else {
+            actions.orientation = .horizontal
+            actions.alignment = .centerY
+            actions.addArrangedSubview(bankedResetButton)
+            actions.addArrangedSubview(continueButton)
+            actions.addArrangedSubview(waitButton)
+        }
+    }
 
     // MARK: - Pointer
 
@@ -578,6 +638,12 @@ enum LimitEscapeStripDefaults {
     /// is now pane chrome rather than one more queued row above a composer.
     static var rowHeight: CGFloat { PaneNoticeDefaults.bandHeight }
 
+    static func rowHeight(for offer: LimitEscapeStripView.Offer) -> CGFloat {
+        guard offer.offersBankedReset
+                && (offer.offersAccountEscape || offer.offersWaitForReset) else { return rowHeight }
+        return rowHeight + Design.Size.chipHeight + Design.Spacing.small
+    }
+
     /// The same ink-to-edge distance as the pane's other standing-condition ribbon.
     static let contentInset: CGFloat = PaneNoticeDefaults.contentInset
 
@@ -588,6 +654,7 @@ enum LimitEscapeStripDefaults {
     static let identifier = "composer.limit-escape"
     static let continueIdentifier = "composer.limit-escape.continue"
     static let waitIdentifier = "composer.limit-escape.wait"
+    static let bankedResetIdentifier = "composer.limit-escape.banked-reset"
     static let dismissIdentifier = "composer.limit-escape.dismiss"
 }
 
@@ -612,7 +679,15 @@ enum LimitEscapeStripStrings {
 
     static var waitingBusy: String { L10n.string("Scheduling…") }
 
+    static var useBankedReset: String { L10n.string("Use Reset") }
+
+    static var usingBankedReset: String { L10n.string("Using Reset…") }
+
     static var waitToolTip: String {
         L10n.string("Stop here and continue when the usage window resets")
+    }
+
+    static var bankedResetToolTip: String {
+        L10n.string("Spend one banked reset on this account")
     }
 }

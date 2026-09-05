@@ -179,7 +179,7 @@ Components so far:
 | `PaneFooterView` | The bottom band of a pane: hairline, band height, corner-aware insets, controls aligned by their ink (`OpticalInsetProviding`) horizontally and — for loose text — vertically: a bare label sits on the first titled control's baseline (`TextBaselineProviding`, `PaneBandTextAlignment`) rather than on its own centre, because two point sizes centred never share one. See [2026-08-15 below](#2026-08-15--a-band-centred-its-text-and-centring-is-not-a-line). |
 | `PaneFoldDivider` | The fold *inside* a pane, where the two halves are not both flexible — the attachments chronology above its preview. The rule keeps the theme's weight at the top edge and the band under it is the pane's own gap made hittable, so a seam becomes a grip without anything below it moving. It reports travel in points and nothing else: only the host knows what floor and ceiling the travel is answered against, and the host is also where a stored position is clamped. The seam takes the accent wherever a drag would attach — pointer, hand or keyboard focus — which is `ThemedSplitView`'s answer, and the reason focus is shown that way rather than as a ring around a 7pt band. A press takes the focus so the arrows work on the fold the hand just left, and that focus is drawn only if it arrived from the keyboard (`KeyboardFocusOrigin`, as the media canvases do): drawn for a click too, every drag ended with the seam still lit, the one divider in the window that did — the split and the shell drawer never take focus at all. Arrow keys and the splitter role's increment/decrement move it too; a double-click asks the host to place it again. Not `NSSplitView`: one of the halves states a content-derived height, which a split view has nowhere to say. **Where it reaches its pane's own edge, that end is a corner and holds both seams**: a press within `cornerReach` asks the enclosing `ThemedSplitView` for the divider beside the pane and drags it across while the fold travels down, so the panel gets wider and the chronology taller in one movement. Resolved live rather than configured — a fold inset from the edge, or beside a collapsed pane, has no corner — and pointer-only, since both seams are already draggable on their own. The gallery story stands in a real split view so the corner can be tried at all. |
 | `PaneHeaderView` | The footer's mirror at a pane's top. Its live height is the content pane's header-strip measure (`PaneHeaderDefaults.height` reads it): row, equal top and bottom air, then the theme's rule. It remeasures on a theme change, so the two panes' separators land on one line without using their ink as spacing. It states the footer's text-baseline rule too. |
-| `ControlRowView` | Those two bands' rule for a row that belongs to **content** rather than to chrome: a leading run, a trailing run, one shared centreline, and one shared height. The height is the row's to state and the members' to take — every `ControlRowMember` (`ChipView`, `ThemedButton`, `ThemedIconButton`, `ThemedSegmentedControl`, `ControlButtonGroupView`) is handed a `ControlRowMetrics` and resizes to it, glyph included, and only a row can make one. `.compact` resolves to the material's `choiceHeight`, so a style switch relevels the whole row rather than half of it. The runs are pinned to opposite edges with a real inequality between them, and the outer controls' full hover/focus silhouettes stay inside the row's edges. See [2026-08-05 below](#2026-08-05--a-row-of-controls-had-no-owner). |
+| `ControlRowView` | Those two bands' rule for a row that belongs to **content** rather than to chrome: a leading run, a trailing run, one shared centreline, and one shared height. The height is the row's to state and the members' to take — every `ControlRowMember` (`ChipView`, `ThemedButton`, `ThemedIconButton`, `ThemedSegmentedControl`, `ControlButtonGroupView`) is handed a `ControlRowMetrics` and resizes to it, glyph included, and only a row can make one. `.compact` resolves to the material's `choiceHeight`, so a style switch relevels the whole row rather than half of it. The runs are pinned to opposite edges with a real inequality between them, and the outer controls' full hover/focus silhouettes stay inside the row's edges. A row may instead **name one member as the one the slack belongs to** (`stretching:`), which is the shape a row built around a field has: the field is the row and the controls beside it are what it is narrowed by, so the spring is held at its floor and the named member hugs below everything else. See [2026-08-05 below](#2026-08-05--a-row-of-controls-had-no-owner) and [2026-09-05](#2026-09-05--searchs-header-was-three-controls-that-had-each-picked-their-own-height). |
 | `WindowTitleBandView` | The title band a chrome-takeover theme draws across the window's top (`WindowChromeStyle`, see [`window-chrome.md`](window-chrome.md)): active/inactive gradients and texture, full-width or compact leading-tab shape, optional app icon, leading or centred upright/italic title, trailing/split/bookended authored caption controls, and the titlebar's own gestures — a press drags the window, a double-click performs the user's System Settings choice. Application commands stay in `WindowCommandBandView` below. Not a control (its `interactiveComponent` exception records why); its buttons are. |
 | `WindowCommandBandView` | The button-face row beneath an app-drawn title bar, hosting the sidebar/history controls the native toolbar held. It keeps application commands out of title-bar geometry and uses ordinary chrome ink. Collapses with the title band in native dress. |
 | `WindowChromeButton` | A takeover window's Window menu/close/minimize/zoom/depth, one component for every role and glyph family (`squares`, `platinum`, `beos`, `openstep`, `irix`, `amiga`, `plain`) — the tab strip's "every" lesson applied to period chrome. Calls the *semantic* window operations, because the `perform*` forms animate a standard button a frameless window does not have and refuse outright; zoom follows the window and becomes Restore while maximized, Window menu opens app-owned `ThemedMenuPresenter` rows, and Workbench Depth orders the window behind its peers. Full `ThemedControl` contract: keyboard, focus ring, AX press. |
@@ -3570,3 +3570,66 @@ now take a group's breath (`Spacing.medium`) above a second heading: with the ro
 `SessionInfoRenderTests` renders the unfolded rows in both appearances, and
 `SessionInfoRowTests` pins the grouping, the bounds, the `~` boundary, the copy text, the fold
 surviving a reading and a rebuild, and the receipt saying each thing once.
+
+## 2026-09-05 — Search's header was three controls that had each picked their own height
+
+Universal Search was reported from a screenshot with two sentences: *this feels ugly and
+unthemed*, and *I can't close it with Escape*. Neither was a theme bug. The surface had been
+assembled out of themed components rather than composed of them, and every one of the four
+defects below is a place where something the app already owns was rebuilt by hand at the call
+site.
+
+**The header was an `NSStackView`, so each control chose its own height.** `ThemedSearchField`
+stands at `Design.Size.fieldHeight` (32); `ThemedSegmentedControl` and `ThemedButton` both stood
+at `Design.Size.chipHeight` (26). The scope run and the ✕ therefore floated three points clear of
+the query's top and bottom edges — and, exactly as on the Compare tab a month earlier, the
+mismatch was not a constant, because only one of those two numbers is authored by the theme.
+`ControlRowView` exists for this and `ControlRowScale.field` — *"a row that also holds a
+single-line text field"* — had been written for it and never used by anything. It is now the
+header, and the picture is level under every material.
+
+**A row can now say which member the slack belongs to.** The ordinary row is two runs pushed to
+opposite edges with a spring between them, which is right for chips and buttons and wrong for a
+palette: dropped into that shape the query held its placeholder's width and left a hole between
+the words and the scope run. `configure(leading:trailing:stretching:)` names one member instead,
+and the mechanism is two writes rather than a special case — the spring is *held at* its floor by
+an optional `.defaultHigh` constraint so there is slack to place at all, and the named member is
+put below every other hugging priority in the row so there is exactly one place to put it. Held
+optional, not required, so a row narrower than its own content still compresses into the pane the
+way `testAFullRowCompressesIntoTheNarrowestPaneRatherThanOverflowingIt` demands.
+
+**Escape belonged to one child rather than to the surface.** It was bound on the query field's
+`control(_:textView:doCommandBy:)` seam and nowhere else, so it closed Search from the one
+responder Search had placed and from none of the others — click a result and the table has the
+keyboard, tab to the scope run and a segment does, and the key then travelled a responder chain
+in which nothing had heard of the surface covering the window. This is the same defect
+`CompareInspectorView` shipped with, and it takes the same three overrides on the surface's own
+root: `cancelOperation(_:)` is the one that carries in the app, `keyDown` catches a control that
+passed the key up itself, and `performKeyEquivalent` is the route a fixture pressing Escape by
+hand goes through. A transient surface owns Escape; whichever child holds focus does not.
+
+**The list was a fixed 470 points with a required 160 under it.** A palette is the size of its
+answer, and this one was the size of the largest answer it could ever give: three matches drew
+about a hundred and eighty points of empty panel beneath them, which is the single largest thing
+in the screenshot the report came with. The list is now sized to the rows it is showing —
+`O(rows)` over the same capped array `reloadData` already walks — capped at the preferred height
+where it starts scrolling instead, and the old floor became a *crush* floor (`min(content,
+minimum)`) so a short answer is never padded up to it. The measure is re-taken on
+`AppThemeDidChange` beside the row heights, because a row's height is a live type measure.
+
+**A group name is a section start.** `Destinations`, `Conversations` and `Files` were plain
+labels centred in 30-point rows, so "Conversations" sat the same distance below the result above
+it as above the result below it and read as another entry rather than as the heading of what
+followed. They are `SearchListLabelRow`s now: taller rows with the words on the bottom, so the
+spare height becomes the section's air, and on the same leading edge as a result's title —
+`SearchResultRowView`'s own inset, which a label pinned to the row's edge missed by six points.
+The ✕ became `Emphasis.tertiary`, which is what the vocabulary has always said a close button is;
+it had been drawing a bordered button's plate in a row where the field and the scope run already
+carry one.
+
+`UniversalSearchRenderTests` renders the surface in four themes and pins each claim: Escape from
+the list, from a segment, from the close button and from the surface itself; the three header
+members on one height and one centreline; the query holding the header's spare width; and a short
+answer taking less than half the panel a full one does. `ControlRowTests` pins the stretching
+member — that it takes the slack, that its neighbours keep their own width, that a narrow pane
+still compresses, and that reconfiguring without it gives the slack back to the spring.

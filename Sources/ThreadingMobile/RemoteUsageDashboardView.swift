@@ -331,6 +331,8 @@ final class RemoteUsageDashboardModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var isLoadingLimit = false
     @Published private(set) var isLoadingMore = false
+    @Published private(set) var isUsingBankedReset = false
+    @Published private(set) var bankedResetStatusMessage: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var limitErrorMessage: String?
     @Published var selectedLimitID: String?
@@ -409,6 +411,103 @@ final class RemoteUsageDashboardModel: ObservableObject {
         }
     }
 
+    func prepareBankedReset(
+        seriesID: String
+    ) async -> RemoteBankedUsageResetOfferDTO? {
+        guard !isUsingBankedReset else { return nil }
+        isUsingBankedReset = true
+        bankedResetStatusMessage = nil
+        defer { isUsingBankedReset = false }
+        do {
+            if isDemo,
+               let series = limitSeries.first(where: { $0.id == seriesID }),
+               let count = series.bankedResetCount,
+               count > 0 {
+                return RemoteBankedUsageResetOfferDTO(
+                    seriesID: seriesID,
+                    accountName: series.accountName,
+                    availableCount: count,
+                    offerFingerprint: String(repeating: "d", count: 64),
+                    selectedCreditTitle: MobileL10n.string("Banked usage reset"),
+                    selectedCreditExpiresAt: series.nextBankedResetExpiresAt,
+                    letsProviderChooseCredit: false,
+                    eligibleWindowLabels: [series.windowLabel],
+                    owedContinuationCount: 1
+                )
+            }
+            return try await client.fetchBankedUsageResetOffer(seriesID: seriesID)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            limitErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func consumeBankedReset(
+        _ offer: RemoteBankedUsageResetOfferDTO,
+        days: Int
+    ) async {
+        guard !isUsingBankedReset else { return }
+        isUsingBankedReset = true
+        bankedResetStatusMessage = nil
+        defer { isUsingBankedReset = false }
+        do {
+            let result = isDemo
+                ? RemoteBankedUsageResetResponseDTO(
+                    outcome: .reset,
+                    remainingCreditCount: max(0, offer.availableCount - 1),
+                    releasedContinuationCount: offer.owedContinuationCount,
+                    hasVerifiedHeadroom: true,
+                    continuationReleaseFailed: false
+                )
+                : try await client.consumeBankedUsageReset(offer)
+            bankedResetStatusMessage = Self.bankedResetMessage(result)
+            guard !isDemo else { return }
+            await fetchDashboard(initial: false)
+            await loadLimit(seriesID: offer.seriesID, days: days, force: true)
+        } catch is CancellationError {
+            return
+        } catch {
+            limitErrorMessage = error.localizedDescription
+        }
+    }
+
+    private static func bankedResetMessage(
+        _ result: RemoteBankedUsageResetResponseDTO
+    ) -> String {
+        switch result.outcome {
+        case .reset:
+            if !result.hasVerifiedHeadroom {
+                return MobileL10n.string(
+                    "Codex used the reset, but the account still reports a full usage window. Waiting chats were not released."
+                )
+            }
+            if result.continuationReleaseFailed {
+                return MobileL10n.string(
+                    "Codex used the reset, but Threading could not release waiting continuations."
+                )
+            }
+            return result.releasedContinuationCount == 0
+                ? MobileL10n.string("Codex used the banked reset.")
+                : MobileL10n.string(
+                    "Codex used the reset · %lld continuations released.",
+                    Int64(result.releasedContinuationCount)
+                )
+        case .alreadyRedeemed:
+            if !result.hasVerifiedHeadroom {
+                return MobileL10n.string(
+                    "Codex confirmed that reset was already used, but the account still reports a full usage window."
+                )
+            }
+            return MobileL10n.string("Codex confirmed that reset was already used.")
+        case .nothingToReset:
+            return MobileL10n.string("Codex found no eligible limit to reset.")
+        case .noCredit:
+            return MobileL10n.string("Codex found no banked reset available.")
+        }
+    }
+
     private func fetchDashboard(initial: Bool) async {
         if initial { isLoading = true }
         defer { if initial { isLoading = false } }
@@ -448,6 +547,8 @@ struct RemoteUsageDashboardView: View {
     @State private var scope = MobileUsageScope.accounts
     @State private var breakdownKind = RemoteUsageBreakdownKindDTO.models
     @State private var selectedAccountID: String?
+    @State private var pendingBankedReset: RemoteBankedUsageResetOfferDTO?
+    @State private var isConfirmingBankedReset = false
 
     init(link: RemoteConnectionLink, isDemo: Bool, focus: MobileUsageAccountFocus? = nil) {
         self.isDemo = isDemo
@@ -1343,6 +1444,15 @@ struct RemoteUsageDashboardView: View {
                         limitChart(detail)
                         Divider().overlay(theme.divider)
                         limitSummaryRows(detail)
+                        if detail.series.canRedeemBankedReset == true {
+                            Divider().overlay(theme.divider)
+                            bankedResetButton(detail.series)
+                        }
+                        if let status = model.bankedResetStatusMessage {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(theme.secondaryLabel)
+                        }
                     } else if let message = model.limitErrorMessage {
                         Label {
                             Text(message)
@@ -1380,6 +1490,89 @@ struct RemoteUsageDashboardView: View {
         guard model.limit?.series.id == model.selectedLimitID,
               model.limit?.days == limitDays else { return nil }
         return model.limit
+    }
+
+    private func bankedResetButton(
+        _ series: RemoteUsageLimitSeriesSummaryDTO
+    ) -> some View {
+        Button {
+            actionTask?.cancel()
+            actionTask = Task {
+                guard let offer = await model.prepareBankedReset(seriesID: series.id) else { return }
+                pendingBankedReset = offer
+                isConfirmingBankedReset = true
+            }
+        } label: {
+            if model.isUsingBankedReset {
+                HStack {
+                    ProgressView()
+                    Text("Checking banked reset…")
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                Label("Use Banked Reset", systemImage: "arrow.counterclockwise.circle")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(theme.accent)
+        .disabled(model.isUsingBankedReset)
+        .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+        .themedConfirmationDialog(
+            "Use a banked reset?",
+            message: pendingBankedReset.map(bankedResetConfirmationMessage),
+            isPresented: $isConfirmingBankedReset,
+            actions: pendingBankedReset.map { offer in
+                [
+                    ThemedDialogAction("Use Banked Reset", role: .destructive) {
+                        actionTask?.cancel()
+                        actionTask = Task { await model.consumeBankedReset(offer, days: limitDays) }
+                    },
+                    ThemedDialogAction("Cancel", role: .cancel)
+                ]
+            } ?? [ThemedDialogAction("Cancel", role: .cancel)]
+        )
+    }
+
+    private func bankedResetConfirmationMessage(
+        _ offer: RemoteBankedUsageResetOfferDTO
+    ) -> String {
+        let count = MobileL10n.string(
+            "This permanently spends 1 of %lld banked resets for %@.",
+            Int64(offer.availableCount),
+            offer.accountName
+        )
+        let credit: String
+        if offer.letsProviderChooseCredit {
+            credit = MobileL10n.string(
+                "Codex did not report individual credits, so Codex will choose which reset to use."
+            )
+        } else {
+            let title = offer.selectedCreditTitle ?? MobileL10n.string("Banked usage reset")
+            let expiry = offer.selectedCreditExpiresAt.map {
+                MobileL10n.string("expires %@", exactDateTime($0))
+            } ?? MobileL10n.string("no expiry reported")
+            credit = MobileL10n.string("Credit: %@ · %@.", title, expiry)
+        }
+        let windows = offer.eligibleWindowLabels.isEmpty
+            ? MobileL10n.string("Eligible windows: determined by Codex.")
+            : MobileL10n.string(
+                "Eligible windows: %@.",
+                offer.eligibleWindowLabels.joined(separator: ", ")
+            )
+        let continuation = offer.owedContinuationCount == 0
+            ? MobileL10n.string("No chat message will be created or sent by this reset.")
+            : MobileL10n.string(
+                "%lld existing “continue on reset” messages for this account will be released only after Codex confirms new headroom. No message will be created or sent for any other chat.",
+                Int64(offer.owedContinuationCount)
+            )
+        return [
+            count,
+            credit,
+            windows,
+            MobileL10n.string("The next reset date for an affected window may move."),
+            continuation
+        ].joined(separator: "\n\n")
     }
 
     /// A snapshot that is recent, complete and not being replaced has nothing to say for itself.
@@ -2455,7 +2648,8 @@ enum RemoteUsageDemo {
             resetsAt: now + 3 * 86_400,
             windowDuration: 7 * 86_400,
             bankedResetCount: 2,
-            nextBankedResetExpiresAt: now + 28 * 86_400
+            nextBankedResetExpiresAt: now + 28 * 86_400,
+            canRedeemBankedReset: true
         ),
         .init(
             id: "codex|work|weekly",

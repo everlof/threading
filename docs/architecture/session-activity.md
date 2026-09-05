@@ -190,6 +190,18 @@ every connected phone. The other direction — a declared turn with no timer who
 is closed by `task_complete` through the same reader, which is otherwise inert because Codex
 raises `Stop` about three milliseconds *before* it writes that record.
 
+That reader cannot depend on another terminal repaint. Measured on 5 September 2026 in session
+`TAPPING`: the rollout appended `task_complete` and the matching durable turn checkpoint reached
+`complete` at 04:59:41, but the row still showed `working` when reopened twenty-one minutes later.
+The final repaint had already crossed the PTY, so the output-triggered scan that was meant to
+recover a lost relay was never scheduled again. A running Codex terminal therefore owns one
+FSEvents observer for its validated rollout. It filters sibling files on a utility queue and asks
+the existing capped, single-flight reader only after that exact rollout changes. There is no
+polling and no session-tree walk in the callback; one live process costs one dormant kernel
+subscription, while actual transcript work remains O(changed). The observer is armed before an
+initial read, closing the registration race, and lives between turns because goal mode may write
+its next `task_started` without a hook or user input. Process teardown releases it.
+
 **An ending followed by an automatic start is one published activity interval.** The protocol
 still has a real gap: on the measured goal continuation, `Stop` arrived at 13:12:00.931 and the
 next `task_started` at 13:12:01.177. Publishing that quarter-second as a completed off-screen turn
@@ -1057,10 +1069,11 @@ stays `working` forever; the same stale fact also keeps `watch_session` and sibl
 gates waiting.
 
 The `.transcriptInterruptedTurnRecord` capability gives Codex terminals this fallback. The
-controller remembers the hook's validated `transcript_path` and, after a PTY output burst settles,
-revalidates one `TranscriptFactReader` against it. The common path is a background `stat`; growth
-scans one bounded tail chunk, and the callback moves state only when the newest lifecycle boundary
-is the structured interruption for the tracker's active turn id. It never parses the red
+controller remembers the hook's validated `transcript_path`; an event on that exact rollout, an
+initial observer read, or a PTY output hint revalidates one `TranscriptFactReader` against it. The
+common path is a background `stat`; growth scans one bounded tail chunk, and the callback moves
+state only when the newest lifecycle boundary is the structured interruption for the tracker's
+active turn id. It never parses the red
 "Conversation interrupted" presentation string. Matching the id is load-bearing: the read is
 asynchronous, so a late result from turn A must not stop a newer turn B. The admitted edge settles
 through `SessionActivityTracker`, exactly like `Stop`, which is why the sidebar, alerts, control

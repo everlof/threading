@@ -141,6 +141,56 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertEqual(makeStore().messages(for: sessionID).map(\.id), [userPreset.id])
     }
 
+    func testBankedResetReleasesOnlyExistingOwedRecoveryContinuations() throws {
+        let store = makeStore()
+        let matching = SessionID()
+        let other = SessionID()
+        let armed = ScheduledMessage(
+            dueAt: now.addingTimeInterval(3_600),
+            target: .session(matching),
+            text: "continue one",
+            anchor: .usageWindowReset(windowID: "5h"),
+            purpose: .limitRecovery
+        )
+        let waiting = ScheduledMessage(
+            dueAt: now.addingTimeInterval(7_200),
+            target: .session(matching),
+            text: "continue two",
+            anchor: .usageWindowReset(windowID: "7d"),
+            state: .waiting("busy"),
+            purpose: .limitRecovery
+        )
+        let userMessage = message(
+            to: matching,
+            text: "ordinary",
+            anchor: .usageWindowReset(windowID: "5h")
+        )
+        let otherRecovery = ScheduledMessage(
+            dueAt: now.addingTimeInterval(3_600),
+            target: .session(other),
+            text: "other",
+            anchor: .usageWindowReset(windowID: "5h"),
+            purpose: .limitRecovery
+        )
+        for value in [armed, waiting, userMessage, otherRecovery] {
+            try store.add(value, now: now).get()
+        }
+
+        let releaseAt = now.addingTimeInterval(30)
+        XCTAssertEqual(
+            store.releaseLimitRecoveryContinuations(for: [matching], dueAt: releaseAt),
+            2
+        )
+        XCTAssertEqual(store[armed.id]?.dueAt, releaseAt)
+        XCTAssertEqual(store[waiting.id]?.dueAt, releaseAt)
+        XCTAssertEqual(store[armed.id]?.state, .armed)
+        XCTAssertEqual(store[waiting.id]?.state, .armed)
+        XCTAssertEqual(store[armed.id]?.text, "continue one")
+        XCTAssertEqual(store[userMessage.id]?.dueAt, userMessage.dueAt)
+        XCTAssertEqual(store[otherRecovery.id]?.dueAt, otherRecovery.dueAt)
+        XCTAssertEqual(makeStore()[waiting.id]?.dueAt, releaseAt)
+    }
+
     func testAReservedSessionStartIsAddressableByItsConversationID() throws {
         let store = makeStore()
         let projectID = ProjectID()

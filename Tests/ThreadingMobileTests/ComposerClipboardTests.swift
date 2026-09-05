@@ -244,6 +244,45 @@ final class ComposerTextViewPasteTests: XCTestCase {
         )
     }
 
+    /// The system keyboard implements a held Backspace as repeated `deleteBackward()` calls on
+    /// one uninterrupted editing session. The composer's render after each deletion must not
+    /// reapply the same editability value and terminate that sequence after its first callback.
+    func testRepeatedBackspaceKeepsOneNativeEditingSession() throws {
+        let model = RemoteAppModel()
+        model.startDemo()
+        let controller = RemoteConversationViewController(
+            connection: RemoteSessionConnection.demoConversation(),
+            model: model,
+            continuity: MobileSessionContinuityStore(),
+            notifications: RemoteNotificationManager(),
+            inheritedTheme: RemoteThemePalette(nil)
+        )
+        let window = makeWindow(
+            rootViewController: controller,
+            size: CGSize(width: 402, height: 874)
+        )
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        textView.text = "abcdefgh"
+        textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        for _ in 0..<4 {
+            textView.deleteBackward()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+
+            XCTAssertFalse(
+                textView.setEditableIfNeeded(true),
+                "an unchanged availability refresh reached the native input session"
+            )
+            XCTAssertTrue(textView.isFirstResponder)
+        }
+
+        XCTAssertEqual(textView.text, "abcd")
+    }
+
     /// The compact prompt shares a row with two centred controls. Its first line therefore owns
     /// equal top and bottom air inside that same compact row rather than starting at its top.
     func testNewSessionDraftCentersOneLineInTheCompactComposerRow() throws {
@@ -515,6 +554,22 @@ final class ComposerTextViewPasteTests: XCTestCase {
         let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
         window.frame = CGRect(origin: .zero, size: size)
         window.rootViewController = host
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        return window
+    }
+
+    private func makeWindow(
+        rootViewController: UIViewController,
+        size: CGSize
+    ) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = rootViewController
         window.makeKeyAndVisible()
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         window.layoutIfNeeded()

@@ -183,6 +183,83 @@ final class RemoteDiagnosticsTests: XCTestCase {
         XCTAssertEqual(journal.records().last?.fields["transport"], "websocket")
     }
 
+    func testRecentRecordsStopsAtNewestRequestedCountAcrossDays() async throws {
+        let records = (1...4).map { index in
+            RemoteDiagnosticRecord(
+                timestamp: "2026-09-0\(index)T00:00:00Z",
+                source: .iOSClient,
+                level: .info,
+                event: .socketConnected,
+                fields: ["trace": "trace-\(index)"]
+            )
+        }
+        try writeJournal(records.prefix(2), day: "2026-09-04")
+        try writeJournal(records.suffix(2), day: "2026-09-05")
+        let journal = RemoteDiagnosticJournal(
+            directory: directory,
+            source: .iOSClient,
+            maximumReportRecords: 2
+        )
+
+        let recent = await journal.recentRecords(maximumCount: 2)
+        let report = await journal.supportReportAsync(
+            appVersion: "1",
+            appBuild: "2",
+            operatingSystem: "iOS",
+            protocolVersion: 3,
+            minimumProtocolVersion: 2
+        )
+
+        XCTAssertEqual(recent.map { $0.fields["trace"] }, ["trace-3", "trace-4"])
+        XCTAssertEqual(report.records, recent)
+    }
+
+    func testAsyncReportReadsAnOversizedJournalOnlyFromItsBoundedTail() async throws {
+        let file = directory.appendingPathComponent("remote-diagnostics-2026-09-05.jsonl")
+        XCTAssertTrue(FileManager.default.createFile(atPath: file.path, contents: Data()))
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(
+            atOffset: UInt64(RemoteDiagnosticJournal.maximumJournalReadBytes + 1_024)
+        )
+        try handle.seekToEnd()
+        let expected = RemoteDiagnosticRecord(
+            timestamp: "2026-09-05T00:00:00Z",
+            source: .iOSClient,
+            level: .warning,
+            event: .socketFailed,
+            fields: ["code": "url.-1009"]
+        )
+        try handle.write(contentsOf: Data([0x0A]))
+        try handle.write(contentsOf: JSONEncoder().encode(expected))
+        try handle.write(contentsOf: Data([0x0A]))
+        try handle.close()
+
+        let journal = RemoteDiagnosticJournal(directory: directory, source: .iOSClient)
+        let report = await journal.supportReportAsync(
+            appVersion: "1",
+            appBuild: "2",
+            operatingSystem: "iOS",
+            protocolVersion: 3,
+            minimumProtocolVersion: 2
+        )
+
+        XCTAssertEqual(report.records, [expected])
+    }
+
+    private func writeJournal<S: Sequence>(
+        _ records: S,
+        day: String
+    ) throws where S.Element == RemoteDiagnosticRecord {
+        var data = Data()
+        for record in records {
+            data.append(try JSONEncoder().encode(record))
+            data.append(0x0A)
+        }
+        try data.write(
+            to: directory.appendingPathComponent("remote-diagnostics-\(day).jsonl")
+        )
+    }
+
     func testJournalReportsContentFreeStorageFailureAndRecovery() throws {
         let blocked = directory.appendingPathComponent("blocked")
         try Data("not-a-directory".utf8).write(to: blocked)

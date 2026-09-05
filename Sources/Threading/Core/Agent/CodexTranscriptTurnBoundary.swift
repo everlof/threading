@@ -156,6 +156,9 @@ enum CodexTranscriptTurnBoundary {
 // MARK: - Defaults
 
 enum CodexTurnBoundaryDefaults {
+    /// FSEvents only batches write notifications for this long. The transcript reader's larger
+    /// quiet edge below still coalesces the actual stat and bounded tail scan.
+    static let observationLatency: TimeInterval = 0.05
     static let quietDelay: TimeInterval = 0.5
     /// Codex goal mode opened its measured continuation 246 ms after `Stop`. Keep the published
     /// turn open long enough for the rollout's `task_started` record to cross the existing

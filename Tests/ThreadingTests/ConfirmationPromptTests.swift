@@ -62,6 +62,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "stopSessionProcess",
             "takeOverSingleInstanceLock",
             "endOrphanedAgentProcesses",
+            "consumeBankedUsageReset",
             "grantBrowserOriginAccess",
             "approveSensitiveBrowserAction",
             "approveToolPermission",

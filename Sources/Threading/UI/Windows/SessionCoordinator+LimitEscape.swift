@@ -55,6 +55,61 @@ extension SessionCoordinator {
         performLimitEscape(for: sessionID, to: accountID, trigger: .policy)
     }
 
+    /// Spends a banked reset on the refused login itself. It deliberately creates no
+    /// continuation: only already-owed `continue on reset` records are released by the core
+    /// service after Codex's authoritative post-consume read shows headroom.
+    func performBankedUsageReset(for sessionID: SessionID) {
+        let store = LimitEscapeSuggestionStore.shared
+        guard let suggestion = store.offer(for: sessionID),
+              suggestion.offersBankedReset,
+              !suggestion.isBusy,
+              let session = environment.projectStore.session(withID: sessionID),
+              let account = AgentAccountDiscovery.account(
+                  for: session.kind,
+                  handle: session.accountHandle
+              ), account.provider.supports(.bankedUsageReset) else { return }
+
+        store.setBusy(.useBankedReset, for: sessionID)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let offer = try await BankedUsageResetService.shared.prepare(account: account)
+                guard await confirmBankedUsageReset(offer) else {
+                    store.setBusy(nil, for: sessionID)
+                    return
+                }
+                let result = try await BankedUsageResetService.shared.redeem(
+                    account: account,
+                    offer: offer
+                )
+                switch result.outcome {
+                case .reset, .alreadyRedeemed where result.hasVerifiedHeadroom:
+                    store.clear(sessionID)
+                case .reset, .alreadyRedeemed, .nothingToReset, .noCredit:
+                    store.note(
+                        problem: BankedUsageResetConfirmation.resultMessage(result),
+                        for: sessionID
+                    )
+                }
+                toastPresenter(ToastRequest(
+                    message: BankedUsageResetConfirmation.resultMessage(result),
+                    identifier: "sidebar.toast.banked-usage-reset"
+                ))
+            } catch {
+                store.note(problem: error.localizedDescription, for: sessionID)
+            }
+        }
+    }
+
+    private func confirmBankedUsageReset(_ offer: BankedUsageResetOffer) async -> Bool {
+        await withCheckedContinuation { continuation in
+            ConfirmationAlert.ask(
+                BankedUsageResetConfirmation.request(for: offer),
+                in: container.view.window
+            ) { continuation.resume(returning: $0) }
+        }
+    }
+
     private func performLimitEscape(
         for sessionID: SessionID,
         to requestedAccountID: AccountID?,
