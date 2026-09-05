@@ -3949,6 +3949,7 @@ final class RemoteAppModel: ObservableObject {
         )
     }
 
+#if DEBUG
     static func marketingTerminalSession(
         provider: MobileMarketingTerminalFixture.Provider,
         now: Double
@@ -4112,6 +4113,7 @@ final class RemoteAppModel: ObservableObject {
             )
         }
     }
+#endif
 
     private static var demoResponse: RemoteMeDTO {
         let now = Date().timeIntervalSince1970
