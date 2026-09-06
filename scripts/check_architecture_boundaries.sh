@@ -7,6 +7,15 @@ script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
 failed=0
 
+if ! python3 "${script_directory}/check_transcript_boundaries.py" "${repository_directory}"; then
+  failed=1
+fi
+
+if ! python3 "${script_directory}/tests/test_transcript_boundaries.py"; then
+  echo "architecture-boundary: transcript source checker regression tests failed" >&2
+  failed=1
+fi
+
 if ! python3 "${script_directory}/generate_diagnostic_contract.py" \
     --root "${repository_directory}" --check; then
   echo "architecture-boundary: regenerate the diagnostic contract projections" >&2
@@ -93,6 +102,21 @@ fi
 if ! python3 "${script_directory}/tests/test_navigator_fact_parity.py"; then
   echo "architecture-boundary: navigator fact parity checker regression tests failed" >&2
   failed=1
+fi
+
+# The event socket's reconnect counter is reset by the socket's first frame and by the socket's
+# owner ending it, and by nothing else. A catalogue answer used to reset it too, so a socket
+# failing every second beside a `304` every second never backed off (the 2026-09-06 iOS report;
+# docs/REMOTE_ACCESS.md, "the sockets follow the route that answered last"). Counted rather than
+# named, because the sites are statements inside one file and a name would drift.
+remote_app_model="${repository_directory}/Sources/ThreadingMobile/RemoteAppModel.swift"
+socket_recovery_resets="$(grep -cE '^[[:space:]]+connectionRecoveryAttempt = 0$' "${remote_app_model}" || true)"
+if [[ "${socket_recovery_resets}" != "2" ]]; then
+  echo "architecture-boundary: connectionRecoveryAttempt is reset at ${socket_recovery_resets} site(s); exactly 2 are allowed —" >&2
+  echo "  the socket's first frame and disconnectThemeEvents. A catalogue answer is not a socket hello." >&2
+  failed=1
+else
+  echo "socket-recovery-reset: clean"
 fi
 
 tool_handlers=(

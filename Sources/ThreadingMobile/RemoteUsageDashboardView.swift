@@ -1514,8 +1514,10 @@ struct RemoteUsageDashboardView: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(theme.accent)
+        .buttonStyle(MobileThemedActionButtonStyle(
+            kind: .primary,
+            theme: theme
+        ))
         .disabled(model.isUsingBankedReset)
         .frame(minHeight: MobileDesign.Size.minimumTapTarget)
         .themedConfirmationDialog(

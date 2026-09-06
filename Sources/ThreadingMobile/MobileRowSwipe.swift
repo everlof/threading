@@ -41,9 +41,43 @@ struct MobileRowSwipeAction {
 /// So the gesture is ours. The part worth testing is arithmetic rather than UIKit: how far the
 /// row follows a finger, and what letting go of it means.
 enum MobileRowSwipe {
-    /// The resting width of the revealed button: one tap target plus the air a word needs
-    /// under a glyph.
-    static let actionWidth: CGFloat = 92
+    /// The resting width of the revealed button: wider than one tap target, but still a compact
+    /// action beside a two-line dashboard row. The glyph and caption keep this fixed slot while
+    /// the plate beneath them expands with a full swipe, so neither grows or wanders with the
+    /// finger.
+    static let actionWidth: CGFloat = 76
+
+    /// A revealed action has two geometries: the plate follows every point the row uncovers,
+    /// while the tappable content keeps one trailing slot. Keeping that distinction as value
+    /// geometry prevents a partial reveal from narrowing and wrapping the action's title.
+    struct ActionLayout: Equatable {
+        let backdrop: CGRect
+        let control: CGRect
+
+        /// The fixed trailing control expressed inside the clipped revealed plate.
+        var controlInBackdrop: CGRect {
+            control.offsetBy(dx: -backdrop.minX, dy: -backdrop.minY)
+        }
+    }
+
+    static func actionLayout(in bounds: CGRect, revealed: CGFloat) -> ActionLayout {
+        let visibleWidth = min(bounds.width, max(0, revealed))
+        let controlWidth = min(bounds.width, actionWidth)
+        return ActionLayout(
+            backdrop: CGRect(
+                x: bounds.maxX - visibleWidth,
+                y: bounds.minY,
+                width: visibleWidth,
+                height: bounds.height
+            ),
+            control: CGRect(
+                x: bounds.maxX - controlWidth,
+                y: bounds.minY,
+                width: controlWidth,
+                height: bounds.height
+            )
+        )
+    }
 
     /// Past this much of the row's own width, letting go performs the action instead of resting
     /// open — UIKit's full swipe, which is the gesture that people who swipe already know.
@@ -278,9 +312,9 @@ private struct MobileRowSwipeModifier: ViewModifier {
         Button {
             perform(action)
         } label: {
-            VStack(spacing: MobileDesign.Spacing.tight) {
+            VStack(spacing: MobileDesign.Spacing.hairline) {
                 Image(systemName: action.systemImage)
-                    .font(.body)
+                    .font(.caption.weight(.medium))
                 Text(action.title)
                     .font(.caption2)
                     .lineLimit(1)
@@ -291,8 +325,9 @@ private struct MobileRowSwipeModifier: ViewModifier {
         }
         .buttonStyle(.plain)
         .foregroundStyle(ink(for: action))
-        .frame(width: max(0, revealed))
+        .frame(width: MobileRowSwipe.actionWidth)
         .frame(maxHeight: .infinity)
+        .frame(width: max(0, revealed), alignment: .trailing)
         .background(armed ? theme.selection : theme.controlResting)
         .clipped()
         .accessibilityHidden(revealed <= 0)

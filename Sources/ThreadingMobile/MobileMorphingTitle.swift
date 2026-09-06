@@ -257,6 +257,19 @@ final class MobileMorphingTitleLabel: UIView {
         label.stopFade()
     }
 
+    /// Clears a recycled host's presentation before it is assigned another identity.
+    ///
+    /// A non-animated text replacement normally settles an in-flight morph. It cannot do so
+    /// when the next record happens to have the same title, because LabelMorph correctly treats
+    /// assigning the same string as a no-op. Clearing at the reuse boundary makes identity and
+    /// animation ownership agree even in that case.
+    func resetForReuse() {
+        label.setText("", animated: false)
+        presentedTitle = ""
+        accessibilityLabel = nil
+        invalidateIntrinsicContentSize()
+    }
+
     var isAnimatingTitleForTesting: Bool {
         layer.sublayers?.contains(where: Self.hasAnimations) == true
     }

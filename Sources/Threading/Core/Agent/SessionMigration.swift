@@ -428,6 +428,19 @@ enum SessionMigration {
 
     // MARK: - Move
 
+    static func destinationTranscript(
+        for session: AgentSession,
+        in project: Project,
+        account: AgentAccount,
+        accountRelativeDestination: URL
+    ) -> URL {
+        guard session.kind.supports(.checkoutScopedConversationStorage),
+              let transcriptID = session.resumeState.transcriptID
+        else { return accountRelativeDestination }
+        return ClaudeTranscript.storageURL(sessionID: transcriptID, account: account, in: project)
+            ?? accountRelativeDestination
+    }
+
     /// Copies the conversation into the target account and re-points the session at it, so the
     /// next launch resumes there. Non-destructive: the original transcript is left in place, so
     /// a move can be undone by moving back.
@@ -490,14 +503,17 @@ enum SessionMigration {
             ))
         }
 
-        // The layout under a config directory is identical between accounts, so the destination
-        // is the source with its account-directory prefix swapped. This holds for Claude's
-        // `projects/<slug>/` and Codex's dated `sessions/` path alike.
-        let destination = relativeComponents.reduce(
+        // A live Claude transcript may still belong to the original project slug. Install its
+        // complete contents where the destination launch will look, not under that old slug.
+        let accountRelativeDestination = relativeComponents.reduce(
             URL(fileURLWithPath: account.configPath, isDirectory: true)
         ) { partial, component in
             partial.appendingPathComponent(component, isDirectory: false)
         }
+        let destination = destinationTranscript(
+            for: session, in: project, account: account,
+            accountRelativeDestination: accountRelativeDestination
+        )
 
         // A live process still belongs to the old account and is still writing the transcript,
         // so it is torn down before the file is copied.

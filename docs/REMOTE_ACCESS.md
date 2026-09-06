@@ -240,6 +240,44 @@ and the TLS status beneath the error (`trust.notPinned`, `trust.accepted:tls.-98
 difference between a pin this phone never registered and a listener the Mac is not actually
 serving on — the two fixes the audit could not choose between.
 
+**The sockets follow the route that answered last, and a tunnel that has ended is not a route.**
+The dashboard's event socket, every session socket and the client a mutation or a reconnect
+starts from take the route `lastConnection` names — the one the catalogue came over — through
+`MobileLiveRoutePolicy`, pure and unit-tested. A hosted tunnel carries them only when hosted is
+what answered, and only while the tunnel stands. The rule used to be "hosted whenever a tunnel
+has been prepared", and how it survived three weeks is the part worth keeping. It arrived with
+hosted access on 12 August, when a read was one sequential walk that tried the tunnel first, so a
+prepared tunnel and the route that answered were nearly always the same thing. The route race of
+21 August made reads first-to-answer and tore a losing tunnel down, which hid the rule rather than
+fixing it: every socket recovery ran the race, and a direct winner took the stale tunnel with it.
+On 22 August the socket's own attempt counter became `connectionRecoveryAttempt`, shared with the
+dashboard's recovery card, and a catalogue success began resetting it, because for the card a
+catalogue is "we are back". The conditional refresh of 5 September then made socket recovery one
+`304` request on the warm route, without the race and its teardown, and the mutation walk, which
+still prepares a tunnel for every mutation and adopts it, was left as the only thing setting the
+socket route. The next day the phone was in the loop. The 2026-09-06 report is what that costs.
+Every second, for as long as the journal reached back, the event socket dialled the hosted
+loopback origin and failed in 20 ms (`url.-1004`: nothing listening), its recovery ran one
+conditional refresh over Tailscale that answered `304`, and the socket dialled the loopback again
+at attempt 1. The dashboard showed every row, because the catalogue was fine; no chat would open,
+because the session sockets took the same dead route; a force quit, which forgets the tunnel, was
+the only way out. Three things were wrong and each is now its own boundary. The tunnel behind
+the origin had ended and nothing on the phone knew: `PeerHostedDeviceTunnel` now watches its
+transport, stops itself — closing the listener, so a dial refuses at once rather than hanging —
+and reports `isActive`, which travels with the origin as `HostedRemoteRoute`;
+`HostedRemoteConnectionManager` never hands out an ended tunnel and negotiates again in its
+place, and the model's readers treat one as no hosted route. The socket route was chosen by the
+tunnel's presence rather than by the answer, which the policy above ends. And every `304` reset
+the socket's reconnect counter, so the backoff promised in the diagnostics section never grew
+past one second: the counter is reset by a frame on the socket and by nothing else, so a socket
+that keeps failing beside a healthy REST route now backs off to the sixty-second
+ceiling. `socketFailed … transport: hosted, code: url.-1004` beside `hostRefreshSucceeded …
+transport: tailscale, status: 304`, repeating, is the signature to look for in an older build.
+The boundaries: `MobileLiveRoutePolicyTests` and `MobileSocketRecoveryBackoffTests` in the
+`software` connectivity lane, `PeerHostedTunnelLifetimeTests` in the package's own suite,
+`HostedRouteMirror` as the only reader of the stored hosted route, and an architecture check that
+counts the places the socket counter may be reset.
+
 The body itself is encoded once per catalogue edition and authorization on a worker, never on the
 main queue, and served gzip-compressed to any client whose `Accept-Encoding` allows it, which
 `URLSession` and every browser do by default. See the mobile dashboard scaling contract in

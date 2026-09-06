@@ -353,8 +353,11 @@ private struct RemoteExtensionNodeView: View {
         switch role {
         case .primary:
             Button(title) { onEvent(id, nil) }
-                .buttonStyle(.borderedProminent)
-                .tint(theme.accent)
+                .buttonStyle(MobileThemedActionButtonStyle(
+                    kind: .primary,
+                    theme: theme,
+                    width: .intrinsic
+                ))
                 .disabled(!isEnabled)
                 .accessibilityIdentifier("extension.action.\(id)")
         case .destructive:

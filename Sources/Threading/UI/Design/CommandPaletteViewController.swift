@@ -46,6 +46,7 @@ final class CommandPaletteViewController: NSViewController {
     nonisolated(unsafe) private var keyMonitor: Any?
     private var presentation: InWindowOverlay.Presentation?
     private weak var presentationWindow: NSWindow?
+    private weak var previousFirstResponder: NSResponder?
     private let appEvents = AppEventObservations()
 
     var onDismiss: (() -> Void)?
@@ -185,6 +186,16 @@ final class CommandPaletteViewController: NSViewController {
 
     func present(in window: NSWindow) {
         _ = view
+        // A refused command reopens this same presentation. Keep the original keyboard owner,
+        // not the palette's reused field editor, across that round trip.
+        if presentationWindow == nil {
+            if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor,
+               let control = editor.delegate as? NSControl {
+                previousFirstResponder = control
+            } else {
+                previousFirstResponder = window.firstResponder
+            }
+        }
         presentationWindow = window
         presentation = InWindowOverlay.install(view, in: window) { [weak self] in
             self?.dismiss()
@@ -197,8 +208,10 @@ final class CommandPaletteViewController: NSViewController {
     }
 
     func dismiss() {
+        guard presentationWindow != nil else { return }
         removePresentation()
         presentationWindow = nil
+        previousFirstResponder = nil
         onDismiss?()
     }
 
@@ -207,6 +220,14 @@ final class CommandPaletteViewController: NSViewController {
         keyMonitor = nil
         presentation?.remove()
         presentation = nil
+        // Restore before dispatching a command too: responder-chain commands need their source,
+        // and a command that opens another surface gets to choose its own new focus afterwards.
+        if let window = presentationWindow,
+           let responder = previousFirstResponder,
+           let view = responder as? NSView, view.window === window,
+           !view.isHiddenOrHasHiddenAncestor {
+            window.makeFirstResponder(responder)
+        }
     }
 
     private func makeFooter() -> NSView {
@@ -459,6 +480,7 @@ final class CommandPaletteViewController: NSViewController {
         switch invokeRequest(request) {
         case .invoked:
             presentationWindow = nil
+            previousFirstResponder = nil
             onDismiss?()
         case .refused:
             SystemAlert.refuse()
@@ -592,6 +614,7 @@ final class CommandPaletteViewController: NSViewController {
     func moveSelectionForTesting(by offset: Int) { moveSelection(by: offset) }
     func confirmSelectionForTesting() { confirmSelection() }
     func returnToCommandsForTesting() { returnToCommands() }
+    func handleKeyForTesting(_ event: NSEvent) -> Bool { handleKey(event) }
 }
 
 extension CommandPaletteViewController: NSTextFieldDelegate {

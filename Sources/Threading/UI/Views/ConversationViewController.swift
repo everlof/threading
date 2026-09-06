@@ -662,6 +662,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         appEvents.observe(CustomLimitsDidChange.self) { [weak self] _ in
             self?.refreshLimitEscapeStrip()
         }
+        appEvents.observe(AgentModelsDidChange.self) { [weak self] _ in
+            self?.refreshConversationControls()
+        }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
             self?.refreshLimitEscapeStrip()
         }
@@ -1039,14 +1042,15 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                           let transcriptAccount = AgentAccountDiscovery.account(
                               for: current.kind,
                               handle: current.accountHandle
-                          ), let directory = ClaudeTranscript.subagentsDirectory(
+                          ), let root = SessionTranscript.url(
                               sessionID: transcriptID,
-                              account: transcriptAccount,
-                              in: project
+                              for: current,
+                              in: project,
+                              account: transcriptAccount
                           ) else { return nil }
                     return ClaudeSubagentTranscriptPlan(
                         rootThreadID: transcriptID.rawValue,
-                        directory: directory
+                        directory: ClaudeTranscript.subagentsDirectory(forRoot: root)
                     )
                 },
                 hostPlan: hostPlan,

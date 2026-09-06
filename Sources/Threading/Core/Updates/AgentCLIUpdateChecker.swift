@@ -84,7 +84,7 @@ struct AgentCLIUpdateDefinition: Equatable, Sendable {
     let versionArguments: [String]
     let source: AgentCLIReleaseSource
     let comparison: AgentCLIVersionComparison
-    let updateCommand: String
+    let updateArguments: [String]
 }
 
 extension AgentKind {
@@ -102,7 +102,7 @@ extension AgentKind {
                 versionArguments: ["--version"],
                 source: .npm(packageName: "@anthropic-ai/claude-code"),
                 comparison: .semantic,
-                updateCommand: "claude update"
+                updateArguments: ["update"]
             )
         case .codex:
             return AgentCLIUpdateDefinition(
@@ -112,7 +112,7 @@ extension AgentKind {
                 versionArguments: ["--version"],
                 source: .npm(packageName: "@openai/codex"),
                 comparison: .semantic,
-                updateCommand: "codex update"
+                updateArguments: ["update"]
             )
         case .grok:
             return AgentCLIUpdateDefinition(
@@ -122,7 +122,7 @@ extension AgentKind {
                 versionArguments: ["version"],
                 source: .npm(packageName: "@xai-official/grok"),
                 comparison: .semantic,
-                updateCommand: "grok update"
+                updateArguments: ["update"]
             )
         case .openCode:
             return AgentCLIUpdateDefinition(
@@ -132,7 +132,7 @@ extension AgentKind {
                 versionArguments: ["--version"],
                 source: .npm(packageName: "opencode-ai"),
                 comparison: .semantic,
-                updateCommand: "opencode upgrade"
+                updateArguments: ["upgrade"]
             )
         case .cursor:
             return AgentCLIUpdateDefinition(
@@ -142,7 +142,7 @@ extension AgentKind {
                 versionArguments: ["--version"],
                 source: .cursorInstaller,
                 comparison: .datedBuild,
-                updateCommand: "cursor-agent update"
+                updateArguments: ["update"]
             )
         }
     }
@@ -160,12 +160,26 @@ struct AgentCLIInstalledTool: Equatable, Sendable {
     let version: String
 }
 
+/// One CLI as resolved through the user's login environment.
+///
+/// `executablePath` is absolute so execution never asks a different shell to interpret PATH.
+/// The PATH itself travels with it because several provider launchers use `/usr/bin/env` in
+/// their shebang and therefore still need the interpreter directories their login shell exports.
+struct ResolvedAgentCLI: Equatable, Sendable {
+    let executablePath: String
+    let effectivePATH: String
+    let version: String
+}
+
 struct AgentCLIUpdate: Equatable, Sendable {
     let id: String
     let displayName: String
+    let executable: String
+    let versionArguments: [String]
+    let comparison: AgentCLIVersionComparison
     let installedVersion: String
     let latestVersion: String
-    let updateCommand: String
+    let updateArguments: [String]
 }
 
 struct AgentCLIUpdateFailure: Equatable, Sendable {
@@ -179,6 +193,8 @@ struct AgentCLIUpdateFailure: Equatable, Sendable {
         case versionCommandFailed(status: Int32?)
         case versionOutputTooLarge
         case unreadableVersionOutput
+        case loginEnvironmentUnavailable
+        case executableNotFound
         case transport
         case httpStatus(Int)
         case responseTooLarge
@@ -191,10 +207,30 @@ struct AgentCLIUpdateFailure: Equatable, Sendable {
                 return "version-command-exit-\(status.map(String.init) ?? "spawn")"
             case .versionOutputTooLarge: return "version-output-too-large"
             case .unreadableVersionOutput: return "unreadable-version-output"
+            case .loginEnvironmentUnavailable: return "login-environment-unavailable"
+            case .executableNotFound: return "executable-not-found"
             case .transport: return "transport"
             case .httpStatus(let status): return "http-\(status)"
             case .responseTooLarge: return "response-too-large"
             case .invalidSourceResponse: return "invalid-source-response"
+            }
+        }
+
+        var terminalDescription: String {
+            switch self {
+            case .versionCommandTimedOut: return "the version command timed out"
+            case .versionCommandFailed(let status):
+                return status.map { "the version command exited with status \($0)" }
+                    ?? "the version command could not be started"
+            case .versionOutputTooLarge: return "the version output exceeded the safety limit"
+            case .unreadableVersionOutput: return "the installed version could not be read"
+            case .loginEnvironmentUnavailable:
+                return "the configured login environment could not be read"
+            case .executableNotFound: return "the executable is no longer on the login PATH"
+            case .transport: return "the release source could not be reached"
+            case .httpStatus(let status): return "the release source returned HTTP \(status)"
+            case .responseTooLarge: return "the release response exceeded the safety limit"
+            case .invalidSourceResponse: return "the release source returned an invalid version"
             }
         }
     }
@@ -356,55 +392,103 @@ struct AgentCLIVersion: Equatable, Comparable, Sendable {
 
 // MARK: - Installed version
 
-/// The single login-shell probe behind one tool's installed version.
+/// The one authority for resolving and reading an installed provider CLI.
 ///
-/// One child per tool rather than two, and a login shell rather than a direct `exec`. Both follow
-/// from the same fact: a GUI application inherits none of the user's interactive `PATH`, so the
-/// lookup has to happen inside a login shell anyway — and the npm-published agents install a
-/// `#!/usr/bin/env node` launcher, which cannot resolve its own interpreter outside that
-/// environment. Running the version command in the shell that just found it is what makes
-/// `grok` and `opencode` answer at all instead of exiting 127.
-///
-/// `command -v` still runs first so that "not installed" stays a different answer from "the tool
-/// answered badly": the former is silence, the latter is a logged failure.
-enum AgentCLIVersionProbe {
-
-    enum Answer: Equatable, Sendable {
-        case notInstalled
-        case version(String)
-        case unreadable
+/// The user's login shell is consulted once for its exported PATH. Everything after that is an
+/// absolute executable launch with that PATH in the environment, so checking and updating cannot
+/// disagree because one happened to use Bash while the other happened to use `/bin/sh`.
+final class AgentCLILocalResolver: @unchecked Sendable {
+    private enum PATHState {
+        case unresolved
+        case resolved(String?)
     }
 
-    /// Printed instead of a version when the lookup finds nothing. A sentinel rather than an exit
-    /// status because a status is the tool's to use: `grok version` may exit non-zero for its own
-    /// reasons, and that has to stay distinguishable from an absent tool.
-    static let notInstalledSentinel = "__threading-agent-cli-not-installed__"
+    private let shell: String
+    private let lock = NSLock()
+    private var pathState = PATHState.unresolved
 
-    static func script(for definition: AgentCLIUpdateDefinition) -> String {
-        var lookup = ShellCommand(word: "command")
-        lookup.append(word: "-v")
-        lookup.append(word: definition.executable)
+    init(shell: String) {
+        self.shell = shell
+    }
 
-        var absent = ShellCommand(word: "printf")
-        absent.append(word: "%s")
-        absent.append(word: notInstalledSentinel)
+    func resolve(
+        _ definition: AgentCLIUpdateDefinition
+    ) -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason> {
+        resolve(
+            executable: definition.executable,
+            versionArguments: definition.versionArguments
+        )
+    }
 
-        var version = ShellCommand(word: definition.executable)
-        for argument in definition.versionArguments {
-            version.append(word: argument)
+    func resolve(
+        _ update: AgentCLIUpdate
+    ) -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason> {
+        resolve(executable: update.executable, versionArguments: update.versionArguments)
+    }
+
+    private func resolve(
+        executable: String,
+        versionArguments: [String]
+    ) -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason> {
+        guard let effectivePATH = loginPATH() else {
+            return .failure(.loginEnvironmentUnavailable)
+        }
+        guard let executablePath = AgentCLIProbe.locate(executable, on: effectivePATH) else {
+            return .success(nil)
         }
 
-        return "\(lookup.source) > /dev/null 2>&1 || { \(absent.source); exit 0; }; "
-            + version.source
+        var environment = AgentEnvironment.launchEnvironment()
+        environment[EnvironmentKeys.path] = effectivePATH
+
+        let result: BoundedChildResult
+        do {
+            result = try BoundedChildProcess.run(
+                executable: executablePath,
+                arguments: versionArguments,
+                environment: environment,
+                timeout: AgentCLIUpdateDefaults.versionCommandTimeout,
+                maximumOutputBytes: AgentCLIUpdateDefaults.maximumVersionOutputBytes,
+                output: .standardOutput
+            )
+        } catch {
+            return .failure(.versionCommandFailed(status: nil))
+        }
+
+        switch result.termination {
+        case .timedOut:
+            return .failure(.versionCommandTimedOut)
+        case .exited(let status) where status != 0:
+            return .failure(.versionCommandFailed(status: status))
+        case .exited:
+            break
+        }
+        guard !result.outputWasTruncated else { return .failure(.versionOutputTooLarge) }
+        guard let version = AgentCLIVersion(
+            String(decoding: result.output, as: UTF8.self)
+        ) else { return .failure(.unreadableVersionOutput) }
+
+        return .success(ResolvedAgentCLI(
+            executablePath: executablePath,
+            effectivePATH: effectivePATH,
+            version: version.display
+        ))
     }
 
-    /// The pure half. A login shell prints its own profile's noise onto the same stream, so the
-    /// sentinel is matched at the end rather than over the whole output.
-    static func answer(forShellOutput output: String) -> Answer {
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.hasSuffix(notInstalledSentinel) else { return .notInstalled }
-        guard let version = AgentCLIVersion(trimmed) else { return .unreadable }
-        return .version(version.display)
+    /// The first caller performs the bounded shell probe while holding the lock; the remaining
+    /// fixed-catalog workers wait and reuse that exact answer. This is never called on the main
+    /// actor, and avoids starting one profile-sourcing shell per provider.
+    private func loginPATH() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        switch pathState {
+        case .resolved(let path):
+            return path
+        case .unresolved:
+            let path = AgentCLIProbe.loginShellPATH(shell: shell)
+            pathState = .resolved(path)
+            return path
+        }
     }
 }
 
@@ -418,15 +502,16 @@ struct AgentCLIUpdateHTTPResponse: Sendable {
 struct AgentCLIUpdateChecker: Sendable {
     typealias LocalReader = @Sendable (
         AgentCLIUpdateDefinition
-    ) -> Result<String?, AgentCLIUpdateFailure.Reason>
+    ) -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason>
     typealias Transport = @Sendable (URLRequest) async throws -> AgentCLIUpdateHTTPResponse
 
     /// Constructs the live reader with the login shell already resolved on the main actor.
     /// Background probes must not reach back through `ProfileStorage` to ask for it later.
     static func live(shell: String) -> AgentCLIUpdateChecker {
-        AgentCLIUpdateChecker(
+        let resolver = AgentCLILocalResolver(shell: shell)
+        return AgentCLIUpdateChecker(
             definitions: AgentCLIUpdateCatalog.all,
-            localReader: { definition in liveLocalVersion(definition, shell: shell) },
+            localReader: { definition in resolver.resolve(definition) },
             transport: { request in try await liveTransport(request) }
         )
     }
@@ -499,12 +584,12 @@ struct AgentCLIUpdateChecker: Sendable {
 
     private func check(_ definition: AgentCLIUpdateDefinition) async -> Outcome {
         let localResult = await readLocalVersion(definition)
-        let installedVersionText: String
+        let resolvedCLI: ResolvedAgentCLI
         switch localResult {
         case .success(nil):
             return .missing
-        case .success(.some(let version)):
-            installedVersionText = version
+        case .success(.some(let resolved)):
+            resolvedCLI = resolved
         case .failure(let reason):
             return .failed(
                 installed: nil,
@@ -516,7 +601,7 @@ struct AgentCLIUpdateChecker: Sendable {
             )
         }
 
-        guard let installedVersion = AgentCLIVersion(installedVersionText) else {
+        guard let installedVersion = AgentCLIVersion(resolvedCLI.version) else {
             return .failed(
                 installed: nil,
                 failure: AgentCLIUpdateFailure(
@@ -588,9 +673,12 @@ struct AgentCLIUpdateChecker: Sendable {
         ) ? AgentCLIUpdate(
             id: definition.id,
             displayName: definition.displayName,
+            executable: definition.executable,
+            versionArguments: definition.versionArguments,
+            comparison: definition.comparison,
             installedVersion: installedVersion.display,
             latestVersion: latestVersion.display,
-            updateCommand: definition.updateCommand
+            updateArguments: definition.updateArguments
         ) : nil
 
         return .checked(installed: installed, update: update)
@@ -598,52 +686,12 @@ struct AgentCLIUpdateChecker: Sendable {
 
     private func readLocalVersion(
         _ definition: AgentCLIUpdateDefinition
-    ) async -> Result<String?, AgentCLIUpdateFailure.Reason> {
+    ) async -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason> {
         let reader = localReader
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(returning: reader(definition))
             }
-        }
-    }
-
-    private static func liveLocalVersion(
-        _ definition: AgentCLIUpdateDefinition,
-        shell: String
-    ) -> Result<String?, AgentCLIUpdateFailure.Reason> {
-        let result: BoundedChildResult
-        do {
-            result = try BoundedChildProcess.run(
-                executable: shell,
-                arguments: ["-l", "-c", AgentCLIVersionProbe.script(for: definition)],
-                environment: AgentEnvironment.launchEnvironment(),
-                timeout: AgentCLIUpdateDefaults.versionCommandTimeout,
-                maximumOutputBytes: AgentCLIUpdateDefaults.maximumVersionOutputBytes,
-                output: .standardOutput
-            )
-        } catch {
-            return .failure(.versionCommandFailed(status: nil))
-        }
-
-        switch result.termination {
-        case .timedOut:
-            return .failure(.versionCommandTimedOut)
-        case .exited(let status) where status != 0:
-            return .failure(.versionCommandFailed(status: status))
-        case .exited:
-            break
-        }
-        guard !result.outputWasTruncated else { return .failure(.versionOutputTooLarge) }
-
-        switch AgentCLIVersionProbe.answer(
-            forShellOutput: String(decoding: result.output, as: UTF8.self)
-        ) {
-        case .notInstalled:
-            return .success(nil)
-        case .unreadable:
-            return .failure(.unreadableVersionOutput)
-        case .version(let version):
-            return .success(version)
         }
     }
 
@@ -719,13 +767,13 @@ private enum AgentCLIUpdateDefaults {
     static let cursorVersionParts = 3
     static let maximumVersionBytes = 128
     static let maximumVersionInputBytes = 16 * 1_024
-    /// The login shell's own profile prints onto the same stream as the answer, so this budget
-    /// covers both — matching what `AgentCLIProbe` already tolerated from the same rc files.
+    /// Provider version commands are small, but a broken CLI must not be able to grow an
+    /// in-memory response without limit.
     static let maximumVersionOutputBytes = 64 * 1_024
     static let maximumResponseBytes = 256 * 1_024
     static let initialResponseCapacity = 16 * 1_024
-    /// One login shell now sources the user's profile *and* runs the version command, so the
-    /// deadline covers both. The rc files are the slow half and are the reason it is not tighter.
+    /// Version reads are direct absolute-path launches. Login-environment discovery has its own
+    /// shorter bound in `AgentCLIProbe`.
     static let versionCommandTimeout: TimeInterval = 10
     static let requestTimeout: TimeInterval = 10
     static let userAgent = "Threading-Agent-CLI-Update-Check"

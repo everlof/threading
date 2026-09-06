@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// One provider-native reasoning level an installed runtime says a model can use.
-struct AgentReasoningLevel: Equatable {
+struct AgentReasoningLevel: Equatable, Codable, Sendable {
     let effort: String
     let description: String
 
@@ -63,7 +63,7 @@ struct ResolvedDefaultModel: Equatable {
 }
 
 /// One model the installed CLI says the current account can use.
-struct AgentModelOption: Equatable {
+struct AgentModelOption: Equatable, Codable, Sendable {
     let identifier: String
     let displayName: String
 
@@ -951,6 +951,7 @@ enum AgentModels {
     private struct RememberedCodexCatalog: Sendable {
         var identity: ProviderSettingsFileIdentity
         var options: [AgentModelOption]
+        var version: String?
     }
 
     /// Codex rewrites `models_cache.json` in place — truncate, then write — so for about a
@@ -974,7 +975,10 @@ enum AgentModels {
     ///
     /// Hidden/internal models stay hidden. A future catalog can rename the fast service-tier
     /// id without a Threading release because the id is carried through as data.
-    private static func codexCatalog(account: AgentAccount?) -> [AgentModelOption] {
+    static func codexCatalog(
+        account: AgentAccount?,
+        store: CodexModelCatalogStore = .shared
+    ) -> [AgentModelOption] {
         guard let account else { return [] }
 
         let url = URL(fileURLWithPath: account.configPath)
@@ -982,16 +986,24 @@ enum AgentModels {
         let key = url.path
         let identity = ProviderSettingsFileIdentity(of: url)
         let remembered = rememberedCodexCatalogs.withLock { $0[key] }
+        let direct = store.entry(for: account).flatMap { entry in
+            entry.authentication == CodexModelCatalogStore.authenticationIdentity(for: account)
+                ? entry : nil
+        }
         if let remembered, let identity, remembered.identity == identity {
+            if let direct, direct.prefersDirectAnswer(
+                cacheVersion: remembered.version, cacheModified: identity.modified
+            ) { return direct.catalog.options }
             return remembered.options
         }
         guard let identity else {
             // A missing cache is an account with no live catalogue, not a rewrite observed in
             // progress. Reusing a former login's entry here could offer models that no longer
             // exist after sign-out and recreation at the same path.
-            return []
+            return direct?.catalog.options ?? []
         }
         guard let decoded = decodeCodexCatalog(at: url) else {
+            if let direct { return direct.catalog.options }
             let observedAt = Date()
             guard let remembered,
                   let modified = identity.modified,
@@ -1002,13 +1014,18 @@ enum AgentModels {
             return remembered.options
         }
         rememberedCodexCatalogs.withLock {
-            $0[key] = RememberedCodexCatalog(identity: identity, options: decoded)
+            $0[key] = RememberedCodexCatalog(
+                identity: identity, options: decoded.options, version: decoded.version
+            )
         }
-        return decoded
+        if let direct, direct.prefersDirectAnswer(
+            cacheVersion: decoded.version, cacheModified: identity.modified
+        ) { return direct.catalog.options }
+        return decoded.options
     }
 
     /// One read of the file, or nil when it cannot be read or decoded whole.
-    private static func decodeCodexCatalog(at url: URL) -> [AgentModelOption]? {
+    private static func decodeCodexCatalog(at url: URL) -> (options: [AgentModelOption], version: String?)? {
         guard let data = try? BoundedFileReader.read(
             url,
             maximumBytes: maximumProviderCatalogBytes
@@ -1016,7 +1033,7 @@ enum AgentModels {
               let cache = try? JSONDecoder().decode(CodexModelsCache.self, from: data)
         else { return nil }
 
-        return cache.models
+        let options = cache.models
             .filter { $0.visibility == AgentDefaults.codexVisibleModel }
             .map { model in
                 let fastTier = model.serviceTiers?.first {
@@ -1043,11 +1060,18 @@ enum AgentModels {
                     } ?? []
                 )
             }
+        return (options, cache.clientVersion)
     }
 }
 
 private struct CodexModelsCache: Decodable {
     let models: [Model]
+    let clientVersion: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case models
+        case clientVersion = "client_version"
+    }
 
     struct Model: Decodable {
         let slug: String

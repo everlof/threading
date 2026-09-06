@@ -31,6 +31,41 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(metrics.hostedContentCount, 0)
     }
 
+    /// A catalogue update that drops a whole group used to kill the app: the layout installed
+    /// for the shorter list was resolved against the snapshot still holding the longer one, and
+    /// a compositional layout treats a nil section as an assertion failure rather than an empty
+    /// one. Reaching the assertion is the crash, so this test aborting is the regression.
+    @MainActor
+    func testADashboardThatLosesSectionsKeepsTheOnesThatRemain() {
+        XCTAssertEqual(
+            MobileDashboardCollectionPerformanceProbe.exerciseSectionRemoval(
+                initialSections: 4,
+                remainingSections: 1
+            ),
+            1
+        )
+        XCTAssertEqual(
+            MobileDashboardCollectionPerformanceProbe.exerciseSectionRemoval(
+                initialSections: 3,
+                remainingSections: 0
+            ),
+            0
+        )
+    }
+
+    /// A dashboard cell keeps its LabelMorph view as it leaves and re-enters the viewport. The
+    /// recycled view may carry another chat's title, but that reassignment is not a rename and
+    /// must not produce the scrambled transition visible while scrolling the session list.
+    @MainActor
+    func testDashboardAnimatesOnlyARenameOfTheSameVisibleRecord() {
+        let metrics = MobileDashboardTitleReuseProbe.exercise()
+
+        XCTAssertFalse(metrics.initialPresentationAnimated)
+        XCTAssertTrue(metrics.sameRecordRenameAnimated)
+        XCTAssertFalse(metrics.recycledPresentationAnimated)
+        XCTAssertEqual(metrics.recycledTitle, "Second title")
+    }
+
     func testDashboardRowHeightFollowsAccessibilityContentSize() {
         let standard = DashboardRowMetrics.height(
             compatibleWith: UITraitCollection(preferredContentSizeCategory: .large),

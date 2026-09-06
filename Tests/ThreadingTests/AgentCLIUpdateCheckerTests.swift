@@ -18,15 +18,15 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
         XCTAssertTrue(definitions.allSatisfy { $0.source.url.scheme == "https" })
     }
 
-    func testCatalogUsesProviderOwnedUpdateCommands() {
+    func testCatalogUsesProviderOwnedTypedUpdateArguments() {
         XCTAssertEqual(
-            AgentCLIUpdateCatalog.all.map(\.updateCommand),
+            AgentCLIUpdateCatalog.all.map(\.updateArguments),
             [
-                "claude update",
-                "codex update",
-                "grok update",
-                "opencode upgrade",
-                "cursor-agent update"
+                ["update"],
+                ["update"],
+                ["update"],
+                ["upgrade"],
+                ["update"]
             ]
         )
     }
@@ -106,7 +106,10 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
 
         let checker = AgentCLIUpdateChecker(
             definitions: definitions,
-            localReader: { definition in .success(localVersions[definition.id]) },
+            localReader: { definition in
+                guard let version = localVersions[definition.id] else { return .success(nil) }
+                return .success(Self.resolved(definition, version: version))
+            },
             transport: { request in
                 let package = request.url?.deletingLastPathComponent().lastPathComponent ?? ""
                 let version = latestVersions[package] ?? "0.0.0"
@@ -138,7 +141,9 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
     func testSourceFailuresKeepTheInstalledReadingAndNeverInventAnUpdate() async {
         let checker = AgentCLIUpdateChecker(
             definitions: [definition(id: "codex", package: "codex")],
-            localReader: { _ in .success("0.148.0") },
+            localReader: { definition in
+                .success(Self.resolved(definition, version: "0.148.0"))
+            },
             transport: { _ in
                 AgentCLIUpdateHTTPResponse(data: Data(), statusCode: 503)
             }
@@ -162,7 +167,9 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
     func testTheCheckerCoversTheWholeCatalogRatherThanSilentlyTruncatingIt() async {
         let checker = AgentCLIUpdateChecker(
             definitions: AgentCLIUpdateCatalog.all,
-            localReader: { _ in .success("1.0.0") },
+            localReader: { definition in
+                .success(Self.resolved(definition, version: "1.0.0"))
+            },
             transport: { request in
                 let body = request.url?.host == "cursor.com"
                     ? #"FINAL_DIR="$HOME/.local/share/cursor-agent/versions/2026.08.11-e8db854""#
@@ -178,36 +185,82 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
         XCTAssertTrue(report.failures.isEmpty)
     }
 
-    // MARK: - Installed version probe
+    // MARK: - Installed version resolution
 
-    func testVersionProbeAsksOneLoginShellForBothTheLookupAndTheVersion() {
-        let script = AgentCLIVersionProbe.script(for: definition(id: "grok", package: "grok"))
+    func testPATHResolutionKeepsTheStableExecutablePathAndRejectsRelativeEntries() {
+        var checked: [String] = []
+        let path = AgentCLIProbe.locate(
+            "cursor-agent",
+            on: "relative:/first/bin:/second/bin"
+        ) { candidate in
+            checked.append(candidate)
+            return candidate == "/second/bin/cursor-agent"
+        }
 
-        // The lookup comes first and the version command last, in one child: a GUI app inherits
-        // no interactive PATH, and an `#!/usr/bin/env node` launcher cannot find its interpreter
-        // outside the shell that found the launcher.
-        XCTAssertTrue(script.hasPrefix("'command' '-v' 'grok'"))
-        XCTAssertTrue(script.hasSuffix("'grok' '--version'"))
-        XCTAssertTrue(script.contains(AgentCLIVersionProbe.notInstalledSentinel))
+        XCTAssertEqual(path, "/second/bin/cursor-agent")
+        XCTAssertEqual(checked, [
+            "/first/bin/cursor-agent",
+            "/second/bin/cursor-agent"
+        ])
     }
 
-    func testVersionProbeTellsAnAbsentToolApartFromABadAnswer() {
-        XCTAssertEqual(
-            AgentCLIVersionProbe.answer(forShellOutput: AgentCLIVersionProbe.notInstalledSentinel),
-            .notInstalled
+    func testLocalResolverCarriesTheLoginPATHIntoAnEnvShebang() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentCLILocalResolver-\(UUID().uuidString)", isDirectory: true)
+        let bin = root.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let interpreter = bin.appendingPathComponent("fixture-interpreter")
+        try FileManager.default.createSymbolicLink(
+            at: interpreter,
+            withDestinationURL: URL(fileURLWithPath: "/bin/sh")
         )
-        // A login shell prints its own profile's noise onto the same stream as the answer.
-        XCTAssertEqual(
-            AgentCLIVersionProbe.answer(
-                forShellOutput: "welcome back\n\(AgentCLIVersionProbe.notInstalledSentinel)"
-            ),
-            .notInstalled
+
+        let executable = bin.appendingPathComponent("fixture-agent")
+        try Data("""
+        #!/usr/bin/env fixture-interpreter
+        /usr/bin/printf 'fixture-agent 7.8.9\\n'
+        """.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
         )
-        XCTAssertEqual(
-            AgentCLIVersionProbe.answer(forShellOutput: "2.1.237 (Claude Code)\n"),
-            .version("2.1.237")
+
+        let loginShell = root.appendingPathComponent("fixture-login-shell")
+        let fixturePATH = "\(bin.path):/usr/bin:/bin"
+        try Data("""
+        #!/bin/sh
+        PATH=\(ShellCommand(word: fixturePATH).source)
+        export PATH
+        if [ "$1" = "-l" ] && [ "$2" = "-c" ]; then
+            exec /bin/sh -c "$3"
+        fi
+        exit 64
+        """.utf8).write(to: loginShell)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: loginShell.path
         )
-        XCTAssertEqual(AgentCLIVersionProbe.answer(forShellOutput: "no idea"), .unreadable)
+
+        let definition = AgentCLIUpdateDefinition(
+            id: "fixture",
+            displayName: "Fixture",
+            executable: "fixture-agent",
+            versionArguments: ["--version"],
+            source: .npm(packageName: "fixture"),
+            comparison: .semantic,
+            updateArguments: ["update"]
+        )
+
+        XCTAssertEqual(
+            AgentCLILocalResolver(shell: loginShell.path).resolve(definition),
+            .success(ResolvedAgentCLI(
+                executablePath: executable.path,
+                effectivePATH: fixturePATH,
+                version: "7.8.9"
+            ))
+        )
     }
 
     func testCursorSourceAllowsADeclaredAssignmentButNotProseAboutOne() {
@@ -233,7 +286,18 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
             versionArguments: ["--version"],
             source: .npm(packageName: package),
             comparison: .semantic,
-            updateCommand: "\(id) update"
+            updateArguments: ["update"]
+        )
+    }
+
+    private static func resolved(
+        _ definition: AgentCLIUpdateDefinition,
+        version: String
+    ) -> ResolvedAgentCLI {
+        ResolvedAgentCLI(
+            executablePath: "/tools/\(definition.executable)",
+            effectivePATH: "/tools:/usr/bin:/bin",
+            version: version
         )
     }
 }

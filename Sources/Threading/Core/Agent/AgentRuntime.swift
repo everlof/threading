@@ -189,6 +189,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     // MARK: - Properties
 
     private var controllers: [SessionID: any AgentTerminalRuntimeSurface] = [:]
+    private var terminalOwnerships: [SessionID: UUID] = [:]
     private var checkoutMoveOutboxes: [SessionID: ConversationOutbox] = [:]
 
 #if DEBUG
@@ -217,6 +218,36 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// Identifiers of every session currently holding a live terminal.
     var liveSessionIDs: Set<SessionID> {
         Set(controllers.keys)
+    }
+
+    /// Authority to apply a background transcript result to this terminal ownership. A stable
+    /// session ID alone survives account changes, checkout moves and replacement processes.
+    struct TranscriptObservation: Equatable, Sendable {
+        fileprivate let sessionID: SessionID
+        fileprivate let runtimeID: UUID
+        fileprivate let kind: AgentKind
+        fileprivate let account: AccountHandle
+        fileprivate let transcript: TranscriptID?
+        fileprivate let ownershipEpoch: UInt64
+        fileprivate let sourceRevision: UUID?
+    }
+
+    func transcriptObservation(for sessionID: SessionID) -> TranscriptObservation? {
+        guard let runtimeID = terminalOwnerships[sessionID],
+              let session = currentSessionProjection.session(for: sessionID) else { return nil }
+        return TranscriptObservation(
+            sessionID: sessionID,
+            runtimeID: runtimeID,
+            kind: session.kind,
+            account: session.accountHandle,
+            transcript: session.resumeState.transcriptID,
+            ownershipEpoch: SessionExecutionLocusTracker.shared.ownershipEpoch(forSessionID: sessionID),
+            sourceRevision: ClaudeTranscriptLocations.shared.revision(for: sessionID)
+        )
+    }
+
+    func isCurrent(_ observation: TranscriptObservation) -> Bool {
+        transcriptObservation(for: observation.sessionID) == observation
     }
 
     // MARK: - UI Composition
@@ -266,6 +297,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             self?.noteSessionAttention(sessionID)
         }
         controllers[sessionID] = surface
+        terminalOwnerships[sessionID] = UUID()
         runtimeSnapshots[sessionID] = surface.activityTracker.runtimeSnapshot
         return true
     }
@@ -607,6 +639,15 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             return
         }
         let tracker = controller.activityTracker
+
+        if let session = currentSessionProjection.session(for: report.sessionID) {
+            ClaudeTranscriptLocations.shared.observe(
+                report,
+                for: session,
+                ownershipEpoch: SessionExecutionLocusTracker.shared
+                    .ownershipEpoch(forSessionID: report.sessionID)
+            )
+        }
 
         // Codex reports the rollout's exact path on its hooks. Remembering that path avoids a
         // session-tree walk on terminal output and arms the transcript fallback for boundaries
@@ -1017,6 +1058,8 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
     func discard(sessionID: SessionID, preservingViewport: Bool = true) {
+        terminalOwnerships.removeValue(forKey: sessionID)
+        ClaudeTranscriptLocations.shared.forget(sessionID)
 #if DEBUG
         fixtureLaunchPlanProviders.removeValue(forKey: sessionID)
 #endif
@@ -1123,12 +1166,14 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         // must not be a way to kill a child nobody asked to stop.
         let detachDeadline = Date().addingTimeInterval(PTYHostSessionDefaults.detachDrainSeconds)
         for sessionID in controllers.keys {
+            ClaudeTranscriptLocations.shared.forget(sessionID)
             RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
             guard controllers[sessionID]?.detachFromBackgroundHost(by: detachDeadline) != true
             else { continue }
             controllers[sessionID]?.terminate()
         }
         controllers.removeAll()
+        terminalOwnerships.removeAll()
 
         for sessionID in conversations.keys {
             RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)

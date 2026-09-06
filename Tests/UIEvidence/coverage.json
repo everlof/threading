@@ -548,10 +548,10 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session action menu",
-      "description": "The shared sidebar, context, and header session menu for a chat whose repository has two branch-attached checkouts.",
-      "states": ["Move to Checkout available", "Light", "Dark"],
+      "description": "The shared sidebar, context, and header session menu for a chat whose repository has two branch-attached checkouts, plus usage-bearing move, continuation and recovery account choices across three themes.",
+      "states": ["Move to Checkout available", "Account usage columns", "Scoped model usage", "Selected recovery login", "Light", "Dark"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
         "sizes": ["Natural menu size"]
       },
@@ -1157,16 +1157,20 @@
         "CLI missing",
         "Verification failed",
         "Login verified",
-        "Account reconnect running"
+        "Account reconnect running",
+        "Model refresh ready, running, complete and partial failure"
       ],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Cyberpunk (model refresh)", "Swiss Minimalist (model refresh)"],
         "appearances": ["Light", "Dark"],
         "sizes": ["Onboarding window", "Shared Settings width"]
       },
       "source": {
         "path": "Tests/ThreadingTests/AccountSetupRenderTests.swift",
-        "test": "ThreadingTests/AccountSetupRenderTests/testRendersEveryAccountSetupStateInOnboardingAndSettings"
+        "tests": [
+          "ThreadingTests/AccountSetupRenderTests/testRendersEveryAccountSetupStateInOnboardingAndSettings",
+          "ThreadingTests/AccountSetupRenderTests/testRendersModelRefreshStatesInSettings"
+        ]
       },
       "capture": {
         "glob": "account-setup-*.png"
@@ -1245,7 +1249,8 @@
       "states": [
         "Command list and inline shortcuts",
         "Filtered session target input",
-        "Shortcut recording"
+        "Shortcut recording",
+        "Refresh Models action"
       ],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],

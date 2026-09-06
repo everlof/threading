@@ -876,26 +876,26 @@ Codex (`@openai/codex`), Grok (`@xai-official/grok`) and OpenCode (`opencode-ai`
 npm `latest` documents; Cursor reads the version pinned by its public `cursor.com/install` script.
 There is no authentication and no fallback source whose meaning Threading would have to guess.
 
-Local discovery uses the same login-shell path as an agent launch, and for the same reason twice
-over. A GUI application inherits none of the user's interactive `PATH`, so the lookup has to happen
-inside a login shell — and the npm-published agents install a `#!/usr/bin/env node` launcher, which
-cannot resolve its own interpreter outside that environment either. Running the tool directly with
-the app's own environment was the first version of this, and it reported `claude` and `codex` as
-*broken* on a machine where both work: `env: node: No such file or directory`, exit 127. So
-`AgentCLIVersionProbe` puts `command -v` and the version command in **one** login shell per runtime
-— one child, not two — with a sentinel distinguishing "not installed" (silence) from "the tool
-answered badly" (a logged failure). It is a bounded one-shot child off the main thread: ten seconds
-for the profile and the command together, 64 KiB of stdout, inherited agent identity removed.
+Local discovery uses the same login-shell path as an agent launch to capture the exported `PATH`
+once per sweep. A marker after profile loading separates that environment from login banners, and
+the probe is a bounded one-shot child off the main thread. `AgentCLILocalResolver` then resolves
+each authored executable name against that captured `PATH` and preserves the absolute path it
+found, including a stable provider symlink. Installed-version reads execute that absolute path
+directly with the captured `PATH` in their environment. This last detail is required because the
+npm-published agents commonly use a `#!/usr/bin/env node` launcher: an absolute agent path alone
+still exits 127 if its interpreter directories are missing. Missing executables remain distinct
+from failed or unreadable version commands, and inherited agent identity is removed from every
+child.
 
 Only installed tools reach the network. Their HTTPS reads run concurrently with a ten-second
 timeout and a 256 KiB response cap enforced against the transfer rather than the result, so a
 source that declares no length cannot be downloaded in full and rejected afterwards; a failed or
 malformed source is logged and omitted without suppressing good answers from the others. The
 catalog is the runtime inventory itself — `AgentCLIUpdateChecker` refuses a longer one instead of
-silently truncating to it — so one daily sweep is at most one child process per runtime and one
-small request per installed tool: five and five today, constant in projects, accounts, sessions,
-files and transcripts. There is no user-data stress fixture to add for a cardinality that cannot
-grow with user data.
+silently truncating to it — so one daily sweep is at most one bounded login-environment child, one
+direct version child per runtime, and one small request per installed tool: six local children and
+five requests today, constant in projects, accounts, sessions, files and transcripts. There is no
+user-data stress fixture to add for a cardinality that cannot grow with user data.
 
 `AgentCLIUpdateCoordinator` records attempts at a 24-hour cadence, cancels when the shared setting
 turns off, and holds a result while the app is inactive or onboarding covers the window. Three
@@ -919,15 +919,20 @@ user was working in.
 
 The receipt uses the existing sidebar `Toast` component, remains for the unattended dwell, pauses
 under the pointer like every toast, and aligns now/latest values through the toast's generic
-comparison table. Checking never starts an updater. Pressing **Update** creates a durable
-standalone terminal and supplies it one host-built shell command as a process argument; each
-provider command is a quoted argument to its own login-shell child, runs sequentially, and leaves
-prompts, output and exit-code receipts visible and interruptible. A failing provider does not
-suppress the next one. The argument route is load-bearing: macOS limits the complete queued
-terminal input to 1024 bytes, and a multi-tool plan can exceed that even when each physical line
-is shorter. Typing the plan immediately after shell creation silently duplicated or discarded its
-tail on the real path. A clean interactive Bash bootstrap receives the plan outside the PTY,
-preserves foreground-job interruption, then replaces itself with the user's configured shell.
+comparison table. Checking never starts an updater. Pressing **Update** first repeats the bounded
+local resolution off the main actor, so a stale daily notice cannot launch a moved executable or
+reinstall a version that is already current. It then creates a durable standalone terminal and
+supplies one host-built shell command as a process argument. A fixed non-login `/bin/sh` wrapper
+only sequences the plan; each provider runs by absolute path with typed arguments and the captured
+`PATH`, leaving prompts and output visible and interruptible without relying on `/bin/sh`, Bash or
+the user's configured shell to locate it. After every successful updater exit the same absolute
+path is queried again, and the receipt reports a verified target, an unexpected version change, an
+unchanged version, a skip or a failure. A failing provider does not suppress the next one. The
+argument route is load-bearing: macOS limits the complete queued terminal input to 1024 bytes, and
+a multi-tool plan can exceed that even when each physical line is shorter. Typing the plan
+immediately after shell creation silently duplicated or discarded its tail on the real path. A
+clean interactive Bash bootstrap receives the plan outside the PTY, preserves foreground-job
+interruption, then replaces itself with the user's configured shell.
 
 That host-owned check also makes Threading the central update manager for every Codex process it
 starts. Each Codex invocation therefore receives the documented one-run override

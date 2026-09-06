@@ -695,6 +695,9 @@ final class SessionComposerViewController: NSViewController {
     /// icon chosen in Settings has to reach it. `refreshChips` is this composer's own bounded
     /// restamp — the same one a model or effort choice uses — rather than a rebuild.
     private func observeAccountPresentation() {
+        appEvents.observe(AgentModelsDidChange.self) { [weak self] _ in
+            self?.refreshChips()
+        }
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.refreshChips()
         }

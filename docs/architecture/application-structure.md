@@ -164,3 +164,32 @@ family still keeps its policy out of the hub: `SimulatorAgentCommandService` val
 arguments and shapes the results, and the counted adapter decodes, reveals the pane, and maps a
 result. The debt is that the hub is the only door, not that this family walked through it, and the
 ledger entry stays open until the dispatch seam lets a service answer for its own tools.
+
+### Transcript authority — 6 September 2026
+
+The missing continuation offer after a checkout move exposed another split in ownership: Claude
+kept writing its original file while features read the copy at the new checkout slug. The first
+fix recorded the live hook path, but three callers still chose independently between that path
+and a computed slot, and background replay/search could bypass the live selection altogether.
+
+| Boundary in this increment | Before | After |
+|---|---:|---:|
+| Owners of live-path versus checkout-fallback selection | 3 | 1 (`SessionTranscript`) |
+| Replay/search paths bypassing live source selection | 2 | 0 |
+| Terminal caches retaining the first Claude URL for a launch | 1 | 0 (cache account discovery only) |
+| Feature readers allowed to compute a Claude storage slot | unrestricted | 0 (resolver and two destination owners only) |
+
+`ReadRequest` transfers an immutable source to a worker without moving Codex discovery onto the
+main actor. Runtime registration owns the authority of an outstanding observation, and the shared
+fact reader owns invalidation of work crossing a copy/reset. The gate in
+`scripts/check_transcript_boundaries.py` rejects direct location-state access outside the runtime
+and resolver, and storage-slot calls outside the resolver and migration/checkout destination owners.
+Its regression tests deliberately introduce those dependencies. Source-agreement and deterministic
+worker-race tests hold the behavior; the broader singleton counts above are historical measurements,
+not numbers this local change claims to have reduced.
+
+Verification on 6 September: 299 focused tests passed, then the full `scripts/test.sh` run passed
+with 8,692 passing cases, 65 skips and no failures. Both architecture and theme gates passed.
+The 1,000-session location stress case (10 repeated hooks per session, lookup and discard) took
+0.127 seconds. These are hosted/file regression results; a new real Claude limit event in an
+installed build was not exercised during this increment.

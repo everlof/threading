@@ -11,20 +11,25 @@ enum ClaudeTranscript {
     /// The transcript for a session, whether or not it exists yet.
     @MainActor
     static func url(sessionID: TranscriptID, for session: AgentSession, in project: Project) -> URL? {
-        guard let account = AgentAccountDiscovery.account(
+        guard session.kind.supports(.checkoutScopedConversationStorage),
+              let account = AgentAccountDiscovery.account(
             for: session.kind,
             handle: session.accountHandle
         ) else { return nil }
 
-        return url(sessionID: sessionID, account: account, in: project)
+        return SessionTranscript.url(
+            sessionID: sessionID, for: session, in: project, account: account
+        )
     }
 
-    static func url(sessionID: TranscriptID, account: AgentAccount, in project: Project) -> URL? {
+    /// A storage slot for a checkout, used for copy destinations and the resolver's fallback.
+    /// Readers select their source through `SessionTranscript`; this slot may be a stale copy.
+    static func storageURL(sessionID: TranscriptID, account: AgentAccount, in project: Project) -> URL? {
         guard sessionID.isSafePathComponent else { return nil }
-        return URL(fileURLWithPath: account.configPath)
-            .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
-            .appendingPathComponent(projectSlug(for: project))
-            .appendingPathComponent(sessionID.rawValue)
+        return URL(fileURLWithPath: account.configPath, isDirectory: true)
+            .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory, isDirectory: true)
+            .appendingPathComponent(projectSlug(for: project), isDirectory: true)
+            .appendingPathComponent(sessionID.rawValue, isDirectory: false)
             .appendingPathExtension(AgentDefaults.transcriptExtension)
     }
 
@@ -32,14 +37,10 @@ enum ClaudeTranscript {
     ///
     /// Claude places the root at `<session-id>.jsonl` and children beneath
     /// `<session-id>/subagents/`, with a small `.meta.json` index beside each child JSONL.
-    static func subagentsDirectory(
-        sessionID: TranscriptID,
-        account: AgentAccount,
-        in project: Project
-    ) -> URL? {
-        url(sessionID: sessionID, account: account, in: project)?
+    static func subagentsDirectory(forRoot root: URL) -> URL {
+        root
             .deletingPathExtension()
-            .appendingPathComponent(AgentDefaults.claudeSubagentsSubdirectory)
+            .appendingPathComponent(AgentDefaults.claudeSubagentsSubdirectory, isDirectory: true)
     }
 
     /// Whether a conversation has been recorded, which is what makes a resume possible.

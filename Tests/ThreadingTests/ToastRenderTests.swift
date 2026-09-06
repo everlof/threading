@@ -205,23 +205,32 @@ final class ToastRenderTests: XCTestCase {
                 AgentCLIUpdate(
                     id: "claude",
                     displayName: "Claude Code",
+                    executable: "claude",
+                    versionArguments: ["--version"],
+                    comparison: .semantic,
                     installedVersion: "2.1.220",
                     latestVersion: "2.1.237",
-                    updateCommand: "claude update"
+                    updateArguments: ["update"]
                 ),
                 AgentCLIUpdate(
                     id: "codex",
                     displayName: "Codex",
+                    executable: "codex",
+                    versionArguments: ["--version"],
+                    comparison: .semantic,
                     installedVersion: "0.145.0",
                     latestVersion: "0.148.0",
-                    updateCommand: "codex update"
+                    updateArguments: ["update"]
                 ),
                 AgentCLIUpdate(
                     id: "opencode",
                     displayName: "OpenCode",
+                    executable: "opencode",
+                    versionArguments: ["--version"],
+                    comparison: .semantic,
                     installedVersion: "1.17.0",
                     latestVersion: "1.18.19",
-                    updateCommand: "opencode upgrade"
+                    updateArguments: ["upgrade"]
                 )
             ], runUpdates: { _ in })
         }

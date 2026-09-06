@@ -476,9 +476,10 @@ struct ThemedDialogDemoView: View {
                 Text("A deterministic debug surface for visual review and future UI tests.")
                     .foregroundStyle(theme.secondaryLabel)
                 Button("Show again") { isPresented = true }
-                    .buttonStyle(.borderedProminent)
-                    .tint(theme.accent)
-                    .foregroundStyle(theme.accentForeground)
+                    .buttonStyle(MobileThemedActionButtonStyle(
+                        kind: .primary,
+                        theme: theme
+                    ))
                 Spacer()
             }
             .frame(maxWidth: .infinity, alignment: .leading)

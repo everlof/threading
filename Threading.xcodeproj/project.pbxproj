@@ -106,7 +106,10 @@
 		A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */; };
 		A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */; };
 		A71500010000000000000001 /* MobileIdentityPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71500010000000000000002 /* MobileIdentityPickerTests.swift */; };
+		A72100010000000000000001 /* MobileSessionSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72100010000000000000002 /* MobileSessionSettingsTests.swift */; };
 		A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71600010000000000000002 /* MobileRefreshPolicyTests.swift */; };
+		A72200010000000000000001 /* MobileLiveRoutePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */; };
+		A72300010000000000000001 /* MobileSocketRecoveryBackoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */; };
 		A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */; };
 		A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */; };
 		A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71900010000000000000002 /* MobileScrubSurfaceTests.swift */; };
@@ -366,7 +369,10 @@
 		A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDashboardCacheStoreTests.swift; sourceTree = "<group>"; };
 		A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteNotificationPresentationPolicyTests.swift; sourceTree = "<group>"; };
 		A71500010000000000000002 /* MobileIdentityPickerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIdentityPickerTests.swift; sourceTree = "<group>"; };
+		A72100010000000000000002 /* MobileSessionSettingsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionSettingsTests.swift; sourceTree = "<group>"; };
 		A71600010000000000000002 /* MobileRefreshPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRefreshPolicyTests.swift; sourceTree = "<group>"; };
+		A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLiveRoutePolicyTests.swift; sourceTree = "<group>"; };
+		A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSocketRecoveryBackoffTests.swift; sourceTree = "<group>"; };
 		A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileMediaDownloadLimiterTests.swift; sourceTree = "<group>"; };
 		A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRouteHealthLedgerTests.swift; sourceTree = "<group>"; };
 		A71900010000000000000002 /* MobileScrubSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileScrubSurfaceTests.swift; sourceTree = "<group>"; };
@@ -408,6 +414,7 @@
 				ThreadingMobile/MobileIdentityPicker.swift,
 				ThreadingMobile/MobileIssueReportArchive.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
+				ThreadingMobile/MobileLiveRoutePolicy.swift,
 				ThreadingMobile/MobileLoadingPlaceholder.swift,
 				ThreadingMobile/MobileMarketingTerminalFixture.swift,
 				ThreadingMobile/MobileMediaDownloadLimiter.swift,
@@ -425,6 +432,7 @@
 				ThreadingMobile/MobileSessionSettingsView.swift,
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileSettingsView.swift,
+				ThreadingMobile/MobileSocketRecoveryBackoff.swift,
 				ThreadingMobile/MobileTerminalFontSize.swift,
 				ThreadingMobile/MobileTerminalKeyboardStore.swift,
 				ThreadingMobile/MobileTerminalPresentation.swift,
@@ -730,7 +738,10 @@
 				A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */,
 				A71400010000000000000002 /* RemoteNotificationPresentationPolicyTests.swift */,
 				A71500010000000000000002 /* MobileIdentityPickerTests.swift */,
+				A72100010000000000000002 /* MobileSessionSettingsTests.swift */,
 				A71600010000000000000002 /* MobileRefreshPolicyTests.swift */,
+				A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */,
+				A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */,
 				A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */,
 				A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */,
 				A71900010000000000000002 /* MobileScrubSurfaceTests.swift */,
@@ -1508,7 +1519,10 @@
 				A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */,
 				A71400010000000000000001 /* RemoteNotificationPresentationPolicyTests.swift in Sources */,
 				A71500010000000000000001 /* MobileIdentityPickerTests.swift in Sources */,
+				A72100010000000000000001 /* MobileSessionSettingsTests.swift in Sources */,
 				A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */,
+				A72200010000000000000001 /* MobileLiveRoutePolicyTests.swift in Sources */,
+				A72300010000000000000001 /* MobileSocketRecoveryBackoffTests.swift in Sources */,
 				A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */,
 				A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */,
 				A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */,

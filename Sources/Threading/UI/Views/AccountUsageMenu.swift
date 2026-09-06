@@ -10,6 +10,8 @@ import AppKit
 @MainActor
 enum AccountUsageMenu {
 
+    typealias Decorator = @MainActor (inout ThemedMenuItem, AgentAccount, String?, AgentKind?) -> Void
+
     // MARK: - Public Methods
 
     /// Puts `account`'s cached reading on a semantic chip item, and asks for a fresh one.

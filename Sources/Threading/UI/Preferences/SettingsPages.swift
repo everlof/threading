@@ -276,7 +276,8 @@ enum SettingsPages {
             group: agentsGroup,
             searchTerms: terms(
                 "Claude", "Codex", "Grok", "Cursor", "OpenCode", "login", "account",
-                "avatar", "emoji", "name", "enabled", "connect"
+                "avatar", "emoji", "name", "enabled", "connect",
+                "models", "refresh models", "missing models", "model list"
             )
         ) { AccountsPreferencesViewController() },
         Page(

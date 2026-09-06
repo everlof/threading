@@ -110,14 +110,15 @@ final class LimitRecoveryCoordinator {
     private func poll() {
         for sessionID in AgentRuntime.shared.liveSessionIDs {
             guard let session = ProjectStore.shared.session(withID: sessionID),
-                  let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
+                  let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
+                  let ownership = AgentRuntime.shared.transcriptObservation(for: sessionID)
             else { continue }
 
-            // A first read may land before the running terminal surface is registered. The fact
-            // reader correctly suppresses unchanged callbacks, so retry a cached provisional
-            // observation here; authoritative refusals never need this screen-confirmation path.
-            if let known = ObservedUsageLimit.knownObservation(for: session, in: project),
-               known.requiresTerminalConfirmation {
+            // A read may land before the process is running or after its ownership changed.
+            // Changed-only reader callbacks cannot retry that delivery. Reconcile the current
+            // source's cache too; parked/recovering identity keeps an accepted refusal idempotent.
+            if AgentRuntime.shared.isRunning(sessionID: sessionID),
+               let known = ObservedUsageLimit.knownObservation(for: session, in: project) {
                 limitObservationMoved(sessionID, observation: known)
             }
 
@@ -127,6 +128,7 @@ final class LimitRecoveryCoordinator {
                 for: session,
                 in: project
             ) { [weak self] observation in
+                guard AgentRuntime.shared.isCurrent(ownership) else { return }
                 self?.limitObservationMoved(sessionID, observation: observation)
             }
         }

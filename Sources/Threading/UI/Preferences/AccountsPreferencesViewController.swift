@@ -10,6 +10,7 @@ import AppKit
 final class AccountsPreferencesViewController: NSViewController {
 
     private enum PresentationRow {
+        case modelRefresh
         case setup
         case accountCaption
         case emptyAccount
@@ -25,6 +26,8 @@ final class AccountsPreferencesViewController: NSViewController {
     private let accountsProvider: () -> [AgentAccount]
     private let setupController: AccountSetupCardViewController
     private let accountStore: AccountPreferencesStore
+    private let modelRefresh: CodexModelRefreshService
+    private let refreshEvents = AppEventObservations()
 
     private var accounts: [AgentAccount] = []
     private var extensionSections: [ExtensionSettingsSectionModel] = []
@@ -83,12 +86,14 @@ final class AccountsPreferencesViewController: NSViewController {
         },
         setupCoordinator: AgentAccountSetupCoordinator = AgentAccountSetupCoordinator(),
         limitSettings: CustomLimitSettings? = nil,
-        accountStore: AccountPreferencesStore? = nil
+        accountStore: AccountPreferencesStore? = nil,
+        modelRefresh: CodexModelRefreshService? = nil
     ) {
         let accountStore = accountStore ?? AccountPreferencesStore.shared
         self.accountsProvider = accountsProvider
         self.setupController = AccountSetupCardViewController(coordinator: setupCoordinator)
         self.accountStore = accountStore
+        self.modelRefresh = modelRefresh ?? .shared
         self.limits = AccountLimitsSectionController(
             settings: limitSettings,
             accountStore: accountStore
@@ -111,6 +116,15 @@ final class AccountsPreferencesViewController: NSViewController {
         // posted the structural event by the time this runs.
         setupController.onAccountReady = { [weak self] _ in self?.reload() }
         limits.onPresentationChange = { [weak self] in self?.reloadPresentationRows() }
+        refreshEvents.observe(CodexModelRefreshDidChange.self) { [weak self] _ in
+            guard let self,
+                  let row = self.presentationRows.firstIndex(where: {
+                      if case .modelRefresh = $0 { return true }
+                      return false
+                  }) else { return }
+            self.tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+            self.tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+        }
 
         let page = SettingsUI.listPage(
             title: "Agents & Accounts",
@@ -180,7 +194,7 @@ final class AccountsPreferencesViewController: NSViewController {
     /// [`performance.md`](../../../../docs/architecture/performance.md).
     private func reloadPresentationRows() {
         presentationRebuildCount += 1
-        var rows: [PresentationRow] = [.setup, .accountCaption]
+        var rows: [PresentationRow] = [.modelRefresh, .setup, .accountCaption]
         if accounts.isEmpty {
             rows.append(.emptyAccount)
         } else {
@@ -421,6 +435,24 @@ final class AccountsPreferencesViewController: NSViewController {
 
     // MARK: - Actions
 
+    private func makeModelRefreshRow() -> NSView {
+        let button = SettingsUI.button("Refresh Models", target: self, action: #selector(refreshModelsClicked))
+        button.isEnabled = !modelRefresh.state.isRunning
+        button.setAccessibilityIdentifier("accounts.refresh-models")
+        return SettingsUI.section("Models", SettingsCard(rows: [
+            SettingsUI.row(
+                title: L10n.string("Available models"),
+                subtitle: modelRefresh.state.message,
+                control: button,
+                localizes: false
+            )
+        ]))
+    }
+
+    @objc private func refreshModelsClicked() {
+        modelRefresh.start()
+    }
+
     /// Opens the emoji picker beneath the clicked icon well.
     @objc private func iconClicked(_ sender: ThemedButton) {
         guard let account = account(at: sender.tag) else { return }
@@ -597,6 +629,8 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
 
     private func content(for row: PresentationRow) -> NSView {
         switch row {
+        case .modelRefresh:
+            return makeModelRefreshRow()
         case .setup:
             return SettingsUI.section("Supported agents", setupController.view)
         case .accountCaption:
@@ -630,7 +664,7 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
     private func topInset(forRowAt index: Int) -> CGFloat {
         guard presentationRows.indices.contains(index) else { return 0 }
         switch presentationRows[index] {
-        case .setup, .accountCaption, .accountNote:
+        case .modelRefresh, .setup, .accountCaption, .accountNote:
             return Design.Spacing.large
         case .emptyAccount, .account:
             return Design.Spacing.small
@@ -692,7 +726,7 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
                 } else {
                     extensionBounds[sectionIndex] = (index, index)
                 }
-            case .setup, .accountCaption, .accountNote, .extensionCaption:
+            case .modelRefresh, .setup, .accountCaption, .accountNote, .extensionCaption:
                 break
             }
         }

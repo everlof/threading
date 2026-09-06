@@ -247,7 +247,8 @@ struct HookLifecycleReport {
     /// The root conversation transcript reported on ordinary lifecycle events.
     ///
     /// Separate from `subagentTranscriptPath`: Codex's missing interrupt boundary is recovered
-    /// from this file, while a child's path belongs only to its navigator row.
+    /// from this file, and Claude reports the live file even when a checkout move left a copy
+    /// elsewhere. A child's path belongs only to its navigator row.
     let transcriptPath: String?
 
     /// The directory the agent says it is working in, as of this event.

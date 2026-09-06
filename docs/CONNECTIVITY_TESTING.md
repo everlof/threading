@@ -4,7 +4,8 @@ Connectivity has three different failure domains, so one test style cannot make 
 claim on its own:
 
 1. **Software contracts** make deadlines, reconnect backoff, single-flight refresh, route races,
-   trust, discovery and listener lifecycle deterministic. Run `scripts/test-connectivity.sh
+   the route the sockets take, hosted tunnel lifetime, trust, discovery and listener lifecycle
+   deterministic. Run `scripts/test-connectivity.sh
    software` and `scripts/test-connectivity.sh topology`; the client half runs in an iOS
    Simulator. Those simulator phases take the shared host-wide CoreSimulator lane before invoking
    Xcode, so evidence, dogfood and chaos lanes cannot shut down their device mid-run.

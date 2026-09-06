@@ -720,7 +720,7 @@ capture_fixture() {
       tap_point="$(jq -er --arg label "${interaction_label}" '
         [.[] | select((.AXLabel // "") | startswith($label))][0].frame
         | select(.width > 0 and .height > 0)
-        | "\(.x + (.width / 2)) \(.y + (.height / 2))"
+        | "\((.x + (.width / 2)) | round) \((.y + (.height / 2)) | round)"
       ' "${accessibility_json}" 2>/dev/null || true)"
       [[ -n "${tap_point}" ]] && break
       if ((SECONDS - last_hit_test >= 1)); then

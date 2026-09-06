@@ -173,7 +173,7 @@ final class PeerTunnelMultiplexerTests: XCTestCase {
     }
 }
 
-private actor InMemoryMessageTransport: PeerMessageTransport {
+actor InMemoryMessageTransport: PeerMessageTransport {
     private var peer: InMemoryMessageTransport?
     private var messages: [Data] = []
     private var head = 0

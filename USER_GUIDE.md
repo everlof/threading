@@ -1801,7 +1801,7 @@ the conversation stays in the pane, and what it did is written to the diagnostic
 ### Continuing on another login, in one press
 
 When a session stops at its limit and you have another login for the same agent with room left,
-a strip appears at the bottom of that session's pane:
+a strip appears directly below that session's pane header:
 
 > ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Nova Hartley · 5h 12% · 7d 40%**  ·  **Wait for Reset**  ·  ✕
 
@@ -1809,6 +1809,9 @@ Pressing the first button moves the conversation to that login and sends it a **
 work carries on where it stopped. It is the same move as **Move to Account** above with the
 follow-up message attached, and it asks nothing further: the button already names the login, its
 current usage, and what pressing will do.
+
+This also works after a Claude chat moves to another checkout: Threading follows its live
+conversation file, so the limit is detected and the continuation includes work done after the move.
 
 **Wait for Reset** is the other answer, and it needs no second login — so the strip appears even
 when you only have one. It does there and then what **Continue at Reset** above would have done
@@ -1847,6 +1850,13 @@ composer, and one running in the agent's terminal shows it under the terminal, w
 have typed the answer yourself. Sessions whose agent has only one login never see it.
 
 ## Agents & Accounts
+
+If a Codex model appears in the CLI but is missing in Threading, choose **Refresh Models** in
+**Settings ▸ Agents & Accounts**, or run **Refresh Models** from the command palette. It reloads
+the model list for every enabled Codex account without starting a conversation. Settings shows
+progress and any accounts that could not refresh; the palette action reports its result when
+finished. Refreshed catalogs include reasoning levels and Fast mode and survive app restarts;
+an older Codex client cannot replace them with its older list.
 
 Threading supports five coding-agent runtimes, but each runtime does not expose the same account
 model:
@@ -1891,6 +1901,11 @@ Each account in that menu also carries a **ring** showing how much of its most-p
 is spent — grey while there is room, orange past three quarters, red when it is nearly gone.
 The percentages are still written out beside it; the ring is there so three accounts can be
 compared at a glance instead of by reading six numbers.
+
+Usage is also shown beside destinations in **Move to Account**, **Continue with…**, and the
+per-account choices under **When the Limit Is Reached**. On iPhone, the same choices in
+**Chat Settings** show usage below each account name. Readings help you compare accounts;
+choosing one still uses the usual move, continuation or recovery action.
 
 ### Naming
 If you have a shell alias pointing at an account, Threading uses your name for it. Given:
@@ -4830,9 +4845,12 @@ traffic never means losing the ability to look for a new app release.
 
 Threading updates are handled through **Sparkle**, only after you agree. Agent tool updates never
 run as part of the background check: a sidebar receipt aligns the now/latest versions in a compact
-table. **Update** opens a named standalone terminal and runs the provider's
-own command there, with every prompt, result and exit code visible. When several tools have news,
-**Update All** runs them sequentially in that terminal and continues to the next if one fails.
+table. **Update** first checks the executable and installed version again, then opens a named
+standalone terminal and runs the provider's own command by its resolved path, with every prompt and
+result visible. Threading checks the installed version again afterward and reports whether it
+reached the announced version, changed to another version, stayed unchanged or failed. When
+several tools have news, **Update All** runs them sequentially in that terminal, summarizes the
+outcomes and continues to the next if one fails.
 Because Threading provides that notice, Codex chats launched inside Threading skip Codex's own
 startup update screen; this does not change Codex's setting when you launch it elsewhere.
 
@@ -5318,7 +5336,8 @@ screen says so and leads with the offers further down the list instead.
 
 Press **Cmd+Shift+P** to search app, extension, and project-script commands. Use the arrow keys to
 move and Return to run. The result area shows at most six rows at once and scrolls when there are
-more.
+more. **Escape** closes the palette and returns keyboard focus to the terminal or control you
+were using before opening it.
 
 Session commands do not require you to select a chat first. If a command such as **Close Session**
 or **Rename Session** only needs a session and none is selected, press **Tab or Return** to move to

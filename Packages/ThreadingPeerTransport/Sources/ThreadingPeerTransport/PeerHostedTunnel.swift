@@ -38,6 +38,7 @@ public final class PeerHostedDeviceTunnel: @unchecked Sendable {
     private let localCandidateTask: Task<Void, Error>
     private let remoteSignalTask: Task<Void, Error>
     private let maintenanceTask: Task<Void, Never>
+    private var livenessTask: Task<Void, Never>?
     private let lifecycle = NSLock()
     private var isStopped = false
 
@@ -61,9 +62,26 @@ public final class PeerHostedDeviceTunnel: @unchecked Sendable {
         self.localCandidateTask = localCandidateTask
         self.remoteSignalTask = remoteSignalTask
         self.maintenanceTask = maintenanceTask
+        // A tunnel whose transport has closed or failed is over whether or not the device has
+        // noticed: left alone, the loopback listener goes on accepting sockets that lead
+        // nowhere, and the origin stays in the app's hands as if it were a route. Stopping here
+        // closes the listener, so a dial fails at once instead of hanging, and `isActive` says
+        // so to whoever still holds the origin.
+        livenessTask = PeerTransportLifetime.whenEnded(transport) { [weak self] in
+            self?.stop()
+        }
     }
 
     deinit { stop() }
+
+    /// Whether the tunnel is still standing.
+    ///
+    /// False once `stop()` has run, including the stop the tunnel performs on itself when its
+    /// transport closes or fails. An origin read from an inactive tunnel refuses every
+    /// connection, so a holder checks this before dialling rather than after.
+    public var isActive: Bool {
+        lifecycle.withLock { !isStopped }
+    }
 
     public func selectedRoute() async -> PeerTransportRoute? {
         await transport.selectedRoute()
@@ -76,11 +94,42 @@ public final class PeerHostedDeviceTunnel: @unchecked Sendable {
             return true
         }
         guard shouldStop else { return }
+        livenessTask?.cancel()
         localCandidateTask.cancel()
         remoteSignalTask.cancel()
         maintenanceTask.cancel()
         proxy.stop()
         Task { await socket.close() }
+    }
+}
+
+/// Runs a closure once a transport has closed or failed, whichever side ended it.
+///
+/// The transport's state stream is the one signal of a peer going away that does not require
+/// sending something first: ICE consent expires, the data channel closes, or the other side
+/// closes its peer connection, and each arrives as `.closed` or `.failed`. The stream finishes
+/// only when the transport closes, so a finished stream counts as an end too. The stream has one
+/// consumer; on the device that is this watch, and on the Mac it is the listener's own.
+enum PeerTransportLifetime {
+    @discardableResult
+    static func whenEnded(
+        _ transport: WebRTCPeerTransport,
+        onEnded: @escaping @Sendable () -> Void
+    ) -> Task<Void, Never> {
+        Task {
+            for await state in transport.stateChanges {
+                guard !Task.isCancelled else { return }
+                switch state {
+                case .closed, .failed:
+                    onEnded()
+                    return
+                case .idle, .gathering, .connecting, .open:
+                    continue
+                }
+            }
+            guard !Task.isCancelled else { return }
+            onEnded()
+        }
     }
 }
 

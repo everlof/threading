@@ -3906,6 +3906,23 @@
         }
       }
     },
+    "A model refresh is already running." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A model refresh is already running."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En modelluppdatering pågår redan."
+          }
+        }
+      }
+    },
     "A native semantic scene supplied by an extension. Area represents installed size." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4892,6 +4909,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Konton hittas automatiskt i dina konfigurationskataloger för Claude och Codex. Klicka på en ikon för att välja en emoji eller byt namn på ett konto för att skilja det från de andra i sidofältet. Om du rensar namnet återställs namnet från ditt skalalias. Stäng av ett konto om det inte ska erbjudas för nya konversationer. Inget raderas och konversationer som redan använder kontot fortsätter att fungera."
+          }
+        }
+      }
+    },
+    "Accounts refreshed: %lld of %lld." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accounts refreshed: %lld of %lld."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdaterade konton: %lld av %lld."
           }
         }
       }
@@ -7752,6 +7786,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillgängliga inloggningar"
+          }
+        }
+      }
+    },
+    "Available models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Available models"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillgängliga modeller"
           }
         }
       }
@@ -11551,6 +11602,40 @@
         }
       }
     },
+    "Codex opened a different account. Check this account's configuration and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex opened a different account. Check this account's configuration and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex öppnade ett annat konto. Kontrollera kontots konfiguration och försök igen."
+          }
+        }
+      }
+    },
+    "Codex returned an unreadable model list. Update Codex and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex returned an unreadable model list. Update Codex and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex returnerade en modellista som inte kunde läsas. Uppdatera Codex och försök igen."
+          }
+        }
+      }
+    },
     "Codex returned no %@ draft." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12475,6 +12560,23 @@
         }
       }
     },
+    "Connect a Codex account to refresh its models." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect a Codex account to refresh its models."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut ett Codex-konto för att uppdatera dess modeller."
+          }
+        }
+      }
+    },
     "Connect a model provider" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12768,6 +12870,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fortsätt som %@ · %@"
+          }
+        }
+      }
+    },
+    "Continue as…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fortsätt som…"
           }
         }
       }
@@ -13659,6 +13772,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte koda kontrollbegäran."
+          }
+        }
+      }
+    },
+    "Could not load models. Check that Codex is installed and reconnect this account if needed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not load models. Check that Codex is installed and reconnect this account if needed."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte läsa in modeller. Kontrollera att Codex är installerat och anslut kontot igen vid behov."
           }
         }
       }
@@ -16567,6 +16697,23 @@
         }
       }
     },
+    "Enable at most 32 Codex accounts before refreshing models." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable at most 32 Codex accounts before refreshing models."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera högst 32 Codex-konton innan du uppdaterar modellerna."
+          }
+        }
+      }
+    },
     "Enable notifications" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18488,6 +18635,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Finder"
+          }
+        }
+      }
+    },
+    "Finding Codex accounts…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finding Codex accounts…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Söker efter Codex-konton…"
           }
         }
       }
@@ -32715,6 +32879,23 @@
         }
       }
     },
+    "Refresh Models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Models"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera modeller"
+          }
+        }
+      }
+    },
     "Refresh Simulator" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32766,6 +32947,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdatera exempeltilläggets projektstatus."
+          }
+        }
+      }
+    },
+    "Refreshing %@… (%lld of %lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refreshing %@… (%lld of %lld)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdaterar %@… (%lld av %lld)"
           }
         }
       }
@@ -32887,6 +33085,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ladda om"
+          }
+        }
+      }
+    },
+    "Reload available models for all enabled Codex accounts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reload available models for all enabled Codex accounts."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs in tillgängliga modeller på nytt för alla aktiverade Codex-konton."
           }
         }
       }
@@ -43660,6 +43875,40 @@
         }
       }
     },
+    "The model list exceeded the refresh limit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The model list exceeded the refresh limit."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modellistan överskred gränsen för uppdateringen."
+          }
+        }
+      }
+    },
+    "The model refresh timed out. Check your connection and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The model refresh timed out. Check your connection and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modelluppdateringen tog för lång tid. Kontrollera anslutningen och försök igen."
+          }
+        }
+      }
+    },
     "The movie could not be read." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44206,6 +44455,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställningsstarten kom inte tillbaka den heller, så inget automatiskt har startats."
+          }
+        }
+      }
+    },
+    "The refreshed model list could not be saved. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The refreshed model list could not be saved. Try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den uppdaterade modellistan kunde inte sparas. Försök igen."
           }
         }
       }
@@ -54275,6 +54541,23 @@
         }
       }
     },
+    "missing models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "missing models"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "saknade modeller"
+          }
+        }
+      }
+    },
     "model" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54282,6 +54565,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "modell"
+          }
+        }
+      }
+    },
+    "model list" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "model list"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "modellista"
+          }
+        }
+      }
+    },
+    "models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "models"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "modeller"
           }
         }
       }
@@ -55140,6 +55457,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "skapa om miljön"
+          }
+        }
+      }
+    },
+    "refresh models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "refresh models"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "uppdatera modeller"
           }
         }
       }

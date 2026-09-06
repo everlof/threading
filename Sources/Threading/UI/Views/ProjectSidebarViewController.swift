@@ -100,6 +100,7 @@ final class ProjectSidebarViewController: NSViewController {
     /// injected store lets deterministic UI workloads exercise the real outline controller
     /// without reading or mutating the user's projects.
     let projectStore: ProjectStore
+    let decorateAccountUsage: AccountUsageMenu.Decorator
     let scheduledMessageStore: ScheduledMessageStore
     let canAskAgentToRename: (SessionID) -> Bool
     let canAskForReportBack: (SessionID) -> Bool
@@ -365,13 +366,15 @@ final class ProjectSidebarViewController: NSViewController {
         scheduledMessageStore: ScheduledMessageStore = .shared,
         canAskAgentToRename: @escaping (SessionID) -> Bool = { _ in false },
         canAskForReportBack: @escaping (SessionID) -> Bool = { _ in false },
-        defersInitialTreeMount: Bool = false
+        defersInitialTreeMount: Bool = false,
+        decorateAccountUsage: @escaping AccountUsageMenu.Decorator = AccountUsageMenu.decorate
     ) {
         self.projectStore = projectStore
         self.scheduledMessageStore = scheduledMessageStore
         self.canAskAgentToRename = canAskAgentToRename
         self.canAskForReportBack = canAskForReportBack
         self.defersInitialTreeMount = defersInitialTreeMount
+        self.decorateAccountUsage = decorateAccountUsage
         super.init(nibName: nil, bundle: nil)
     }
 

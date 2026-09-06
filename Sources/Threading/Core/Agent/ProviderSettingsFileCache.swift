@@ -5,7 +5,7 @@ import os
 ///
 /// Shared by every reader of a CLI-owned file. `codexCatalog` proved the shape first; the Claude
 /// readers now use it for the same reason.
-struct ProviderSettingsFileIdentity: Equatable, Sendable {
+struct ProviderSettingsFileIdentity: Equatable, Codable, Sendable {
     let modified: Date?
     let size: Int?
 

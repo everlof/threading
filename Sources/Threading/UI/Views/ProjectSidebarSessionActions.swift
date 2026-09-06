@@ -1301,13 +1301,14 @@ extension ProjectSidebarViewController {
             let destinations = SessionMigration.destinations(for: session)
             if !destinations.isEmpty {
                 submenu.append(.separator)
+                submenu.append(.header(L10n.string("Continue as…")))
                 for account in destinations {
                     submenu.append(limitRecoveryItem(
                         .resumeVia(account.id),
-                        title: SessionActionMenuDefaults.limitRecoveryLoginTitle(
-                            AccountName.display(for: account)
-                        ),
-                        resolved: resolved
+                        title: accountMenuLabel(account),
+                        resolved: resolved,
+                        account: account,
+                        model: session.model
                     ))
                 }
             }
@@ -1320,17 +1321,23 @@ extension ProjectSidebarViewController {
         ))
     }
 
-    private func limitRecoveryItem(
+    func limitRecoveryItem(
         _ policy: LimitRecoveryPolicy,
         title: String,
-        resolved: LimitRecoveryPolicy
+        resolved: LimitRecoveryPolicy,
+        account: AgentAccount? = nil,
+        model: String? = nil
     ) -> ThemedMenuEntry {
-        .item(ThemedMenuItem(
+        var item = ThemedMenuItem(
             title: title,
             help: policy.explanation,
             isSelected: resolved == policy,
             onChoose: { [weak self] in self?.chooseLimitRecovery(policy) }
-        ))
+        )
+        if let account {
+            decorateAccountUsage(&item, account, model, nil)
+        }
+        return .item(item)
     }
 
     private func chooseLimitRecovery(_ policy: LimitRecoveryPolicy) {
@@ -1670,17 +1677,22 @@ extension ProjectSidebarViewController {
         guard let project = projectStore.executionProject(forSessionID: session.id),
               SessionMigration.canMigrate(session, in: project) else { return nil }
 
-        let rows: [ThemedMenuEntry] = SessionMigration.destinations(for: session).map { account in
-            .item(ThemedMenuItem(
-                title: accountMenuLabel(account),
-                onChoose: { [weak self] in self?.moveToAccount(account) }
-            ))
-        }
         return .item(ThemedMenuItem(
             title: L10n.string("Move to Account"),
             image: ThemedMenuIcon.symbol("person.crop.circle"),
-            submenu: rows
+            submenu: moveToAccountItems(for: session, accounts: SessionMigration.destinations(for: session))
         ))
+    }
+
+    func moveToAccountItems(for session: AgentSession, accounts: [AgentAccount]) -> [ThemedMenuEntry] {
+        accounts.map { account in
+            var item = ThemedMenuItem(
+                title: accountMenuLabel(account),
+                onChoose: { [weak self] in self?.moveToAccount(account) }
+            )
+            decorateAccountUsage(&item, account, session.model, nil)
+            return .item(item)
+        }
     }
 
     /// Cross-provider is deliberately a different verb from Move. Move preserves one native
@@ -1693,23 +1705,35 @@ extension ProjectSidebarViewController {
         let destinations = ConversationContinuation.destinations(for: session)
         guard !destinations.isEmpty else { return nil }
 
-        let rows: [ThemedMenuEntry] = destinations.map { account in
-            .item(ThemedMenuItem(
-                title: continuationMenuLabel(account),
-                onChoose: { [weak self] in self?.continueWith(account) }
-            ))
-        }
         return .item(ThemedMenuItem(
             title: L10n.string("Continue with…"),
             image: ThemedMenuIcon.symbol("arrow.triangle.branch"),
-            submenu: rows
+            submenu: continuationAccountItems(accounts: destinations)
         ))
     }
 
-    private func continuationMenuLabel(_ account: AgentAccount) -> String {
-        let provider = account.provider.displayName
-        guard account.provider.supportsAccounts, !account.isDefault else { return provider }
-        return "\(provider) · \(accountMenuLabel(account))"
+    func continuationAccountItems(accounts: [AgentAccount]) -> [ThemedMenuEntry] {
+        var entries: [ThemedMenuEntry] = []
+        var previousProvider: AgentKind?
+        for account in accounts {
+            if account.provider.supportsAccounts, previousProvider != account.provider {
+                entries.append(.header(account.provider.displayName))
+            } else if previousProvider?.supportsAccounts == true, !account.provider.supportsAccounts {
+                entries.append(.separator)
+            }
+            previousProvider = account.provider
+            var item = ThemedMenuItem(
+                title: account.provider.supportsAccounts
+                    ? accountMenuLabel(account) : account.provider.displayName,
+                image: AccountMarkImage.make(for: account.provider),
+                onChoose: { [weak self] in self?.continueWith(account) }
+            )
+            if account.provider.supportsAccounts {
+                decorateAccountUsage(&item, account, nil, account.provider)
+            }
+            entries.append(.item(item))
+        }
+        return entries
     }
 
     private func accountMenuLabel(_ account: AgentAccount) -> String {

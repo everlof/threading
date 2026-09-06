@@ -29,6 +29,7 @@ final class CommandPaletteRenderTests: XCTestCase {
         /// settings destinations: the command that *does* it on top, then the places it is set,
         /// each naming its page and section where a shortcut would otherwise be.
         case settings
+        case refreshModels = "refresh-models"
     }
 
     private struct Variant {
@@ -132,6 +133,11 @@ final class CommandPaletteRenderTests: XCTestCase {
                 // Selected one row down, so the picture carries both halves: the command that
                 // performs the thing on top, and the footer a settings row changes to "Open".
                 controller.moveSelectionForTesting(by: 1)
+            case .refreshModels:
+                controller.setSearchQueryForTesting("refresh models")
+                drain(until: {
+                    controller.visibleCommandIDsForTesting == [AppCommands.ID.refreshModels]
+                })
             }
 
             guard let root = window.contentView else { return }
@@ -224,6 +230,7 @@ final class CommandPaletteRenderTests: XCTestCase {
         AppCommands.ID.toggleSidebar,
         AppCommands.ID.newSession,
         AppCommands.ID.silenceSounds,
+        AppCommands.ID.refreshModels,
     ]
 
     /// Stated here rather than read from `SettingsPages`, so the picture does not change every

@@ -53,4 +53,27 @@ final class AgentCLIProbeTests: XCTestCase {
         })
         XCTAssertEqual(asked, ["/opt/bin/codex"])
     }
+
+    func testLoginPATHIgnoresProfileOutputBeforeItsMarker() {
+        let output = """
+        PATH=/wrong/profile/banner
+        welcome back
+        \(AgentCLIProbe.environmentMarker)
+        USER=fixture
+        PATH=/fixture/bin:/usr/bin:/bin
+
+        """
+
+        XCTAssertEqual(
+            AgentCLIProbe.path(fromLoginEnvironmentOutput: output),
+            "/fixture/bin:/usr/bin:/bin"
+        )
+    }
+
+    func testLoginPATHRequiresThePostProfileMarkerAndANonemptyValue() {
+        XCTAssertNil(AgentCLIProbe.path(fromLoginEnvironmentOutput: "PATH=/unframed/bin\n"))
+        XCTAssertNil(AgentCLIProbe.path(
+            fromLoginEnvironmentOutput: "\(AgentCLIProbe.environmentMarker)\nPATH=\n"
+        ))
+    }
 }

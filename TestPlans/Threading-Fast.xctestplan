@@ -68,6 +68,7 @@
         "BrowserCaptureGeometryTests",
         "BrowserOffScreenCaptureTests",
         "SidebarRevealFocusTests",
+        "CommandPaletteFocusTests/testEscapeReturnsKeyboardToTerminalInKeyWindow()",
         "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
         "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()",
         "ThemedPresentationTests\/testAlertDismissEndsTheSheetWithoutAButtonAnswer()",

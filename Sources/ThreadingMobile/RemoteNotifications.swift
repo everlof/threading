@@ -2074,9 +2074,11 @@ struct NotificationOnboardingCard: View {
                         Label("Turn on", systemImage: "bell")
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(theme.accent)
-                .foregroundStyle(theme.ground)
+                .buttonStyle(MobileThemedActionButtonStyle(
+                    kind: .primary,
+                    theme: theme,
+                    width: .intrinsic
+                ))
                 .disabled(isRequesting)
                 .accessibilityLabel(MobileL10n.string("Turn on notifications"))
             }

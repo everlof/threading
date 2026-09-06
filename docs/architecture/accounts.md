@@ -132,6 +132,32 @@ clears only the display-name and emoji overrides and leaves enablement, credenti
 and every usage reading untouched. “Reset” beside the Usage destinations made the last of those
 easy to misread; the button now names the complete scope of its action on its face.
 
+**Refresh Models** is a host-owned action in Agents & Accounts and the command palette
+(`app.refreshModels`). `CodexModelRefreshService` refreshes every enabled Codex login through the
+same routed installed CLI used for conversations. It runs only `initialize` and paginated
+`model/list`, never starts a thread or turn, and leaves credentials with Codex. Both entry points
+share one running job and per-account outcomes. Settings restamps just the refresh row; palette
+invocation reports completion in an informational alert. Execution, account routing, result
+validation, persistence, and availability remain host-owned; this is not an extension action or
+a new customizable popover.
+
+The shared `models_cache.json` is not authoritative across CLI versions. An older bundled client
+can overwrite it with a smaller model list even while the current CLI offers newer models to
+that same login. `CodexModelCatalogStore` therefore saves direct answers separately in
+`codex-model-catalogs.json` under Threading's support directory. A later shared-cache write from
+the same or a newer CLI can supersede that answer; an older client's write cannot. For file-based
+logins, a changed authentication-file identity invalidates the direct answer. Keychain-only login
+changes require another refresh, as no authentication-file marker changes. The store loads and
+saves on its own worker and publishes immutable values; `AgentModelsDidChange` refreshes Mac
+controls and the phone catalog.
+Model visibility and explicit choices still use their existing account-specific rules.
+
+Expected use is 1–8 accounts with roughly 8–30 models each. Admission stops above 32 accounts;
+one background child runs at a time with a 25-second deadline, process-group cleanup, an aggregate
+2 MiB output ceiling, and at most eight 64-model pages. Parsing and persistence stay off the main
+actor. The deterministic child fixture exercises pagination, 512 models, timeouts, malformed and
+oversized output, partial account failure, and an older cache writer after store reload.
+
 **Model visibility is also scoped to the provider-qualified login.** The macOS launch popover
 owns the edit affordance: hovering an unselected, non-default model reveals an eye-slash action,
 and the same popover restores every hidden row. `AccountPreference.hiddenModelIDs` persists that
@@ -295,6 +321,30 @@ project trust and per-project permissions live in `<config>/.claude.json`, so a 
 target account has never opened prompts once, exactly as it would have anyway.
 
 ## Account Usage
+
+Account-choice evidence also belongs in the session action menu: **Move to Account**,
+**Continue with…**, and each pinned-login recovery policy use `AccountUsageMenu.decorate`,
+the same columns and scoped-window readings as the new-chat picker. Move and recovery meter
+their gauge/reset against the session's explicit model. Continuation has not chosen its new
+model yet: it carries the destination's brand, account-wide reset and all scoped readings.
+Provider names and the recovery menu's “Continue as…” are section headings, leaving each
+row's title column for the account name and plan.
+Opening these menus does not read model configuration from disk. Missing readings remain
+unknown; the existing throttled service refreshes them for the next menu open.
+
+On iPhone the corresponding Chat Settings menus use native title/subtitle rows, keeping the
+account name separate from its usage. Continuation joins its authorized destinations to the
+live owner catalogue by runtime **and** account ID, never by display name. Move/recovery
+resolve the current model's windows; continuation resolves the destination's default. Hosts
+without per-window readings retain their supplied summary. Missing/error states use the
+identity picker's existing words. These remain host-owned operational surfaces: rendering
+usage cannot change destination eligibility, confirmation, migration or recovery execution.
+
+The scaling contract is an occasional menu open over typically 1–10 logins, with 1,000 as the
+stress cardinality. Desktop entries stay value models in the existing menu renderer and each
+reading keeps `UsageReadingLabel.maximumReadings`; refresh work uses the service's bounded
+queue. The phone indexes catalogue accounts once per continuation-menu build, making its usage
+join O(accounts + destinations), rather than searching the catalogue for every row.
 
 This section owns live account discovery, credentials, endpoint pacing and the compact toolbar
 reading. The combined 90-day transcript ledger and durable 180-day limit/reset dashboard are

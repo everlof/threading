@@ -98,8 +98,8 @@ meeting at one seam:
   terminal supplies the delegated-work exception's second key above.
 - **Recovery** is `LimitRecoveryCoordinator` + `LimitRecoveryPolicy` + `LimitChooserReading`:
   a poll at `UsageLimitDefaults.pollInterval` over the live sessions (`stat`-cheap — the
-  reader's size gate skips any transcript that has not grown, and its changed-only callback
-  means one refusal is handled exactly once), the bounded confirmation of a provisional task
+  reader's file stamp skips unchanged transcripts, and the coordinator's parked/refusal identity
+  handles an accepted refusal once), the bounded confirmation of a provisional task
   failure, the policy switch, the chooser actuator, and the scheduled continuation.
 
 Recovery reaches a terminal through `AgentTerminalLimitRecoverySurface`: bounded visible lines,
@@ -108,11 +108,51 @@ to its terminal and tracker; Core never obtains `AgentSessionViewController`, `T
 a view. Running-only lookup gates chooser input, while the allocated-surface lookup remains
 available to lower a transcript-derived park after a process exits.
 
-The transcript path is derived, not discovered: Claude ids are minted up front
-([`sessions.md`](sessions.md)), so `ClaudeTranscript.url` names the file from the account's
-config directory and the project slug. Native sessions come through neither layer — the same
+The live transcript path comes from Claude's authenticated root lifecycle hooks, validated against
+the session ID and account's `projects/<slug>/<id>.jsonl` boundary by `ClaudeTranscriptLocations`.
+The checkout-derived path is the fallback before a hook reports one; no transcript-tree discovery
+runs in the poll. Native sessions come through neither layer — the same
 refusal arrives on the structured stream, owned by the conversation — and other runtimes are
 excluded by the capability table, never by a `kind ==` branch.
+
+**A checkout copy can remain stale while the original keeps growing.** Two sessions on CLI 2.1.263
+recorded root 429s after moving to temporary worktrees, but the recovery poll read the copies at
+the new project slugs. Claude kept appending to the original project files, so neither stop nor
+escape was offered. Working directory and transcript location are independent facts. The live
+location retains one bounded path per terminal, rejects child transcripts and stale ownership
+epochs, and clears when the runtime is discarded. Account migration and checkout copying read
+that same source; account migration installs it at the destination's launch slug, preserving the
+work done after the original copy. A hook-path update performs no filesystem scan; the existing
+background attribute check and bounded tail reader remain the only limit-detection I/O.
+
+`SessionTranscript` owns live-source selection for every reader. `ReadRequest` captures that
+decision before replay leaves the main actor, while Codex's rollout discovery stays deferred to
+its worker. Search uses the same resolver with `.known`. `ClaudeTranscript.storageURL` names a
+copy destination or the resolver's initial fallback; the architecture gate rejects feature readers
+calling it. Child directories derive from the selected root. Terminal output caches its account,
+not its first transcript path, so a later hook can correct the initial fallback without another
+account-directory scan.
+
+A background result carries `AgentRuntime.TranscriptObservation`: runtime registration identity,
+provider/account/conversation, checkout ownership epoch and live-source revision. Recovery checks
+that authority again before applying the result. Repeated identical hooks preserve it; a changed
+source, account, checkout or replacement runtime revokes it. The poll also reconciles the current
+source's cached refusal: a scan can finish before its process is ready, and a changed-only reader
+will not announce the same record twice just because a consumer is now ready.
+
+`TranscriptFactReader` keeps one scan per path in flight. Copy seeding and resets revoke that
+scan and its earlier waiters, while retaining the slot until its worker exits; requests made after
+the change receive a trailing scan. This prevents an old refusal from overwriting a destination's
+cleared copy boundary. Ordinary cache stamps include inode, modification time and size, so an
+atomic replacement or an in-place rewrite with the same byte count cannot remain invisible.
+Copy seeding starts with the transaction's byte count and establishes its file stamp on the
+worker's first check, preserving the rule that copied history is not fresh provider output.
+
+The regression lane is `ClaudeTranscriptLocationsTests`, `TranscriptFactReaderTests`, the
+existing replay/search/refusal/migration suites, and `scripts/tests/test_transcript_boundaries.py`.
+The race tests stop a worker after it reads old bytes, change ownership, and release it; they
+do not depend on sleeping long enough to happen across the race. Location storage remains O(1)
+per allocated runtime (1–40 expected, 1,000 stress), and source capture adds no filesystem work.
 
 ## The tracker's fifth fact
 

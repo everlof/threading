@@ -301,6 +301,31 @@ editors, Notifications, Diagnostics, Mac appearance, Ask for input and the issue
   its rows are editable or reordered, the group when the form is a small fixed shape or the
   screen already builds its rows lazily.
 
+## Prominent application actions
+
+Feature code never applies SwiftUI's `.buttonStyle(.borderedProminent)` directly. That system
+style chooses its foreground independently of the Mac-supplied accent: a white or bright accent
+can therefore become a pale fill carrying pale text and a pale symbol. The Usage dashboard's
+banked-reset action shipped in exactly that state.
+
+Use `MobileThemedActionButtonStyle` for application-owned primary and secondary actions. It owns
+the accent-derived foreground, authored control radius, pressed response and disabled opacity as
+one construction:
+
+```swift
+Button("Apply") { apply() }
+    .buttonStyle(MobileThemedActionButtonStyle(
+        kind: .primary,
+        theme: theme
+    ))
+```
+
+The default width fills its container. Pass `width: .intrinsic` where a compact action belongs in
+a horizontal row or extension-provided stack. Do not repair a raw prominent button by adding a
+local foreground modifier: that still leaves radius, pressed and disabled chrome split between
+the system style and feature code. `scripts/check_mobile_theme_boundaries.py` rejects the raw
+style before compilation, including when its argument is split across lines.
+
 ## System menus stay bounded
 
 An iOS `Menu` is system chrome, but it is not a general scroll container. On iOS 26 an upward

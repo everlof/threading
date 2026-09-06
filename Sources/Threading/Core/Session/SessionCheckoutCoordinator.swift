@@ -746,13 +746,14 @@ final class SessionCheckoutCoordinator {
                     for: session.kind,
                     handle: session.accountHandle
                   ),
-                  let source = ClaudeTranscript.url(
+                  let source = SessionTranscript.url(
                     sessionID: transcriptID,
-                    account: account,
-                    in: sourceProject
+                    for: session,
+                    in: sourceProject,
+                    account: account
                   ),
                   fileManager.fileExists(atPath: source.path),
-                  let destination = ClaudeTranscript.url(
+                  let destination = ClaudeTranscript.storageURL(
                     sessionID: transcriptID,
                     account: account,
                     in: destinationProject
@@ -760,16 +761,8 @@ final class SessionCheckoutCoordinator {
             return CheckoutTranscriptCopyPair(
                 sourceTranscript: source,
                 destinationTranscript: destination,
-                sourceSubagents: ClaudeTranscript.subagentsDirectory(
-                    sessionID: transcriptID,
-                    account: account,
-                    in: sourceProject
-                ),
-                destinationSubagents: ClaudeTranscript.subagentsDirectory(
-                    sessionID: transcriptID,
-                    account: account,
-                    in: destinationProject
-                )
+                sourceSubagents: ClaudeTranscript.subagentsDirectory(forRoot: source),
+                destinationSubagents: ClaudeTranscript.subagentsDirectory(forRoot: destination)
             )
         }
     }

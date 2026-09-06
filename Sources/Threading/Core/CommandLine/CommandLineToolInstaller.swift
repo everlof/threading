@@ -226,26 +226,11 @@ enum CommandLineToolInstaller {
         timeout: TimeInterval = CommandLineToolInstallerDefaults.pathProbeTimeout,
         maximumOutputBytes: Int = CommandLineToolInstallerDefaults.pathProbeOutputBytes
     ) -> String? {
-        let command = ShellCommand(word: CommandLineToolInstallerDefaults.environmentCommand)
-        guard let result = try? BoundedChildProcess.run(
-            executable: shell,
-            arguments: ["-l", "-c", command.source],
+        AgentCLIProbe.loginShellPATH(
+            shell: shell,
             timeout: timeout,
-            maximumOutputBytes: maximumOutputBytes,
-            output: .standardOutput
-        ), result.termination == .exited(0), !result.outputWasTruncated else { return nil }
-
-        return path(fromEnvironmentOutput: String(decoding: result.output, as: UTF8.self))
-    }
-
-    /// The pure half: the first `PATH=` line of an environment dump.
-    nonisolated static func path(fromEnvironmentOutput output: String) -> String? {
-        let prefix = "\(EnvironmentKeys.path)="
-        for line in output.split(separator: "\n", omittingEmptySubsequences: false)
-        where line.hasPrefix(prefix) {
-            return String(line.dropFirst(prefix.count))
-        }
-        return nil
+            maximumOutputBytes: maximumOutputBytes
+        )
     }
 
     /// The line to add to a shell profile when `~/.local/bin` is not on `PATH`.
@@ -281,7 +266,6 @@ enum CommandLineToolInstallerDefaults {
     /// One login shell, bounded like every other probe that starts one.
     static let pathProbeTimeout: TimeInterval = 5
     static let pathProbeOutputBytes = 64 * 1024
-    static let environmentCommand = "/usr/bin/env"
 }
 
 // MARK: - Surface

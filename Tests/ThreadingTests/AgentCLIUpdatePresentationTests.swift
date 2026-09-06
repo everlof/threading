@@ -59,29 +59,52 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
             AgentCLIUpdate(
                 id: "first",
                 displayName: "First Tool",
+                executable: "false",
+                versionArguments: [],
+                comparison: .semantic,
                 installedVersion: "1.0.0",
                 latestVersion: "2.0.0",
-                updateCommand: "printf first; exit 7"
+                updateArguments: []
             ),
             AgentCLIUpdate(
                 id: "second",
                 displayName: "Second Tool",
+                executable: "echo",
+                versionArguments: ["4.0.0"],
+                comparison: .semantic,
                 installedVersion: "3.0.0",
                 latestVersion: "4.0.0",
-                updateCommand: "printf second"
+                updateArguments: ["second"]
             )
         ]
-        let plan = AgentCLIUpdateExecutionPlan(updates: updates)
-        let script = AgentCLIUpdateShellCommand.script(for: updates)
+        let items: [AgentCLIUpdateExecutionItem] = [
+            .ready(
+                update: updates[0],
+                resolved: ResolvedAgentCLI(
+                    executablePath: "/usr/bin/false",
+                    effectivePATH: "/usr/bin:/bin",
+                    version: "1.0.0"
+                )
+            ),
+            .ready(
+                update: updates[1],
+                resolved: ResolvedAgentCLI(
+                    executablePath: "/bin/echo",
+                    effectivePATH: "/usr/bin:/bin",
+                    version: "3.0.0"
+                )
+            )
+        ]
+        let plan = AgentCLIUpdateExecutionPlan(items: items)
+        let script = AgentCLIUpdateShellCommand.script(for: items)
 
-        XCTAssertTrue(script.contains("'/bin/sh' '-l' '-c' 'printf first; exit 7'"))
-        XCTAssertTrue(script.contains("'/bin/sh' '-l' '-c' 'printf second'"))
-        XCTAssertTrue(plan.shellSource.hasPrefix("'/bin/sh' '-l' '-c' "))
+        XCTAssertTrue(script.contains("'/usr/bin/env' 'PATH=/usr/bin:/bin' '/usr/bin/false'"))
+        XCTAssertTrue(script.contains("'/usr/bin/env' 'PATH=/usr/bin:/bin' '/bin/echo' 'second'"))
+        XCTAssertTrue(plan.shellSource.hasPrefix("'/bin/sh' '-c' "))
+        XCTAssertFalse(plan.shellSource.contains("'-l'"))
 
-        // The plan's own shells are login shells, which is the point of it — so this runs them
-        // against a scratch home rather than the developer's. A profile that prints a banner,
-        // asks a question or takes its time would otherwise decide whether this test passes,
-        // and one that blocks on input would hang the suite outright. Hence the deadline too.
+        // The runner is deliberately a clean non-login shell: provider paths and the PATH needed
+        // by their interpreters were resolved before this terminal began.
         let home = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("AgentCLIUpdatePlan-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -109,21 +132,157 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
         }
 
         XCTAssertEqual(process.terminationStatus, 0)
-        XCTAssertTrue(text.contains("First Tool updater finished with exit code 7"))
-        XCTAssertTrue(text.contains("Second Tool updater finished with exit code 0"))
-        XCTAssertTrue(text.contains("first"))
+        XCTAssertTrue(text.contains("First Tool updater failed with exit code 1"))
+        XCTAssertTrue(text.contains("Second Tool updated from 3.0.0 to 4.0.0"))
         XCTAssertTrue(text.contains("second"), "the first updater's exit stopped the second")
+        XCTAssertTrue(text.contains("1 updated, 0 changed, 0 skipped, 1 failed"))
+    }
+
+    func testPreflightReResolvesAndSkipsAToolUpdatedSinceTheNotice() async {
+        let update = fixtureUpdates()[0]
+        let plan = await AgentCLIUpdateExecutionPlan.prepare(updates: [update]) { _ in
+            .success(ResolvedAgentCLI(
+                executablePath: "/fresh/bin/claude",
+                effectivePATH: "/fresh/bin:/usr/bin:/bin",
+                version: update.latestVersion
+            ))
+        }
+
+        XCTAssertEqual(plan.items, [
+            .alreadyCurrent(
+                update: update,
+                resolved: ResolvedAgentCLI(
+                    executablePath: "/fresh/bin/claude",
+                    effectivePATH: "/fresh/bin:/usr/bin:/bin",
+                    version: update.latestVersion
+                )
+            )
+        ])
+    }
+
+    func testResolvedPATHRunsAnEnvShebangFromASparseGUIEnvironment() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentCLIUpdatePATH-\(UUID().uuidString)", isDirectory: true)
+        let bin = home.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let interpreter = bin.appendingPathComponent("fixture-shell")
+        try FileManager.default.createSymbolicLink(
+            at: interpreter,
+            withDestinationURL: URL(fileURLWithPath: "/bin/sh")
+        )
+        let versionFile = home.appendingPathComponent("version")
+        try Data("1.0.0\n".utf8).write(to: versionFile)
+        let executable = bin.appendingPathComponent("fixture-agent")
+        let source = """
+        #!/usr/bin/env fixture-shell
+        if [ "$1" = "update" ]; then
+            /usr/bin/printf '2.0.0\\n' > "$HOME/version"
+        else
+            /bin/cat "$HOME/version"
+        fi
+        """
+        try Data(source.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+
+        let update = AgentCLIUpdate(
+            id: "fixture",
+            displayName: "Fixture Tool",
+            executable: "fixture-agent",
+            versionArguments: ["--version"],
+            comparison: .semantic,
+            installedVersion: "1.0.0",
+            latestVersion: "2.0.0",
+            updateArguments: ["update"]
+        )
+        let plan = AgentCLIUpdateExecutionPlan(items: [
+            .ready(
+                update: update,
+                resolved: ResolvedAgentCLI(
+                    executablePath: executable.path,
+                    effectivePATH: "\(bin.path):/usr/bin:/bin",
+                    version: "1.0.0"
+                )
+            )
+        ])
+
+        let result = try BoundedChildProcess.run(
+            executable: "/bin/sh",
+            arguments: ["-c", plan.shellSource],
+            environment: [
+                "HOME": home.path,
+                "PATH": "/usr/bin:/bin"
+            ],
+            timeout: Self.planDeadline,
+            maximumOutputBytes: 64 * 1_024
+        )
+        let text = String(decoding: result.output, as: UTF8.self)
+
+        XCTAssertEqual(result.termination, .exited(0))
+        XCTAssertTrue(text.contains("Fixture Tool updated from 1.0.0 to 2.0.0"), text)
+        XCTAssertTrue(text.contains("1 updated, 0 changed, 0 skipped, 0 failed"), text)
+    }
+
+    func testAZeroExitWithoutAVersionChangeIsReportedAsAFailure() throws {
+        let update = AgentCLIUpdate(
+            id: "unchanged",
+            displayName: "Unchanged Tool",
+            executable: "echo",
+            versionArguments: ["1.0.0"],
+            comparison: .semantic,
+            installedVersion: "1.0.0",
+            latestVersion: "2.0.0",
+            updateArguments: ["provider updater exited zero"]
+        )
+        let plan = AgentCLIUpdateExecutionPlan(items: [
+            .ready(
+                update: update,
+                resolved: ResolvedAgentCLI(
+                    executablePath: "/bin/echo",
+                    effectivePATH: "/usr/bin:/bin",
+                    version: "1.0.0"
+                )
+            )
+        ])
+
+        let result = try BoundedChildProcess.run(
+            executable: "/bin/sh",
+            arguments: ["-c", plan.shellSource],
+            timeout: Self.planDeadline,
+            maximumOutputBytes: 64 * 1_024
+        )
+        let text = String(decoding: result.output, as: UTF8.self)
+
+        XCTAssertEqual(result.termination, .exited(0))
+        XCTAssertTrue(text.contains("provider updater exited zero"), text)
+        XCTAssertTrue(text.contains("version remains 1.0.0"), text)
+        XCTAssertTrue(text.contains("0 updated, 0 changed, 0 skipped, 1 failed"), text)
     }
 
     func testAFullPlanBypassesTheCompleteTTYInputLimitAndLeavesAnInteractiveShell() {
         let plan = AgentCLIUpdateExecutionPlan(
-            updates: AgentCLIUpdateCatalog.all.map { definition in
-                AgentCLIUpdate(
+            items: AgentCLIUpdateCatalog.all.map { definition in
+                let update = AgentCLIUpdate(
                     id: definition.id,
                     displayName: definition.displayName,
+                    executable: definition.executable,
+                    versionArguments: ["2026.08.19-aabbccd"],
+                    comparison: definition.comparison,
                     installedVersion: "2026.08.11-e8db854",
                     latestVersion: "2026.08.19-aabbccd",
-                    updateCommand: "/usr/bin/printf 'ran-\(definition.id)\\n'"
+                    updateArguments: ["ran-\(definition.id)"]
+                )
+                return .ready(
+                    update: update,
+                    resolved: ResolvedAgentCLI(
+                        executablePath: "/bin/echo",
+                        effectivePATH: "/usr/bin:/bin",
+                        version: update.installedVersion
+                    )
                 )
             }
         )
@@ -156,7 +315,7 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
         defer { session.terminate() }
 
         XCTAssertTrue(
-            waitForTerminalText("Agent tool update run finished.") {
+            waitForTerminalText("Agent tool update run finished:") {
                 String(decoding: output, as: UTF8.self)
             },
             String(decoding: output, as: UTF8.self)
@@ -409,16 +568,22 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
             AgentCLIUpdate(
                 id: "claude",
                 displayName: "Claude Code",
+                executable: "claude",
+                versionArguments: ["--version"],
+                comparison: .semantic,
                 installedVersion: "2.1.220",
                 latestVersion: "2.1.237",
-                updateCommand: "claude update"
+                updateArguments: ["update"]
             ),
             AgentCLIUpdate(
                 id: "codex",
                 displayName: "Codex",
+                executable: "codex",
+                versionArguments: ["--version"],
+                comparison: .semantic,
                 installedVersion: "0.145.0",
                 latestVersion: "0.148.0",
-                updateCommand: "codex update"
+                updateArguments: ["update"]
             )
         ]
     }

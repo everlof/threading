@@ -154,6 +154,9 @@ final class RemoteSessionMirrorRegistry {
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.broadcastSessionsChanged(ProjectsDidChange())
         }
+        appEvents.observe(AgentModelsDidChange.self) { [weak self] _ in
+            self?.broadcastSessionsChanged(ProjectsDidChange())
+        }
         // Receipt commits have their own narrow edge. The broad presentation event remains for
         // local UI, but the remote catalogue no longer guesses whether it meant runtime or read.
         appEvents.observe(SessionAttentionDidChange.self) { [weak self] event in

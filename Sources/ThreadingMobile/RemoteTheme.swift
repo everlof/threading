@@ -992,25 +992,40 @@ extension View {
     }
 }
 
-/// A full-width action whose foreground remains legible against an arbitrary authored accent.
+/// An application action whose foreground remains legible against an arbitrary authored accent.
 ///
 /// SwiftUI's prominent button chooses its own foreground colour, which can disappear when a Mac
-/// theme supplies a pale accent. Application-owned mobile actions use the resolved accent contrast
-/// instead, while secondary actions stay on the theme's control surface.
+/// theme supplies a pale accent. Application-owned mobile actions use this style so the fill,
+/// foreground, authored radius, pressed state and disabled state remain one themed construction.
 struct MobileThemedActionButtonStyle: ButtonStyle {
     enum Kind {
         case primary
         case secondary
     }
 
+    enum Width {
+        case fill
+        case intrinsic
+    }
+
     let kind: Kind
     let theme: RemoteThemePalette
+    var width: Width = .fill
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: MobileDesign.Size.dialogActionHeight)
+            .frame(
+                maxWidth: width == .fill ? .infinity : nil,
+                minHeight: width == .fill
+                    ? MobileDesign.Size.dialogActionHeight
+                    : MobileDesign.Size.minimumTapTarget
+            )
+            .padding(
+                .horizontal,
+                width == .intrinsic ? MobileDesign.Spacing.medium : 0
+            )
             .foregroundStyle(kind == .primary ? theme.accentForeground : theme.label)
             .background(
                 kind == .primary ? theme.accent : theme.controlResting,

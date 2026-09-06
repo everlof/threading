@@ -5,7 +5,7 @@ import XCTest
 /// The complete account-setup storybook in the two shipping hosts that use it.
 ///
 /// Each state is rendered in System light and dark. Onboarding is mounted inside the real flow
-/// footer, while Settings uses the production page/controller at its shared 396-point width.
+/// footer, while Settings uses the production page/controller at its shared Settings width.
 /// Fixtures never inspect the developer's accounts or start an authentication process.
 @MainActor
 final class AccountSetupRenderTests: XCTestCase {
@@ -34,6 +34,7 @@ final class AccountSetupRenderTests: XCTestCase {
         let name: String
         let accounts: [AgentAccount]
         let state: AgentAccountSetupState
+        var modelRefreshState: CodexModelRefreshService.State = .idle
     }
 
     override func tearDown() {
@@ -180,6 +181,67 @@ final class AccountSetupRenderTests: XCTestCase {
         [(.aqua, "light"), (.darkAqua, "dark")]
     }
 
+    func testRendersModelRefreshStatesInSettings() throws {
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        let account = fixtureAccount(provider: .codex, handle: "personal", path: "/tmp/personal", name: "Personal")
+        let states: [(String, CodexModelRefreshService.State)] = [
+            ("ready", .idle),
+            ("running", .refreshing(accountName: "Personal", completed: 0, total: 2)),
+            ("success", .finished([.init(accountName: "Personal", modelCount: 8, failure: nil)])),
+            ("partial", .finished([
+                .init(accountName: "Personal", modelCount: 8, failure: nil),
+                .init(accountName: "Work", modelCount: 0, failure: .timedOut)
+            ]))
+        ]
+        for (themeName, theme, appearance) in [
+            ("system", AppTheme.system, NSAppearance.Name.aqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, NSAppearance.Name.darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, NSAppearance.Name.aqua)
+        ] {
+            AppThemePalette.set(theme)
+            for (name, state) in states {
+                let story = SettingsStory(name: name, accounts: [account], state: .choice, modelRefreshState: state)
+                let data = try XCTUnwrap(settingsImage(story, appearance: appearance))
+                try data.write(to: Render.directory.appendingPathComponent("account-setup-model-refresh-\(name)-\(themeName).png"))
+            }
+        }
+    }
+
+    func testSettingsButtonRunsTheSharedRefreshAndOnlyRestampsItsRow() async throws {
+        let account = fixtureAccount(provider: .codex, handle: "personal", path: "/tmp/personal", name: "Personal")
+        let service = CodexModelRefreshService(accountsProvider: { [account] }, refresh: { _, _ in 8 })
+        let controller = AccountsPreferencesViewController(accountsProvider: { [account] }, modelRefresh: service)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Render.settingsSize), styleMask: .borderless, backing: .buffered, defer: false)
+        let host = NSView(frame: NSRect(origin: .zero, size: Render.settingsSize))
+        window.contentView = host
+        let page = controller.view
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: Render.settingsSize.width),
+            host.heightAnchor.constraint(equalToConstant: Render.settingsSize.height),
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        defer { withExtendedLifetime(window) {} }
+        controller.viewWillAppear()
+        host.layoutSubtreeIfNeeded()
+        // NSTableView materializes visible cells during drawing, as it does in Settings.
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let before = controller.presentationRebuildCountForTesting
+        let button = try XCTUnwrap(descendants(of: controller.view).compactMap { $0 as? ThemedButton }.first {
+            $0.accessibilityIdentifier() == "accounts.refresh-models"
+        })
+        XCTAssertTrue(button.performPrimaryAction())
+        XCTAssertTrue(service.state.isRunning)
+        for _ in 0..<100 where service.state.isRunning { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertEqual(service.state, .finished([.init(accountName: "Personal", modelCount: 8, failure: nil)]))
+        XCTAssertEqual(controller.presentationRebuildCountForTesting, before)
+    }
+
     private func fixtureAccount(
         provider: AgentKind,
         handle: String,
@@ -236,7 +298,8 @@ final class AccountSetupRenderTests: XCTestCase {
             let coordinator = AgentAccountSetupCoordinator(initialState: story.state)
             let controller = AccountsPreferencesViewController(
                 accountsProvider: { story.accounts },
-                setupCoordinator: coordinator
+                setupCoordinator: coordinator,
+                modelRefresh: CodexModelRefreshService(initialState: story.modelRefreshState)
             )
             _ = controller.view
             controller.viewWillAppear()
@@ -262,11 +325,16 @@ final class AccountSetupRenderTests: XCTestCase {
         content.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(content)
         NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: size.width),
+            host.heightAnchor.constraint(equalToConstant: size.height),
             content.topAnchor.constraint(equalTo: host.topAnchor),
             content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
             content.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: host.trailingAnchor)
         ])
+        let window = NSWindow(contentRect: host.bounds, styleMask: .borderless, backing: .buffered, defer: false)
+        window.appearance = appearance
+        window.contentView = host
         AppThemeRefresh.repaint(host)
         host.layoutSubtreeIfNeeded()
 
@@ -274,7 +342,7 @@ final class AccountSetupRenderTests: XCTestCase {
         host.wantsLayer = true
         host.layer?.backgroundColor = background.cgColor
         host.cacheDisplay(in: host.bounds, to: rep)
-        return rep.representation(using: .png, properties: [:])
+        return withExtendedLifetime(window) { rep.representation(using: .png, properties: [:]) }
     }
 
     private func descendants(of view: NSView) -> [NSView] {

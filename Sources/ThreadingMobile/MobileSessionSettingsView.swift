@@ -11,6 +11,7 @@ import ThreadingRemoteKit
 struct MobileSessionLimitRecoveryChoice: Equatable, Identifiable {
     let policy: RemoteLimitRecoveryPolicyDTO
     let title: String
+    var usage: String? = nil
 
     var id: String {
         [policy.action, policy.accountID].compactMap { $0 }.joined(separator: ":")
@@ -32,6 +33,34 @@ enum MobileSessionSettingsPresentation {
     ) -> [RemoteAccountChoiceDTO] {
         guard let currentAccountID = session.accountID else { return [] }
         return agent?.accounts?.filter { $0.id != currentAccountID } ?? []
+    }
+
+    /// Resolve from the live owner catalogue, matching both runtime and login. Account handles
+    /// such as `default` are only unique inside their runtime; names are never lookup keys.
+    static func continuationAccounts(
+        for destinations: [RemoteContinuationDestinationDTO],
+        in agents: [RemoteAgentChoiceDTO]
+    ) -> [String: RemoteAccountChoiceDTO] {
+        let accountsByAgent = Dictionary(agents.map { agent in
+            (agent.id, Dictionary((agent.accounts ?? []).map { ($0.id, $0) },
+                                  uniquingKeysWith: { _, latest in latest }))
+        }, uniquingKeysWith: { _, latest in latest })
+        return destinations.reduce(into: [:]) { result, destination in
+            guard let accountID = destination.accountID,
+                  let account = accountsByAgent[destination.agentID]?[accountID] else { return }
+            result[destination.id] = account
+        }
+    }
+
+    static func accountUsage(
+        _ account: RemoteAccountChoiceDTO,
+        model: String?,
+        now: Date = Date()
+    ) -> String {
+        MobileAccountUsageWords.resolve(
+            account: account,
+            reading: MobileAccountUsageReading.resolve(account: account, model: model, now: now)
+        ).text
     }
 
     /// How one continuation destination is named.
@@ -83,7 +112,8 @@ enum MobileSessionSettingsPresentation {
                 .map { account in
                     .init(
                         policy: .resumeVia(accountID: account.id),
-                        title: MobileL10n.string("Continue as %@", account.name)
+                        title: MobileL10n.string("Continue as %@", account.name),
+                        usage: accountUsage(account, model: session.model)
                     )
                 })
         }
@@ -296,9 +326,14 @@ struct MobileSessionSettingsView: View {
                 Text("No other accounts")
             } else {
                 ForEach(destinations) { account in
-                    Button(accountMenuTitle(account)) {
+                    Button {
                         pendingAccount = account
                         isConfirmingAccountMove = true
+                    } label: {
+                        Text(account.name)
+                        Text(MobileSessionSettingsPresentation.accountUsage(
+                            account, model: session.model
+                        ))
                     }
                 }
             }
@@ -312,17 +347,28 @@ struct MobileSessionSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(isMutating)
+        .accessibilityLabel(MobileL10n.string("Account"))
+        .accessibilityValue(accountDetail(session))
     }
 
     private func continuationRow() -> some View {
-        Menu {
+        let accounts = MobileSessionSettingsPresentation.continuationAccounts(
+            for: continuationDestinations,
+            in: model.me?.newSessionCatalog?.agents ?? []
+        )
+        return Menu {
             ForEach(continuationDestinations) { destination in
-                Button(MobileSessionSettingsPresentation.continuationTitle(
-                    for: destination,
-                    in: continuationDestinations
-                )) {
+                Button {
                     pendingContinuation = destination
                     isConfirmingContinuation = true
+                } label: {
+                    Text(MobileSessionSettingsPresentation.continuationTitle(
+                        for: destination,
+                        in: continuationDestinations
+                    ))
+                    if let account = accounts[destination.id] {
+                        Text(MobileSessionSettingsPresentation.accountUsage(account, model: nil))
+                    }
                 }
             }
         } label: {
@@ -335,6 +381,8 @@ struct MobileSessionSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(isMutating)
+        .accessibilityLabel(MobileL10n.string("Continue with…"))
+        .accessibilityHint(MobileL10n.string("Carry this conversation to another agent"))
     }
 
     private func limitRecoveryRow(_ session: RemoteSessionSummaryDTO) -> some View {
@@ -346,10 +394,10 @@ struct MobileSessionSettingsView: View {
                 Button {
                     setLimitRecovery(choice.policy, for: session)
                 } label: {
+                    Text(choice.title)
+                    if let usage = choice.usage { Text(usage) }
                     if choice.policy == session.limitRecovery {
-                        Label(choice.title, systemImage: "checkmark")
-                    } else {
-                        Text(choice.title)
+                        Image(systemName: "checkmark")
                     }
                 }
             }
@@ -366,17 +414,16 @@ struct MobileSessionSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(isMutating)
+        .accessibilityLabel(MobileL10n.string("When the Limit Is Reached"))
+        .accessibilityValue(
+            MobileSessionSettingsPresentation.limitRecoveryTitle(for: session, in: agent) ?? ""
+        )
     }
 
     private func accountDetail(_ session: RemoteSessionSummaryDTO) -> String {
         let name = currentAccount?.name ?? session.accountID ?? MobileL10n.string("Unknown")
         guard let usage = currentAccount?.usageSummary else { return name }
         return "\(name) · \(usage)"
-    }
-
-    private func accountMenuTitle(_ account: RemoteAccountChoiceDTO) -> String {
-        guard let usage = account.usageSummary else { return account.name }
-        return "\(account.name) · \(usage)"
     }
 
     private func moveToPendingAccount() {

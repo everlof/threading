@@ -109,7 +109,7 @@ final class AgentSessionViewController: NSViewController {
     private var codexTurnBoundaryRefreshWorkItem: DispatchWorkItem?
     private var codexContinuationBoundaryRefreshWorkItem: DispatchWorkItem?
     private var codexContinuationBoundaryRefreshIsOutputPrompted = false
-    private var claudeTranscriptURL: URL?
+    private var claudeTranscriptAccount: AgentAccount?
     private var claudeBoundaryRefreshWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
@@ -1388,7 +1388,7 @@ final class AgentSessionViewController: NSViewController {
     /// connection. See `ClaudeTranscriptTurnRefusal`.
     private func readClaudeRefusal(at url: URL, turn generation: Int) {
         ClaudeTranscriptTurnRefusal.revalidate(at: url) { [weak self] refusal in
-            guard let self, self.isRunning, self.claudeTranscriptURL == url,
+            guard let self, self.isRunning, self.resolvedClaudeTranscriptURL() == url,
                   let refusal,
                   self.activityTracker.noteTurnRefused(turn: generation)
             else { return }
@@ -1407,7 +1407,7 @@ final class AgentSessionViewController: NSViewController {
     /// The boundary Claude omits when the user presses Escape. See `ClaudeTranscriptInterruption`.
     private func readClaudeInterruption(at url: URL, turn generation: Int) {
         ClaudeTranscriptInterruption.revalidate(at: url) { [weak self] interruption in
-            guard let self, self.isRunning, self.claudeTranscriptURL == url,
+            guard let self, self.isRunning, self.resolvedClaudeTranscriptURL() == url,
                   let interruption,
                   self.activityTracker.noteTurnInterrupted(turn: generation)
             else { return }
@@ -1423,30 +1423,27 @@ final class AgentSessionViewController: NSViewController {
         }
     }
 
-    /// Where this session's Claude transcript is, derived from the session's own record rather
-    /// than from a path a hook reported: the id is Threading's own, minted before launch, so
-    /// there is nothing here to validate an outside string against.
-    ///
-    /// Resolved once per launch and then remembered, because the last step of it asks
-    /// `AgentAccountDiscovery`, whose cache expires after seven seconds and rescans the config
-    /// directories when it does — which is not work a terminal-output callback may repeat. The
-    /// two store lookups are checked *first* for the same reason: a session whose identifier has
-    /// not been recorded yet answers nil without ever reaching the scan, and is asked again on
-    /// its next burst rather than being written off for the rest of the process.
+    /// Cache account discovery per launch, but always ask the shared resolver for the source.
+    /// A hook may correct the initial checkout-derived path after the first output callback.
+    /// Store and location lookups are O(1), with no filesystem work after account resolution.
     private func resolvedClaudeTranscriptURL() -> URL? {
-        if let claudeTranscriptURL { return claudeTranscriptURL }
-
         guard let session = ProjectStore.shared.session(withID: sessionID),
               let transcriptID = session.resumeState.transcriptID,
               let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
         else { return nil }
 
-        claudeTranscriptURL = ClaudeTranscript.url(
+        if claudeTranscriptAccount?.handle != session.accountHandle {
+            claudeTranscriptAccount = AgentAccountDiscovery.account(
+                for: session.kind, handle: session.accountHandle
+            )
+        }
+        guard let account = claudeTranscriptAccount else { return nil }
+        return SessionTranscript.url(
             sessionID: transcriptID,
             for: session,
-            in: project
+            in: project,
+            account: account
         )
-        return claudeTranscriptURL
     }
 
     /// Drops both transcript fallbacks. A new process re-earns them: Codex's rollout arrives from
@@ -1467,7 +1464,7 @@ final class AgentSessionViewController: NSViewController {
         codexTranscriptURL = nil
         claudeBoundaryRefreshWorkItem?.cancel()
         claudeBoundaryRefreshWorkItem = nil
-        claudeTranscriptURL = nil
+        claudeTranscriptAccount = nil
         clearRunProgress(resetTranscriptCursor: true)
     }
 

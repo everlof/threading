@@ -71,7 +71,7 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
         }
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
 
-        let sidebar = ProjectSidebarViewController()
+        let sidebar = ProjectSidebarViewController(decorateAccountUsage: { _, _, _, _ in })
         sidebar.actionSessionID = session.id
         let entries = sidebar.sessionActionEntries(for: session)
 
@@ -88,7 +88,96 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
         }
 
         XCTAssertEqual(written, Render.appearances.count)
+        try renderAccountDestinations(to: directory)
         print("Rendered the session action menu to \(directory.path)")
+    }
+
+    /// Exercise the shipping row builders, including a selected recovery policy and a scoped
+    /// window. Fixture logins never touch provider discovery or start a provider process.
+    private func renderAccountDestinations(to directory: URL) throws {
+        let originalTheme = AppThemePalette.current
+        defer { AppThemePalette.set(originalTheme) }
+        let now = Date()
+        let accounts = ["Personal", "Work"].enumerated().map { index, name in
+            AgentAccount(
+                provider: .codex,
+                handle: .named("codex-menu-evidence-\(index)"),
+                configPath: directory.appendingPathComponent(name).path,
+                displayName: name,
+                displayNameOverride: name
+            )
+        }
+        var readings: [AccountID: AccountUsage] = [:]
+        for (index, account) in accounts.enumerated() {
+            var usage = AccountUsage(
+                windows: [
+                    .init(id: "5h", label: "Session", fraction: index == 0 ? 0.24 : 0.88,
+                          resetsAt: now.addingTimeInterval(3_600), windowDuration: 18_000),
+                    .init(id: "7d", label: "Weekly", fraction: index == 0 ? 0.42 : 0.96,
+                          resetsAt: now.addingTimeInterval(86_400), windowDuration: 604_800)
+                ],
+                planLabel: "Pro", observedAt: now, source: .localCache
+            )
+            usage.modelWindows = [
+                .init(id: "spark", label: "Weekly Spark", fraction: 0.97,
+                      resetsAt: now.addingTimeInterval(7_200), windowDuration: 604_800,
+                      scopeName: "Spark")
+            ]
+            readings[account.id] = usage
+        }
+        let sidebar = ProjectSidebarViewController(decorateAccountUsage: { item, account, model, agent in
+            guard let usage = readings[account.id] else { return }
+            item.image = agent.map { AccountMarkImage.make(for: $0) }
+                ?? UsageRingImage.make(for: usage, at: now, metering: model)
+            AccountUsageMenu.apply(usage, to: &item, metering: model, at: now)
+        })
+        var session = AgentSession(kind: .codex, title: "Compare accounts")
+        session.model = "gpt-5.3-codex-spark"
+        var move: [ThemedMenuEntry] {
+            sidebar.moveToAccountItems(for: session, accounts: accounts)
+        }
+        var continuation: [ThemedMenuEntry] {
+            sidebar.continuationAccountItems(accounts: accounts)
+        }
+        var recovery: [ThemedMenuEntry] {
+            accounts.map { account in
+                sidebar.limitRecoveryItem(
+                    .resumeVia(account.id),
+                    title: account.displayName,
+                    resolved: .resumeVia(accounts[0].id),
+                    account: account,
+                    model: session.model
+                )
+            }
+        }
+        for entries in [move, continuation, recovery] {
+            let items = entries.compactMap { entry -> ThemedMenuItem? in
+                guard case .item(let item) = entry else { return nil }
+                return item
+            }
+            XCTAssertEqual(items.map { $0.metrics.map(\.value) }, [["24%", "42%"], ["88%", "96%"]])
+            XCTAssertTrue(items.allSatisfy { $0.subtitle?.contains("97%") == true })
+            XCTAssertTrue(items.allSatisfy { $0.onChoose != nil })
+        }
+        guard case .item(let selected) = recovery[0] else { return XCTFail("Missing account") }
+        XCTAssertTrue(selected.isSelected)
+        XCTAssertEqual(selected.help, LimitRecoveryPolicy.resumeVia(accounts[0].id).explanation)
+
+        for theme in [AppTheme.system, AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist] {
+            AppThemePalette.set(theme)
+            for (name, entries) in [
+                ("move", move), ("continue", continuation),
+                ("recovery", [.header(L10n.string("Continue as…"))] + recovery)
+            ] {
+                let image = try XCTUnwrap(menuImage(
+                    entries: entries, appearance: .darkAqua,
+                    canvas: NSSize(width: 800, height: 280)
+                ))
+                try image.write(to: directory.appendingPathComponent(
+                    "session-menu-\(name)-\(theme.id.rawValue).png"
+                ))
+            }
+        }
     }
 
     private func git(_ arguments: [String], in directory: URL) throws {
@@ -213,14 +302,15 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
     /// window, so `cacheDisplay` sees the whole panel without anything reaching the screen.
     private func menuImage(
         entries: [ThemedMenuEntry],
-        appearance name: NSAppearance.Name
+        appearance name: NSAppearance.Name,
+        canvas: NSSize = Render.canvas
     ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render: @MainActor () -> Void = {
             let window = NSWindow(
-                contentRect: NSRect(origin: .zero, size: Render.canvas),
+                contentRect: NSRect(origin: .zero, size: canvas),
                 styleMask: [.titled],
                 backing: .buffered,
                 defer: false
@@ -228,11 +318,11 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
             window.appearance = appearance
             let root = ThemedSurfaceView()
             root.translatesAutoresizingMaskIntoConstraints = true
-            root.frame = NSRect(origin: .zero, size: Render.canvas)
+            root.frame = NSRect(origin: .zero, size: canvas)
             root.applySurface(fill: Design.Surface.background, radius: .fixed(0))
             let source = NSView(frame: NSRect(
                 x: 12,
-                y: Render.canvas.height - 32,
+                y: canvas.height - 32,
                 width: 1,
                 height: 1
             ))

@@ -1918,14 +1918,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.presentToast(AgentCLIUpdateToast.request(for: updates) {
             [weak self] requestedUpdates in
             guard let self else { return }
-            guard self.runAgentCLIUpdates(requestedUpdates) != nil else {
-                self.sidebarViewController.presentToast(ToastRequest(
-                    message: L10n.string("Couldn’t start agent updates"),
-                    detail: L10n.string("Threading couldn’t open the update terminal.")
-                ))
-                return
+            let shell = AgentLauncher.loginShellPath
+            Task { @MainActor [weak self] in
+                let plan = await AgentCLIUpdateExecutionPlan.prepare(
+                    updates: requestedUpdates,
+                    shell: shell
+                )
+                guard let self else { return }
+                guard self.runAgentCLIUpdates(plan) != nil else {
+                    self.sidebarViewController.presentToast(ToastRequest(
+                        message: L10n.string("Couldn’t start agent updates"),
+                        detail: L10n.string("Threading couldn’t open the update terminal.")
+                    ))
+                    return
+                }
+                didStart()
             }
-            didStart()
         })
     }
 
@@ -3555,9 +3563,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// live under a project in Threading's model. The visible project's home is preferred; while
     /// Settings is showing there is no page context, so the first project is the stable fallback.
     func runAgentCLIUpdates(
-        _ updates: [AgentCLIUpdate]
+        _ plan: AgentCLIUpdateExecutionPlan
     ) -> AgentCLIUpdateExecutionReceipt? {
-        guard !RecoveryMode.isActive, !updates.isEmpty else { return nil }
+        guard !RecoveryMode.isActive, !plan.items.isEmpty else { return nil }
+
+        let updates = plan.updates
 
         let project = currentProjectID
             .flatMap { environment.projectStore.project(withID: $0) }
@@ -3573,7 +3583,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             customTitle: title
         ) else { return nil }
 
-        let plan = AgentCLIUpdateExecutionPlan(updates: updates)
         let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)
         guard let receipt = controller.prepareAgentCLIUpdates(plan) else {
             environment.projectStore.removeTerminal(id: terminal.id)

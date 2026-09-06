@@ -55,6 +55,8 @@ run_software() {
     -only-testing:ThreadingMobileTests/RemoteConnectionFailureTests \
     -only-testing:ThreadingMobileTests/MobileHostRefreshSingleFlightTests \
     -only-testing:ThreadingMobileTests/MobileSessionConnectionPoolTests \
+    -only-testing:ThreadingMobileTests/MobileLiveRoutePolicyTests \
+    -only-testing:ThreadingMobileTests/MobileSocketRecoveryBackoffTests \
     "$@"
 }
 

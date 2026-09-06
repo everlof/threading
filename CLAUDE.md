@@ -547,6 +547,9 @@ the following cases genuinely need to be visible, and they are skipped by name i
   keyboard ownership into its selected row. AppKit exposes no key window while the test host is
   inactive, so the fixture must activate the host and order its main window or key panel on
   screen; an unshown-window responder assertion would not prove where keystrokes go.
+- `CommandPaletteFocusTests/testEscapeReturnsKeyboardToTerminalInKeyWindow()` — opens the
+  shipping palette over a real terminal in a key window and proves Escape returns the keyboard.
+  Its unshown responder-lifecycle cases stay in `fast`; key-window ownership requires activation.
 - `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.

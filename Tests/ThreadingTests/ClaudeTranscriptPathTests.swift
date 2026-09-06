@@ -104,7 +104,7 @@ final class ClaudeTranscriptPathTests: XCTestCase {
         project.folderPath = worktree
 
         let url = try XCTUnwrap(
-            ClaudeTranscript.url(
+            ClaudeTranscript.storageURL(
                 sessionID: transcriptID,
                 account: Self.account(configPath: configPath),
                 in: project
@@ -122,8 +122,8 @@ final class ClaudeTranscriptPathTests: XCTestCase {
         var project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
         project.folderPath = "/Users/david/mjukis/projects/mjukis.dev"
 
-        let directory = try XCTUnwrap(
-            ClaudeTranscript.subagentsDirectory(
+        let root = try XCTUnwrap(
+            ClaudeTranscript.storageURL(
                 sessionID: TranscriptID("00000000-0000-0000-0000-0000000000ab"),
                 account: Self.account(configPath: configPath),
                 in: project
@@ -131,7 +131,7 @@ final class ClaudeTranscriptPathTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            directory.path,
+            ClaudeTranscript.subagentsDirectory(forRoot: root).path,
             configPath + "/projects/-Users-david-mjukis-projects-mjukis-dev"
                 + "/00000000-0000-0000-0000-0000000000ab/subagents"
         )

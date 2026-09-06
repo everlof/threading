@@ -221,6 +221,7 @@ enum AgentAccountDiscovery {
 
         appendRegisteredAccounts(
             for: .claude,
+            records: AgentAccountLocationRegistry.shared.records(for: .claude),
             aliases: aliases,
             to: &accounts
         )
@@ -232,7 +233,7 @@ enum AgentAccountDiscovery {
     ///
     /// The reserved name matches outright. A custom root must show every structural marker,
     /// so an ordinary config directory is never excluded merely for holding common files.
-    static func isClaudeScienceDataDirectory(_ directory: URL) -> Bool {
+    nonisolated static func isClaudeScienceDataDirectory(_ directory: URL) -> Bool {
         guard isDirectory(directory) else { return false }
 
         if directory.lastPathComponent == AgentAccountDefaults.claudeScienceDirectory {
@@ -253,6 +254,22 @@ enum AgentAccountDiscovery {
     /// The Codex home from the environment (or `~/.codex`) plus any `~/.codex-*` directory,
     /// admitting only those holding a completed login.
     private static func codexAccounts() -> [AgentAccount] {
+        discoverCodexAccounts(records: AgentAccountLocationRegistry.shared.records(for: .codex))
+    }
+
+    /// Explicit refreshes scan on a worker. The registry and presentation preferences remain
+    /// main-actor values; no filesystem discovery is added to command/menu validation.
+    static func codexAccountsForModelRefresh() async -> [AgentAccount] {
+        let records = AgentAccountLocationRegistry.shared.records(for: .codex)
+        let discovered = await Task.detached(priority: .userInitiated) {
+            discoverCodexAccounts(records: records)
+        }.value
+        return discovered.map(applyingPreferences).filter(\.isEnabled)
+    }
+
+    nonisolated private static func discoverCodexAccounts(
+        records: [AgentAccountLocationRecord]
+    ) -> [AgentAccount] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let aliases = ShellAliasReader.accountAliasesByConfigPath()
         var accounts: [AgentAccount] = []
@@ -291,6 +308,7 @@ enum AgentAccountDiscovery {
 
         appendRegisteredAccounts(
             for: .codex,
+            records: records,
             aliases: aliases,
             to: &accounts
         )
@@ -301,7 +319,7 @@ enum AgentAccountDiscovery {
     // MARK: - Private Methods
 
     /// Home-directory entries matching a prefix, in a stable order.
-    private static func alternateDirectories(prefix: String) -> [URL] {
+    nonisolated private static func alternateDirectories(prefix: String) -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
 
         guard let entries = try? FileManager.default.contentsOfDirectory(
@@ -315,7 +333,7 @@ enum AgentAccountDiscovery {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    private static func makeAccount(
+    nonisolated private static func makeAccount(
         provider: AgentKind,
         handle: AccountHandle,
         directory: URL,
@@ -339,13 +357,14 @@ enum AgentAccountDiscovery {
     /// Merges locations verified through Threading's setup flow with marker-based legacy
     /// discovery. This is what keeps a Codex login visible when its CLI uses the OS keyring and
     /// therefore has no `auth.json` marker for a filesystem-only scan to find.
-    private static func appendRegisteredAccounts(
+    nonisolated private static func appendRegisteredAccounts(
         for provider: AgentKind,
+        records: [AgentAccountLocationRecord],
         aliases: [String: String],
         to accounts: inout [AgentAccount]
     ) {
         var seen = Set(accounts.map { URL(fileURLWithPath: $0.configPath).standardizedFileURL.path })
-        for record in AgentAccountLocationRegistry.shared.records(for: provider) {
+        for record in records {
             let directory = URL(fileURLWithPath: record.configPath).standardizedFileURL
             guard isDirectory(directory), seen.insert(directory.path).inserted else { continue }
             if provider == .claude, isClaudeScienceDataDirectory(directory) { continue }
@@ -373,17 +392,17 @@ enum AgentAccountDiscovery {
     }
 
     /// The directory name minus its leading dot, e.g. `.claude-nhartley` becomes `claude-nhartley`.
-    private static func handle(for directory: URL) -> AccountHandle {
+    nonisolated private static func handle(for directory: URL) -> AccountHandle {
         .named(String(directory.lastPathComponent.dropFirst()))
     }
 
-    private static func isDirectory(_ url: URL) -> Bool {
+    nonisolated private static func isDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && isDirectory.boolValue
     }
 
-    private static func isFile(_ url: URL) -> Bool {
+    nonisolated private static func isFile(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && !isDirectory.boolValue

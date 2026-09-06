@@ -122,23 +122,28 @@ enum TranscriptReplay {
         guard let account = AgentAccountDiscovery.account(
             for: session.kind,
             handle: session.accountHandle
+        ), let request = SessionTranscript.readRequest(
+            sessionID: agentSessionID, for: session, in: project, account: account
         ) else {
             completion([], false)
             return
         }
 
+        load(request, kind: session.kind, completion: completion)
+    }
+
+    static func load(
+        _ request: SessionTranscript.ReadRequest,
+        kind: AgentKind,
+        completion: @escaping @MainActor @Sendable ([StreamEvent], Bool) -> Void
+    ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let url = SessionTranscript.url(
-                sessionID: agentSessionID,
-                for: session,
-                in: project,
-                account: account
-            ), FileManager.default.fileExists(atPath: url.path) else {
+            guard let url = request.resolve(), FileManager.default.fileExists(atPath: url.path) else {
                 DispatchQueue.main.async { completion([], false) }
                 return
             }
 
-            let (events, isTruncated) = read(at: url, kind: session.kind)
+            let (events, isTruncated) = read(at: url, kind: kind)
             DispatchQueue.main.async { completion(events, isTruncated) }
         }
     }

@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - Transcript Fact Reader
 
-/// One fact read back off the end of a session's own transcript, cached against the size it was
-/// read at, and re-read only in the background.
+/// One fact read back off the end of a session's own transcript, cached against its file
+/// identity, modification time and size, and re-read only in the background.
 ///
 /// A transcript is the only source that reports what a **terminal** session is actually doing
 /// rather than what it was configured to do: the model that answered, the posture the user
@@ -15,7 +15,7 @@ import Foundation
 ///   budget, so an answer that has scrolled out of reach is nil rather than a walk through a
 ///   conversation that has grown to hundreds of megabytes.
 /// - **Never on the main thread.** `known(at:)` answers from memory and touches no disk, so a
-///   view can ask while it paints. Even the size check that decides whether to re-read happens
+///   view can ask while it paints. Even the attribute check that decides whether to re-read happens
 ///   on the background queue.
 /// - **Called back only on a change.** A completion per event would redraw for an answer that
 ///   had not moved.
@@ -37,11 +37,33 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
 
     private typealias Completion = @MainActor @Sendable (Value?) -> Void
 
-    /// One transcript's answer and the size it was read at. The size is the invalidation: a file
-    /// that has not grown cannot have recorded a different answer.
-    private struct Reading: Sendable {
+    private struct FileStamp: Equatable, Sendable {
         let size: Int
+        let modified: Date?
+        let inode: UInt64?
+    }
+
+    /// A copied byte boundary suppresses historical output until the worker first stats it.
+    /// Ordinary readings also track replacement and modification, including same-size rewrites.
+    private enum Boundary: Sendable {
+        case copiedSize(Int)
+        case file(FileStamp)
+
+        func matches(_ stamp: FileStamp) -> Bool {
+            switch self {
+            case .copiedSize(let size): return size == stamp.size
+            case .file(let previous): return previous == stamp
+            }
+        }
+    }
+
+    private struct Reading: Sendable {
+        let boundary: Boundary
         let value: Value?
+    }
+
+    private struct Scan {
+        var isCurrent = true
     }
 
     // MARK: - Properties
@@ -52,7 +74,7 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
 
     /// One scan per transcript at a time, so a burst of refreshes cannot queue a stack of reads
     /// behind each other.
-    private var scanning: Set<String> = []
+    private var scanning: [String: Scan] = [:]
 
     /// Requests that arrived after a scan took its size snapshot. They become one trailing scan
     /// wave when the current one lands. Dropping them is a correctness race, not coalescing: the
@@ -78,11 +100,11 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
         readings[url.path]?.value
     }
 
-    /// Re-reads in the background when the transcript has grown, calling back only if the answer
+    /// Re-reads in the background when the transcript changes, calling back only if the answer
     /// changed.
     func revalidate(at url: URL, completion: @escaping @MainActor @Sendable (Value?) -> Void) {
         let path = url.path
-        guard !scanning.contains(path) else {
+        guard scanning[path] == nil else {
             pendingCompletions[path, default: []].append(completion)
             return
         }
@@ -100,7 +122,8 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
     /// than this reader asking the main thread to stat the file, and rather than reusing a possibly
     /// stale source reading from before the provider finished its last write.
     func seedCopiedTranscript(at destination: URL, byteCount: Int, value: Value?) {
-        readings[destination.path] = Reading(size: byteCount, value: value)
+        invalidateScan(at: destination.path)
+        readings[destination.path] = Reading(boundary: .copiedSize(byteCount), value: value)
     }
 
     /// Starts one single-flight read. Calls that overlap it collect in `pendingCompletions` and
@@ -110,17 +133,19 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
 
         let previous = readings[path]
         let scan = scan
-        scanning.insert(path)
+        scanning[path] = Scan()
 
         DispatchQueue.global(qos: .utility).async {
-            let reading = Self.read(at: url, unchangedFrom: previous?.size, scan: scan)
+            let reading = Self.read(at: url, unchangedFrom: previous, scan: scan)
 
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    if let reading {
+                    if self.scanning[path]?.isCurrent == true, let reading {
                         self.readings[path] = reading
                         if reading.value != previous?.value {
                             for completion in completions {
+                                // A callback may itself migrate/reset the transcript.
+                                guard self.scanning[path]?.isCurrent == true else { break }
                                 completion(reading.value)
                             }
                         }
@@ -130,7 +155,7 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
                     // for another validation; admitting it immediately would race this queued
                     // trailing wave and violate the one-scan-per-path contract.
                     let pending = self.pendingCompletions.removeValue(forKey: path)
-                    self.scanning.remove(path)
+                    self.scanning.removeValue(forKey: path)
                     if let pending, !pending.isEmpty {
                         self.beginRevalidation(at: url, completions: pending)
                     }
@@ -141,21 +166,25 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
 
     /// Forgets what has been read. For tests, and for a reset that should re-ask.
     ///
-    /// Deliberately leaves `scanning` alone: a scan already in flight clears its own entry when
-    /// it lands, and dropping the entry here would let a second scan start over the same file.
-    /// What that in-flight read writes back is what the file says, which is the right answer for
-    /// a forgotten transcript anyway.
+    /// Keep the single-flight slot until its worker lands, but revoke its authority to publish.
+    /// Requests after the reset get a trailing scan against the new state.
     func forgetAll() {
         readings.removeAll()
+        for path in Array(scanning.keys) { invalidateScan(at: path) }
     }
 
     // MARK: - Private Methods
 
-    /// The transcript's answer, or nil when the file has not grown since `previousSize` — which
-    /// is "nothing to update", not "no answer".
+    private func invalidateScan(at path: String) {
+        scanning[path]?.isCurrent = false
+        pendingCompletions.removeValue(forKey: path)
+    }
+
+    /// Stat and scan off-main. Unchanged files preserve their cached fact; a first stat after a
+    /// copy establishes its file identity without announcing copied history as fresh output.
     private nonisolated static func read(
         at url: URL,
-        unchangedFrom previousSize: Int?,
+        unchangedFrom previous: Reading?,
         scan: @Sendable (URL) -> Value?
     ) -> Reading? {
         // `URL.resourceValues` caches requested keys on the URL value. These readers deliberately
@@ -166,8 +195,12 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
               let size = (attributes[.size] as? NSNumber)?.intValue else {
             return nil
         }
-        guard previousSize != size else { return nil }
-
-        return Reading(size: size, value: scan(url))
+        let stamp = FileStamp(
+            size: size,
+            modified: attributes[.modificationDate] as? Date,
+            inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+        )
+        let value = previous?.boundary.matches(stamp) == true ? previous?.value : scan(url)
+        return Reading(boundary: .file(stamp), value: value)
     }
 }

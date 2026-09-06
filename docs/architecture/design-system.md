@@ -3302,6 +3302,13 @@ go closes, opens, or performs. `MobileSessionChromeTests` asserts those directly
 an unmeasured row (`rowWidth == 0`, before the first layout) has no full swipe at all, since a
 threshold taken from zero archives a chat on the first points of any sideways drag.
 
+The dashboard's later native-cell migration keeps the same split between gesture and plate. The
+revealed ground follows the row for the full drag, but the icon and caption occupy one fixed,
+compact trailing slot in semantic caption sizes. Making the `UIButton` itself as wide as the
+reveal let UIKit re-centre its content on every pan frame; its default body-sized title then
+wrapped into fragments as the row closed. `MobileRowSwipe.actionLayout` now states the two
+rectangles separately, and the SwiftUI fallback uses the same fixed slot.
+
 ## 2026-08-23 — a pane's content held the pane, and the split view had no say
 
 Reported as "the macOS app just feels broken and I have no idea why, it's impossible to get the
@@ -3645,3 +3652,24 @@ members on one height and one centreline; the query holding the header's spare w
 answer taking less than half the panel a full one does. `ControlRowTests` pins the stretching
 member — that it takes the slack, that its neighbours keep their own width, that a narrow pane
 still compresses, and that reconfiguring without it gives the slack back to the spring.
+
+## 2026-09-06 — A prominent mobile button cannot choose ink separately from its fill
+
+The iPhone Usage sheet's banked-reset action was reported with a white face whose icon and title
+were also nearly white. The feature had supplied the Mac theme's `accent` to SwiftUI's
+`.borderedProminent` style, but the system style chose its own foreground independently. This is
+not a failure a theme can repair: the theme had already supplied `accentForeground`, and the
+control construction simply did not read it.
+
+`MobileThemedActionButtonStyle` is now the only construction for an application-owned prominent
+mobile action. It resolves the foreground from the actual accent and owns the fill, authored
+radius, press response and disabled opacity together. Full-width actions keep the default width;
+compact actions in horizontal or extension-provided layouts request `.intrinsic`. A call site
+must not add a local foreground to `.borderedProminent`, because that would fix one state while
+leaving material and disabled behavior split between owners.
+
+`scripts/check_mobile_theme_boundaries.py` rejects raw `.buttonStyle(.borderedProminent)` in
+`Sources/ThreadingMobile`, including multiline arguments, and its fixture tests prove both the
+rejection and the shared-style path. The existing white-accent crossover test pins the palette's
+dark-ink answer, while the `ios-usage` evidence entry exercises the action through the shipping
+SwiftUI sheet.

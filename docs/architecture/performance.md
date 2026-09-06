@@ -227,6 +227,17 @@ The repairs preserve three independent boundaries:
    An authoritative reconnect also compares its `RemoteMeDTO` before assignment: the equality
    guard is outside the `@Published` observer, because that wrapper sends before `didSet` and an
    observer guard would still invalidate the dashboard for an identical catalogue.
+   The layout's section provider must return a section for every index it is asked about, and
+   must index the same list the snapshot was built from. Both halves shipped wrong. A structural
+   update installs the new layout first, so the layout is resolved while the previous, longer
+   snapshot is still applied, and the provider answered `nil` for the indices past the new
+   section count; `UICollectionViewCompositionalLayout` treats that as an assertion failure, so
+   the phone app aborted whenever a group left the catalogue. The provider also indexed the
+   unfiltered section list while the snapshot skipped empty sections, which would hand every
+   section after an empty one the wrong descriptor. The presented list is now derived once on
+   assignment and used by both, and an out-of-range index gets a placeholder section that the
+   following snapshot apply immediately replaces.
+   `MobileDashboardCollectionPerformanceProbe.exerciseSectionRemoval` is the regression boundary.
 3. `TerminalKeyBridge` has explicit attach/detach operations. Detach clears the weak view without
    publishing in `dismantleUIView`; a generation-checked main-actor task reconciles availability
    after the teardown returns, and cannot overwrite a replacement attachment.
@@ -4991,3 +5002,26 @@ most one `/usr/bin/sample` capture at a time on its utility lane and files the b
 the semantic incident. It is off by default and absent from the Release path. This turns the next
 otherwise anonymous 250 ms stall into a stack without requiring Instruments to have been attached
 beforehand.
+
+## Explicit Codex model refresh (2026-09-06)
+
+The refresh in Agents & Accounts and the command palette normally visits 1–8 accounts with
+roughly 8–30 models each. It admits at most 32 accounts, launches one helper at a time, and limits
+each helper to 25 seconds, 2 MiB of output, and eight pages of 64 models. Account discovery,
+process and pipe work, parsing, and catalog persistence run off the main actor. Main receives
+one progress value per account and restamps one virtual Settings row, without rebuilding the
+account editor or materializing model rows. Pickers read the store's locked value projection;
+authentication invalidation adds a file-identity stat beside the existing catalog identity check.
+
+The deterministic Debug child fixture returned 512 models over eight pages in 75 ms including
+process startup. The opt-in installed-CLI check returned seven models in 925 ms. These are
+observations, not timing assertions; the ordinary tests assert the cardinality limits, partial
+failure behavior, and bounded protocol refusals.
+
+The first pipe implementation used Foundation's `read(upToCount:)`, which waited for a full
+16 KiB while the RPC server waited for the next request. Even the two-model fixture hit the
+25-second deadline. One bounded `read` syscall consumes a short response immediately. The
+oversized-output fixture then exposed a second problem: scanning the entire accumulated buffer
+for a newline after every read was quadratic. The parser now remembers the scanned prefix, so
+each byte is examined once before the aggregate output ceiling refuses the response. Helper
+termination and process-group reaping happen on every exit path.

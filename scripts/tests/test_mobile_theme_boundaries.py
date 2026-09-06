@@ -185,11 +185,56 @@ class MobileThemeBoundaryTests(unittest.TestCase):
         ])
         self.assertEqual(self.run_checker().returncode, 0)
 
+    def test_a_raw_prominent_button_fails(self) -> None:
+        self.write("Usage.swift", [
+            "struct Usage: View {",
+            "    var body: some View {",
+            "        Button(\"Use Reset\") { useReset() }",
+            "            .buttonStyle(",
+            "                .borderedProminent",
+            "            )",
+            "            .tint(theme.accent)",
+            "    }",
+            "}",
+        ])
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("MobileThemedActionButtonStyle", result.stderr)
+
+    def test_a_themed_action_button_passes(self) -> None:
+        self.write("Usage.swift", [
+            "struct Usage: View {",
+            "    var body: some View {",
+            "        Button(\"Use Reset\") { useReset() }",
+            "            .buttonStyle(MobileThemedActionButtonStyle(",
+            "                kind: .primary,",
+            "                theme: theme",
+            "            ))",
+            "    }",
+            "}",
+        ])
+        self.assertEqual(self.run_checker().returncode, 0)
+
+    def test_the_settings_chrome_exception_does_not_hide_a_raw_prominent_button(self) -> None:
+        self.write("MobileSettingsChrome.swift", [
+            "struct ThemedSettingsSection: View {",
+            "    var body: some View {",
+            "        Button(\"Apply\") {}",
+            "            .buttonStyle(.borderedProminent)",
+            "            .listRowBackground(theme.panel)",
+            "    }",
+            "}",
+        ])
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("MobileThemedActionButtonStyle", result.stderr)
+
     def test_the_names_are_read_as_source_rather_than_prose(self) -> None:
         self.write("Settings.swift", [
-            "/// A note about Section inside a List, and .listRowBackground(x).",
+            "/// A note about Section inside a List, .listRowBackground(x), and",
+            "/// .buttonStyle(.borderedProminent).",
             "struct Settings: View {",
-            "    let hint = \"Section { } and .scrollContentBackground(.hidden)\"",
+            "    let hint = \"Section { }, .scrollContentBackground(.hidden), and .borderedProminent\"",
             "    var body: some View {",
             "        List {",
             "            ThemedSettingsSection { Text(hint) }",

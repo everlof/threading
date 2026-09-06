@@ -8,7 +8,7 @@ the theme's ground behind it, and still draw every row on `secondarySystemGroupe
 Notifications, Diagnostics, Mac appearance, Ask for input and the issue report: a themed page with
 a slab of system grey standing on it.
 
-Two rules keep the row plate in one place:
+Five rules keep application-owned mobile chrome in one place:
 
 1. `scrollContentBackground`, `listRowBackground` and `listRowSeparatorTint` belong to
    `MobileSettingsChrome.swift`. Feature code asks for `themedSettingsPage`, `themedSettingsRow`
@@ -26,6 +26,10 @@ Two rules keep the row plate in one place:
    the palette nor the four presentation values read from it, so re-stating only the palette
    left the sheet with a system-tinted switch, a blue accent and the wrong keyboard appearance
    under an authored theme. That is what half the sheets in this app were doing.
+5. Feature code never uses SwiftUI's `.borderedProminent` button style directly. That style
+   chooses its own foreground independently of a Mac-supplied accent, so a pale accent can produce
+   pale text on a pale fill. `MobileThemedActionButtonStyle` owns the accent foreground, authored
+   radius, press response and disabled treatment as one construction.
 """
 
 import pathlib
@@ -46,6 +50,9 @@ RESERVED_MODIFIERS = (
 )
 
 SYSTEM_PRESENTATION = re.compile(r"\.confirmationDialog\s*\(")
+SYSTEM_PROMINENT_BUTTON = re.compile(
+    r"\.buttonStyle\s*\(\s*\.borderedProminent\s*\)"
+)
 
 LIST_OPENER = re.compile(r"\bList\s*(\([^()]*\))?\s*$")
 FORM_OPENER = re.compile(r"\bForm\s*(\([^()]*\))?\s*$")
@@ -123,6 +130,14 @@ def enclosing_container(stack):
 def check_file(path: pathlib.Path, relative: str, failures: list) -> None:
     source = path.read_text(encoding="utf-8")
     scrubbed = strip_swift_noise(source)
+
+    for match in SYSTEM_PROMINENT_BUTTON.finditer(scrubbed):
+        line = scrubbed.count("\n", 0, match.start()) + 1
+        failures.append(
+            f"{relative}:{line}: error: borderedProminent chooses its own foreground; "
+            "use MobileThemedActionButtonStyle so the accent fill and legible ink are one "
+            "themed construction"
+        )
 
     if path.name == CHROME_FILE:
         return

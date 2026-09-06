@@ -461,6 +461,32 @@ final class MobileSessionChromeTests: XCTestCase {
         )
     }
 
+    /// The regression this geometry prevents was visible during every partial swipe: the native
+    /// button took the whole revealed width, so its default-sized icon and title wandered with
+    /// the finger, then the title wrapped as the row closed. The plate expands; the content does
+    /// not.
+    func testTheSwipePlateExpandsWithoutResizingItsActionContent() {
+        let bounds = CGRect(x: 0, y: 0, width: 340, height: 58)
+        let partial = MobileRowSwipe.actionLayout(in: bounds, revealed: 24)
+        let open = MobileRowSwipe.actionLayout(
+            in: bounds,
+            revealed: MobileRowSwipe.actionWidth
+        )
+        let full = MobileRowSwipe.actionLayout(in: bounds, revealed: bounds.width)
+
+        XCTAssertEqual(partial.backdrop, CGRect(x: 316, y: 0, width: 24, height: 58))
+        XCTAssertEqual(open.backdrop.width, MobileRowSwipe.actionWidth)
+        XCTAssertEqual(full.backdrop, bounds)
+        XCTAssertEqual(partial.control, open.control)
+        XCTAssertEqual(open.control, full.control)
+        XCTAssertEqual(open.control.width, MobileRowSwipe.actionWidth)
+        XCTAssertEqual(open.control.maxX, bounds.maxX)
+        XCTAssertEqual(
+            partial.controlInBackdrop,
+            CGRect(x: -52, y: 0, width: 76, height: 58)
+        )
+    }
+
     func testLettingGoShortOfTheButtonSnapsShutAndPastItRestsOpen() {
         XCTAssertEqual(
             MobileRowSwipe.release(

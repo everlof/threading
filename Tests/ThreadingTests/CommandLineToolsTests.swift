@@ -389,20 +389,6 @@ final class CommandLineToolInstallerTests: XCTestCase {
         )
     }
 
-    func testThePATHIsReadOutOfAnEnvironmentDump() {
-        let output = """
-        SHELL=/bin/zsh
-        PATH=/opt/homebrew/bin:/usr/bin:/bin
-        LANG=en_US.UTF-8
-        """
-        XCTAssertEqual(
-            CommandLineToolInstaller.path(fromEnvironmentOutput: output),
-            "/opt/homebrew/bin:/usr/bin:/bin"
-        )
-        XCTAssertNil(CommandLineToolInstaller.path(fromEnvironmentOutput: "SHELL=/bin/zsh"))
-        XCTAssertNil(CommandLineToolInstaller.path(fromEnvironmentOutput: ""))
-    }
-
     func testTheProfileLineNamesTheDirectoryAndKeepsWhatIsAlreadyThere() {
         XCTAssertEqual(
             CommandLineToolInstaller.profileLine,

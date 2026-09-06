@@ -91,6 +91,62 @@ final class MobileSessionSettingsTests: XCTestCase {
 
     // MARK: - Continuation
 
+    func testContinuationUsageMatchesRuntimeAndAccountInsteadOfDisplayName() {
+        let destination = RemoteContinuationDestinationDTO(
+            agentID: "claude", agentName: "Claude Code", accountID: "default", accountName: "Work"
+        )
+        let expected = makeAccount(id: "default", name: "Renamed Work", usage: "5h 84%")
+        let agents = [
+            makeAgent(accounts: [makeAccount(id: "default", name: "Work", usage: "5h 12%")]),
+            RemoteAgentChoiceDTO(
+                id: "claude", name: "Claude Code", accounts: [expected], models: [],
+                defaultModelID: nil, supportsConversation: true
+            )
+        ]
+        XCTAssertEqual(
+            MobileSessionSettingsPresentation.continuationAccounts(for: [destination], in: agents)[destination.id],
+            expected
+        )
+        XCTAssertTrue(MobileSessionSettingsPresentation.continuationAccounts(
+            for: [.init(agentID: "opencode", agentName: "OpenCode")], in: agents
+        ).isEmpty)
+        XCTAssertTrue(MobileSessionSettingsPresentation.continuationAccounts(for: [destination], in: []).isEmpty)
+    }
+
+    func testRecoveryChoicesCarryUsageWithoutChangingTheirIdentityOrTitle() {
+        let choices = MobileSessionSettingsPresentation.limitRecoveryChoices(
+            for: makeSession(accountID: "personal"),
+            in: makeAgent(accounts: [makeAccount(id: "work", name: "Work", usage: "5h 84% · 7d 92%")])
+        )
+        let pinned = choices.first { $0.policy == .resumeVia(accountID: "work") }
+        XCTAssertEqual(pinned?.title, MobileL10n.string("Continue as %@", "Work"))
+        XCTAssertEqual(pinned?.usage, "5h 84% · 7d 92%")
+        XCTAssertTrue(choices.filter { $0.policy != .resumeVia(accountID: "work") }.allSatisfy { $0.usage == nil })
+    }
+
+    func testContinuationUsageJoinAtOneThousandAccountsPreservesEveryDestination() {
+        let accounts = (0..<1_000).map { index in
+            makeAccount(id: "account-\(index)", name: "Work", usage: "5h \(index % 100)%")
+        }
+        let destinations = accounts.reversed().map {
+            RemoteContinuationDestinationDTO(agentID: "codex", agentName: "Codex", accountID: $0.id)
+        }
+        let joined = MobileSessionSettingsPresentation.continuationAccounts(
+            for: destinations, in: [makeAgent(accounts: accounts)]
+        )
+        XCTAssertEqual(joined.count, accounts.count)
+        for destination in destinations {
+            XCTAssertEqual(joined[destination.id]?.id, destination.accountID)
+        }
+    }
+
+    func testUnknownUsageDoesNotBecomeZeroCapacity() {
+        XCTAssertEqual(
+            MobileSessionSettingsPresentation.accountUsage(makeAccount(id: "work", name: "Work"), model: nil),
+            MobileL10n.string("Loading usage…")
+        )
+    }
+
     /// The Mac names a login only where there is a choice between them, and the list is what
     /// says so: one row for a runtime reads as just that runtime, however it got there.
     func testContinuationNamesALoginOnlyWhereTheRuntimeOffersMoreThanOne() {
@@ -179,10 +235,11 @@ final class MobileSessionSettingsTests: XCTestCase {
         )
     }
 
-    private func makeAccount(id: String, name: String) -> RemoteAccountChoiceDTO {
+    private func makeAccount(id: String, name: String, usage: String? = nil) -> RemoteAccountChoiceDTO {
         RemoteAccountChoiceDTO(
             id: id,
             name: name,
+            usageSummary: usage,
             models: [],
             defaultModelID: nil
         )

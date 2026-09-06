@@ -759,7 +759,17 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
 private final class MobileDashboardCollectionViewController: UIViewController {
     private static let plateDecorationKind = "threading.mobile.dashboard.plate"
 
-    private var sections: [DashboardCollectionSection]
+    private var sections: [DashboardCollectionSection] {
+        didSet { presentedSections = Self.presented(sections) }
+    }
+    /// The sections the data source actually holds, which is what a section index means.
+    ///
+    /// A section with no items is never appended to the snapshot, so the collection view never
+    /// asks about it: indexing `sections` directly hands the wrong descriptor to every section
+    /// after an empty one, and walks off the end at the last. Derived on assignment rather than
+    /// recomputed inside the layout's per-section callback, which must not do work proportional
+    /// to the whole list.
+    private var presentedSections: [DashboardCollectionSection]
     private var theme: RemoteThemePalette
     private var bottomContentInset: CGFloat
     private var content: @MainActor (DashboardCollectionItemID) -> AnyView
@@ -821,6 +831,7 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         refresh: @escaping @MainActor () async -> Void
     ) {
         self.sections = sections
+        presentedSections = Self.presented(sections)
         self.theme = theme
         self.bottomContentInset = bottomContentInset
         self.content = content
@@ -895,10 +906,37 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         }
     }
 
+    private static func presented(
+        _ sections: [DashboardCollectionSection]
+    ) -> [DashboardCollectionSection] {
+        sections.filter { !$0.items.isEmpty }
+    }
+
+    /// Stands in for a section index that no longer has a descriptor.
+    ///
+    /// Returning nil from a compositional layout's section provider is not "no section": it is
+    /// an assertion failure inside `UICollectionViewCompositionalLayout`, which aborts the app.
+    /// Installing a layout resolves it immediately, against the snapshot that is still applied,
+    /// so a structural update that *drops* a section is asked about the old count one time
+    /// before `applySnapshot` lands. This answers that one pass; the apply then invalidates and
+    /// re-resolves against the real list, so nothing here reaches the screen.
+    private static func placeholderSection() -> NSCollectionLayoutSection {
+        let size = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1),
+            heightDimension: .absolute(1)
+        )
+        let item = NSCollectionLayoutItem(layoutSize: size)
+        return NSCollectionLayoutSection(
+            group: NSCollectionLayoutGroup.vertical(layoutSize: size, subitems: [item])
+        )
+    }
+
     private func makeLayout() -> UICollectionViewCompositionalLayout {
         let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, _ in
-            guard let self, sections.indices.contains(sectionIndex) else { return nil }
-            let descriptor = sections[sectionIndex]
+            guard let self, presentedSections.indices.contains(sectionIndex) else {
+                return Self.placeholderSection()
+            }
+            let descriptor = presentedSections[sectionIndex]
             let heightDimension: NSCollectionLayoutDimension = switch descriptor.kind {
             case .chrome(let estimatedHeight):
                 .estimated(estimatedHeight)
@@ -1000,7 +1038,7 @@ private final class MobileDashboardCollectionViewController: UIViewController {
     private func applySnapshot(preservingVisibleAnchor: Bool) {
         let anchor = preservingVisibleAnchor ? visibleAnchor() : nil
         var snapshot = NSDiffableDataSourceSnapshot<String, DashboardCollectionItemID>()
-        for section in sections where !section.items.isEmpty {
+        for section in presentedSections {
             snapshot.appendSections([section.id])
             snapshot.appendItems(section.items, toSection: section.id)
         }
@@ -1288,11 +1326,15 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     private let pinImageView = UIImageView()
     private let ageLabel = UILabel()
     private let workingView = DashboardRowWorkingView()
+    private let actionBackdropView = UIView()
     private let actionButton = UIButton(type: .system)
     private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapped))
     private lazy var panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panned))
     private lazy var contextMenuInteraction = UIContextMenuInteraction(delegate: self)
     private var configuration: DashboardUIKitRowConfiguration?
+    /// The record whose title is already drawn in this reused cell. A morph is meaningful only
+    /// while this identity stays put and its title changes.
+    private var representedItemID: String?
     private var restingOffset: CGFloat = 0
     private var beganAtOffset: CGFloat = 0
     private var isSwipeArmed = false
@@ -1306,7 +1348,9 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         contentView.clipsToBounds = true
 
         rowView.backgroundColor = .clear
-        contentView.addSubview(actionButton)
+        actionBackdropView.clipsToBounds = true
+        contentView.addSubview(actionBackdropView)
+        actionBackdropView.addSubview(actionButton)
         contentView.addSubview(rowView)
         for view in [
             dividerView,
@@ -1331,6 +1375,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         markView.clipsToBounds = false
         markImageView.contentMode = .scaleAspectFit
         accountChip.layer.cornerRadius = MobileDesign.Size.accountChip / 2
+        accountChip.clipsToBounds = true
         accountGlyph.textAlignment = .center
         accountGlyph.adjustsFontSizeToFitWidth = true
         accountGlyph.minimumScaleFactor = MobileDesign.Colour.accountChipMinimumScale
@@ -1369,17 +1414,27 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     override func prepareForReuse() {
         super.prepareForReuse()
         configuration = nil
+        representedItemID = nil
+        titleView.resetForReuse()
         restingOffset = 0
         beganAtOffset = 0
         isSwipeArmed = false
         rowView.layer.removeAllAnimations()
         rowView.transform = .identity
+        actionBackdropView.isHidden = true
         actionButton.isHidden = true
         workingView.stop()
         accessibilityCustomActions = nil
     }
 
     func configure(_ configuration: DashboardUIKitRowConfiguration) {
+        let nextItemID = configuration.row.item.id
+        let animatesTitle = representedItemID == nextItemID
+            && titleView.stringValue != configuration.row.item.title
+        if let representedItemID, representedItemID != nextItemID {
+            titleView.resetForReuse()
+        }
+        representedItemID = nextItemID
         self.configuration = configuration
         accessibilityTraits = configuration.activate == nil ? [] : .link
         restingOffset = 0
@@ -1387,7 +1442,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         rowView.layer.removeAllAnimations()
         rowView.transform = .identity
         applyFonts()
-        applyCommon(configuration)
+        applyCommon(configuration, animatesTitle: animatesTitle)
         switch configuration.row.item {
         case .chat(let session):
             apply(session: session, configuration: configuration)
@@ -1487,7 +1542,10 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         )
     }
 
-    private func applyCommon(_ configuration: DashboardUIKitRowConfiguration) {
+    private func applyCommon(
+        _ configuration: DashboardUIKitRowConfiguration,
+        animatesTitle: Bool
+    ) {
         let theme = configuration.theme
         dividerView.backgroundColor = theme.uiDivider
         dividerView.isHidden = !configuration.row.hasDivider
@@ -1499,6 +1557,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
             groundColor: theme.uiPanel,
             alignment: .left,
             reducesMotion: UIAccessibility.isReduceMotionEnabled,
+            animated: animatesTitle,
             role: .chatName
         )
         accountChip.update(
@@ -1516,6 +1575,12 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
             animated: ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] == nil
         )
     }
+
+#if DEBUG
+    var titlePresentationForTesting: (text: String, isAnimating: Bool) {
+        (titleView.stringValue, titleView.isAnimatingTitleForTesting)
+    }
+#endif
 
     private func apply(
         session: RemoteSessionSummaryDTO,
@@ -1803,13 +1868,19 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         theme: RemoteThemePalette
     ) {
         panRecognizer.isEnabled = action != nil
+        actionBackdropView.isHidden = true
         actionButton.isHidden = true
         guard let action else { return }
         var buttonConfiguration = UIButton.Configuration.plain()
         buttonConfiguration.title = action.title
         buttonConfiguration.image = UIImage(systemName: action.systemImage)
         buttonConfiguration.imagePlacement = .top
-        buttonConfiguration.imagePadding = MobileDesign.Spacing.tight
+        buttonConfiguration.imagePadding = MobileDesign.Spacing.hairline
+        buttonConfiguration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            textStyle: .caption1,
+            scale: .small
+        )
+        buttonConfiguration.titleLineBreakMode = .byClipping
         switch action.role {
         case .standard:
             buttonConfiguration.baseForegroundColor = theme.uiAccent
@@ -1818,19 +1889,26 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         }
         buttonConfiguration.contentInsets = .zero
         actionButton.configuration = buttonConfiguration
-        actionButton.backgroundColor = theme.uiControlResting
+        actionButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .caption2)
+        actionButton.backgroundColor = .clear
+        actionButton.titleLabel?.numberOfLines = 1
+        actionButton.titleLabel?.lineBreakMode = .byClipping
+        actionButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        actionBackdropView.backgroundColor = theme.uiControlResting
     }
 
     private func applySwipeOffset(_ offset: CGFloat) {
         rowView.transform = CGAffineTransform(translationX: offset, y: 0)
         let revealed = min(contentView.bounds.width, max(0, -offset))
-        actionButton.isHidden = revealed <= 0
-        actionButton.frame = CGRect(
-            x: contentView.bounds.width - revealed,
-            y: 0,
-            width: revealed,
-            height: contentView.bounds.height
+        let layout = MobileRowSwipe.actionLayout(
+            in: contentView.bounds,
+            revealed: revealed
         )
+        let isHidden = revealed <= 0
+        actionBackdropView.isHidden = isHidden
+        actionButton.isHidden = isHidden
+        actionBackdropView.frame = layout.backdrop
+        actionButton.frame = layout.controlInBackdrop
     }
 
     @objc private func tapped() {
@@ -2075,6 +2153,82 @@ struct MobileDashboardCollectionPerformanceMetrics: Equatable {
     let mountedNativeRowCount: Int
 }
 
+struct MobileDashboardTitleReuseMetrics: Equatable {
+    let initialPresentationAnimated: Bool
+    let sameRecordRenameAnimated: Bool
+    let recycledPresentationAnimated: Bool
+    let recycledTitle: String
+}
+
+/// Exercises the dashboard title in the same retained UIKit cell the collection reuses while
+/// scrolling. The first presentation and a recycled identity must land directly; a real rename
+/// of the record already on screen keeps the LabelMorph transition.
+@MainActor
+enum MobileDashboardTitleReuseProbe {
+    static func exercise() -> MobileDashboardTitleReuseMetrics {
+        let theme = RemoteThemePalette(nil)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let cell = DashboardRowCollectionCell(frame: CGRect(x: 0, y: 0, width: 361, height: 58))
+        controller.view.addSubview(cell)
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer { window.isHidden = true }
+
+        cell.configure(configuration(id: "first", title: "First title", theme: theme))
+        window.layoutIfNeeded()
+        let initial = cell.titlePresentationForTesting
+
+        cell.configure(configuration(id: "first", title: "Renamed title", theme: theme))
+        window.layoutIfNeeded()
+        let renamed = cell.titlePresentationForTesting
+
+        cell.prepareForReuse()
+        cell.configure(configuration(id: "second", title: "Second title", theme: theme))
+        window.layoutIfNeeded()
+        let recycled = cell.titlePresentationForTesting
+
+        return MobileDashboardTitleReuseMetrics(
+            initialPresentationAnimated: initial.isAnimating,
+            sameRecordRenameAnimated: renamed.isAnimating,
+            recycledPresentationAnimated: recycled.isAnimating,
+            recycledTitle: recycled.text
+        )
+    }
+
+    private static func configuration(
+        id: String,
+        title: String,
+        theme: RemoteThemePalette
+    ) -> DashboardUIKitRowConfiguration {
+        let session = RemoteSessionSummaryDTO(
+            id: id,
+            title: title,
+            agentKind: "claude",
+            surface: .conversation,
+            state: .idle,
+            projectName: "Probe",
+            lastActiveAt: 0
+        )
+        return DashboardUIKitRowConfiguration(
+            row: DashboardCollectionRow(
+                item: .chat(session),
+                hasDivider: false,
+                isFirst: true,
+                isLast: true
+            ),
+            theme: theme,
+            isArchived: false,
+            isCatalogueLive: true,
+            showsProjectName: false,
+            activate: nil,
+            swipeAction: nil,
+            contextMenu: nil
+        )
+    }
+}
+
 /// A deterministic scaling gate for the dashboard's collection owner.
 ///
 /// This deliberately exercises the real diffable data source and native row registration with a
@@ -2151,9 +2305,99 @@ enum MobileDashboardCollectionPerformanceProbe {
             hostedContentCount: hostedContentCount
         )
     }
+
+    /// Drives the structural update that used to abort the app: a dashboard that loses a
+    /// section.
+    ///
+    /// Installing a layout resolves it there and then, while the previous snapshot is still the
+    /// applied one, so the section provider is asked about an index the new list no longer has.
+    /// Answering nil is an assertion failure inside `UICollectionViewCompositionalLayout`, not
+    /// an empty section, so the app died whenever a project group disappeared from the
+    /// catalogue. Returns the sections the data source holds once the update has settled.
+    static func exerciseSectionRemoval(
+        initialSections: Int = 4,
+        remainingSections: Int = 1,
+        rowsPerSection: Int = 3,
+        viewport: CGSize = CGSize(width: 393, height: 852)
+    ) -> Int {
+        precondition(initialSections > 0)
+        precondition(remainingSections >= 0 && remainingSections <= initialSections)
+        precondition(rowsPerSection > 0)
+        let theme = RemoteThemePalette(nil)
+        var rows: [String: DashboardCollectionRow] = [:]
+        func makeSection(_ index: Int) -> DashboardCollectionSection {
+            let items = (0..<rowsPerSection).map { offset -> DashboardCollectionItemID in
+                let id = "probe:\(index):\(offset)"
+                rows[id] = DashboardCollectionRow(
+                    item: .chat(RemoteSessionSummaryDTO(
+                        id: id,
+                        title: "Probe row \(offset)",
+                        agentKind: "claude",
+                        surface: .conversation,
+                        state: .idle,
+                        projectName: "Probe \(index)",
+                        lastActiveAt: Double(offset)
+                    )),
+                    hasDivider: offset > 0,
+                    isFirst: offset == 0,
+                    isLast: offset == rowsPerSection - 1
+                )
+                return DashboardCollectionItemID.row(id)
+            }
+            return DashboardCollectionSection(
+                id: "probe:\(index)",
+                kind: .plate,
+                items: items,
+                spacingAfter: 0
+            )
+        }
+        let sections = (0..<initialSections).map(makeSection)
+        let content: @MainActor (DashboardCollectionItemID) -> AnyView = { item in
+            AnyView(Text(String(describing: item)))
+        }
+        let rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration? = { id in
+            guard let row = rows[id] else { return nil }
+            return DashboardUIKitRowConfiguration(
+                row: row,
+                theme: theme,
+                isArchived: false,
+                isCatalogueLive: true,
+                showsProjectName: false,
+                activate: nil,
+                swipeAction: nil,
+                contextMenu: nil
+            )
+        }
+        let controller = MobileDashboardCollectionViewController(
+            sections: sections,
+            theme: theme,
+            bottomContentInset: 0,
+            content: content,
+            rowConfiguration: rowConfiguration,
+            refresh: {}
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(origin: .zero, size: viewport)
+        controller.view.layoutIfNeeded()
+        controller.update(
+            sections: Array(sections.prefix(remainingSections)),
+            theme: theme,
+            bottomContentInset: 0,
+            content: content,
+            rowConfiguration: rowConfiguration,
+            refresh: {}
+        )
+        controller.view.layoutIfNeeded()
+        return controller.snapshotSectionCount
+    }
 }
 
 private extension MobileDashboardCollectionViewController {
+    var snapshotSectionCount: Int {
+        collectionView.layoutIfNeeded()
+        return dataSource.snapshot().numberOfSections
+    }
+
     func performanceMetrics(
         hostedContentCount: Int
     ) -> MobileDashboardCollectionPerformanceMetrics {

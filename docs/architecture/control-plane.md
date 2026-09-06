@@ -396,8 +396,11 @@ virtual table. Expected use is tens to hundreds of sessions; the pure search bou
 with 25,000 options so view construction remains proportional to the visible cap rather than the
 workspace size.
 
-The palette removes its overlay and key monitor before invoking a command because that command
-may synchronously present a sheet, popover or another in-window surface. It retains its controller
+The palette remembers its original first responder when it opens. Escape and backdrop dismissal
+return focus to that still-attached view; a shared text-field editor is remembered as its owning
+control. A refused command keeps the original return target across the palette's re-presentation.
+The palette removes its overlay and key monitor and restores its source before invoking a command
+because that command may synchronously present a sheet, popover or another in-window surface. It retains its controller
 until the invocation returns: success finalizes dismissal, while a dynamic refusal refreshes and
 restores the palette. This ordering keeps two modal surfaces from competing without turning a
 last-moment availability change into a disappearing command UI.

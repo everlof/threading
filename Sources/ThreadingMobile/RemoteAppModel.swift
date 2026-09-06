@@ -448,9 +448,15 @@ final class RemoteAppModel: ObservableObject {
     /// The host whose dashboard recovery is scheduled but has not run yet. Set beside
     /// `themeEventsRecoveryTask`, cleared when that recovery runs or the socket's owner ends it.
     private var themeEventsRecoveryHostID: String?
-    /// Consecutive automatic recovery waits since the last successful catalogue/event socket.
+    /// Consecutive automatic recovery waits since the event socket last delivered a frame.
     /// The dashboard uses the count to keep a transient miss in compact progress chrome and
     /// disclose the full recovery surface only after repeated bounded attempts.
+    ///
+    /// A catalogue answer does not reset it. One did from 2026-08-22, when this counter absorbed
+    /// the socket's own, until the 2026-09-06 report showed what that allows: a `304` every
+    /// second beside a socket failing every second, at attempt 2 for as long as the journal
+    /// reached. A frame on the socket is the reset; `MobileSocketRecoveryBackoff` is the ladder
+    /// the count climbs meanwhile, and `check_architecture_boundaries.sh` counts the resets.
     @Published private(set) var connectionRecoveryAttempt = 0
     /// The route this phone last reached a Mac over, for the connection panel. Kept across a
     /// drop so the panel can still say what was in use; the panel reads it only for the Mac it
@@ -493,8 +499,10 @@ final class RemoteAppModel: ObservableObject {
     private let hostRefreshSingleFlight = MobileHostRefreshSingleFlight()
     /// Addresses that have refused this phone's identity check repeatedly, rested for a while.
     private let routeHealth = MobileRouteHealthLedger()
-    private var activeHostedLink: RemoteConnectionLink?
-    private var activeHostedHostID: String?
+    /// The hosted way in as the manager last handed it out, kept so the synchronous route readers
+    /// can ask whether a tunnel is standing. Holding it does not make it the route in use:
+    /// ``MobileLiveRoutePolicy`` gives the sockets the route that answered last.
+    private var hostedRoute = HostedRouteMirror()
     /// Provisioning is a low-frequency control-plane operation. A service outage must not turn
     /// event-socket recovery into a credential-issuance retry loop.
     private var hostedProvisioningRetryAfter: [String: Date] = [:]
@@ -503,7 +511,6 @@ final class RemoteAppModel: ObservableObject {
     private static let sessionsChangedCoalescingDelay = Duration.milliseconds(350)
     private static let sessionDeltaCoalescingDelay = Duration.milliseconds(50)
     private static let themeEventsHelloDeadline = Duration.seconds(15)
-    private static let maximumThemeEventsRecoveryDelay: TimeInterval = 60
     var mobileDiagnosticsAuthenticatedEventsTask: URLSessionWebSocketTask? {
         themeEventsDidReceiveHello ? themeEventsTask : nil
     }
@@ -879,12 +886,25 @@ final class RemoteAppModel: ObservableObject {
 
     var client: RemoteClient? {
         activeHost.map { host in
-            let usesHostedRoute = activeHostedHostID == host.id
-            return RemoteClient(
-                link: usesHostedRoute ? activeHostedLink ?? host.link : host.link,
-                endpointKind: usesHostedRoute ? .hosted : host.activeEndpointKind
-            )
+            let route = liveRoute(for: host)
+            return RemoteClient(link: route.link, endpointKind: route.kind)
         }
+    }
+
+    /// The route a new socket or request is given now. See ``MobileLiveRoutePolicy``.
+    private func liveRoute(for host: PairedRemoteHost) -> MobileLiveRoute {
+        MobileLiveRoutePolicy.route(
+            for: host,
+            lastConnection: lastConnection,
+            hostedLink: liveHostedLink(for: host)
+        )
+    }
+
+    /// The hosted loopback link, and only while the tunnel behind it is standing. A tunnel that
+    /// has ended keeps its origin in memory until the next negotiation replaces it; that origin
+    /// refuses every dial and is no route at all.
+    private func liveHostedLink(for host: PairedRemoteHost) -> RemoteConnectionLink? {
+        hostedRoute.standingLink(for: host.id)
     }
 
     var canManageThemes: Bool {
@@ -1566,9 +1586,6 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         adoptRefreshedCatalogueIfChanged(response)
-        if connectionRecoveryAttempt != 0 {
-            connectionRecoveryAttempt = 0
-        }
         phase = .online
         lastConnection = MobileConnectionRecord(
             hostID: hostID,
@@ -2482,7 +2499,7 @@ final class RemoteAppModel: ObservableObject {
     private func warmCandidate(for host: PairedRemoteHost) -> ConnectionCandidate? {
         guard let last = lastConnection, last.hostID == host.id else { return nil }
         if last.isHosted {
-            guard activeHostedHostID == host.id, let link = activeHostedLink else { return nil }
+            guard let link = liveHostedLink(for: host) else { return nil }
             return ConnectionCandidate(
                 link: link,
                 isHosted: true,
@@ -2558,9 +2575,6 @@ final class RemoteAppModel: ObservableObject {
                     ]) { current, _ in current }
                 )
                 return .settled
-            }
-            if connectionRecoveryAttempt != 0 {
-                connectionRecoveryAttempt = 0
             }
             phase = .online
             lastConnection = MobileConnectionRecord(
@@ -2954,9 +2968,9 @@ final class RemoteAppModel: ObservableObject {
             .hostRouteStarted,
             fields: baseFields.merging([.result: "started"]) { current, _ in current }
         )
-        let link: RemoteConnectionLink
+        let route: HostedRemoteRoute
         do {
-            guard let prepared = try await hostedConnections.link(for: host, trace: trace) else {
+            guard let prepared = try await hostedConnections.route(for: host, trace: trace) else {
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,
                     level: .warning,
@@ -2968,7 +2982,7 @@ final class RemoteAppModel: ObservableObject {
                 )
                 throw RemoteClientError.invalidResponse
             }
-            link = prepared
+            route = prepared
         } catch {
             let cancelled = error is CancellationError || Task.isCancelled
             if !(error is RemoteClientError) {
@@ -2987,8 +3001,7 @@ final class RemoteAppModel: ObservableObject {
             throw error
         }
         if activeHostID == host.id {
-            activeHostedHostID = host.id
-            activeHostedLink = link
+            hostedRoute.adopt(route, for: host.id)
         }
         MobileDiagnostics.recordConnectivity(
             .hostRouteEnded,
@@ -3003,7 +3016,7 @@ final class RemoteAppModel: ObservableObject {
         do {
             return try await fetchMe(
                 candidate: ConnectionCandidate(
-                    link: link,
+                    link: route.link,
                     isHosted: true,
                     kind: RemoteHostEndpointKind.hosted,
                     doorID: nil
@@ -3292,18 +3305,17 @@ final class RemoteAppModel: ObservableObject {
             if host.hostedServiceURL != nil, host.hostedCredential != nil {
                 routeWillBegin?(RemoteHostEndpointKind.hosted)
             }
-            if let hostedLink = try await hostedConnections.link(for: host, trace: trace) {
+            if let prepared = try await hostedConnections.route(for: host, trace: trace) {
                 candidates.append(
                     ConnectionCandidate(
-                        link: hostedLink,
+                        link: prepared.link,
                         isHosted: true,
                         kind: RemoteHostEndpointKind.hosted,
                         doorID: nil
                     )
                 )
                 if activeHostID == host.id {
-                    activeHostedHostID = host.id
-                    activeHostedLink = hostedLink
+                    hostedRoute.adopt(prepared, for: host.id)
                 }
             }
         } catch is CancellationError {
@@ -3332,10 +3344,7 @@ final class RemoteAppModel: ObservableObject {
 
     private func hostedConnectionFailed(hostID: String) async {
         await hostedConnections.invalidate(hostID: hostID)
-        if activeHostedHostID == hostID {
-            activeHostedHostID = nil
-            activeHostedLink = nil
-        }
+        hostedRoute.clear(for: hostID)
     }
 
     private func reconcileHostedCredential(
@@ -3465,8 +3474,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private func discardHostedConnection() {
-        activeHostedHostID = nil
-        activeHostedLink = nil
+        hostedRoute.clearAll()
         Task { await hostedConnections.invalidate() }
     }
 
@@ -3502,11 +3510,9 @@ final class RemoteAppModel: ObservableObject {
         if themeEventsHostID == host.id, themeEventsTask != nil { return }
         clearThemeEventSocket()
 
-        let link = activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link
-        let endpointKind = activeHostedHostID == host.id
-            ? RemoteHostEndpointKind.hosted
-            : host.activeEndpointKind ?? PairedRemoteHost.endpointKind(for: link.baseURL)
-        let client = RemoteClient(link: link, endpointKind: endpointKind)
+        let route = liveRoute(for: host)
+        let link = route.link
+        let client = RemoteClient(link: link, endpointKind: route.kind)
         let trace = MobileDiagnostics.connectivityTrace()
         themeEventsStartedAt = MobileDiagnostics.monotonicNow()
         themeEventsDiagnosticFields = [
@@ -3618,6 +3624,11 @@ final class RemoteAppModel: ObservableObject {
                     )
                     sendMobileDiagnosticsHello(on: task)
                 }
+                // The one place the socket's attempt counter goes back to zero. A catalogue
+                // answer is not a socket: in the 2026-09-06 report a `304` over Tailscale reset
+                // the counter every second while the socket beside it failed on a dead hosted
+                // origin every second, so the backoff never grew past its first step. Only a
+                // frame on the socket says the socket is back.
                 if connectionRecoveryAttempt != 0 {
                     connectionRecoveryAttempt = 0
                 }
@@ -3775,11 +3786,7 @@ final class RemoteAppModel: ObservableObject {
     private func scheduleThemeEventsRecovery(for hostID: String) {
         guard !isDemo, activeHostID == hostID, themeEventsTask == nil,
               themeEventsRecoveryTask == nil else { return }
-        let exponent = min(connectionRecoveryAttempt, 6)
-        let delay = min(
-            pow(2, Double(exponent)),
-            Self.maximumThemeEventsRecoveryDelay
-        )
+        let delay = MobileSocketRecoveryBackoff.delay(forAttempt: connectionRecoveryAttempt)
         connectionRecoveryAttempt &+= 1
         if case .offline = phase {
             connectionProgress = .waitingToRetry(attempt: connectionRecoveryAttempt)

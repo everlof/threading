@@ -3006,6 +3006,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard AppUpdater.shared.canCheckForUpdates else {
                 return .unavailable(L10n.string("An update check is already running."))
             }
+        case AppCommands.ID.refreshModels:
+            guard !CodexModelRefreshService.shared.state.isRunning else {
+                return .unavailable(L10n.string("A model refresh is already running."))
+            }
         case AppCommands.ID.newManager:
             guard mainWindowController?.currentProjectID != nil else {
                 return .unavailable(L10n.string("Select a project first."))
@@ -3211,6 +3215,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.nextTab: mainWindowController?.selectAdjacentTab(offset: 1)
         case AppCommands.ID.inspectElement: mainWindowController?.toggleElementInspector()
         case AppCommands.ID.checkForUpdates: AppUpdater.shared.checkForUpdates()
+        case AppCommands.ID.refreshModels:
+            CodexModelRefreshService.shared.start { [weak self] state in
+                let alert = ThemedAlert()
+                alert.messageText = L10n.string("Refresh Models")
+                alert.informativeText = state.message
+                if let window = self?.mainWindowController?.window {
+                    alert.beginSheetModal(for: window) { _ in }
+                } else {
+                    alert.runModal()
+                }
+            }
         case "system.preferences": mainWindowController?.toggleSettingsFromCommand()
         case "system.hide": NSApp.hide(nil)
         case "system.quit": NSApp.terminate(nil)

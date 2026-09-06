@@ -530,6 +530,11 @@ counted twice. No new empty project can survive a refused transaction.
 Claude is the one provider whose conversation files are checkout-scoped. Before the store commit,
 `CheckoutTranscriptCopyTransaction` prepares the transcript and its subagent directory off-main,
 backs up any destination, installs the bundle, and restores it if the graph commit refuses.
+Its source is the live hook-reported root transcript when available: Claude can continue writing
+at the original slug after a resume in another checkout. The destination remains derived from
+the requested checkout. `ClaudeTranscriptLocations` validates and retains the live location until
+runtime discard; the limit reader and account migration share this authority rather than reading
+a stale checkout copy (see [`limit-recovery.md`](limit-recovery.md)).
 Codex and ACP sessions keep their global provider IDs and require no file copy. For an unlaunched
 Claude side chat, the coordinator moves the smallest connected closure of unlaunched Claude
 parents and children; a side chat that has already launched is independent.
@@ -877,8 +882,10 @@ something already on screen*:
   it last drew; a morph needs both to say yes. A first fill, a row reconfigured while an
   agent works, and a cell recycled from another session all land the name directly — the
   last would otherwise animate a transition between two unrelated conversations, which reads
-  as a glitch. A *heading* never animates at all: its name is its identity, so a different
-  name there is a different heading rather than a rename of this one.
+  as a glitch. The iPhone dashboard's native collection cell keeps the same identity guard and
+  clears an in-flight title at its reuse boundary, including when two unrelated records happen
+  to have the same title. A *heading* never animates at all: its name is its identity, so a
+  different name there is a different heading rather than a rename of this one.
 - **The rename has to reach the view that is showing it**, which is what actually made this
   work and was two separate gaps. `ProjectsDidChange` fires for content edits as well as
   structural ones, and the sidebar answered every one with a full `reloadData()` — which

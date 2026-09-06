@@ -170,6 +170,7 @@ enum AppCommands {
         static let inspectElement = "inspect.element"
 
         static let checkForUpdates = "app.checkForUpdates"
+        static let refreshModels = "app.refreshModels"
 
         static let silenceSounds = "app.silenceSounds"
     }
@@ -178,6 +179,9 @@ enum AppCommands {
 
     /// Threading's own commands, in the order the page lists them.
     static let editable: [AppCommand] = [
+        AppCommand(id: ID.refreshModels, group: .system, title: "Refresh Models",
+                   detail: "Reload available models for all enabled Codex accounts.",
+                   defaultShortcut: nil, isEditable: true, iconName: "arrow.clockwise"),
         AppCommand(id: ID.newSession, group: .session, title: "New Session",
                    defaultShortcut: KeyboardShortcut(key: "n", modifiers: .command), isEditable: true,
                    scope: .project),
