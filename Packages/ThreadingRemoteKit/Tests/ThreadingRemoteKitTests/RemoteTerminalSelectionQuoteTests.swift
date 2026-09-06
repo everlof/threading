@@ -176,6 +176,17 @@ final class RemoteTerminalPasteTests: XCTestCase {
         XCTAssertEqual(RemoteTerminalPaste.delimited("", bracketedPaste: true), "")
     }
 
+    func testFilePathsAreShellEscapedAndLeaveTheTerminalLineOpen() {
+        XCTAssertEqual(
+            RemoteTerminalPaste.filePathText(for: [
+                "/tmp/first.png",
+                "/tmp/My Photos/$draft.png",
+            ]),
+            "/tmp/first.png /tmp/My\\ Photos/\\$draft.png "
+        )
+        XCTAssertEqual(RemoteTerminalPaste.filePathText(for: []), "")
+    }
+
     func testOnlyTextWithLineBreaksCountsAsAPaste() {
         XCTAssertFalse(RemoteTerminalPaste.carriesLineBreaks("one line"))
         XCTAssertTrue(RemoteTerminalPaste.carriesLineBreaks("one\ntwo"))

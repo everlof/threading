@@ -11,6 +11,17 @@ struct SessionActivityDidChange: AppEvent {
     let sessionID: SessionID
 }
 
+/// The participant receipt ledger committed or lost authority for one session.
+///
+/// This is the narrow catalogue edge. `SessionActivityDidChange` remains the broad presentation
+/// notification consumed by local UI, while remote row delivery no longer depends on inferring a
+/// receipt mutation from that unversioned signal.
+struct SessionAttentionDidChange: AppEvent {
+    static let name = Notification.Name("sessionAttentionDidChange")
+    let sessionID: SessionID
+    let persistence: SessionReadReceiptPersistence
+}
+
 /// Operational lifecycle moved. Unlike `SessionActivityDidChange`, this carries the exact facts
 /// and edge so consumers never reconstruct turn completion from a reader-specific UI state.
 struct SessionRuntimeDidChange: AppEvent {

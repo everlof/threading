@@ -347,6 +347,63 @@ public enum RemoteSessionActivity: RawRepresentable, Codable, Equatable, Hashabl
     }
 }
 
+/// What the host's participant-scoped receipt ledger can prove.
+///
+/// This stays separate from `RemoteSessionActivity`: working, blocking, limits and dormancy are
+/// shared runtime facts, while only a completed result has a reader-specific receipt.
+public enum RemoteSessionAttentionKnowledge: RawRepresentable, Codable, Equatable, Sendable {
+    case read
+    case unread
+    case unavailable
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "read": self = .read
+        case "unread": self = .unread
+        case "unavailable": self = .unavailable
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .read: return "read"
+        case .unread: return "unread"
+        case .unavailable: return "unavailable"
+        case let .unknown(rawValue): return rawValue
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+/// The generation proof behind one participant's attention dot. Optional on the session row so
+/// old hosts and new clients remain compatible; when present, clients never have to infer a
+/// receipt from a transient UI event.
+public struct RemoteSessionAttentionDTO: Codable, Equatable, Sendable {
+    public let knowledge: RemoteSessionAttentionKnowledge
+    public let completionGeneration: Int?
+    public let seenGeneration: Int?
+
+    public init(
+        knowledge: RemoteSessionAttentionKnowledge,
+        completionGeneration: Int? = nil,
+        seenGeneration: Int? = nil
+    ) {
+        self.knowledge = knowledge
+        self.completionGeneration = completionGeneration
+        self.seenGeneration = seenGeneration
+    }
+}
+
 /// Work that can re-enter a prompt-ready conversation without another user message.
 public enum RemoteSessionContinuation: RawRepresentable, Codable, Equatable, Hashable, Sendable {
     case delegated
@@ -386,6 +443,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let agentKind: String
     public let surface: RemoteSessionSurface
     public let state: RemoteSessionActivity
+    /// Additive participant-scoped proof for the attention part of `state`.
+    public let attention: RemoteSessionAttentionDTO?
     /// Additive so older hosts and clients safely read this as no background continuation.
     public let continuation: RemoteSessionContinuation?
     public let projectName: String
@@ -436,6 +495,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         agentKind: String,
         surface: RemoteSessionSurface,
         state: RemoteSessionActivity,
+        attention: RemoteSessionAttentionDTO? = nil,
         continuation: RemoteSessionContinuation? = nil,
         projectName: String,
         projectID: String? = nil,
@@ -463,6 +523,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.agentKind = agentKind
         self.surface = surface
         self.state = state
+        self.attention = attention
         self.continuation = continuation
         self.projectName = projectName
         self.projectID = projectID
@@ -487,7 +548,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, agentKind, surface, state, continuation, projectName, projectID, isAvailable, lastActiveAt
+        case id, title, agentKind, surface, state, attention, continuation, projectName, projectID, isAvailable, lastActiveAt
         case isPinned, isArchived, archivedAt, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
@@ -501,6 +562,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         agentKind = try container.decode(String.self, forKey: .agentKind)
         surface = try container.decode(RemoteSessionSurface.self, forKey: .surface)
         state = try container.decode(RemoteSessionActivity.self, forKey: .state)
+        attention = try container.decodeIfPresent(
+            RemoteSessionAttentionDTO.self,
+            forKey: .attention
+        )
         continuation = try container.decodeIfPresent(
             RemoteSessionContinuation.self,
             forKey: .continuation
@@ -2811,6 +2876,21 @@ public struct RemoteAppThemeUpdateDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// Fences the authenticated dashboard event stream against the `/api/me` snapshot already held
+/// by the client. Registering the subscriber and capturing this edition are one main-actor step;
+/// later scoped deltas are sequenced within `streamID`.
+public struct RemoteCatalogueStreamHelloDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let streamID: String
+    public let revision: RemoteCatalogueRevisionDTO
+
+    public init(streamID: String, revision: RemoteCatalogueRevisionDTO) {
+        type = "catalogueHello"
+        self.streamID = streamID
+        self.revision = revision
+    }
+}
+
 /// Local-diagnostics request sent over the already-authenticated app-events socket.
 ///
 /// The request id binds the following REST upload to the paired device that owns this socket.
@@ -2928,13 +3008,19 @@ public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
     /// its next conditional `/api/me` can be answered `304`; a client that receives a delta while
     /// holding no catalogue, or from an older host that sends none, refreshes in full as before.
     public let revision: RemoteCatalogueRevisionDTO?
+    /// Additive per-connection continuity. Hidden rows do not consume a sequence number, so a
+    /// scoped client learns nothing about catalogue changes outside its authorization.
+    public let streamID: String?
+    public let sequence: UInt64?
 
     public init(
         session: RemoteSessionSummaryDTO? = nil,
         removedSessionID: String? = nil,
         terminal: RemoteProjectTerminalSummaryDTO? = nil,
         removedTerminalID: String? = nil,
-        revision: RemoteCatalogueRevisionDTO? = nil
+        revision: RemoteCatalogueRevisionDTO? = nil,
+        streamID: String? = nil,
+        sequence: UInt64? = nil
     ) {
         type = "sessionsChanged"
         self.session = session
@@ -2942,6 +3028,41 @@ public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
         self.terminal = terminal
         self.removedTerminalID = removedTerminalID
         self.revision = revision
+        self.streamID = streamID
+        self.sequence = sequence
+    }
+
+    public func framed(streamID: String, sequence: UInt64) -> Self {
+        Self(
+            session: session,
+            removedSessionID: removedSessionID,
+            terminal: terminal,
+            removedTerminalID: removedTerminalID,
+            revision: revision,
+            streamID: streamID,
+            sequence: sequence
+        )
+    }
+}
+
+/// The canonical catalogue row after a live session attach attempted its durable read receipt.
+/// The originating phone applies this directly; delivery to its dashboard no longer depends on
+/// a second best-effort socket event.
+public struct RemoteSessionVisitedDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let session: RemoteSessionSummaryDTO
+    public let revision: RemoteCatalogueRevisionDTO
+    public let receiptCommitted: Bool
+
+    public init(
+        session: RemoteSessionSummaryDTO,
+        revision: RemoteCatalogueRevisionDTO,
+        receiptCommitted: Bool
+    ) {
+        type = "sessionVisited"
+        self.session = session
+        self.revision = revision
+        self.receiptCommitted = receiptCommitted
     }
 }
 

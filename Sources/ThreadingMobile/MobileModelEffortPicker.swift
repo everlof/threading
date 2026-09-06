@@ -273,8 +273,15 @@ struct MobileModelEffortPicker: View {
                 )
 
                 matrixContent(modelWidth: modelWidth, effortWidth: effortWidth)
-                    .contentShape(Rectangle())
-                    .gesture(scrubGesture(modelWidth: modelWidth, effortWidth: effortWidth))
+                    .mobileScrubSurface(
+                        item: {
+                            availableCell(at: $0, modelWidth: modelWidth, effortWidth: effortWidth)
+                        },
+                        scrubbed: $scrubbedCell,
+                        onCommit: { cell in
+                            commit(cell, fraction: rampFraction(visibleEfforts[cell.column]))
+                        }
+                    )
             }
             .frame(height: matrixHeight)
             .background {
@@ -526,30 +533,6 @@ struct MobileModelEffortPicker: View {
         commitFeedback.impactOccurred(intensity: 0.5 + 0.5 * fraction)
         commitFeedback.prepare()
         choose(cell)
-    }
-
-    private func scrubGesture(modelWidth: CGFloat, effortWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                guard let cell = availableCell(
-                    at: value.location,
-                    modelWidth: modelWidth,
-                    effortWidth: effortWidth
-                ), cell != scrubbedCell else { return }
-                scrubbedCell = cell
-                scrubFeedback.selectionChanged()
-                scrubFeedback.prepare()
-            }
-            .onEnded { value in
-                let releaseCell = availableCell(
-                    at: value.location,
-                    modelWidth: modelWidth,
-                    effortWidth: effortWidth
-                ) ?? scrubbedCell
-                scrubbedCell = nil
-                guard let releaseCell else { return }
-                commit(releaseCell, fraction: rampFraction(visibleEfforts[releaseCell.column]))
-            }
     }
 
     @ViewBuilder

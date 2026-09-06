@@ -316,19 +316,53 @@ enum TerminalKeyBarSymbols {
     ]
 }
 
-private enum TerminalKeyBarMetrics {
+enum TerminalKeyBarMetrics {
     /// The key row hugs the keyboard, so its caps are deliberately shorter and tighter than a
     /// full-height control: a cap is one of many small targets in a dense strip, and the action
-    /// row above carries the bar's full-height utilities.
-    /// Apple Color Emoji outgrows the text face's nominal line box. Thirty points clipped the
-    /// artwork on a real phone, so the compact cap keeps the original 34-point ink well while
-    /// the two-row split still supplies the density.
+    /// row above carries the bar's full-height utilities. Apple Color Emoji outgrows the text
+    /// face's nominal line box, so the compact cap keeps a 34-point ink well. The well is the
+    /// cap's height; what a glyph draws inside it is the font's. 🫡's face is cropped at its
+    /// right edge in the artwork Apple Color Emoji ships on iOS 26.5 and macOS 26.5 — the PNG in
+    /// the font's `sbix` table is cut — so it draws that way in every app on the phone, and in
+    /// CoreText, UIKit and SwiftUI alike. No label pipeline here can complete it.
     static let keyHeight: CGFloat = 34
+    /// The air inside a cap around its label, and the air the cap run keeps between itself and
+    /// whatever fixed thing bounds it: the bar's edge, the divider before the keyboard toggle,
+    /// the paperclip's target. It is also the line both rows stand their outermost mark on —
+    /// the bottom row a cap's plate, the action row a glyph's ink — so the two rows read as
+    /// one bar rather than as a strip under a toolbar.
     static let keyPadding: CGFloat = 8
     /// The tight ink padding would let a lone arrow collapse to a sliver; a cap never gets
     /// narrower than a comfortable square.
     static let minimumKeyWidth: CGFloat = 34
     static let actionHeight: CGFloat = MobileDesign.Size.compactControl
+    /// The face the bar's glyph controls draw their symbols in, which is also the face they
+    /// are measured at.
+    static let glyphFont: Font = .subheadline
+
+    /// The padding that stands a glyph control's *ink* on `keyPadding` at the bar's edge. The
+    /// control is the full target with its symbol centred, so between the frame's edge and the
+    /// ink lies the control's optical inset on that edge, and the row pulls the frame out over
+    /// the edge by that much — the rule the composer's paperclip already keeps. Placed by its
+    /// frame, the paperclip's ink stood eleven points inboard of the cap the bottom row starts
+    /// with, and the trailing glyphs four points inboard of the keyboard toggle's. The inset is
+    /// read off SwiftUI's own render of the symbol in this very frame, per edge
+    /// (`MobileDesign.Size.symbolInsets`): the bar's symbols differ by seven points in width
+    /// and are not all centred, and the key editor's badge hangs nearly two points past the box
+    /// SwiftUI lays out — a pull sized to the face, or to the box, or to the bare symbol's ink,
+    /// each stood it one to three points over the line.
+    @MainActor
+    static func edgeInset(
+        for systemName: String,
+        weight: Font.Weight = .regular,
+        edge: MobileDesign.Size.SymbolInsets.Edge
+    ) -> CGFloat {
+        keyPadding - MobileDesign.Size.symbolInsets(
+            systemName,
+            font: glyphFont.weight(weight),
+            in: CGSize(width: MobileDesign.Size.minimumTapTarget, height: actionHeight)
+        ).inset(at: edge)
+    }
 }
 
 /// One press treatment for every key cap. The fill and small travel are driven by the actual
@@ -384,17 +418,24 @@ struct TerminalKeyBarActionControls: View {
 
             if showsInputModeControl {
                 Button(action: toggleInputPreference) {
-                    trailingIcon(
-                        effectiveInputMode == .independentComposer
-                            ? TerminalKeyBarSymbols.composeInput
-                            : TerminalKeyBarSymbols.directInput
-                    )
+                    trailingIcon(inputModeSymbol)
                 }
                 .disabled(!canChooseInputPreference)
                 .accessibilityLabel(inputModeAccessibilityLabel)
                 .accessibilityValue(inputModeAccessibilityValue)
             }
         }
+    }
+
+    /// The symbol on the row's trailing edge, which the bar stands on its margin by its ink.
+    var trailingSymbol: String {
+        showsInputModeControl ? inputModeSymbol : TerminalKeyBarSymbols.customizeKeys
+    }
+
+    private var inputModeSymbol: String {
+        effectiveInputMode == .independentComposer
+            ? TerminalKeyBarSymbols.composeInput
+            : TerminalKeyBarSymbols.directInput
     }
 
     private var inputModeAccessibilityLabel: String {
@@ -418,7 +459,7 @@ struct TerminalKeyBarActionControls: View {
     /// they reserve. `contentShape` is what makes the reserved area the real one.
     private func trailingIcon(_ systemName: String) -> some View {
         Image(systemName: systemName)
-            .font(.subheadline)
+            .font(TerminalKeyBarMetrics.glyphFont)
             .foregroundStyle(theme.secondaryLabel)
             .frame(
                 width: MobileDesign.Size.minimumTapTarget,
@@ -499,11 +540,27 @@ struct TerminalKeyBar: View {
     }
 
     /// The bar's full-height utilities and the optional top key run. Fixed controls keep their
-    /// slots while the person's keys scroll through whatever width remains between them.
+    /// slots while the person's keys scroll through whatever width remains between them. The
+    /// outermost glyph at each end stands on the bar's margin by its ink, the line the bottom
+    /// row's caps stand on by their plates; see `TerminalKeyBarMetrics.edgeInset(for:weight:edge:)`.
     private var actionRow: some View {
-        HStack(spacing: 0) {
+        let actionControls = TerminalKeyBarActionControls(
+            customize: customize,
+            showsInputModeControl: connection.supportsAtomicTerminalSubmission
+                && effectiveInputMode != .none,
+            inputPreference: inputPreference,
+            effectiveInputMode: effectiveInputMode,
+            canChooseInputPreference: canChooseInputPreference,
+            toggleInputPreference: toggleInputPreference
+        )
+        return HStack(spacing: 0) {
             if showsAttachmentKey {
                 attachmentButton
+                    .padding(.leading, TerminalKeyBarMetrics.edgeInset(
+                        for: TerminalKeyBarSymbols.attachments,
+                        weight: .medium,
+                        edge: .leading
+                    ))
             }
             if layout.keys(in: .top).isEmpty {
                 Spacer(minLength: 0)
@@ -520,17 +577,12 @@ struct TerminalKeyBar: View {
                 .disabled(!canSend)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            TerminalKeyBarActionControls(
-                customize: customize,
-                showsInputModeControl: connection.supportsAtomicTerminalSubmission
-                    && effectiveInputMode != .none,
-                inputPreference: inputPreference,
-                effectiveInputMode: effectiveInputMode,
-                canChooseInputPreference: canChooseInputPreference,
-                toggleInputPreference: toggleInputPreference
-            )
+            actionControls
+                .padding(.trailing, TerminalKeyBarMetrics.edgeInset(
+                    for: actionControls.trailingSymbol,
+                    edge: .trailing
+                ))
         }
-        .padding(.horizontal, MobileDesign.Spacing.tight)
     }
 
     /// The tight cap run closest to the keyboard, with the way back from the keyboard at its
@@ -553,7 +605,8 @@ struct TerminalKeyBar: View {
     }
 
     /// Both directions, because the terminal no longer answers a tap by taking the keyboard
-    /// while a TUI is tracking the mouse: that tap is the TUI's click.
+    /// while a TUI is tracking the mouse: that tap is the TUI's click. The glyph stands on the
+    /// bar's trailing margin by its ink, like the action row's last glyph above it.
     @ViewBuilder
     private var keyboardToggle: some View {
         if isKeyboardVisible || bridge.canShowKeyboard {
@@ -562,19 +615,19 @@ struct TerminalKeyBar: View {
                 .frame(width: theme.borderWidth, height: TerminalKeyBarMetrics.keyHeight)
 
             Button(action: isKeyboardVisible ? bridge.dismissKeyboard : bridge.showKeyboard) {
-                Image(
-                    systemName: isKeyboardVisible
-                        ? TerminalKeyBarSymbols.hideKeyboard
-                        : TerminalKeyBarSymbols.showKeyboard
-                )
-                .font(.subheadline)
-                .foregroundStyle(theme.secondaryLabel)
-                .frame(
-                    width: MobileDesign.Size.minimumTapTarget,
-                    height: TerminalKeyBarMetrics.keyHeight
-                )
-                .contentShape(Rectangle())
+                Image(systemName: keyboardToggleSymbol)
+                    .font(TerminalKeyBarMetrics.glyphFont)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .frame(
+                        width: MobileDesign.Size.minimumTapTarget,
+                        height: TerminalKeyBarMetrics.keyHeight
+                    )
+                    .contentShape(Rectangle())
             }
+            .padding(.trailing, TerminalKeyBarMetrics.edgeInset(
+                for: keyboardToggleSymbol,
+                edge: .trailing
+            ))
             .accessibilityLabel(
                 isKeyboardVisible
                     ? MobileL10n.string("Hide keyboard")
@@ -583,10 +636,16 @@ struct TerminalKeyBar: View {
         }
     }
 
+    private var keyboardToggleSymbol: String {
+        isKeyboardVisible
+            ? TerminalKeyBarSymbols.hideKeyboard
+            : TerminalKeyBarSymbols.showKeyboard
+    }
+
     private var attachmentButton: some View {
         Button(action: chooseAttachmentSource) {
             Image(systemName: TerminalKeyBarSymbols.attachments)
-                .font(.subheadline.weight(.medium))
+                .font(TerminalKeyBarMetrics.glyphFont.weight(.medium))
                 .foregroundStyle(theme.label)
                 .frame(
                     width: MobileDesign.Size.minimumTapTarget,

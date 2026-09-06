@@ -15,17 +15,17 @@ final class ScheduledMessageStoreTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("scheduled-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         if let directory { try? FileManager.default.removeItem(at: directory) }
         directory = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func makeStore() -> ScheduledMessageStore {
@@ -101,7 +101,7 @@ final class ScheduledMessageStoreTests: XCTestCase {
             purpose: .limitRecovery,
             limitRecoveryRecordID: "refusal-two"
         )
-        try store.add(recovery, now: now).get()
+        _ = try store.add(recovery, now: now).get()
 
         let reopened = makeStore()
         let persisted = try XCTUnwrap(reopened[recovery.id])
@@ -132,8 +132,8 @@ final class ScheduledMessageStoreTests: XCTestCase {
             purpose: .limitRecovery,
             limitRecoveryRecordID: "refusal-one"
         )
-        try store.add(userPreset, now: now).get()
-        try store.add(recovery, now: now).get()
+        _ = try store.add(userPreset, now: now).get()
+        _ = try store.add(recovery, now: now).get()
 
         XCTAssertTrue(store.cancelLimitRecoveryContinuations(for: sessionID))
 
@@ -173,7 +173,7 @@ final class ScheduledMessageStoreTests: XCTestCase {
             purpose: .limitRecovery
         )
         for value in [armed, waiting, userMessage, otherRecovery] {
-            try store.add(value, now: now).get()
+            _ = try store.add(value, now: now).get()
         }
 
         let releaseAt = now.addingTimeInterval(30)

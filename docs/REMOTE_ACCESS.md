@@ -1662,7 +1662,19 @@ way back from the keyboard at its trailing edge; every key may instead be placed
 where it scrolls through the room between the fixed attachment, Direct/Compose and editor controls.
 Small targets stay a dense strip in either place. Apple Color Emoji exceeds the text face's
 nominal line box, so both rows retain a 34-point cap well rather than clipping a user-authored
-emoji. The customizable run itself is a Termius-style keyboard, and deliberately exceeds Termius's
+emoji; what the glyph draws inside the well is the font's own — 🫡's face is cropped at its right
+edge in the artwork Apple ships on iOS 26.5 and macOS 26.5 (the PNG in the font's `sbix` table is
+cut), so it draws that way in every app and in CoreText, UIKit and SwiftUI alike, and no label
+pipeline can complete it. Both rows stand their outermost mark on one 8-point margin — the
+bottom row a cap's plate, the action row a glyph's ink — so the two read as one bar: each glyph
+control is the full 44-point target centred on its symbol, and the row pulls that frame out over
+the edge by the control's optical inset on that edge, read once off SwiftUI's own render of the
+symbol inside that frame (`MobileDesign.Size.symbolInsets`). The bar's symbols differ by seven
+points in width and are not all centred: the key editor's badge hangs nearly two points past the
+box SwiftUI lays out, which only a render in the frame keeps. Placed by their frames, the
+paperclip stood eleven points inboard of the cap beneath it and the trailing glyphs four points
+inboard of the keyboard toggle's. The
+customizable run itself is a Termius-style keyboard, and deliberately exceeds Termius's
 model where agent TUIs need it: a key can be a *chord* (⇧⇥ — Claude Code's permission-mode
 cycle, which Termius cannot put on its bar at all), a snippet that types saved text and
 optionally submits it, a raw escape sequence, or a latching ⌃/⌥ that arms for the next key —

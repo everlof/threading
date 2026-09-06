@@ -34,6 +34,33 @@ public enum RemoteTerminalPaste {
         return start + text + end
     }
 
+    /// File paths as one terminal paste: shell-safe words followed by a separator for whatever
+    /// the person types next.
+    ///
+    /// This is shared by a drop on the Mac terminal and an attachment uploaded from the phone.
+    /// Letting those two doors spell paths differently is how the remote door produced a quoted
+    /// path with no trailing space: the TUI saw ordinary typing, and the next word was joined to
+    /// the filename. Bracketing remains separate because only the live terminal mode can say
+    /// whether the program asked for it.
+    public static func filePathText(for paths: [String]) -> String {
+        guard !paths.isEmpty else { return "" }
+        return paths.map(escapedFilePath).joined(separator: " ") + " "
+    }
+
+    /// One path escaped as a shell word before it enters a terminal paste.
+    public static func escapedFilePath(_ path: String) -> String {
+        var result = ""
+        result.reserveCapacity(path.count)
+
+        for character in path {
+            if character == "\\" || filePathEscapableCharacters.contains(character) {
+                result.append("\\")
+            }
+            result.append(character)
+        }
+        return result
+    }
+
     /// Whether a line break makes this text a paste rather than typing.
     ///
     /// Typing cannot produce one — Return submits — so a draft that carries a line break was
@@ -47,4 +74,11 @@ public enum RemoteTerminalPaste {
     public static func fits(_ text: String) -> Bool {
         text.utf8.count <= maximumBytes
     }
+
+    /// Shell word-breaking and expansion characters. Newline and tab are included because a
+    /// legal filename containing either must remain one path rather than becoming terminal input.
+    private static let filePathEscapableCharacters: Set<Character> = [
+        " ", "\t", "\n", "\"", "'", "`", "$", "&", "*", "?", ";", "|",
+        "<", ">", "(", ")", "[", "]", "{", "}", "!", "#", "~",
+    ]
 }

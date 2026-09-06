@@ -516,11 +516,7 @@ final class RemoteHostedServiceController {
                 apnsID: result.apnsID
             )
         } catch {
-            return RemoteAPNSDeliveryResult(
-                statusCode: nil,
-                reason: "Hosted push broker was unavailable.",
-                apnsID: nil
-            )
+            return Self.notificationDeliveryFailure(error, operation: .push)
         }
     }
 
@@ -551,12 +547,48 @@ final class RemoteHostedServiceController {
                 apnsID: result.apnsID
             )
         } catch {
+            return Self.notificationDeliveryFailure(error, operation: .retraction)
+        }
+    }
+
+    enum HostedNotificationOperation {
+        case push
+        case retraction
+
+        var unavailableReason: String {
+            switch self {
+            case .push: "Hosted push broker was unavailable."
+            case .retraction: "Hosted retraction broker was unavailable."
+            }
+        }
+
+        var refusedReason: String {
+            switch self {
+            case .push: "Hosted push broker refused the request."
+            case .retraction: "Hosted retraction broker refused the request."
+            }
+        }
+    }
+
+    static func notificationDeliveryFailure(
+        _ error: Error,
+        operation: HostedNotificationOperation
+    ) -> RemoteAPNSDeliveryResult {
+        if let peerError = error as? PeerControlPlaneError,
+           case .rejected(let status, let code) = peerError {
             return .init(
-                statusCode: nil,
-                reason: "Hosted retraction broker was unavailable.",
-                apnsID: nil
+                statusCode: status,
+                reason: operation.refusedReason,
+                apnsID: nil,
+                failureCode: code
             )
         }
+        return .init(
+            statusCode: nil,
+            reason: operation.unavailableReason,
+            apnsID: nil,
+            failureCode: errorCode(error)
+        )
     }
 
     func revokeDevice(deviceID: String) {

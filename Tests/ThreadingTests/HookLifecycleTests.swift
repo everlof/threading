@@ -1147,12 +1147,56 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
 
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
-        tracker.noteTurnFinished(continuationGrace: 0.05)
+        tracker.noteTurnFinished(
+            continuationGrace: 0.05,
+            allowsOutputInferredContinuation: true
+        )
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
         waitOutContinuationGrace(0.05)
 
         XCTAssertEqual(tracker.activity, .working)
         XCTAssertFalse(tracker.hasPendingReportedTurnFinish)
+    }
+
+    /// A missing rollout may spend one continuation fallback, but an idle TUI repaint after that
+    /// inferred turn settles cannot manufacture another completion. This is the production shape
+    /// that posted and withdrew an alert roughly every 0.8 seconds.
+    @MainActor
+    func testReportedFinishDoesNotTurnIdleRepaintsIntoACompletionStorm() {
+        let quietInterval: TimeInterval = 0.01
+        let tracker = SessionActivityTracker(quietInterval: quietInterval)
+        let sessionID = SessionID()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        var transitions = SessionRuntimeTransitionLedger()
+        var completions = 0
+        tracker.onRuntimeChange = { snapshot in
+            if transitions.observe(snapshot, for: sessionID).completedPendingOutcome {
+                completions += 1
+            }
+        }
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        tracker.noteTurnFinished(
+            continuationGrace: 0.05,
+            allowsOutputInferredContinuation: true
+        )
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        RunLoop.current.run(until: Date().addingTimeInterval(quietInterval * 3))
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertEqual(completions, 1)
+
+        for _ in 0..<8 {
+            XCTAssertNil(
+                tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+            )
+            RunLoop.current.run(until: Date().addingTimeInterval(quietInterval * 2))
+        }
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertEqual(completions, 1, "the fallback is scoped to one reported finish")
     }
 
     /// The bug a phone reported as "the chat isn't showing loading but it is clearly loading".
@@ -1167,7 +1211,10 @@ final class HookLifecycleTests: XCTestCase {
         tracker.markRunning()
         tracker.isVisible = false
 
-        tracker.noteTurnFinished()
+        tracker.noteTurnFinished(
+            continuationGrace: 0.05,
+            allowsOutputInferredContinuation: true
+        )
         XCTAssertTrue(tracker.reportsOwnActivity)
         XCTAssertFalse(tracker.reportsTurnStarts)
 
@@ -1242,7 +1289,10 @@ final class HookLifecycleTests: XCTestCase {
         tracker.markRunning()
         tracker.isVisible = false
 
-        tracker.noteTurnFinished()
+        tracker.noteTurnFinished(
+            continuationGrace: 0.05,
+            allowsOutputInferredContinuation: true
+        )
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
         XCTAssertEqual(tracker.activity, .working)
 
@@ -1262,7 +1312,10 @@ final class HookLifecycleTests: XCTestCase {
         tracker.markRunning()
         tracker.isVisible = false
 
-        tracker.noteTurnFinished()
+        tracker.noteTurnFinished(
+            continuationGrace: 0.05,
+            allowsOutputInferredContinuation: true
+        )
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
         tracker.noteTurnStartedFromTranscript(turnID: "turn-2")
 

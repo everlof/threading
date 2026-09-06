@@ -40,7 +40,8 @@ async function verifyAttempt(origin, fetchImplementation) {
   const ready = await request(fetchImplementation, `${origin}/ready`);
   const readyValue = JSON.parse(ready.body);
   if (ready.status !== 200 || readyValue.status !== "ready"
-    || readyValue.rendezvousProtocol !== 1) {
+    || readyValue.rendezvousProtocol !== 1
+    || readyValue.notificationProtocol !== 1) {
     throw new Error(`readiness returned HTTP ${ready.status}`);
   }
 
@@ -55,13 +56,15 @@ async function verifyAttempt(origin, fetchImplementation) {
     }
   }
 
-  const unauthorizedPush = await request(fetchImplementation, `${origin}/v1/push`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  });
-  if (unauthorizedPush.status !== 401) {
-    throw new Error(`push route did not require a host credential (HTTP ${unauthorizedPush.status})`);
+  for (const path of ["/v1/push", "/v1/push/retractions"]) {
+    const unauthorizedPush = await request(fetchImplementation, `${origin}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (unauthorizedPush.status !== 401) {
+      throw new Error(`${path} did not require a host credential (HTTP ${unauthorizedPush.status})`);
+    }
   }
 
   const start = await request(fetchImplementation, `${origin}/v1/auth/development/start`, {

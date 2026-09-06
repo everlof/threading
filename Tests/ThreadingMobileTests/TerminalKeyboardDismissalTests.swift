@@ -15,6 +15,21 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
     private enum Fixture {
         static let windowFrame = CGRect(x: 0, y: 0, width: 390, height: 844)
         static let fontSize: CGFloat = 12
+        static let scale: CGFloat = 3
+        /// A user-authored emoji cap on the top row, so the paperclip's pull is measured with
+        /// the scrolling cap run beside it rather than a spacer.
+        static let topRowEmoji = "🍕"
+        static let agentKind = "codex"
+        static let barWindowSize = CGSize(width: 390, height: 160)
+        /// Where the bar has nothing drawn: the action row's middle, between the top-row cap and
+        /// the trailing controls.
+        static let surfaceSample = CGPoint(x: 195, y: 17)
+        /// The rows without their hairlines: the top overlay and the divider between the rows.
+        static let actionRowBand: Range<CGFloat> = 2..<32
+        static let keyRowBand: Range<CGFloat> = 39..<73
+        /// A plate over the surface is eighteen levels apart; anti-aliased ink and the hairline
+        /// dividers are further. Anything nearer than this is the surface.
+        static let surfaceTolerance = 8
     }
 
     // MARK: - Tests
@@ -224,6 +239,114 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         )
     }
 
+    // MARK: - Margins
+
+    /// Both rows stand their outermost mark on the bar's one margin: the paperclip's ink where
+    /// the bottom row's first plate starts, and each row's last glyph the same distance in from
+    /// the other edge. Read off a drawn, hosted bar, because equal frames are not equal ink:
+    /// placed by its frame the paperclip stood eleven points inboard of the cap under it.
+    func testBothRowsStandTheirOutermostMarksOnOneMargin() throws {
+        let store = MobileTerminalKeyboardStore(defaults: try XCTUnwrap(
+            UserDefaults(suiteName: "TerminalKeyBarMargins-\(UUID().uuidString)")
+        ))
+        var keys = RemoteTerminalKeyboardLayout.standard(forAgentKind: Fixture.agentKind).keys
+        keys.insert(RemoteTerminalKeyDefinition(
+            customLabel: Fixture.topRowEmoji,
+            action: .snippet(text: Fixture.topRowEmoji, submits: false),
+            row: .top
+        ), at: 0)
+        store.setLayout(RemoteTerminalKeyboardLayout(keys: keys), forAgentKind: Fixture.agentKind)
+        let bridge = TerminalKeyBridge()
+        let terminal = RemoteTerminalView(
+            frame: Fixture.windowFrame,
+            font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
+        )
+        bridge.attachTerminalView(terminal)
+        let connection = RemoteSessionConnection(
+            session: RemoteSessionSummaryDTO(
+                id: "key-bar-margins",
+                title: "Margins",
+                agentKind: Fixture.agentKind,
+                surface: .terminal,
+                state: .idle,
+                projectName: "Threading"
+            ),
+            client: RemoteClient(
+                link: try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#preview"))
+            )
+        )
+        let bar = TerminalKeyBar(
+            connection: connection,
+            bridge: bridge,
+            agentKind: Fixture.agentKind,
+            customize: {},
+            inputPreference: .direct,
+            effectiveInputMode: .direct,
+            canChooseInputPreference: true,
+            toggleInputPreference: {},
+            showsAttachmentKey: true,
+            canAttach: true,
+            chooseAttachmentSource: {},
+            isChoosingAttachmentSource: .constant(false),
+            attachmentSourceActions: []
+        )
+        let host = UIHostingController(
+            rootView: VStack(spacing: 0) {
+                bar
+                Spacer(minLength: 0)
+            }
+            .environmentObject(store)
+            .mobileTheme(RemoteThemePalette(nil))
+            .ignoresSafeArea()
+        )
+        let window = hostedWindow(rootViewController: host, size: Fixture.barWindowSize)
+        defer { window.isHidden = true }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        window.layoutIfNeeded()
+        let bitmap = try drawnPixels(of: window, scale: Fixture.scale)
+
+        let surface = bitmap.colour(
+            x: Int(Fixture.surfaceSample.x * Fixture.scale),
+            y: Int(Fixture.surfaceSample.y * Fixture.scale)
+        )
+        let actionRow = scaled(Fixture.actionRowBand)
+        let keyRow = scaled(Fixture.keyRowBand)
+        let paperclip = try XCTUnwrap(
+            bitmap.firstColumn(differingFrom: surface, rows: actionRow),
+            "the action row drew nothing"
+        )
+        let firstPlate = try XCTUnwrap(
+            bitmap.firstColumn(differingFrom: surface, rows: keyRow),
+            "the key row drew nothing"
+        )
+        let lastActionGlyph = try XCTUnwrap(
+            bitmap.lastColumn(differingFrom: surface, rows: actionRow)
+        )
+        let keyboardGlyph = try XCTUnwrap(
+            bitmap.lastColumn(differingFrom: surface, rows: keyRow)
+        )
+
+        let margin = Int(TerminalKeyBarMetrics.keyPadding * Fixture.scale)
+        let farMargin = bitmap.width - 1 - margin
+        let tolerance = Int(Fixture.scale)
+        XCTAssertEqual(
+            paperclip, margin, accuracy: tolerance,
+            "the paperclip's ink is not on the cap run's margin"
+        )
+        XCTAssertEqual(
+            firstPlate, margin, accuracy: tolerance,
+            "the first cap's plate is not on the cap run's margin"
+        )
+        XCTAssertEqual(
+            lastActionGlyph, farMargin, accuracy: tolerance,
+            "the action row's last glyph is not on the trailing margin"
+        )
+        XCTAssertEqual(
+            keyboardGlyph, farMargin, accuracy: tolerance,
+            "the keyboard toggle's glyph is not on the trailing margin"
+        )
+    }
+
     /// A platform tripwire, not a behaviour of ours. `UIApplication.sendAction` broadcasting
     /// `resignFirstResponder` is the idiom that dismisses a `UITextField`, and the bar shipped
     /// with it — but it leaves this terminal first responder, which is why the button did
@@ -259,10 +382,39 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         return (window, view, bridge)
     }
 
+    /// Premultiplied RGBA, one byte each, rows top to bottom.
     private struct AlphaBitmap {
         let width: Int
         let height: Int
         let bytes: [UInt8]
+
+        func alpha(x: Int, y: Int) -> UInt8 {
+            bytes[(y * width + x) * 4 + 3]
+        }
+
+        func colour(x: Int, y: Int) -> (UInt8, UInt8, UInt8) {
+            let offset = (y * width + x) * 4
+            return (bytes[offset], bytes[offset + 1], bytes[offset + 2])
+        }
+
+        func column(_ x: Int, differsFrom surface: (UInt8, UInt8, UInt8), in rows: Range<Int>) -> Bool {
+            rows.contains { y in
+                let (r, g, b) = colour(x: x, y: y)
+                return max(
+                    abs(Int(r) - Int(surface.0)),
+                    abs(Int(g) - Int(surface.1)),
+                    abs(Int(b) - Int(surface.2))
+                ) > Fixture.surfaceTolerance
+            }
+        }
+
+        func firstColumn(differingFrom surface: (UInt8, UInt8, UInt8), rows: Range<Int>) -> Int? {
+            (0..<width).first { column($0, differsFrom: surface, in: rows) }
+        }
+
+        func lastColumn(differingFrom surface: (UInt8, UInt8, UInt8), rows: Range<Int>) -> Int? {
+            (0..<width).last { column($0, differsFrom: surface, in: rows) }
+        }
     }
 
     private func renderedAlpha<Content: View>(
@@ -274,8 +426,22 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         renderer.proposedSize = ProposedViewSize(width: size.width, height: size.height)
         renderer.scale = scale
         renderer.isOpaque = false
-        let image = try XCTUnwrap(renderer.uiImage?.cgImage, "SwiftUI rendered no image")
+        return try alphaBitmap(of: XCTUnwrap(renderer.uiImage?.cgImage, "SwiftUI rendered no image"))
+    }
 
+    /// The window as drawn, which is the only place a SwiftUI `ScrollView`'s content appears:
+    /// `ImageRenderer` leaves the UIKit-backed scroll views empty.
+    private func drawnPixels(of window: UIWindow, scale: CGFloat) throws -> AlphaBitmap {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = scale
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        return try alphaBitmap(of: XCTUnwrap(image.cgImage, "the window drew no image"))
+    }
+
+    private func alphaBitmap(of image: CGImage) throws -> AlphaBitmap {
         let width = image.width
         let height = image.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -290,6 +456,21 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         ))
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return AlphaBitmap(width: width, height: height, bytes: bytes)
+    }
+
+    private func scaled(_ band: Range<CGFloat>) -> Range<Int> {
+        Int(band.lowerBound * Fixture.scale)..<Int(band.upperBound * Fixture.scale)
+    }
+
+    private func hostedWindow(rootViewController: UIViewController, size: CGSize) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = rootViewController
+        window.makeKeyAndVisible()
+        return window
     }
 
     /// The chassis is the tallest connected run of ink in the left half of each symbol; the

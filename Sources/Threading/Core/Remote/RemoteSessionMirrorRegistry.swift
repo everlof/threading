@@ -154,9 +154,13 @@ final class RemoteSessionMirrorRegistry {
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.broadcastSessionsChanged(ProjectsDidChange())
         }
-        // Runtime is live row state, not a project mutation. The continuation kind can change
-        // while its compact presentation remains "ready with background work", so observing
-        // only presentation activity would silently leave that typed wire fact stale.
+        // Receipt commits have their own narrow edge. The broad presentation event remains for
+        // local UI, but the remote catalogue no longer guesses whether it meant runtime or read.
+        appEvents.observe(SessionAttentionDidChange.self) { [weak self] event in
+            self?.broadcastSessionRow(event.sessionID)
+        }
+        // Runtime is live row state too. Receipt changes do not use this edge, so every typed
+        // runtime transition — including a continuation-kind-only change — publishes exactly once.
         appEvents.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.broadcastSessionRow(event.sessionID)
         }
@@ -368,6 +372,8 @@ final class RemoteSessionMirrorRegistry {
     private var startingSessions: [SessionID: StartingSession] = [:]
     private var startupSessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
+    private var catalogueStreamIDs: [ObjectIdentifier: String] = [:]
+    private var catalogueStreamSequences: [ObjectIdentifier: UInt64] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
     private var latestWorkspaceActivity: [SessionID: RemoteWorkspaceChangedDTO] = [:]
     private var terminalHydrations: [ObjectIdentifier: TerminalHydrationTransaction] = [:]
@@ -684,6 +690,7 @@ final class RemoteSessionMirrorRegistry {
     ) -> RemoteSessionSummaryDTO {
         let available = AgentRuntime.shared.isRunning(sessionID: session.id)
         let runtime = AgentRuntime.shared.runtimeSnapshot(sessionID: session.id)
+        let participantID = authorization.collaborationParticipantID
         let ownsSessionLifecycle = canManageSessions(authorization)
         let resolvedLimitRecovery = LimitRecoveryResolution.resolve(
             session: session.limitRecoveryPolicy,
@@ -697,7 +704,11 @@ final class RemoteSessionMirrorRegistry {
             surface: session.usesNativeUI ? .conversation : .terminal,
             state: RemoteSessionActivity(AgentRuntime.shared.activity(
                 sessionID: session.id,
-                participantID: authorization.collaborationParticipantID
+                participantID: participantID
+            )),
+            attention: RemoteSessionAttentionDTO(AgentRuntime.shared.attention(
+                sessionID: session.id,
+                participantID: participantID
             )),
             continuation: RemoteSessionContinuation(runtime.continuation),
             projectName: projectName,
@@ -1071,10 +1082,17 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         guard attached else { return false }
-        AgentRuntime.shared.acknowledgeAttention(
+        let acknowledgement = AgentRuntime.shared.acknowledgeAttention(
             sessionID: sessionID,
             participantID: authorization.collaborationParticipantID
         )
+        if let session = sessionSummary(for: sessionID, authorization: authorization) {
+            connection.sendText(encode(RemoteSessionVisitedDTO(
+                session: session,
+                revision: catalogueRevision,
+                receiptCommitted: acknowledgement.persistence == .committed
+            )))
+        }
         // Attaching the live surface is a visit, regardless of which window or paired device
         // supplied it. All clients therefore acknowledge the same durable wake receipt.
         SessionSnoozeCenter.shared.acknowledge(sessionID)
@@ -1199,6 +1217,9 @@ final class RemoteSessionMirrorRegistry {
     func attachThemeEvents(_ connection: RemoteConnection) {
         let key = ObjectIdentifier(connection)
         themeEventSubscribers[key] = connection
+        let streamID = UUID().uuidString
+        catalogueStreamIDs[key] = streamID
+        catalogueStreamSequences[key] = 0
         if let peer = connection.authenticatedPeer {
             RemoteNotificationService.shared.foregroundDeviceAttached(
                 shareID: peer.authorization.shareID,
@@ -1206,6 +1227,12 @@ final class RemoteSessionMirrorRegistry {
                 deviceID: peer.deviceID ?? "socket-\(key.hashValue)"
             )
         }
+        // Registration and the edition capture are one main-actor transaction. The client can
+        // now prove that its REST snapshot meets this stream or refresh before trusting it.
+        connection.sendText(encode(RemoteCatalogueStreamHelloDTO(
+            streamID: streamID,
+            revision: catalogueRevision
+        )))
         connection.sendText(encode(RemoteAppThemeUpdateDTO(
             theme: RemoteThemeBridge.appTheme()
         )))
@@ -1519,6 +1546,8 @@ final class RemoteSessionMirrorRegistry {
             startingSessions[startupSessionID] = starting
         }
         cancelTerminalHydration(for: key)
+        catalogueStreamIDs.removeValue(forKey: key)
+        catalogueStreamSequences.removeValue(forKey: key)
         if themeEventSubscribers.removeValue(forKey: key) != nil,
            let peer = connection.authenticatedPeer {
             RemoteNotificationService.shared.foregroundDeviceDetached(
@@ -1753,6 +1782,8 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         themeEventSubscribers.removeAll()
+        catalogueStreamIDs.removeAll()
+        catalogueStreamSequences.removeAll()
     }
 
     // MARK: - Input
@@ -1764,6 +1795,26 @@ final class RemoteSessionMirrorRegistry {
     private func writeTerminalInput(_ bytes: [UInt8], to sessionID: SessionID) -> Bool {
         pressOwedReturn(in: sessionID)
         return terminalApplication?.sendInput(bytes, to: sessionID) == .applied
+    }
+
+    /// Inserts one semantic paste using the mode the program running on the PTY actually set.
+    ///
+    /// Attachment paths cannot go through `writeTerminalInput`: Claude Code and Codex both
+    /// distinguish pasted image paths from the identical characters typed at the cursor. The
+    /// cheap terminal state already carries DECSET 2004, so no screen snapshot or UI adapter is
+    /// needed to preserve that distinction for a remote attachment.
+    @discardableResult
+    private func pasteTerminalText(_ text: String, to sessionID: SessionID) -> Bool {
+        pressOwedReturn(in: sessionID)
+        guard !text.isEmpty,
+              let terminalApplication,
+              case .available(let state) = terminalApplication.state(for: sessionID)
+        else { return false }
+        let paste = RemoteTerminalPaste.delimited(
+            text,
+            bracketedPaste: state.modes.bracketedPaste
+        )
+        return terminalApplication.sendInput(Array(paste.utf8), to: sessionID) == .applied
     }
 
     /// Submits the line just typed into `sessionID`, in a write of its own a beat later.
@@ -2050,6 +2101,20 @@ final class RemoteSessionMirrorRegistry {
     ) -> String? {
         guard !stagedAttachmentPaths.isEmpty else { return text }
 
+        guard let handed = handedOverAttachmentPaths(
+            stagedAttachmentPaths,
+            for: sessionID
+        ) else { return nil }
+        return ComposerAttachmentHandover.appending(paths: handed, to: text)
+    }
+
+    /// Exchanges temporary upload paths for the session-owned copies an agent may safely open.
+    private func handedOverAttachmentPaths(
+        _ stagedAttachmentPaths: [String],
+        for sessionID: SessionID
+    ) -> [String]? {
+        guard !stagedAttachmentPaths.isEmpty else { return [] }
+
         // The staged files are on loan, not handed over: the server released or discarded them
         // by the status this call returns. Deleting them here would take them away from a
         // rejected submission the composer is about to retry.
@@ -2061,7 +2126,7 @@ final class RemoteSessionMirrorRegistry {
             sessionID: sessionID,
             projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
         ) else { return nil }
-        return ComposerAttachmentHandover.appending(paths: handed, to: text)
+        return handed
     }
 
     /// Sends one locally composed terminal line. Every device keeps its own draft; only the
@@ -2135,7 +2200,7 @@ final class RemoteSessionMirrorRegistry {
         return status
     }
 
-    /// Takes custody of phone uploads and types only their quoted workspace paths into the PTY.
+    /// Takes custody of phone uploads and pastes their workspace paths into the PTY.
     /// Direct mode belongs to the terminal application, so adding Return here would unexpectedly
     /// submit whatever the person was editing before the upload finished.
     func insertTerminalAttachments(
@@ -2171,13 +2236,12 @@ final class RemoteSessionMirrorRegistry {
             status = .rejected
         } else if mirrors[sessionID]?.surface == .terminal,
                   RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-                  let inserted = promptText(
-                      "",
-                      stagedAttachmentPaths: stagedPaths,
-                      for: sessionID
-                  ),
-                  !inserted.isEmpty,
-                  writeTerminalInput(Array(inserted.utf8), to: sessionID)
+                  let handed = handedOverAttachmentPaths(stagedPaths, for: sessionID),
+                  !handed.isEmpty,
+                  pasteTerminalText(
+                      RemoteTerminalPaste.filePathText(for: handed),
+                      to: sessionID
+                  )
         {
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
@@ -2919,6 +2983,31 @@ final class RemoteSessionMirrorRegistry {
         }
     }
 
+    /// Sends one scoped catalogue frame with continuity local to this authenticated connection.
+    /// A hidden row consumes no sequence number, so the counter carries delivery proof without
+    /// leaking activity from outside the connection's authorization.
+    private func sendCatalogueUpdate(
+        _ update: RemoteSessionsChangedDTO,
+        to connection: RemoteConnection
+    ) {
+        let key = ObjectIdentifier(connection)
+        guard themeEventSubscribers[key] === connection,
+              var streamID = catalogueStreamIDs[key],
+              var sequence = catalogueStreamSequences[key] else { return }
+        if sequence == UInt64.max {
+            streamID = UUID().uuidString
+            sequence = 0
+            catalogueStreamIDs[key] = streamID
+            connection.sendText(encode(RemoteCatalogueStreamHelloDTO(
+                streamID: streamID,
+                revision: catalogueRevision
+            )))
+        }
+        sequence += 1
+        catalogueStreamSequences[key] = sequence
+        connection.sendText(encode(update.framed(streamID: streamID, sequence: sequence)))
+    }
+
     /// Keeps high-frequency row changes proportional to the changed session. Structural edits
     /// remain an invalidation because they can change ordering, projects, archives and creation
     /// choices together; every client then re-fetches its own scoped snapshot.
@@ -2929,9 +3018,8 @@ final class RemoteSessionMirrorRegistry {
         let revision = catalogueRevision
         switch change.sidebarImpact {
         case .structure, .projectRemoved, .projectStructure, .projectRow:
-            let message = encode(RemoteSessionsChangedDTO(revision: revision))
             for connection in themeEventSubscribers.values {
-                connection.sendText(message)
+                sendCatalogueUpdate(RemoteSessionsChangedDTO(revision: revision), to: connection)
             }
         case let .terminalAdded(_, terminalID), let .terminalRow(terminalID):
             let terminal = ProjectStore.shared.terminal(withID: terminalID)
@@ -2946,11 +3034,11 @@ final class RemoteSessionMirrorRegistry {
                         projectName: project?.name ?? ""
                     )
                 }
-                connection.sendText(encode(RemoteSessionsChangedDTO(
+                sendCatalogueUpdate(RemoteSessionsChangedDTO(
                     terminal: visible,
                     removedTerminalID: visible == nil ? terminalID.uuidString : nil,
                     revision: revision
-                )))
+                ), to: connection)
             }
         case .sessionRemoved:
             for connection in themeEventSubscribers.values {
@@ -2960,7 +3048,7 @@ final class RemoteSessionMirrorRegistry {
                           authorization: authorization,
                           revision: revision
                       ) else { continue }
-                connection.sendText(encode(delta))
+                sendCatalogueUpdate(delta, to: connection)
             }
         case let .sessionAdded(_, sessionID), let .sessionStructure(_, sessionID),
              let .sessionTitle(sessionID, _),
@@ -2989,7 +3077,7 @@ final class RemoteSessionMirrorRegistry {
                     authorization: authorization,
                     revision: revision
                 ) else { continue }
-                connection.sendText(encode(delta))
+                sendCatalogueUpdate(delta, to: connection)
             }
         }
     }
@@ -3004,7 +3092,7 @@ final class RemoteSessionMirrorRegistry {
             guard let authorization = connection.authenticatedPeer?.authorization,
                   RemoteSessionAccess.isVisible(session),
                   authorization.scope.covers(sessionID) else { continue }
-            connection.sendText(encode(RemoteSessionsChangedDTO(
+            sendCatalogueUpdate(RemoteSessionsChangedDTO(
                 session: summary(
                     for: session,
                     projectID: project.id,
@@ -3013,7 +3101,7 @@ final class RemoteSessionMirrorRegistry {
                     authorization: authorization
                 ),
                 revision: revision
-            )))
+            ), to: connection)
         }
     }
 
@@ -3744,6 +3832,27 @@ private extension RemoteSessionActivity {
         case .awaitingUser: self = .awaitingUser
         case .needsAttention: self = .needsAttention
         case .limitReached: self = .limitReached
+        }
+    }
+}
+
+private extension RemoteSessionAttentionDTO {
+    init(_ projection: SessionAttentionProjection) {
+        switch projection {
+        case let .read(completionGeneration, seenGeneration):
+            self.init(
+                knowledge: .read,
+                completionGeneration: completionGeneration,
+                seenGeneration: seenGeneration
+            )
+        case let .unread(completionGeneration, seenGeneration):
+            self.init(
+                knowledge: .unread,
+                completionGeneration: completionGeneration,
+                seenGeneration: seenGeneration
+            )
+        case .unknown:
+            self.init(knowledge: .unavailable)
         }
     }
 }

@@ -1,3 +1,4 @@
+import os
 import XCTest
 @testable import Threading
 
@@ -5,17 +6,19 @@ import XCTest
 final class SessionReadReceiptTests: XCTestCase {
 
     func testOwnerDevicesShareAReceiptWhileCollaboratorsRemainIndependent() {
-        var persisted: [SessionID: SessionReadReceiptState] = [:]
+        let persisted = OSAllocatedUnfairLock(
+            initialState: [SessionID: SessionReadReceiptState]()
+        )
         let store = SessionReadReceiptStore(
-            load: { persisted },
-            save: {
-                persisted[$0.sessionID] = $0
+            load: { persisted.withLock { $0 } },
+            save: { state in
+                persisted.withLock { $0[state.sessionID] = state }
                 return true
             }
         )
         let sessionID = SessionID()
 
-        store.recordAttention(for: sessionID, seenBy: [])
+        _ = store.recordAttention(for: sessionID, seenBy: [])
         XCTAssertTrue(store.hasUnread(
             sessionID: sessionID,
             participantID: SessionReadReceiptStore.ownerParticipantID
@@ -27,7 +30,7 @@ final class SessionReadReceiptTests: XCTestCase {
         XCTAssertTrue(store.acknowledge(
             sessionID: sessionID,
             participantID: SessionReadReceiptStore.ownerParticipantID
-        ))
+        ).didChangeProjection)
         XCTAssertFalse(store.hasUnread(
             sessionID: sessionID,
             participantID: SessionReadReceiptStore.ownerParticipantID
@@ -35,23 +38,28 @@ final class SessionReadReceiptTests: XCTestCase {
         XCTAssertTrue(store.hasUnread(sessionID: sessionID, participantID: "anna"))
 
         // Anna reading cannot spend Priya's receipt.
-        XCTAssertTrue(store.acknowledge(sessionID: sessionID, participantID: "anna"))
+        XCTAssertTrue(store.acknowledge(
+            sessionID: sessionID,
+            participantID: "anna"
+        ).didChangeProjection)
         XCTAssertFalse(store.hasUnread(sessionID: sessionID, participantID: "anna"))
         XCTAssertTrue(store.hasUnread(sessionID: sessionID, participantID: "priya"))
     }
 
     func testACompletionIsAlreadyReadForEveryIdentityViewingIt() {
-        var persisted: [SessionID: SessionReadReceiptState] = [:]
+        let persisted = OSAllocatedUnfairLock(
+            initialState: [SessionID: SessionReadReceiptState]()
+        )
         let store = SessionReadReceiptStore(
-            load: { persisted },
-            save: {
-                persisted[$0.sessionID] = $0
+            load: { persisted.withLock { $0 } },
+            save: { state in
+                persisted.withLock { $0[state.sessionID] = state }
                 return true
             }
         )
         let sessionID = SessionID()
 
-        store.recordAttention(
+        _ = store.recordAttention(
             for: sessionID,
             seenBy: [SessionReadReceiptStore.ownerParticipantID, "anna"]
         )
@@ -65,20 +73,22 @@ final class SessionReadReceiptTests: XCTestCase {
     }
 
     func testReceiptsSurviveAStoreRecreation() {
-        var persisted: [SessionID: SessionReadReceiptState] = [:]
+        let persisted = OSAllocatedUnfairLock(
+            initialState: [SessionID: SessionReadReceiptState]()
+        )
         func makeStore() -> SessionReadReceiptStore {
             SessionReadReceiptStore(
-                load: { persisted },
-                save: {
-                    persisted[$0.sessionID] = $0
+                load: { persisted.withLock { $0 } },
+                save: { state in
+                    persisted.withLock { $0[state.sessionID] = state }
                     return true
                 }
             )
         }
         let sessionID = SessionID()
         let first = makeStore()
-        first.recordAttention(for: sessionID, seenBy: [])
-        first.acknowledge(sessionID: sessionID, participantID: "anna")
+        _ = first.recordAttention(for: sessionID, seenBy: [])
+        _ = first.acknowledge(sessionID: sessionID, participantID: "anna")
 
         let relaunched = makeStore()
         XCTAssertFalse(relaunched.hasUnread(sessionID: sessionID, participantID: "anna"))
@@ -99,6 +109,95 @@ final class SessionReadReceiptTests: XCTestCase {
             store.project(.needsAttention, sessionID: sessionID, participantID: "anna"),
             .idle,
             "a process-local unread bit cannot override Anna's durable receipt"
+        )
+    }
+
+    func testFailedLoadIsUnknownAndNeverLooksRead() {
+        let store = SessionReadReceiptStore(load: { nil }, save: { _ in true })
+        let sessionID = SessionID()
+
+        XCTAssertEqual(
+            store.attention(sessionID: sessionID, participantID: "anna"),
+            .unknown
+        )
+        XCTAssertTrue(store.hasUnread(sessionID: sessionID, participantID: "anna"))
+        XCTAssertEqual(
+            store.project(.idle, sessionID: sessionID, participantID: "anna"),
+            .needsAttention
+        )
+        XCTAssertEqual(
+            store.acknowledge(sessionID: sessionID, participantID: "anna").persistence,
+            .unavailable
+        )
+    }
+
+    func testFailedAcknowledgementWriteCannotClaimReadAndASecondVisitRetriesIt() {
+        let persistence = OSAllocatedUnfairLock(
+            initialState: (
+                states: [SessionID: SessionReadReceiptState](),
+                writesSucceed: true
+            )
+        )
+        let store = SessionReadReceiptStore(
+            load: { persistence.withLock { $0.states } },
+            save: { state in
+                persistence.withLock {
+                    guard $0.writesSucceed else { return false }
+                    $0.states[state.sessionID] = state
+                    return true
+                }
+            }
+        )
+        let sessionID = SessionID()
+        XCTAssertEqual(
+            store.recordAttention(for: sessionID, seenBy: []).persistence,
+            .committed
+        )
+
+        persistence.withLock { $0.writesSucceed = false }
+        let refused = store.acknowledge(sessionID: sessionID, participantID: "anna")
+        XCTAssertEqual(refused.persistence, .unavailable)
+        XCTAssertEqual(
+            store.attention(sessionID: sessionID, participantID: "anna"),
+            .unknown
+        )
+        XCTAssertTrue(store.hasUnread(sessionID: sessionID, participantID: "anna"))
+
+        persistence.withLock { $0.writesSucceed = true }
+        let retried = store.acknowledge(sessionID: sessionID, participantID: "anna")
+        XCTAssertEqual(retried.persistence, .committed)
+        XCTAssertTrue(retried.didChangeProjection)
+        XCTAssertEqual(
+            store.attention(sessionID: sessionID, participantID: "anna"),
+            .read(completionGeneration: 1, seenGeneration: 1)
+        )
+    }
+
+    func testFailedAttentionWriteRemainsUnknownUntilTheWholeRecordCommits() {
+        let writesSucceed = OSAllocatedUnfairLock(initialState: false)
+        let store = SessionReadReceiptStore(
+            load: { [:] },
+            save: { _ in writesSucceed.withLock { $0 } }
+        )
+        let sessionID = SessionID()
+
+        XCTAssertEqual(
+            store.recordAttention(for: sessionID, seenBy: []).persistence,
+            .unavailable
+        )
+        XCTAssertEqual(
+            store.attention(sessionID: sessionID, participantID: "anna"),
+            .unknown
+        )
+
+        writesSucceed.withLock { $0 = true }
+        XCTAssertEqual(
+            store.acknowledge(sessionID: sessionID, participantID: "anna").persistence,
+            .committed
+        )
+        XCTAssertEqual(
+            store.attention(sessionID: sessionID, participantID: "anna"),
+            .read(completionGeneration: 1, seenGeneration: 1)
         )
     }
 

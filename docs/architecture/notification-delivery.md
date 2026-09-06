@@ -112,5 +112,12 @@ host has selected a valid recipient and payload.
 Every transition uses the generated diagnostic vocabulary: created, deferred, replaced,
 canceled, invalidated, deadline fired, revalidated, sent, refused, retracted and locally cleared.
 Records use pseudonymous identifiers, generation, bounded queue and delay values, transport,
-attempt/provider result, activity source, suppression reason, and preview-present/byte-count
-metadata. Prompts, responses, tokens, device tokens and notification bodies are forbidden.
+attempt/provider result, the exact HTTP status and bounded broker code, activity source,
+suppression reason, and preview-present/byte-count metadata. Only a request that received no HTTP
+response is recorded as `status=transport`; service rejections must not be flattened into it.
+Prompts, responses, tokens, device tokens and notification bodies are forbidden.
+
+The hosted service publishes a notification protocol version beside the rendezvous protocol in
+`/health` and `/ready`. Both guarded deploy verifiers require that version and prove that the push
+and retraction routes exist behind host authentication. A green dependency probe from an older
+Worker is therefore not sufficient to release a client with a newer notification contract.

@@ -180,12 +180,12 @@ enum MobileIdentityPickerHitTest {
 /// the toolbar disc wears once it is chosen, so the picker is a row of the discs the bar might
 /// show.
 ///
-/// Each group is one scrub surface, the way the model-by-effort matrix is: tap takes the item
-/// beneath it, while a drag makes the choice follow continuously with a selection tick at every
-/// crossing before lift commits with its own thump. The tap recognizer gets stationary touches;
-/// after travel, the scrub recognizer takes over. While a finger is down the *scrubbed* item is
-/// the one that reads as chosen, and the committed login keeps its checkmark throughout, so the
-/// panel says both what is current and what lifting now would take.
+/// Each group is one scrub surface — `mobileScrubSurface`, the modifier the model-by-effort
+/// matrix stands on: tap takes the item beneath the finger, a drag makes the choice follow it
+/// with a selection tick at every crossing, and the lift commits with its own thump. While a
+/// finger is down the *scrubbed* item is the one that reads as chosen, and the committed login
+/// keeps its checkmark throughout, so the panel says both what is current and what lifting now
+/// would take.
 ///
 /// Choosing a runtime keeps the popover open and the rows beneath follow it; choosing a login
 /// commits and closes, because that is the last thing there is to say. So is a runtime that
@@ -197,7 +197,7 @@ struct MobileIdentityPicker: View {
         /// One fixed width, and one the popover can grant; `pane` is the margin the popover
         /// keeps on each side. `MobileDraftChooser` measures the same way, for the same reason.
         static var preferredWidth: CGFloat { 356 }
-        static var width: CGFloat {
+        @MainActor static var width: CGFloat {
             min(
                 preferredWidth,
                 UIScreen.main.bounds.width
@@ -223,9 +223,6 @@ struct MobileIdentityPicker: View {
         /// How much of a tile's width its drawn plate leaves as the group's own margin. The
         /// touch target keeps the full cell; only the paint is inset.
         static var tilePlateInset: CGFloat { MobileDesign.Spacing.tight }
-        /// A tap gets first refusal. Once the finger travels this far it becomes a scrub, so a
-        /// zero-travel touch is never left for `DragGesture` to reinterpret as a tap.
-        static var scrubMinimumDistance: CGFloat { 1 }
         /// Logins beyond what this many rows can show scroll instead of being scrubbed: a pan
         /// inside a scroll view belongs to the scroll view, and a surface that sometimes scrolls
         /// and sometimes scrubs would answer the same drag two ways.
@@ -244,7 +241,6 @@ struct MobileIdentityPicker: View {
     let onChooseAccount: (String) -> Void
     @State private var scrubbedAgentID: String?
     @State private var scrubbedAccountID: String?
-    @State private var scrubFeedback = UISelectionFeedbackGenerator()
     @State private var commitFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     /// The runtime a lift would take: the one under the finger, else the one already chosen.
@@ -283,10 +279,7 @@ struct MobileIdentityPicker: View {
         .animation(motion, value: selectedAgentID)
         .animation(motion, value: scrubbedAgentID)
         .animation(motion, value: scrubbedAccountID)
-        .onAppear {
-            scrubFeedback.prepare()
-            commitFeedback.prepare()
-        }
+        .onAppear { commitFeedback.prepare() }
         .accessibilityElement(children: .contain)
     }
 
@@ -304,8 +297,11 @@ struct MobileIdentityPicker: View {
             GeometryReader { geometry in
                 stripContent
                     .frame(width: geometry.size.width, height: geometry.size.height)
-                    .contentShape(.interaction, Rectangle())
-                    .gesture(agentInteraction(in: geometry.size))
+                    .mobileScrubSurface(
+                        item: { agent(at: $0, in: geometry.size)?.id },
+                        scrubbed: $scrubbedAgentID,
+                        onCommit: choose(agent:)
+                    )
             }
             .frame(height: CGFloat(agentRows.count) * Metrics.tileHeight)
         }
@@ -367,36 +363,6 @@ struct MobileIdentityPicker: View {
         .accessibilityAction { choose(agent: agent.id) }
     }
 
-    private func agentInteraction(in size: CGSize) -> some Gesture {
-        SpatialTapGesture(coordinateSpace: .local)
-            .exclusively(before: DragGesture(
-                minimumDistance: Metrics.scrubMinimumDistance,
-                coordinateSpace: .local
-            ))
-            .onChanged { value in
-                guard case .second(let drag) = value,
-                      let agent = agent(at: drag.location, in: size),
-                      agent.id != scrubbedAgentID else { return }
-                scrubbedAgentID = agent.id
-                scrubFeedback.selectionChanged()
-                scrubFeedback.prepare()
-            }
-            .onEnded { value in
-                let scrubbed = scrubbedAgentID
-                scrubbedAgentID = nil
-                switch value {
-                case .first(let tap):
-                    guard let released = agent(at: tap.location, in: size)?.id else { return }
-                    choose(agent: released)
-                case .second(let drag):
-                    guard let released = agent(at: drag.location, in: size)?.id ?? scrubbed else {
-                        return
-                    }
-                    choose(agent: released)
-                }
-            }
-    }
-
     private func agent(at point: CGPoint, in size: CGSize) -> RemoteAgentChoiceDTO? {
         MobileIdentityPickerHitTest.tile(
             at: point,
@@ -429,8 +395,11 @@ struct MobileIdentityPicker: View {
                 GeometryReader { geometry in
                     accountRows(scrubbable: true)
                         .frame(width: geometry.size.width, height: geometry.size.height)
-                        .contentShape(.interaction, Rectangle())
-                        .gesture(accountInteraction(in: geometry.size))
+                        .mobileScrubSurface(
+                            item: { account(at: $0, in: geometry.size)?.id },
+                            scrubbed: $scrubbedAccountID,
+                            onCommit: choose(account:)
+                        )
                 }
                 .frame(height: CGFloat(accounts.count) * Metrics.rowHeight)
             }
@@ -447,10 +416,18 @@ struct MobileIdentityPicker: View {
                             + MobileDesign.Spacing.medium
                     )
                 }
-                accountRow(account)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(.interaction, Rectangle())
-                    .onTapGesture { if !scrubbable { choose(account: account.id) } }
+                let row = accountRow(account).frame(maxWidth: .infinity)
+                if scrubbable {
+                    // The group is the surface. A recognizer on the row — even one that did
+                    // nothing — would be the child gesture, and a child gesture takes every
+                    // stationary touch away from its parent; that is how the rows shipped
+                    // answering a drag and not a tap.
+                    row
+                } else {
+                    row
+                        .contentShape(.interaction, Rectangle())
+                        .onTapGesture { choose(account: account.id) }
+                }
             }
         }
     }
@@ -504,36 +481,6 @@ struct MobileIdentityPicker: View {
         .accessibilityValue(words.text)
         .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { choose(account: account.id) }
-    }
-
-    private func accountInteraction(in size: CGSize) -> some Gesture {
-        SpatialTapGesture(coordinateSpace: .local)
-            .exclusively(before: DragGesture(
-                minimumDistance: Metrics.scrubMinimumDistance,
-                coordinateSpace: .local
-            ))
-            .onChanged { value in
-                guard case .second(let drag) = value,
-                      let account = account(at: drag.location, in: size),
-                      account.id != scrubbedAccountID else { return }
-                scrubbedAccountID = account.id
-                scrubFeedback.selectionChanged()
-                scrubFeedback.prepare()
-            }
-            .onEnded { value in
-                let scrubbed = scrubbedAccountID
-                scrubbedAccountID = nil
-                switch value {
-                case .first(let tap):
-                    guard let released = account(at: tap.location, in: size)?.id else { return }
-                    choose(account: released)
-                case .second(let drag):
-                    guard let released = account(at: drag.location, in: size)?.id ?? scrubbed else {
-                        return
-                    }
-                    choose(account: released)
-                }
-            }
     }
 
     private func account(at point: CGPoint, in size: CGSize) -> RemoteAccountChoiceDTO? {

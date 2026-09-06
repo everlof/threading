@@ -78,9 +78,15 @@ Read identity has one deliberate asymmetry:
 with their session. The ledger loads once, lazily, and row projection is then O(1); opening a
 local session or successfully attaching a remote live surface advances that identity's receipt.
 Participants already viewing the conversation are recorded as having seen a result when it lands,
-so the dot does not flash on another one of their devices. `RemoteSessionMirrorRegistry` observes
-`SessionActivityDidChange` directly and sends an authorization-specific row delta; activity no
-longer waits for an unrelated project-title or branch mutation to refresh the remote chat list.
+so the dot does not flash on another one of their devices. A failed ledger load or write projects
+an explicit unknown rather than an empty/read default; unknown conservatively retains attention
+until persistence can prove otherwise. `AgentRuntime` alone publishes the narrow
+`SessionAttentionDidChange` receipt edge. `RemoteSessionMirrorRegistry` observes it and the typed
+`SessionRuntimeDidChange` edge separately, then sends one authorization-specific row delta;
+receipt and runtime changes no longer depend on the broad local presentation invalidation or an
+unrelated project-title or branch mutation. The dashboard snapshot/stream fence and direct
+post-visit acknowledgement are specified in
+[`status-integrity.md`](status-integrity.md).
 An owner acknowledgement also removes the Mac's stable session notification unconditionally,
 even when no receipt changed: after relaunch, macOS can still hold the prior process's request
 while the new process has no in-memory alert edge to clear. Collaborator receipts never remove
@@ -132,19 +138,18 @@ carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, o
 **The latch is split, because a report proves only the boundary it is.** `reportsOwnActivity`
 latches on the first report of any kind and stops output *ending* a turn: a guess must not
 overrule a boundary the agent declared. Switching off the half that *opens* one needs the
-narrower fact, `reportsTurnStarts`, and the difference is a bug a phone reported as "the chat
-isn't showing loading but it is clearly loading". **Codex opens turns by itself.** In goal mode
-the CLI continues the thread with an internal message — `<codex_internal_context source="goal">`
-in the rollout — which submits no user prompt, so `UserPromptSubmit` never fires, and there is no
-other hook to register: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`,
-`PostCompact`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`,
-`Stop`, `Interrupt` is CLI 0.151.0's whole hook vocabulary. A session whose *first* report was
-therefore a `Stop` — the app had not been listening when the earlier turn began — was latched off
-output inference by an ending, and had no way back into `working` at all. Measured on 30 August
-2026: `Stop` at 13:12:00.931, the next turn opened by the CLI at 13:12:01.177, the row reading
-`idle` for the seventy minutes that turn ran while the pane painted "Working". `outputMayOpenTurn`
-is the rule that fixes it — output may open a turn where nothing reports, and where the runtime
-reports endings without ever having declared a start.
+narrower fact, `reportsTurnStarts`. Codex complicates that split because goal mode opens an
+internal continuation without `UserPromptSubmit`; the rollout's `task_started` record is the
+authoritative start. Where that validated rollout is available, output only prompts its bounded
+reader and never opens a turn itself.
+
+The fallback for a missing rollout is deliberately one-shot. A Codex `Stop` can grant output one
+inferred continuation during that finish's existing grace window; using, expiring, or superseding
+the grant consumes it. Making `reportsTurnEnds` itself a permanent grant was measured on 5
+September 2026 in a restored idle Codex TUI: periodic repaint output opened a fake turn, the
+0.8-second quiet timer closed it, and the cycle posted and withdrew 959 attention alerts without
+new input. Sustaining the one inferred continuation remains legal, but opening another requires a
+new reported finish, real input, an authoritative start, or a process boundary.
 
 That fallback still has to get past unattended-launch suppression. Measured on 4 September 2026,
 Threading relaunched a Codex goal session during an existing turn; the new tracker first received
@@ -159,9 +164,9 @@ the ordinary Codex continuation grace while preserving the prior idle presentati
 cancels it, while a genuine finish commits the unread result once the grace expires. This prevents
 the same restart gap from posting a false completion alert before it repairs the loader.
 
-The `reportsTurnEnds` condition is what keeps a runtime's *notice* out of this: Claude's
-idle-prompt `Notification` says the session is waiting, and a redraw arriving after it must not
-overwrite that with work nobody started.
+The finish-scoped grant also keeps a runtime's *notice* out of this: Claude's idle-prompt
+`Notification` says the session is waiting, and a redraw arriving after it must not overwrite
+that with work nobody started.
 
 **But inference is the stopgap here, not the answer — the rollout says it outright.** Codex
 writes `task_started` with the turn's own id whether or not any hook reports it, so

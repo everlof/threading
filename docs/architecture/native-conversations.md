@@ -1203,7 +1203,13 @@ terminals therefore type directly into SwiftTerm's target TUI. During reconnect,
 host has supplied its authoritative roster, and with an older host that cannot supply one, an
 enabled independent-draft setting conservatively keeps the atomic composer until the client can
 prove the session is owner-only. Accepted members who are away remain participants, so their
-temporary absence does not change input mode or hide a device-local draft.
+temporary absence does not change input mode or hide a device-local draft. A file chosen in
+direct-input mode crosses a stricter seam than an ordinary key: after the Mac takes attachment
+custody it uses the same shell-safe path spelling as a local terminal drop, leaves a trailing
+separator for the next typed word, and sends the whole path list as one bracketed paste when the
+live terminal mode requests it. It deliberately sends no Return. Both agent TUIs distinguish a
+pasted image path from identical typed characters, so an accepted attachment insertion means the
+paste semantic reached the PTY, not merely that some path bytes did.
 
 The iOS conversation is a UIKit route, not a SwiftUI composition around a UIKit timeline.
 `RemoteConversationViewController` owns the virtual collection, composer, command/skill results,

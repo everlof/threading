@@ -78,14 +78,22 @@ describe("service release surfaces", () => {
     const response = await worker.fetch(new Request("http://127.0.0.1/ready"), local);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ready", rendezvousProtocol: 1 });
+    await expect(response.json()).resolves.toEqual({
+      status: "ready",
+      rendezvousProtocol: 1,
+      notificationProtocol: 1,
+    });
   });
 
   it("keeps liveness cheap and hardened without claiming dependency readiness", async () => {
     const response = await worker.fetch(new Request("https://service.test/health"), testEnv);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ok", rendezvousProtocol: 1 });
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      rendezvousProtocol: 1,
+      notificationProtocol: 1,
+    });
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(response.headers.get("Content-Security-Policy")).toBe("default-src 'none'");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
@@ -119,7 +127,11 @@ describe("service release surfaces", () => {
     const response = await worker.fetch(new Request("https://service.test/ready"), configured);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ready", rendezvousProtocol: 1 });
+    await expect(response.json()).resolves.toEqual({
+      status: "ready",
+      rendezvousProtocol: 1,
+      notificationProtocol: 1,
+    });
   });
 
   it("refuses to report ready when signing and stored-token secrets are reused", async () => {

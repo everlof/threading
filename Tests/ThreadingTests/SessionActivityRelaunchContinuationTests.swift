@@ -20,7 +20,10 @@ final class SessionActivityRelaunchContinuationTests: XCTestCase {
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
         XCTAssertEqual(tracker.activity, .idle, "the resume repaint remains inert")
 
-        tracker.noteTurnFinished(continuationGrace: 0.02)
+        tracker.noteTurnFinished(
+            continuationGrace: 0.02,
+            allowsOutputInferredContinuation: true
+        )
         XCTAssertEqual(tracker.activity, .idle, "the provisional finish keeps the prior state")
         XCTAssertTrue(tracker.hasPendingReportedTurnFinish)
         XCTAssertEqual(attentionCount, 0, "an internal continuation is not an unread result")

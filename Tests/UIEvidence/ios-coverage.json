@@ -51,6 +51,8 @@
     {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "session-dashboard-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "project-sessions", "appearance": "dark", "theme": "custom"},
     {"id": "standalone-terminal-dashboard-custom-dark", "entryID": "ios-standalone-terminal", "demo": "sessions", "appearance": "dark", "theme": "custom"},
+    {"id": "standalone-terminal-opening-starting-custom-dark", "entryID": "ios-standalone-terminal", "demo": "project-terminal-opening-starting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
+    {"id": "standalone-terminal-opening-connecting-custom-dark", "entryID": "ios-standalone-terminal", "demo": "project-terminal-opening-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-dashboard-connecting-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
     {"id": "universal-search-custom-dark", "entryID": "ios-universal-search", "demo": "universal-search", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
@@ -311,10 +313,10 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Standalone terminals",
-      "description": "The paired owner catalogue for project shells, drawn as rows of the same list as chats and told apart by the terminal mark, before either kind opens its dedicated surface.",
-      "states": ["Terminal rows beside chats", "Running shell", "Dormant shell", "Project identity"],
+      "description": "The paired owner catalogue and opening shell for project terminals: rows share the chat list but keep a terminal identity, then one retained loader changes phase text without moving while the Mac starts and the terminal opens.",
+      "states": ["Terminal rows beside chats", "Running shell", "Dormant shell", "Project identity", "Starting terminal on your Mac", "Opening terminal"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
-      "capture": {"glob": "ios/standalone-terminal-dashboard-*.png"},
+      "capture": {"glob": "ios/standalone-terminal-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
     },
     {

@@ -98,6 +98,13 @@ enum DashboardRowItem: Identifiable, Equatable {
         }
     }
 
+    var title: String {
+        switch self {
+        case let .chat(session): return session.title
+        case let .terminal(terminal): return terminal.title
+        }
+    }
+
     /// The rows of a plate, each kind in its own run, runs in the order given.
     static func rows(
         sessions: [RemoteSessionSummaryDTO],
@@ -670,13 +677,6 @@ private enum DashboardCollectionSectionKind: Equatable {
     case chrome(estimatedHeight: CGFloat)
     case plate
 
-    var estimatedHeight: CGFloat {
-        switch self {
-        case .chrome(let estimatedHeight): return estimatedHeight
-        case .plate: return 58
-        }
-    }
-
     var drawsPlate: Bool {
         if case .plate = self { return true }
         return false
@@ -702,18 +702,31 @@ private struct DashboardCollectionModel {
     let rows: [String: DashboardCollectionRow]
 }
 
+private struct DashboardUIKitRowConfiguration {
+    let row: DashboardCollectionRow
+    let theme: RemoteThemePalette
+    let isArchived: Bool
+    let isCatalogueLive: Bool
+    let showsProjectName: Bool
+    let activate: (() -> Void)?
+    let swipeAction: MobileRowSwipeAction?
+    let contextMenu: (() -> UIMenu)?
+}
+
 /// The dashboard's one scroll owner.
 ///
 /// SwiftUI previously put a lazy stack of project groups around another lazy stack of rows. A
 /// group is one outer item, so returning through an interactive navigation transition made
 /// SwiftUI estimate the whole group's height and call every bridged title's `sizeThatFits`. This
 /// collection owns one diffable item per row instead. `UIHostingConfiguration` keeps the existing
-/// authored row content, but only visible cells have a hosting tree or morphing title.
+/// authored bounded chrome, while repeated chat and terminal rows use one native reuse pool and
+/// keep `MobileMorphingTitleLabel` as their title implementation. Only visible rows are mounted.
 private struct MobileDashboardCollection: UIViewControllerRepresentable {
     let model: DashboardCollectionModel
     let theme: RemoteThemePalette
     let bottomContentInset: CGFloat
     let content: @MainActor (DashboardCollectionItemID) -> AnyView
+    let rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
     let refresh: @MainActor () async -> Void
 
     func makeUIViewController(context _: Context) -> MobileDashboardCollectionViewController {
@@ -722,6 +735,7 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
             theme: theme,
             bottomContentInset: bottomContentInset,
             content: content,
+            rowConfiguration: rowConfiguration,
             refresh: refresh
         )
     }
@@ -735,6 +749,7 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
             theme: theme,
             bottomContentInset: bottomContentInset,
             content: content,
+            rowConfiguration: rowConfiguration,
             refresh: refresh
         )
     }
@@ -748,6 +763,7 @@ private final class MobileDashboardCollectionViewController: UIViewController {
     private var theme: RemoteThemePalette
     private var bottomContentInset: CGFloat
     private var content: @MainActor (DashboardCollectionItemID) -> AnyView
+    private var rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
     private var refreshAction: @MainActor () async -> Void
     private var refreshTask: Task<Void, Never>?
     private var dataSource: UICollectionViewDiffableDataSource<
@@ -758,6 +774,14 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         UICollectionViewCell,
         DashboardCollectionItemID
     >!
+    private var rowCellRegistration: UICollectionView.CellRegistration<
+        DashboardRowCollectionCell,
+        DashboardCollectionItemID
+    >!
+#if DEBUG
+    private var performanceScrollDriver: DashboardScrollPerformanceDriver?
+    private var performanceConfiguredCellCount = 0
+#endif
 
     private lazy var collectionView: DashboardCollectionUIKitView = {
         let layout = makeLayout()
@@ -793,12 +817,14 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         theme: RemoteThemePalette,
         bottomContentInset: CGFloat,
         content: @escaping @MainActor (DashboardCollectionItemID) -> AnyView,
+        rowConfiguration: @escaping @MainActor (String) -> DashboardUIKitRowConfiguration? = { _ in nil },
         refresh: @escaping @MainActor () async -> Void
     ) {
         self.sections = sections
         self.theme = theme
         self.bottomContentInset = bottomContentInset
         self.content = content
+        self.rowConfiguration = rowConfiguration
         refreshAction = refresh
         super.init(nibName: nil, bundle: nil)
     }
@@ -822,6 +848,12 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         ])
         configureDataSource()
         applySnapshot(preservingVisibleAnchor: false)
+        registerForTraitChanges([
+            UITraitPreferredContentSizeCategory.self,
+            UITraitDisplayScale.self,
+        ]) { (controller: MobileDashboardCollectionViewController, _) in
+            controller.replaceLayoutPreservingVisibleAnchor()
+        }
     }
 
     func update(
@@ -829,6 +861,7 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         theme: RemoteThemePalette,
         bottomContentInset: CGFloat,
         content: @escaping @MainActor (DashboardCollectionItemID) -> AnyView,
+        rowConfiguration: @escaping @MainActor (String) -> DashboardUIKitRowConfiguration?,
         refresh: @escaping @MainActor () async -> Void
     ) {
         let structureChanged = self.sections != sections
@@ -838,6 +871,7 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         self.theme = theme
         self.bottomContentInset = bottomContentInset
         self.content = content
+        self.rowConfiguration = rowConfiguration
         refreshAction = refresh
 
         guard isViewLoaded else { return }
@@ -854,6 +888,9 @@ private final class MobileDashboardCollectionViewController: UIViewController {
             collectionView.setCollectionViewLayout(makeLayout(), animated: false)
             applySnapshot(preservingVisibleAnchor: true)
         } else {
+            if themeChanged {
+                replaceLayoutPreservingVisibleAnchor()
+            }
             reconfigureVisibleItems()
         }
     }
@@ -862,9 +899,18 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, _ in
             guard let self, sections.indices.contains(sectionIndex) else { return nil }
             let descriptor = sections[sectionIndex]
+            let heightDimension: NSCollectionLayoutDimension = switch descriptor.kind {
+            case .chrome(let estimatedHeight):
+                .estimated(estimatedHeight)
+            case .plate:
+                .absolute(DashboardRowMetrics.height(
+                    compatibleWith: traitCollection,
+                    dividerWidth: theme.borderWidth
+                ))
+            }
             let itemSize = NSCollectionLayoutSize(
                 widthDimension: .fractionalWidth(1),
-                heightDimension: .estimated(descriptor.kind.estimatedHeight)
+                heightDimension: heightDimension
             )
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
             let group = NSCollectionLayoutGroup.vertical(layoutSize: itemSize, subitems: [item])
@@ -897,10 +943,33 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         return layout
     }
 
+    private func replaceLayoutPreservingVisibleAnchor() {
+        guard isViewLoaded else { return }
+        let anchor = visibleAnchor()
+        collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+        collectionView.layoutIfNeeded()
+        restore(anchor)
+    }
+
     private func configureDataSource() {
+        rowCellRegistration = UICollectionView.CellRegistration { [weak self]
+            (cell: DashboardRowCollectionCell, _: IndexPath, item: DashboardCollectionItemID) in
+            guard let self,
+                  case .row(let id) = item,
+                  let configuration = rowConfiguration(id) else {
+                return
+            }
+#if DEBUG
+            performanceConfiguredCellCount += 1
+#endif
+            cell.configure(configuration)
+        }
         cellRegistration = UICollectionView.CellRegistration { [weak self]
             (cell: UICollectionViewCell, _: IndexPath, item: DashboardCollectionItemID) in
             guard let self else { return }
+#if DEBUG
+            performanceConfiguredCellCount += 1
+#endif
             cell.backgroundColor = .clear
             cell.contentView.backgroundColor = .clear
             cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
@@ -913,6 +982,13 @@ private final class MobileDashboardCollectionViewController: UIViewController {
             collectionView: collectionView
         ) { [weak self] collectionView, indexPath, item in
             guard let self else { return nil }
+            if case .row(let id) = item, rowConfiguration(id) != nil {
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: rowCellRegistration,
+                    for: indexPath,
+                    item: item
+                )
+            }
             return collectionView.dequeueConfiguredReusableCell(
                 using: cellRegistration,
                 for: indexPath,
@@ -932,8 +1008,44 @@ private final class MobileDashboardCollectionViewController: UIViewController {
             guard let self else { return }
             collectionView.layoutIfNeeded()
             restore(anchor)
+#if DEBUG
+            startPerformanceScrollIfNeeded()
+#endif
         }
     }
+
+#if DEBUG
+    private func startPerformanceScrollIfNeeded() {
+        guard performanceScrollDriver == nil,
+              ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == MobileDemoFixture.sessionsScrollStress.rawValue else {
+            return
+        }
+        let duration = ProcessInfo.processInfo.environment[
+            "THREADING_MOBILE_DASHBOARD_SCROLL_SECONDS"
+        ].flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? 8
+        let sourceRows = ProcessInfo.processInfo.environment[
+            "THREADING_MOBILE_DASHBOARD_STRESS_ROWS"
+        ].flatMap(Int.init) ?? 1_000
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard let self, performanceScrollDriver == nil else { return }
+            let driver = DashboardScrollPerformanceDriver(
+                collectionView: collectionView,
+                sourceRows: max(1, sourceRows),
+                duration: duration,
+                configuredCellCount: { [weak self] in
+                    self?.performanceConfiguredCellCount ?? 0
+                },
+                completion: { [weak self] in
+                    self?.performanceScrollDriver = nil
+                }
+            )
+            performanceScrollDriver = driver
+            driver.start()
+        }
+    }
+#endif
 
     private func reconfigureVisibleItems() {
         let visible = collectionView.indexPathsForVisibleItems.compactMap {
@@ -994,6 +1106,907 @@ private final class MobileDashboardCollectionViewController: UIViewController {
     }
 }
 
+#if DEBUG
+@MainActor
+private final class DashboardScrollPerformanceDriver: NSObject {
+    private weak var collectionView: UICollectionView?
+    private let sourceRows: Int
+    private let duration: TimeInterval
+    private let configuredCellCount: () -> Int
+    private let completion: () -> Void
+    private var displayLink: CADisplayLink?
+    private var startedAt: TimeInterval = 0
+    private var previousTick: TimeInterval?
+    private var frameGaps: [Double] = []
+    private var workDurations: [Double] = []
+    private var framesOver16Milliseconds = 0
+    private var framesOver33Milliseconds = 0
+    private var peakVisibleCells = 0
+
+    init(
+        collectionView: UICollectionView,
+        sourceRows: Int,
+        duration: TimeInterval,
+        configuredCellCount: @escaping () -> Int,
+        completion: @escaping () -> Void
+    ) {
+        self.collectionView = collectionView
+        self.sourceRows = sourceRows
+        self.duration = duration
+        self.configuredCellCount = configuredCellCount
+        self.completion = completion
+    }
+
+    func start() {
+        guard let collectionView else { return }
+        collectionView.layoutIfNeeded()
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: 0),
+            animated: false
+        )
+        collectionView.layoutIfNeeded()
+        peakVisibleCells = collectionView.visibleCells.count
+        startedAt = ProcessInfo.processInfo.systemUptime
+        previousTick = nil
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stop() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func tick() {
+        guard let collectionView else {
+            finish()
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsed = now - startedAt
+        if let previousTick {
+            let gap = (now - previousTick) * 1_000
+            frameGaps.append(gap)
+            if gap > 16.7 { framesOver16Milliseconds += 1 }
+            if gap > 33.3 { framesOver33Milliseconds += 1 }
+        }
+        previousTick = now
+        guard elapsed < duration else {
+            finish()
+            return
+        }
+
+        let progress = min(1, elapsed / duration)
+        let travel = progress <= 0.5 ? progress * 2 : (1 - progress) * 2
+        let maximumOffset = max(
+            0,
+            collectionView.contentSize.height - collectionView.bounds.height
+        )
+        let workStarted = ProcessInfo.processInfo.systemUptime
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: maximumOffset * travel),
+            animated: false
+        )
+        collectionView.layoutIfNeeded()
+        workDurations.append(
+            (ProcessInfo.processInfo.systemUptime - workStarted) * 1_000
+        )
+        peakVisibleCells = max(peakVisibleCells, collectionView.visibleCells.count)
+    }
+
+    private func finish() {
+        stop()
+        guard let collectionView else {
+            completion()
+            return
+        }
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: 0),
+            animated: false
+        )
+        collectionView.layoutIfNeeded()
+        DashboardPerformanceReporter.report(
+            "THREADING_PERF ios-dashboard-scroll "
+                + "source_rows=\(sourceRows) frames=\(workDurations.count) "
+                + "work_p50_ms=\(milliseconds(percentile(workDurations, 0.50))) "
+                + "work_p95_ms=\(milliseconds(percentile(workDurations, 0.95))) "
+                + "frame_gap_p95_ms=\(milliseconds(percentile(frameGaps, 0.95))) "
+                + "frames_over_16_7=\(framesOver16Milliseconds) "
+                + "frames_over_33_3=\(framesOver33Milliseconds) "
+                + "configured_cells=\(configuredCellCount()) "
+                + "peak_visible_cells=\(peakVisibleCells) "
+                + "final_top_index=\(topVisibleIndex(in: collectionView))"
+        )
+        completion()
+    }
+
+    private func topVisibleIndex(in collectionView: UICollectionView) -> Int {
+        collectionView.indexPathsForVisibleItems.map(\.item).min() ?? -1
+    }
+
+    private func percentile(_ values: [Double], _ fraction: Double) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let index = Int((Double(sorted.count - 1) * fraction).rounded(.up))
+        return sorted[min(max(index, 0), sorted.count - 1)]
+    }
+
+    private func milliseconds(_ value: Double) -> String {
+        String(format: "%.3f", value)
+    }
+
+}
+
+private enum DashboardPerformanceReporter {
+    private static let queue = DispatchQueue(
+        label: "codes.threading.mobile.dashboard-performance",
+        qos: .utility
+    )
+
+    static func report(_ line: String) {
+        let data = Data((line + "\n").utf8)
+        queue.async {
+            FileHandle.standardError.write(data)
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("threading-dashboard-performance.log")
+            if let handle = try? FileHandle(forWritingTo: url) {
+                defer { try? handle.close() }
+                do {
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                } catch {
+                    // The stderr copy is still useful when running directly from Xcode.
+                }
+            } else {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
+    }
+}
+#endif
+
+/// The dashboard's repeated row is native and reusable; SwiftUI remains responsible for the
+/// bounded chrome sections around it. The row keeps the same authored vocabulary — including
+/// `MobileMorphingTitleLabel` — without rebuilding a hosting tree and gesture graph for every
+/// identity that enters the viewport.
+@MainActor
+private final class DashboardRowCollectionCell: UICollectionViewCell,
+    UIGestureRecognizerDelegate, UIContextMenuInteractionDelegate
+{
+    private let rowView = UIView()
+    private let dividerView = UIView()
+    private let markView = UIView()
+    private let markImageView = UIImageView()
+    private let accountChip = MobileThemeOutlineView()
+    private let accountGlyph = UILabel()
+    private let statusDot = UIView()
+    private let titleView = MobileMorphingTitleLabel()
+    private let availabilityImageView = UIImageView()
+    private let surfaceImageView = UIImageView()
+    private let metadataLabel = UILabel()
+    private let pinImageView = UIImageView()
+    private let ageLabel = UILabel()
+    private let workingView = DashboardRowWorkingView()
+    private let actionButton = UIButton(type: .system)
+    private lazy var tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapped))
+    private lazy var panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(panned))
+    private lazy var contextMenuInteraction = UIContextMenuInteraction(delegate: self)
+    private var configuration: DashboardUIKitRowConfiguration?
+    private var restingOffset: CGFloat = 0
+    private var beganAtOffset: CGFloat = 0
+    private var isSwipeArmed = false
+    private let feedback = UIImpactFeedbackGenerator(style: .medium)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+        backgroundConfiguration = UIBackgroundConfiguration.clear()
+        contentView.clipsToBounds = true
+
+        rowView.backgroundColor = .clear
+        contentView.addSubview(actionButton)
+        contentView.addSubview(rowView)
+        for view in [
+            dividerView,
+            markView,
+            titleView,
+            availabilityImageView,
+            surfaceImageView,
+            metadataLabel,
+            pinImageView,
+            ageLabel,
+            workingView,
+        ] {
+            rowView.addSubview(view)
+        }
+        markView.addSubview(markImageView)
+        markView.addSubview(accountChip)
+        markView.addSubview(statusDot)
+        accountChip.addSubview(accountGlyph)
+
+        markView.layer.cornerCurve = .continuous
+        markView.layer.cornerRadius = MobileDesign.Size.rowMarkRadius
+        markView.clipsToBounds = false
+        markImageView.contentMode = .scaleAspectFit
+        accountChip.layer.cornerRadius = MobileDesign.Size.accountChip / 2
+        accountGlyph.textAlignment = .center
+        accountGlyph.adjustsFontSizeToFitWidth = true
+        accountGlyph.minimumScaleFactor = MobileDesign.Colour.accountChipMinimumScale
+        statusDot.isHidden = true
+        statusDot.layer.masksToBounds = true
+        for imageView in [availabilityImageView, surfaceImageView, pinImageView] {
+            imageView.contentMode = .scaleAspectFit
+            imageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+                textStyle: .caption2
+            )
+        }
+        metadataLabel.numberOfLines = 1
+        metadataLabel.lineBreakMode = .byTruncatingTail
+        ageLabel.numberOfLines = 1
+        ageLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        tapRecognizer.delegate = self
+        panRecognizer.delegate = self
+        rowView.addGestureRecognizer(tapRecognizer)
+        rowView.addGestureRecognizer(panRecognizer)
+        rowView.addInteraction(contextMenuInteraction)
+        actionButton.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .link
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (cell: DashboardRowCollectionCell, _) in
+            cell.applyFonts()
+            cell.setNeedsLayout()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        configuration = nil
+        restingOffset = 0
+        beganAtOffset = 0
+        isSwipeArmed = false
+        rowView.layer.removeAllAnimations()
+        rowView.transform = .identity
+        actionButton.isHidden = true
+        workingView.stop()
+        accessibilityCustomActions = nil
+    }
+
+    func configure(_ configuration: DashboardUIKitRowConfiguration) {
+        self.configuration = configuration
+        accessibilityTraits = configuration.activate == nil ? [] : .link
+        restingOffset = 0
+        beganAtOffset = 0
+        rowView.layer.removeAllAnimations()
+        rowView.transform = .identity
+        applyFonts()
+        applyCommon(configuration)
+        switch configuration.row.item {
+        case .chat(let session):
+            apply(session: session, configuration: configuration)
+        case .terminal(let terminal):
+            apply(terminal: terminal, configuration: configuration)
+        }
+        applySwipeAction(configuration.swipeAction, theme: configuration.theme)
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let configuration else { return }
+        let bounds = contentView.bounds
+        rowView.frame = bounds
+
+        let dividerHeight = max(
+            configuration.theme.borderWidth,
+            1 / max(1, traitCollection.displayScale)
+        )
+        dividerView.frame = CGRect(
+            x: DashboardRowMetrics.textLeadingEdge,
+            y: 0,
+            width: max(0, bounds.width - DashboardRowMetrics.textLeadingEdge),
+            height: dividerHeight
+        )
+
+        let markSize = MobileDesign.Size.rowMark
+        markView.frame = CGRect(
+            x: MobileDesign.Spacing.medium,
+            y: (bounds.height - markSize) / 2,
+            width: markSize,
+            height: markSize
+        )
+        let glyphSize = MobileDesign.Size.rowMarkGlyph
+        markImageView.frame = CGRect(
+            x: (markSize - glyphSize) / 2,
+            y: (markSize - glyphSize) / 2,
+            width: glyphSize,
+            height: glyphSize
+        )
+        let chipSize = MobileDesign.Size.accountChip
+        accountChip.frame = CGRect(
+            x: markSize - chipSize + MobileDesign.Offset.accountChipOverhang,
+            y: markSize - chipSize + MobileDesign.Offset.accountChipOverhang,
+            width: chipSize,
+            height: chipSize
+        )
+        accountGlyph.frame = accountChip.bounds
+
+        let textX = DashboardRowMetrics.textLeadingEdge
+        let trailingWidth = layoutTrailing(in: bounds)
+        let textRight = bounds.width - MobileDesign.Spacing.medium
+            - trailingWidth
+            - (trailingWidth > 0 ? MobileDesign.Spacing.tight : 0)
+        let titleHeight = titleView.intrinsicContentSize.height
+        let captionHeight = UIFont.preferredFont(forTextStyle: .caption2).lineHeight
+        let textHeight = titleHeight + MobileDesign.Spacing.hairline + captionHeight
+        let textY = (bounds.height - textHeight) / 2
+        titleView.frame = CGRect(
+            x: textX,
+            y: textY,
+            width: max(0, textRight - textX),
+            height: titleHeight
+        )
+        layoutCaption(
+            origin: CGPoint(x: textX, y: textY + titleHeight + MobileDesign.Spacing.hairline),
+            maximumX: textRight,
+            height: captionHeight
+        )
+
+        let radius = configuration.theme.panelRadius
+        contentView.layer.cornerRadius = radius
+        contentView.layer.cornerCurve = .continuous
+        var corners: CACornerMask = []
+        if configuration.row.isFirst {
+            corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner])
+        }
+        if configuration.row.isLast {
+            corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner])
+        }
+        contentView.layer.maskedCorners = corners
+        applySwipeOffset(restingOffset)
+    }
+
+    private func applyFonts() {
+        metadataLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
+        ageLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
+        accountGlyph.font = UIFont.systemFont(
+            ofSize: configuration.flatMap { config in
+                guard case .chat(let session) = config.row.item else { return nil }
+                return session.account?.isEmoji == true
+                    ? MobileDesign.Size.accountChipEmoji
+                    : MobileDesign.Size.accountChipGlyph
+            } ?? MobileDesign.Size.accountChipGlyph,
+            weight: .heavy
+        )
+    }
+
+    private func applyCommon(_ configuration: DashboardUIKitRowConfiguration) {
+        let theme = configuration.theme
+        dividerView.backgroundColor = theme.uiDivider
+        dividerView.isHidden = !configuration.row.hasDivider
+        titleView.configure(
+            title: configuration.row.item.title,
+            textStyle: .subheadline,
+            weight: .medium,
+            textColor: theme.uiLabel,
+            groundColor: theme.uiPanel,
+            alignment: .left,
+            reducesMotion: UIAccessibility.isReduceMotionEnabled,
+            role: .chatName
+        )
+        accountChip.update(
+            color: theme.uiPanel,
+            radius: MobileDesign.Size.accountChip / 2,
+            width: MobileDesign.Size.accountChipRing,
+            glow: nil
+        )
+        availabilityImageView.tintColor = theme.uiSecondaryLabel
+        surfaceImageView.tintColor = theme.uiTertiaryLabel
+        pinImageView.tintColor = theme.uiAccent
+        ageLabel.textColor = theme.uiTertiaryLabel
+        workingView.configure(
+            color: theme.uiAccent,
+            animated: ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] == nil
+        )
+    }
+
+    private func apply(
+        session: RemoteSessionSummaryDTO,
+        configuration: DashboardUIKitRowConfiguration
+    ) {
+        let theme = configuration.theme
+        let dimmed = (configuration.isCatalogueLive && !session.isAvailable)
+            || session.isArchived
+        applyMark(identity: .resolve(session.agentKind), dimmed: dimmed, theme: theme)
+        applyAccount(session.account, theme: theme)
+        applyStatusDot(session: session, isCatalogueLive: configuration.isCatalogueLive, theme: theme)
+
+        let availability = sessionAvailabilityLabel(session)
+        availabilityImageView.image = UIImage(systemName:
+            session.isAvailable && !session.isArchived
+                ? "laptopcomputer"
+                : "laptopcomputer.slash"
+        )
+        availabilityImageView.tintColor = session.isAvailable && !session.isArchived
+            ? theme.uiPositive
+            : theme.uiSecondaryLabel
+        availabilityImageView.isHidden = !(configuration.isCatalogueLive || session.isArchived)
+        surfaceImageView.image = UIImage(systemName: session.surface == .conversation
+            ? "text.bubble"
+            : MobileTerminalMark.symbolName)
+        surfaceImageView.isHidden = false
+        metadataLabel.attributedText = sessionMetadata(session, theme: theme)
+        metadataLabel.isHidden = metadataLabel.attributedText?.length == 0
+        pinImageView.image = UIImage(systemName: "pin.fill")
+        pinImageView.isHidden = !session.isPinned
+
+        let isWorking = configuration.isCatalogueLive
+            && session.isAvailable
+            && !session.isArchived
+            && session.state == .working
+        workingView.isHidden = !isWorking
+        if isWorking { workingView.startIfNeeded() } else { workingView.stop() }
+        if !isWorking, let lastActiveAt = session.lastActiveAt {
+            ageLabel.text = MobileSessionAgeFormat.string(
+                since: Date(timeIntervalSince1970: lastActiveAt)
+            )
+            ageLabel.isHidden = false
+        } else {
+            ageLabel.text = nil
+            ageLabel.isHidden = true
+        }
+
+        let identity = MobileAgentIdentity.resolve(session.agentKind)
+        let surface = session.surface == .conversation
+            ? MobileL10n.string("Native")
+            : identity.originalUITitle
+        accessibilityLabel = [
+            session.title,
+            identity.displayName,
+            session.account?.name,
+            availability,
+            surface,
+            metadataLabel.attributedText?.string,
+            session.isPinned ? MobileL10n.string("Pinned") : nil,
+            ageLabel.text,
+        ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        accessibilityHint = configuration.contextMenu == nil
+            ? nil
+            : MobileL10n.string("Long press for session actions")
+        if let swipeAction = configuration.swipeAction {
+            accessibilityCustomActions = [UIAccessibilityCustomAction(
+                name: swipeAction.title,
+                target: self,
+                selector: #selector(performAccessibilitySwipeAction)
+            )]
+        } else {
+            accessibilityCustomActions = nil
+        }
+    }
+
+    private func apply(
+        terminal: RemoteProjectTerminalSummaryDTO,
+        configuration: DashboardUIKitRowConfiguration
+    ) {
+        let theme = configuration.theme
+        let presentation = MobileTerminalRowPresentation.resolve(
+            state: terminal.state,
+            isAvailable: terminal.isAvailable,
+            isCatalogueLive: configuration.isCatalogueLive
+        )
+        applyTerminalMark(dimmed: presentation.isDimmed, theme: theme)
+        applyAccount(nil, theme: theme)
+        statusDot.isHidden = true
+        availabilityImageView.image = UIImage(systemName: presentation.isDimmed
+            ? "laptopcomputer.slash"
+            : "laptopcomputer")
+        availabilityImageView.tintColor = presentation.isDimmed
+            ? theme.uiSecondaryLabel
+            : theme.uiPositive
+        availabilityImageView.isHidden = !presentation.showsAvailability
+        surfaceImageView.isHidden = true
+        metadataLabel.text = configuration.showsProjectName ? terminal.projectName : nil
+        metadataLabel.textColor = theme.uiSecondaryLabel
+        metadataLabel.isHidden = metadataLabel.text?.isEmpty != false
+        pinImageView.isHidden = true
+        ageLabel.isHidden = true
+        workingView.isHidden = !presentation.isWorking
+        if presentation.isWorking { workingView.startIfNeeded() } else { workingView.stop() }
+        accessibilityLabel = [
+            terminal.title,
+            MobileL10n.string("Terminal"),
+            presentation.availabilityLabel,
+            configuration.showsProjectName ? terminal.projectName : nil,
+        ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        accessibilityHint = MobileL10n.string("Opens this terminal on your Mac")
+        accessibilityCustomActions = nil
+    }
+
+    private func applyMark(
+        identity: MobileAgentIdentity,
+        dimmed: Bool,
+        theme: RemoteThemePalette
+    ) {
+        applyMarkGround(theme: theme, dimmed: dimmed)
+        switch identity.mark {
+        case .brand(let asset, let keepsItsOwnColour):
+            markImageView.image = UIImage(named: asset)?.withRenderingMode(
+                keepsItsOwnColour ? .alwaysOriginal : .alwaysTemplate
+            )
+            markImageView.tintColor = keepsItsOwnColour ? nil : theme.uiSecondaryLabel
+        case .symbol(let name):
+            markImageView.image = UIImage(systemName: name)?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: MobileDesign.Size.rowMarkGlyph, weight: .medium)
+            )
+            markImageView.tintColor = theme.uiSecondaryLabel
+        }
+        markImageView.alpha = dimmed ? MobileDesign.Opacity.dormantMark : 1
+    }
+
+    private func applyTerminalMark(dimmed: Bool, theme: RemoteThemePalette) {
+        applyMarkGround(theme: theme, dimmed: dimmed)
+        markImageView.image = UIImage(systemName: MobileTerminalMark.symbolName)?.withConfiguration(
+            UIImage.SymbolConfiguration(pointSize: MobileDesign.Size.rowMarkGlyph, weight: .medium)
+        )
+        markImageView.tintColor = theme.uiSecondaryLabel
+        markImageView.alpha = dimmed ? MobileDesign.Opacity.dormantMark : 1
+    }
+
+    private func applyMarkGround(theme: RemoteThemePalette, dimmed: Bool) {
+        let color = theme.uiControlResting
+        let opacity = dimmed ? MobileDesign.Opacity.dormantMark : 1
+        var sourceAlpha: CGFloat = 1
+        color.getRed(nil, green: nil, blue: nil, alpha: &sourceAlpha)
+        markView.backgroundColor = color.withAlphaComponent(sourceAlpha * opacity)
+    }
+
+    private func applyAccount(_ account: RemoteSessionAccountDTO?, theme: RemoteThemePalette) {
+        guard let account else {
+            accountChip.isHidden = true
+            return
+        }
+        accountChip.isHidden = false
+        accountGlyph.text = account.glyph
+        accountGlyph.textColor = account.isEmoji ? theme.uiLabel : .white
+        accountChip.backgroundColor = account.hue.map {
+            UIColor(
+                hue: $0,
+                saturation: MobileDesign.Colour.accountChipSaturation,
+                brightness: MobileDesign.Colour.accountChipBrightness,
+                alpha: 1
+            )
+        } ?? .clear
+        applyFonts()
+    }
+
+    private func applyStatusDot(
+        session: RemoteSessionSummaryDTO,
+        isCatalogueLive: Bool,
+        theme: RemoteThemePalette
+    ) {
+        guard isCatalogueLive,
+              session.state == .needsAttention || session.continuation != nil else {
+            statusDot.isHidden = true
+            return
+        }
+        let needsAttention = session.state == .needsAttention
+        let diameter = needsAttention
+            ? MobileDesign.Size.rowFinishedDot
+            : MobileDesign.Size.rowBackgroundDot
+        let overhang = MobileDesign.Offset.rowStatusDotOverhang(diameter: diameter)
+        statusDot.isHidden = false
+        statusDot.backgroundColor = needsAttention ? theme.uiWarning : theme.uiAccent
+        statusDot.layer.cornerRadius = diameter / 2
+        statusDot.frame = CGRect(
+            x: MobileDesign.Size.rowMark - diameter + overhang,
+            y: -overhang,
+            width: diameter,
+            height: diameter
+        )
+    }
+
+    private func sessionAvailabilityLabel(_ session: RemoteSessionSummaryDTO) -> String {
+        if session.isArchived { return MobileL10n.string("Archived") }
+        if session.wokeAt != nil { return MobileL10n.string("Woke") }
+        if session.isSnoozed() { return MobileL10n.string("Snoozed") }
+        guard session.isAvailable else { return MobileL10n.string("Disconnected") }
+        if session.continuation != nil {
+            return MobileL10n.string("Ready for input; background work running")
+        }
+        switch session.state {
+        case .working: return MobileL10n.string("Working")
+        case .awaitingUser, .needsAttention: return MobileL10n.string("Needs attention")
+        case .limitReached: return MobileL10n.string("Usage limit reached")
+        case .dormant, .idle, .unknown: return MobileL10n.string("Connected")
+        }
+    }
+
+    private func sessionMetadata(
+        _ session: RemoteSessionSummaryDTO,
+        theme: RemoteThemePalette
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        if !session.isArchived,
+           configuration?.isCatalogueLive == true,
+           session.wokeAt != nil || (session.isAvailable && session.state == .limitReached) {
+            result.append(NSAttributedString(
+                string: session.wokeAt != nil
+                    ? MobileL10n.string("Woke")
+                    : MobileL10n.string("Usage limit reached"),
+                attributes: [.foregroundColor: theme.uiWarning]
+            ))
+        }
+        if let account = session.account {
+            if result.length > 0 {
+                result.append(NSAttributedString(
+                    string: " · ",
+                    attributes: [.foregroundColor: theme.uiSecondaryLabel]
+                ))
+            }
+            result.append(NSAttributedString(
+                string: account.name,
+                attributes: [.foregroundColor: theme.uiSecondaryLabel]
+            ))
+        }
+        result.addAttribute(
+            .font,
+            value: UIFont.preferredFont(forTextStyle: .caption2),
+            range: NSRange(location: 0, length: result.length)
+        )
+        return result
+    }
+
+    private func layoutTrailing(in bounds: CGRect) -> CGFloat {
+        let spacing = MobileDesign.Spacing.tight
+        let pinWidth: CGFloat = pinImageView.isHidden ? 0 : 12
+        let workingWidth: CGFloat = workingView.isHidden ? 0 : MobileDesign.Size.rowWorkingOrb
+        let ageWidth: CGFloat = ageLabel.isHidden
+            ? 0
+            : ceil(ageLabel.sizeThatFits(CGSize(width: .greatestFiniteMagnitude, height: bounds.height)).width)
+        let widths = [pinWidth, workingWidth, ageWidth].filter { $0 > 0 }
+        let total = widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) * spacing
+        var x = bounds.width - MobileDesign.Spacing.medium
+        for (view, width) in [(ageLabel as UIView, ageWidth), (workingView, workingWidth), (pinImageView, pinWidth)] {
+            guard width > 0 else { continue }
+            x -= width
+            view.frame = CGRect(x: x, y: (bounds.height - max(16, view.intrinsicContentSize.height)) / 2,
+                                width: width, height: max(16, view.intrinsicContentSize.height))
+            x -= spacing
+        }
+        return total
+    }
+
+    private func layoutCaption(origin: CGPoint, maximumX: CGFloat, height: CGFloat) {
+        let glyph = ceil(UIFont.preferredFont(forTextStyle: .caption2).pointSize)
+        var x = origin.x
+        for imageView in [availabilityImageView, surfaceImageView] where !imageView.isHidden {
+            imageView.frame = CGRect(x: x, y: origin.y, width: glyph, height: height)
+            x += glyph + MobileDesign.Spacing.tight
+        }
+        metadataLabel.frame = CGRect(
+            x: x,
+            y: origin.y,
+            width: max(0, maximumX - x),
+            height: height
+        )
+    }
+
+    private func applySwipeAction(
+        _ action: MobileRowSwipeAction?,
+        theme: RemoteThemePalette
+    ) {
+        panRecognizer.isEnabled = action != nil
+        actionButton.isHidden = true
+        guard let action else { return }
+        var buttonConfiguration = UIButton.Configuration.plain()
+        buttonConfiguration.title = action.title
+        buttonConfiguration.image = UIImage(systemName: action.systemImage)
+        buttonConfiguration.imagePlacement = .top
+        buttonConfiguration.imagePadding = MobileDesign.Spacing.tight
+        switch action.role {
+        case .standard:
+            buttonConfiguration.baseForegroundColor = theme.uiAccent
+        case .destructive:
+            buttonConfiguration.baseForegroundColor = theme.uiNegative
+        }
+        buttonConfiguration.contentInsets = .zero
+        actionButton.configuration = buttonConfiguration
+        actionButton.backgroundColor = theme.uiControlResting
+    }
+
+    private func applySwipeOffset(_ offset: CGFloat) {
+        rowView.transform = CGAffineTransform(translationX: offset, y: 0)
+        let revealed = min(contentView.bounds.width, max(0, -offset))
+        actionButton.isHidden = revealed <= 0
+        actionButton.frame = CGRect(
+            x: contentView.bounds.width - revealed,
+            y: 0,
+            width: revealed,
+            height: contentView.bounds.height
+        )
+    }
+
+    @objc private func tapped() {
+        guard restingOffset == 0 else {
+            animate(to: 0)
+            return
+        }
+        configuration?.activate?()
+    }
+
+    @objc private func actionButtonTapped() {
+        let action = configuration?.swipeAction
+        animate(to: 0) { action?.perform() }
+    }
+
+    @objc private func performAccessibilitySwipeAction() -> Bool {
+        configuration?.swipeAction?.perform()
+        return configuration?.swipeAction != nil
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard let activate = configuration?.activate else { return false }
+        activate()
+        return true
+    }
+
+    @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
+        guard let configuration, configuration.swipeAction != nil else { return }
+        let translation = recognizer.translation(in: contentView).x
+        switch recognizer.state {
+        case .began:
+            beganAtOffset = restingOffset
+            feedback.prepare()
+        case .changed:
+            let offset = MobileRowSwipe.offset(
+                translation: translation,
+                resting: beganAtOffset,
+                rowWidth: contentView.bounds.width,
+                allowsFullSwipe: !configuration.isArchived
+            )
+            let armed = MobileRowSwipe.isArmed(
+                offset: offset,
+                rowWidth: contentView.bounds.width,
+                allowsFullSwipe: !configuration.isArchived
+            )
+            if armed, !isSwipeArmed { feedback.impactOccurred() }
+            isSwipeArmed = armed
+            applySwipeOffset(offset)
+        case .ended:
+            let offset = rowView.transform.tx
+            let projected = MobileRowSwipe.offset(
+                translation: MobileRowSwipe.projectedTranslation(
+                    translation,
+                    velocity: recognizer.velocity(in: contentView).x
+                ),
+                resting: beganAtOffset,
+                rowWidth: contentView.bounds.width,
+                allowsFullSwipe: !configuration.isArchived
+            )
+            switch MobileRowSwipe.release(
+                offset: offset,
+                projectedOffset: projected,
+                rowWidth: contentView.bounds.width,
+                allowsFullSwipe: !configuration.isArchived
+            ) {
+            case .closed: animate(to: 0)
+            case .open: animate(to: -MobileRowSwipe.actionWidth)
+            case .performed:
+                let action = configuration.swipeAction
+                animate(to: -contentView.bounds.width) { action?.perform() }
+            }
+        case .cancelled, .failed:
+            animate(to: 0)
+        default:
+            break
+        }
+    }
+
+    private func animate(to offset: CGFloat, completion: (() -> Void)? = nil) {
+        restingOffset = offset
+        UIView.animate(
+            withDuration: MobileRowSwipe.settleResponse,
+            delay: 0,
+            usingSpringWithDamping: MobileRowSwipe.settleDamping,
+            initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.applySwipeOffset(offset)
+        } completion: { _ in
+            completion?()
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === panRecognizer else { return true }
+        return MobileRowSwipe.isSwipeDirection(velocity: panRecognizer.velocity(in: contentView))
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let menu = configuration?.contextMenu?() else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        guard let rowConfiguration = self.configuration else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = rowConfiguration.theme.uiPanel
+        parameters.visiblePath = UIBezierPath(
+            roundedRect: rowView.bounds,
+            cornerRadius: max(1, rowConfiguration.theme.panelRadius)
+        )
+        return UITargetedPreview(view: rowView, parameters: parameters)
+    }
+}
+
+@MainActor
+private final class DashboardRowWorkingView: UIView {
+    private var ringColor = UIColor.clear
+    private var shouldAnimate = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        isOpaque = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: MobileDesign.Size.rowWorkingOrb, height: MobileDesign.Size.rowWorkingOrb)
+    }
+
+    override func draw(_ rect: CGRect) {
+        let lineWidth: CGFloat = 2
+        let path = UIBezierPath(
+            arcCenter: CGPoint(x: bounds.midX, y: bounds.midY),
+            radius: max(0, min(bounds.width, bounds.height) / 2 - lineWidth / 2),
+            startAngle: -.pi / 2,
+            endAngle: -.pi / 2 + .pi * 2 * 0.72,
+            clockwise: true
+        )
+        path.lineWidth = lineWidth
+        path.lineCapStyle = .round
+        ringColor.setStroke()
+        path.stroke()
+    }
+
+    func configure(color: UIColor, animated: Bool) {
+        ringColor = color
+        shouldAnimate = animated
+        setNeedsDisplay()
+    }
+
+    func startIfNeeded() {
+        guard shouldAnimate, layer.animation(forKey: "rotation") == nil else { return }
+        let animation = CABasicAnimation(keyPath: "transform.rotation")
+        animation.fromValue = 0
+        animation.toValue = Double.pi * 2
+        animation.duration = 0.9
+        animation.repeatCount = .infinity
+        layer.add(animation, forKey: "rotation")
+    }
+
+    func stop() {
+        layer.removeAnimation(forKey: "rotation")
+    }
+}
+
 private final class DashboardCollectionUIKitView: UICollectionView {
     var plateTheme = RemoteThemePalette(nil) {
         didSet {
@@ -1007,6 +2020,18 @@ private final class DashboardCollectionUIKitView: UICollectionView {
 }
 
 private final class DashboardPlateDecorationView: UICollectionReusableView {
+    private let outline = MobileThemeOutlineView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        outline.frame = bounds
+        outline.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(outline)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     override func didMoveToSuperview() {
         super.didMoveToSuperview()
         applyEnclosingTheme()
@@ -1021,24 +2046,13 @@ private final class DashboardPlateDecorationView: UICollectionReusableView {
         backgroundColor = theme.uiPanel
         layer.cornerRadius = theme.panelRadius
         layer.cornerCurve = .continuous
-        layer.borderColor = theme.uiBorder.cgColor
-        layer.borderWidth = theme.borderWidth
         layer.masksToBounds = false
-        if let glow = theme.glow,
-           let color = UIColor(remoteHex: glow.color) {
-            layer.shadowColor = color.cgColor
-            layer.shadowOpacity = Float(glow.opacity)
-            layer.shadowRadius = CGFloat(glow.radius)
-            layer.shadowOffset = CGSize(
-                width: CGFloat(glow.offsetX ?? 0),
-                height: CGFloat(-(glow.offsetY ?? 0))
-            )
-        } else {
-            layer.shadowColor = nil
-            layer.shadowOpacity = 0
-            layer.shadowRadius = 0
-            layer.shadowOffset = .zero
-        }
+        outline.update(
+            color: theme.uiBorder,
+            radius: theme.panelRadius,
+            width: theme.borderWidth,
+            glow: theme.glow
+        )
     }
 
     private func applyEnclosingTheme() {
@@ -1056,15 +2070,17 @@ private final class DashboardPlateDecorationView: UICollectionReusableView {
 #if DEBUG
 struct MobileDashboardCollectionPerformanceMetrics: Equatable {
     let snapshotItemCount: Int
-    let configuredCellCount: Int
+    let hostedContentCount: Int
     let mountedCellCount: Int
+    let mountedNativeRowCount: Int
 }
 
 /// A deterministic scaling gate for the dashboard's collection owner.
 ///
-/// This deliberately exercises the real diffable data source and hosting-cell registration with
-/// a catalogue far larger than a phone viewport. It is kept out of the shipping binary; the
-/// regression test asserts that snapshot size may grow while mounted SwiftUI hosts do not.
+/// This deliberately exercises the real diffable data source and native row registration with a
+/// catalogue far larger than a phone viewport. It is kept out of the shipping binary; the
+/// regression test asserts that snapshot size may grow while mounted cells do not, and that a
+/// repeated dashboard row cannot silently fall back to a SwiftUI hosting configuration.
 @MainActor
 enum MobileDashboardCollectionPerformanceProbe {
     static func exercise(
@@ -1072,23 +2088,56 @@ enum MobileDashboardCollectionPerformanceProbe {
         viewport: CGSize = CGSize(width: 393, height: 852)
     ) -> MobileDashboardCollectionPerformanceMetrics {
         precondition(rowCount >= 0)
-        let items = (0..<rowCount).map { DashboardCollectionItemID.row("probe:\($0)") }
+        let theme = RemoteThemePalette(nil)
+        var rows: [String: DashboardCollectionRow] = [:]
+        let items = (0..<rowCount).map { offset in
+            let id = "probe:\(offset)"
+            let session = RemoteSessionSummaryDTO(
+                id: id,
+                title: "Probe row \(offset)",
+                agentKind: offset.isMultiple(of: 2) ? "codex" : "claude",
+                surface: offset.isMultiple(of: 3) ? .terminal : .conversation,
+                state: .idle,
+                projectName: "Probe",
+                lastActiveAt: Double(offset)
+            )
+            rows[id] = DashboardCollectionRow(
+                item: .chat(session),
+                hasDivider: offset > 0,
+                isFirst: offset == 0,
+                isLast: offset == rowCount - 1
+            )
+            return DashboardCollectionItemID.row(id)
+        }
         let sections = items.isEmpty ? [] : [DashboardCollectionSection(
             id: "probe",
             kind: .plate,
             items: items,
             spacingAfter: 0
         )]
-        var configuredCellCount = 0
+        var hostedContentCount = 0
         let controller = MobileDashboardCollectionViewController(
             sections: sections,
-            theme: RemoteThemePalette(nil),
+            theme: theme,
             bottomContentInset: 0,
             content: { item in
-                configuredCellCount += 1
+                hostedContentCount += 1
                 return AnyView(
                     Text(String(describing: item))
                         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                )
+            },
+            rowConfiguration: { id in
+                guard let row = rows[id] else { return nil }
+                return DashboardUIKitRowConfiguration(
+                    row: row,
+                    theme: theme,
+                    isArchived: false,
+                    isCatalogueLive: true,
+                    showsProjectName: false,
+                    activate: nil,
+                    swipeAction: nil,
+                    contextMenu: nil
                 )
             },
             refresh: {}
@@ -1099,20 +2148,23 @@ enum MobileDashboardCollectionPerformanceProbe {
         controller.view.layoutIfNeeded()
 
         return controller.performanceMetrics(
-            configuredCellCount: configuredCellCount
+            hostedContentCount: hostedContentCount
         )
     }
 }
 
 private extension MobileDashboardCollectionViewController {
     func performanceMetrics(
-        configuredCellCount: Int
+        hostedContentCount: Int
     ) -> MobileDashboardCollectionPerformanceMetrics {
         collectionView.layoutIfNeeded()
         return MobileDashboardCollectionPerformanceMetrics(
             snapshotItemCount: dataSource.snapshot().numberOfItems,
-            configuredCellCount: configuredCellCount,
-            mountedCellCount: collectionView.visibleCells.count
+            hostedContentCount: hostedContentCount,
+            mountedCellCount: collectionView.visibleCells.count,
+            mountedNativeRowCount: collectionView.visibleCells.lazy
+                .filter { $0 is DashboardRowCollectionCell }
+                .count
         )
     }
 }
@@ -1272,6 +2324,10 @@ struct SessionDashboard: View {
             bottomContentInset: dashboardCollectionBottomInset,
             content: { item in
                 dashboardCollectionContent(item, rows: collectionModel.rows)
+            },
+            rowConfiguration: { id in
+                guard let row = collectionModel.rows[id] else { return nil }
+                return dashboardUIKitRowConfiguration(row)
             },
             refresh: { await model.refresh(reason: .pullToRefresh) }
         )
@@ -1482,6 +2538,140 @@ struct SessionDashboard: View {
             roundsBottom: row.isLast,
             radius: theme.panelRadius
         ))
+    }
+
+    private func dashboardUIKitRowConfiguration(
+        _ row: DashboardCollectionRow
+    ) -> DashboardUIKitRowConfiguration {
+        switch row.item {
+        case .terminal(let terminal):
+            return DashboardUIKitRowConfiguration(
+                row: row,
+                theme: theme,
+                isArchived: false,
+                isCatalogueLive: model.dashboardCatalogue?.isLive == true,
+                showsProjectName: projectName == nil,
+                activate: {
+                    guard model.navigationPath.last != .terminal(terminal.id) else { return }
+                    model.navigationPath.append(.terminal(terminal.id))
+                },
+                swipeAction: nil,
+                contextMenu: nil
+            )
+
+        case .chat(let session):
+            let canActivate = !showsArchived
+            let swipeAction: MobileRowSwipeAction? = if model.canManageSessions {
+                showsArchived
+                    ? MobileRowSwipeAction("Restore", systemImage: "arrow.uturn.backward") {
+                        perform(.restore, session)
+                    }
+                    : MobileRowSwipeAction(
+                        "Archive",
+                        systemImage: "archivebox",
+                        role: .destructive
+                    ) {
+                        perform(.archive, session)
+                    }
+            } else {
+                nil
+            }
+            return DashboardUIKitRowConfiguration(
+                row: row,
+                theme: theme,
+                isArchived: showsArchived,
+                isCatalogueLive: model.dashboardCatalogue?.isLive == true,
+                showsProjectName: false,
+                activate: canActivate ? {
+                    MobileSessionNavigationTransition.push(session, onto: model)
+                } : nil,
+                swipeAction: swipeAction,
+                contextMenu: model.canManageSessions ? {
+                    dashboardContextMenu(for: session)
+                } : nil
+            )
+        }
+    }
+
+    private func dashboardContextMenu(for session: RemoteSessionSummaryDTO) -> UIMenu {
+        func action(
+            _ title: String,
+            symbol: String,
+            attributes: UIMenuElement.Attributes = [],
+            perform dashboardAction: DashboardSessionAction
+        ) -> UIAction {
+            UIAction(
+                // localization-ignore: nearby call sites supply a closed set of first-party action keys
+                title: MobileL10n.string(title),
+                image: UIImage(systemName: symbol),
+                attributes: attributes
+            ) { _ in
+                perform(dashboardAction, session)
+            }
+        }
+
+        if showsArchived {
+            return UIMenu(children: [
+                action("Restore", symbol: "arrow.uturn.backward", perform: .restore),
+            ])
+        }
+
+        var children: [UIMenuElement] = [
+            action(
+                session.isPinned ? "Unpin" : "Pin",
+                symbol: session.isPinned ? "pin.slash" : "pin",
+                perform: .pin
+            ),
+            action("Rename", symbol: "pencil", perform: .rename),
+        ]
+        if session.isSnoozed() {
+            children.append(action("Unsnooze", symbol: "sun.max", perform: .snooze(nil)))
+        } else {
+            let snoozeActions = MobileSnoozePresets.choices().map { choice in
+                UIAction(title: choice.title) { _ in
+                    perform(.snooze(choice.deadline), session)
+                }
+            }
+            children.append(UIMenu(
+                title: MobileL10n.string("Snooze"),
+                image: UIImage(systemName: "moon.zzz"),
+                children: snoozeActions
+            ))
+        }
+        children.append(action("Share chat", symbol: "square.and.arrow.up", perform: .share))
+        if session.isShared {
+            children.append(action(
+                "Stop sharing",
+                symbol: "person.crop.circle.badge.xmark",
+                attributes: .destructive,
+                perform: .stopSharing
+            ))
+        }
+        children.append(UIMenu(
+            title: MobileL10n.string("Interface"),
+            options: .displayInline,
+            children: [
+                action(
+                    "Native",
+                    symbol: session.surface == .conversation
+                        ? "checkmark"
+                        : "bubble.left.and.bubble.right",
+                    perform: .surface(.conversation)
+                ),
+                action(
+                    MobileAgentIdentity.resolve(session.agentKind).originalUITitle,
+                    symbol: session.surface == .terminal ? "checkmark" : "terminal",
+                    perform: .surface(.terminal)
+                ),
+            ]
+        ))
+        children.append(action(
+            "Archive",
+            symbol: "archivebox",
+            attributes: .destructive,
+            perform: .archive
+        ))
+        return UIMenu(children: children)
     }
 
     private var shouldOfferNotificationOnboarding: Bool {
@@ -2764,6 +3954,34 @@ enum DashboardRowMetrics {
     static let textLeadingEdge = MobileDesign.Spacing.medium
         + MobileDesign.Size.rowMark
         + MobileDesign.Spacing.medium
+
+    /// Dashboard rows have a deliberately fixed two-line shape, so the collection can know their
+    /// height without asking every hosted SwiftUI cell for a preferred size while scrolling.
+    /// Derive that height from the same Dynamic Type faces as `DashboardRow`; a content-size or
+    /// display-scale change replaces the layout and preserves the visible anchor.
+    static func height(
+        compatibleWith traitCollection: UITraitCollection,
+        dividerWidth: CGFloat
+    ) -> CGFloat {
+        let titleDescriptor = UIFontDescriptor.preferredFontDescriptor(
+            withTextStyle: .subheadline,
+            compatibleWith: traitCollection
+        ).addingAttributes([
+            .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.medium],
+        ])
+        let titleFont = UIFont(descriptor: titleDescriptor, size: 0)
+        let captionFont = UIFont.preferredFont(
+            forTextStyle: .caption2,
+            compatibleWith: traitCollection
+        )
+        let textHeight = titleFont.lineHeight
+            + MobileDesign.Spacing.hairline
+            + captionFont.lineHeight
+        let contentHeight = max(MobileDesign.Size.rowMark, textHeight)
+        let scale = max(1, traitCollection.displayScale)
+        let dividerHeight = max(dividerWidth, 1 / scale)
+        return ceil(contentHeight + 2 * MobileDesign.Spacing.small + dividerHeight)
+    }
 }
 
 /// The one shape every row in the dashboard list has: a mark, a one-line title over a caption of

@@ -100,6 +100,47 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
         XCTAssertEqual(fixture.capability.writes, ["first message", "\r", "y"])
     }
 
+    /// The phone's direct-input attachment route used the ordinary typing primitive. The Mac
+    /// acknowledged those bytes, but both supported agent TUIs treated them as prompt text rather
+    /// than as an attached image. It must be the same bracketed, escaped paste as a local drop,
+    /// with no Return because the person still owns the TUI's draft.
+    func testTerminalAttachmentInsertionIsAnUnsubmittedPaste() throws {
+        let fixture = try makeFixture(bracketedPaste: true)
+        try attachWatcher(to: fixture)
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "phone attachment \(UUID().uuidString).png"
+        )
+        let png = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        ))
+        try png.write(to: source)
+        addTeardownBlock { try? FileManager.default.removeItem(at: source) }
+
+        let status = fixture.registry.insertTerminalAttachments(
+            stagedPaths: [source.path],
+            into: fixture.sessionID,
+            device: "phone",
+            authorization: Self.ownerInteract,
+            requestID: "attachment-1"
+        )
+
+        let storedPath = try XCTUnwrap(
+            SessionAttachmentStore.shared.attachments(for: fixture.sessionID).first?.url.path
+        )
+        XCTAssertEqual(status, .accepted)
+        XCTAssertEqual(
+            fixture.capability.writes,
+            [RemoteTerminalPaste.delimited(
+                RemoteTerminalPaste.filePathText(for: [storedPath]),
+                bracketedPaste: true
+            )]
+        )
+        XCTAssertFalse(
+            try XCTUnwrap(fixture.capability.writes.first).contains("\r"),
+            "insertion submitted the draft"
+        )
+    }
+
     func testAnOwedReturnIsPressedRatherThanDroppedWhenRemoteAccessStops() throws {
         let fixture = try makeFixture()
         try attachWatcher(to: fixture)
@@ -155,7 +196,7 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
         scope: .allSessions
     )
 
-    private func makeFixture() throws -> Fixture {
+    private func makeFixture(bracketedPaste: Bool = false) throws -> Fixture {
         let store = ProjectStore.shared
         // A folder of its own: `addProject` returns the existing project for a folder it
         // already knows, so a shared temporary directory would hand this test a sibling's.
@@ -164,7 +205,10 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
                 .appendingPathComponent("threading-terminal-submit-\(UUID().uuidString)")
         ))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
-        let capability = SubmissionCapability(sessionID: session.id)
+        let capability = SubmissionCapability(
+            sessionID: session.id,
+            bracketedPaste: bracketedPaste
+        )
         let registry = RemoteSessionMirrorRegistry(terminalApplication: capability)
         registry.setInputControlFromOwner(.collaborative, sessionID: session.id)
         return Fixture(capability: capability, registry: registry, sessionID: session.id)
@@ -216,9 +260,11 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
 private final class SubmissionCapability: RemoteTerminalApplicationCapability {
     private(set) var writes: [String] = []
     let identities: Set<TerminalInstanceIdentity>
+    private let bracketedPaste: Bool
 
-    init(sessionID: SessionID) {
+    init(sessionID: SessionID, bracketedPaste: Bool) {
         identities = [.agentSession(sessionID)]
+        self.bracketedPaste = bracketedPaste
     }
 
     private var identity: TerminalInstanceIdentity { identities.first! }
@@ -262,7 +308,12 @@ private final class SubmissionCapability: RemoteTerminalApplicationCapability {
         RemoteTerminalState(
             grid: RemoteTerminalGrid(cols: 120, rows: 40),
             title: "Submission fixture",
-            remoteViewport: nil
+            remoteViewport: nil,
+            modes: RemoteTerminalModes(
+                mouseReporting: nil,
+                applicationCursorKeys: false,
+                bracketedPaste: bracketedPaste
+            )
         )
     }
 

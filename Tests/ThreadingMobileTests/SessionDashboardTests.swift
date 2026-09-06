@@ -27,7 +27,24 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(metrics.snapshotItemCount, 1_000)
         XCTAssertGreaterThan(metrics.mountedCellCount, 0)
         XCTAssertLessThan(metrics.mountedCellCount, 40)
-        XCTAssertLessThan(metrics.configuredCellCount, 40)
+        XCTAssertEqual(metrics.mountedNativeRowCount, metrics.mountedCellCount)
+        XCTAssertEqual(metrics.hostedContentCount, 0)
+    }
+
+    func testDashboardRowHeightFollowsAccessibilityContentSize() {
+        let standard = DashboardRowMetrics.height(
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: .large),
+            dividerWidth: 1
+        )
+        let accessibility = DashboardRowMetrics.height(
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: .accessibilityLarge
+            ),
+            dividerWidth: 1
+        )
+
+        XCTAssertGreaterThanOrEqual(standard, MobileDesign.Size.minimumTapTarget)
+        XCTAssertGreaterThan(accessibility, standard)
     }
 
     @MainActor
@@ -1117,6 +1134,16 @@ final class MobileDemoSceneTests: XCTestCase {
                 expected = ("session-opening-resuming", .sessionOpening(.resuming))
             case .sessionOpeningFailed:
                 expected = ("session-opening-failed", .sessionOpening(.failed))
+            case .projectTerminalOpeningStarting:
+                expected = (
+                    "project-terminal-opening-starting",
+                    .projectTerminalOpening(.starting)
+                )
+            case .projectTerminalOpeningConnecting:
+                expected = (
+                    "project-terminal-opening-connecting",
+                    .projectTerminalOpening(.connecting)
+                )
             case .workspace: expected = ("workspace", .workspace)
             case .browserPrivate: expected = ("browser-private", .browserPrivate)
             case .attachments: expected = ("attachments", .attachments)
@@ -1141,6 +1168,8 @@ final class MobileDemoSceneTests: XCTestCase {
             case .sessions: expected = ("sessions", .shippingRoot)
             case .sessionsConnecting: expected = ("sessions-connecting", .shippingRoot)
             case .sessionsOffline: expected = ("sessions-offline", .shippingRoot)
+            case .sessionsScrollStress:
+                expected = ("sessions-scroll-stress", .shippingRoot)
             case .projectSessions: expected = ("project-sessions", .shippingRoot)
             case .report: expected = ("report", .shippingRoot)
             case .reportScreenshot: expected = ("report-screenshot", .shippingRoot)

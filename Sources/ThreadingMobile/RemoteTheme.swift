@@ -52,6 +52,113 @@ enum MobileDesign {
         static func opticalInset(target: CGFloat, mark: CGFloat) -> CGFloat {
             max(0, (target - mark) / 2)
         }
+        /// How far an SF Symbol's ink stands in from each edge of the frame a control centres
+        /// it in — the control's optical insets, read once off SwiftUI's own rendering of that
+        /// `Image` inside that frame and then kept. Read in the frame, and per edge, because
+        /// nothing shorter is exact: a symbol's layout box is a point or three wider than its
+        /// ink, symbols sharing one face differ by seven points among themselves, the ink is
+        /// not always centred, and a composite symbol can draw past its own box — the key bar's
+        /// `keyboard.badge.ellipsis` hangs its badge nearly two points past the box SwiftUI lays
+        /// out, which a render of the bare image cuts off and a render in the frame keeps. A
+        /// container standing the control on a margin subtracts the inset on that edge, the rule
+        /// `opticalInset(target:mark:)` states for a mark of known width. A name the SDK does not
+        /// know measures as an empty box of the face's point size, which is what its empty slot
+        /// would have been placed by.
+        @MainActor
+        static func symbolInsets(
+            _ systemName: String,
+            font: Font,
+            in target: CGSize
+        ) -> SymbolInsets {
+            let key = SymbolInsetsKey(systemName: systemName, font: font, target: target)
+            if let known = symbolInsetsByKey[key] { return known }
+            let insets = SymbolInsets.measure(systemName, font: font, in: target)
+            symbolInsetsByKey[key] = insets
+            return insets
+        }
+
+        struct SymbolInsets: Equatable {
+            enum Edge {
+                case leading
+                case trailing
+            }
+
+            /// From the frame's leading edge to the first inked column.
+            let leading: CGFloat
+            /// From the last inked column to the frame's trailing edge.
+            let trailing: CGFloat
+
+            func inset(at edge: Edge) -> CGFloat {
+                switch edge {
+                case .leading: return leading
+                case .trailing: return trailing
+                }
+            }
+
+            /// Twice the point size resolves half a point, finer than any margin here is
+            /// stated in. A target is a few thousand pixels at most.
+            private static let scale: CGFloat = 2
+            private static let visibleAlpha: UInt8 = 24
+
+            @MainActor
+            static func measure(_ systemName: String, font: Font, in target: CGSize) -> SymbolInsets {
+                guard UIImage(systemName: systemName) != nil else {
+                    let empty = opticalInset(target: target.width, mark: glyph(.body))
+                    return SymbolInsets(leading: empty, trailing: empty)
+                }
+                let renderer = ImageRenderer(
+                    content: Image(systemName: systemName)
+                        .font(font)
+                        .frame(width: target.width, height: target.height)
+                )
+                renderer.scale = scale
+                guard let image = renderer.cgImage else {
+                    return SymbolInsets(leading: 0, trailing: 0)
+                }
+                let width = image.width
+                let height = image.height
+                var alpha = [UInt8](repeating: 0, count: width * height)
+                guard let context = CGContext(
+                    data: &alpha,
+                    width: width,
+                    height: height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: width,
+                    space: CGColorSpaceCreateDeviceGray(),
+                    bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+                ) else {
+                    return SymbolInsets(leading: 0, trailing: 0)
+                }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                var first: Int?
+                var last: Int?
+                for column in 0..<width {
+                    var inked = false
+                    for row in 0..<height where alpha[row * width + column] > visibleAlpha {
+                        inked = true
+                        break
+                    }
+                    guard inked else { continue }
+                    if first == nil { first = column }
+                    last = column
+                }
+                guard let first, let last else {
+                    return SymbolInsets(leading: 0, trailing: 0)
+                }
+                return SymbolInsets(
+                    leading: CGFloat(first) / scale,
+                    trailing: target.width - CGFloat(last + 1) / scale
+                )
+            }
+        }
+
+        private struct SymbolInsetsKey: Hashable {
+            let systemName: String
+            let font: Font
+            let target: CGSize
+        }
+
+        @MainActor private static var symbolInsetsByKey: [SymbolInsetsKey: SymbolInsets] = [:]
         /// The dashboard's floating bottom pills: the search field and the chat starter riding
         /// above the home indicator. Taller than the minimum tap target because they are the
         /// page's primary actions and float over content rather than sitting in a chrome row.

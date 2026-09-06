@@ -83,7 +83,8 @@ extension SessionCoordinator {
                     offer: offer
                 )
                 switch result.outcome {
-                case .reset, .alreadyRedeemed where result.hasVerifiedHeadroom:
+                case .reset where result.hasVerifiedHeadroom,
+                     .alreadyRedeemed where result.hasVerifiedHeadroom:
                     store.clear(sessionID)
                 case .reset, .alreadyRedeemed, .nothingToReset, .noCredit:
                     store.note(

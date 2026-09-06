@@ -23,8 +23,8 @@ final class AccountPresentationPropagationTests: XCTestCase {
     private var accountStore: AccountPreferencesStore!
     private var limitSettings: CustomLimitSettings!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         // One stable suite per class, erased at both ends: a suite per method accumulates on
         // disk, and the shared store would write the developer's own account names.
         UserDefaults.standard.removePersistentDomain(forName: Fixture.suite)
@@ -33,12 +33,12 @@ final class AccountPresentationPropagationTests: XCTestCase {
         limitSettings = CustomLimitSettings(defaults: defaults)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         UserDefaults.standard.removePersistentDomain(forName: Fixture.suite)
         defaults = nil
         accountStore = nil
         limitSettings = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - The page

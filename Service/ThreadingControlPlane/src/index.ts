@@ -48,7 +48,11 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ status: "ok", rendezvousProtocol: BOUNDS.protocolVersion });
+        return json({
+          status: "ok",
+          rendezvousProtocol: BOUNDS.protocolVersion,
+          notificationProtocol: BOUNDS.notificationProtocolVersion,
+        });
       }
       await enforceRateLimit(request, url.pathname, env);
       if (request.method === "GET" && url.pathname === "/ready") {
@@ -219,7 +223,7 @@ async function readinessResponse(env: Env): Promise<Response> {
       validateReportAlertConfiguration(env);
       requiredConfigurationSecret(env.ISSUE_REPORTS_BUCKET_NAME, 1, 128);
       await probeStorage(env);
-      return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
+      return readyResponse();
     }
     if (isOperatedDevelopment(env)) {
       const signingSecret = requiredConfigurationSecret(env.SESSION_SIGNING_SECRET, 32, 4096);
@@ -237,7 +241,7 @@ async function readinessResponse(env: Env): Promise<Response> {
       validatePushTokenEncryptionConfiguration(env);
       validateDevelopmentAuthConfiguration(env);
       await probeStorage(env, false);
-      return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
+      return readyResponse();
     }
     const clientIDs = env.APPLE_CLIENT_IDS.split(",")
       .map((value) => value.trim())
@@ -277,13 +281,21 @@ async function readinessResponse(env: Env): Promise<Response> {
     validatePushTokenEncryptionConfiguration(env);
     validateDevelopmentAuthConfiguration(env);
     await probeStorage(env, true);
-    return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
+    return readyResponse();
   } catch (error) {
     console.warn("readiness_failed", {
       reason: error instanceof HttpError ? error.code : "dependency",
     });
     return json({ status: "unavailable" }, 503);
   }
+}
+
+function readyResponse(): Response {
+  return json({
+    status: "ready",
+    rendezvousProtocol: BOUNDS.protocolVersion,
+    notificationProtocol: BOUNDS.notificationProtocolVersion,
+  });
 }
 
 async function probeStorage(env: Env, includeIssueReports = true): Promise<void> {

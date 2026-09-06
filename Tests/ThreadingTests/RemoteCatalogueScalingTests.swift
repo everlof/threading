@@ -110,6 +110,84 @@ final class RemoteCatalogueScalingTests: HostedStoreTestCase {
         XCTAssertTrue(moved.revision.matches(ifNoneMatch: moved.revision.entityTag))
     }
 
+    /// Reading a finished chat changes only its participant receipt. The receipt event is a
+    /// narrow model edge; the broader presentation event must not publish the same row twice.
+    /// Runtime snapshots own their own row publication even when their projected activity is
+    /// unchanged, because continuation and blocker fields can still have changed.
+    func testReadReceiptActivityPublishesOneCatalogueEdition() {
+        let registry = RemoteSessionMirrorRegistry()
+        let sessionID = SessionID()
+        let initial = registry.catalogueRevision
+
+        NotificationCenter.default.post(SessionAttentionDidChange(
+            sessionID: sessionID,
+            persistence: .committed
+        ))
+        XCTAssertEqual(registry.catalogueRevision.revision, initial.revision + 1)
+        NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+        XCTAssertEqual(
+            registry.catalogueRevision.revision,
+            initial.revision + 1,
+            "presentation notification is not a second remote model edge"
+        )
+
+        let idle = SessionRuntimeSnapshot(
+            process: .ready,
+            turn: .none,
+            continuation: .none,
+            blocker: .none,
+            activity: .idle,
+            reportsOwnTurns: true
+        )
+        let working = SessionRuntimeSnapshot(
+            process: .ready,
+            turn: .inFlight(.reported),
+            continuation: .none,
+            blocker: .none,
+            activity: .working,
+            reportsOwnTurns: true
+        )
+        NotificationCenter.default.post(SessionRuntimeDidChange(
+            sessionID: sessionID,
+            transition: SessionRuntimeTransition(previous: idle, current: working),
+            cause: .turnStarted
+        ))
+        XCTAssertEqual(
+            registry.catalogueRevision.revision,
+            initial.revision + 2,
+            "the typed runtime edge owns its remote row"
+        )
+        NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+        XCTAssertEqual(registry.catalogueRevision.revision, initial.revision + 2)
+
+        let delegated = SessionRuntimeSnapshot(
+            process: .ready,
+            turn: .none,
+            continuation: .delegated,
+            blocker: .none,
+            activity: .readyWithBackgroundWork,
+            reportsOwnTurns: true
+        )
+        let standing = SessionRuntimeSnapshot(
+            process: .ready,
+            turn: .none,
+            continuation: .standing,
+            blocker: .none,
+            activity: .readyWithBackgroundWork,
+            reportsOwnTurns: true
+        )
+        NotificationCenter.default.post(SessionRuntimeDidChange(
+            sessionID: sessionID,
+            transition: SessionRuntimeTransition(previous: delegated, current: standing),
+            cause: .turnFinished
+        ))
+        XCTAssertEqual(
+            registry.catalogueRevision.revision,
+            initial.revision + 3,
+            "a typed runtime-only row change still publishes"
+        )
+    }
+
     /// The shelf is bounded by distinct authorizations, and the one served longest ago leaves.
     func testTheEncodedBodyShelfEvictsTheLeastRecentlyServedAuthorization() throws {
         var cache = RemoteMeResponseCache(capacity: 2)

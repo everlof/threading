@@ -26,6 +26,29 @@ struct SessionReadReceiptState: Equatable {
     }
 }
 
+/// What the durable receipt ledger can prove for one participant.
+///
+/// `unknown` is deliberately not represented by `false`: a refused SQLite read or write must
+/// never turn into an idle-looking row. Older presentation paths conservatively keep the
+/// attention mark while newer wire clients can retain the distinction explicitly.
+enum SessionAttentionProjection: Equatable {
+    case read(completionGeneration: Int, seenGeneration: Int)
+    case unread(completionGeneration: Int, seenGeneration: Int)
+    case unknown
+}
+
+enum SessionReadReceiptPersistence: Equatable {
+    case committed
+    case unavailable
+}
+
+/// The complete outcome of one receipt mutation. Callers use `didChangeProjection` to publish
+/// presentation and `persistence` to decide whether an acknowledgement may be claimed.
+struct SessionReadReceiptMutationResult: Equatable {
+    let didChangeProjection: Bool
+    let persistence: SessionReadReceiptPersistence
+}
+
 /// Owns participant-scoped read receipts and their in-memory projection.
 ///
 /// Reads are O(1) after one lazy load of the auxiliary SQLite tables. Each completion or visit
@@ -43,6 +66,12 @@ final class SessionReadReceiptStore {
     private let loadPersisted: Load
     private let savePersisted: Save
     private var states: [SessionID: SessionReadReceiptState]?
+    /// A failed load is not an empty ledger. Keep it distinct for this store's lifetime; the
+    /// owning StateManager recovery replaces the process rather than blessing partial state.
+    private var loadFailed = false
+    /// A failed session-sized write leaves useful live state in memory, but none of its read/unread
+    /// claims are durable until a later write succeeds.
+    private var volatileSessionIDs = Set<SessionID>()
 
     init(stateManager: StateManager = .shared) {
         loadPersisted = { stateManager.sessionReadReceiptStates() }
@@ -59,12 +88,16 @@ final class SessionReadReceiptStore {
     ///
     /// Participant ids are deduplicated before persistence. Two sockets for one person are one
     /// receipt, and all owner devices deliberately collapse to `ownerParticipantID`.
-    @discardableResult
     func recordAttention(
         for sessionID: SessionID,
         seenBy viewingParticipantIDs: Set<String>
-    ) -> Bool {
-        ensureLoaded()
+    ) -> SessionReadReceiptMutationResult {
+        guard ensureLoaded() else {
+            return SessionReadReceiptMutationResult(
+                didChangeProjection: false,
+                persistence: .unavailable
+            )
+        }
         var state = states?[sessionID] ?? SessionReadReceiptState(sessionID: sessionID)
 
         // This cannot be reached in a human lifetime, but preserving the comparison invariant
@@ -80,29 +113,94 @@ final class SessionReadReceiptStore {
         }
 
         states?[sessionID] = state
-        // Keep the live projection useful if storage is temporarily refused. StateManager logs
-        // and gates the failed durable write; a disk-full condition must not also lie in the UI.
-        return savePersisted(state)
+        if savePersisted(state) {
+            volatileSessionIDs.remove(sessionID)
+            return SessionReadReceiptMutationResult(
+                didChangeProjection: true,
+                persistence: .committed
+            )
+        }
+        // Keep the new generation in memory so a later acknowledgement can retry the whole
+        // session-sized record. Its projection remains unknown until that retry commits.
+        volatileSessionIDs.insert(sessionID)
+        return SessionReadReceiptMutationResult(
+            didChangeProjection: true,
+            persistence: .unavailable
+        )
     }
 
     /// Advances one person's receipt through everything currently known for the conversation.
-    /// Returns true only when the projected unread state changed.
-    @discardableResult
-    func acknowledge(sessionID: SessionID, participantID: String) -> Bool {
-        guard !participantID.isEmpty else { return false }
-        ensureLoaded()
-        guard var state = states?[sessionID],
-              state.hasUnread(for: participantID) else { return false }
+    /// The result separates a presentation change from proof that SQLite committed it.
+    func acknowledge(
+        sessionID: SessionID,
+        participantID: String
+    ) -> SessionReadReceiptMutationResult {
+        guard !participantID.isEmpty, ensureLoaded() else {
+            return SessionReadReceiptMutationResult(
+                didChangeProjection: false,
+                persistence: .unavailable
+            )
+        }
+        let before = attention(sessionID: sessionID, participantID: participantID)
+        guard var state = states?[sessionID] else {
+            return SessionReadReceiptMutationResult(
+                didChangeProjection: false,
+                persistence: .committed
+            )
+        }
+        let mustRetryVolatileWrite = volatileSessionIDs.contains(sessionID)
+        guard state.hasUnread(for: participantID) || mustRetryVolatileWrite else {
+            return SessionReadReceiptMutationResult(
+                didChangeProjection: false,
+                persistence: .committed
+            )
+        }
 
         state.seenGenerationByParticipant[participantID] = state.completionGeneration
         states?[sessionID] = state
-        _ = savePersisted(state)
-        return true
+        let persistence: SessionReadReceiptPersistence
+        if savePersisted(state) {
+            volatileSessionIDs.remove(sessionID)
+            persistence = .committed
+        } else {
+            volatileSessionIDs.insert(sessionID)
+            persistence = .unavailable
+        }
+        return SessionReadReceiptMutationResult(
+            didChangeProjection: before != attention(
+                sessionID: sessionID,
+                participantID: participantID
+            ),
+            persistence: persistence
+        )
     }
 
     func hasUnread(sessionID: SessionID, participantID: String) -> Bool {
-        ensureLoaded()
-        return states?[sessionID]?.hasUnread(for: participantID) == true
+        switch attention(sessionID: sessionID, participantID: participantID) {
+        case .read: return false
+        case .unread, .unknown: return true
+        }
+    }
+
+    func attention(
+        sessionID: SessionID,
+        participantID: String
+    ) -> SessionAttentionProjection {
+        guard ensureLoaded(), !volatileSessionIDs.contains(sessionID) else { return .unknown }
+        guard let state = states?[sessionID] else {
+            return .read(completionGeneration: 0, seenGeneration: 0)
+        }
+        let seen = max(0, state.seenGenerationByParticipant[participantID] ?? 0)
+        if state.hasUnread(for: participantID) {
+            return .unread(
+                completionGeneration: state.completionGeneration,
+                seenGeneration: seen
+            )
+        }
+        return .read(
+            completionGeneration: state.completionGeneration,
+            seenGeneration: seen
+        )
     }
 
     /// Applies a reader's receipt only to the one reader-specific state. Work, blocking asks,
@@ -122,8 +220,15 @@ final class SessionReadReceiptStore {
         }
     }
 
-    private func ensureLoaded() {
-        guard states == nil else { return }
-        states = loadPersisted() ?? [:]
+    @discardableResult
+    private func ensureLoaded() -> Bool {
+        if states != nil { return true }
+        if loadFailed { return false }
+        guard let loaded = loadPersisted() else {
+            loadFailed = true
+            return false
+        }
+        states = loaded
+        return true
     }
 }

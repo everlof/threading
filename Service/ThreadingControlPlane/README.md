@@ -190,12 +190,14 @@ state and renders a temporary Wrangler configuration; the checked-in placeholder
 A Worker preview or `workers.dev` hostname is useful for staging, but distributed app builds are
 configured for `https://remote.threading.codes`.
 
-`/health` is a cheap liveness response. `/ready` additionally proves that the independent signing
-and Apple-token secrets are usable, the Apple private key can sign both shipping client IDs, TURN
-configuration is present, a local APNs provider JWT can be signed for the shipping iOS topic, D1
-answers a query, and the private report bucket binding answers a
-metadata-only probe. It returns only a generic 503 when unavailable; the D1 probe selects the
-newest required columns so a missing migration also blocks readiness.
+`/health` is a cheap liveness response. Both responses publish the rendezvous and notification
+protocol versions; the guarded deployment verifies those versions and the authenticated push and
+retraction route boundaries so an older Worker cannot pass as compatible. `/ready` additionally
+proves that the independent signing and Apple-token secrets are usable, the Apple private key can
+sign both shipping client IDs, TURN configuration is present, a local APNs provider JWT can be
+signed for the shipping iOS topic, D1 answers a query, and the private report bucket binding
+answers a metadata-only probe. It returns only a generic 503 when unavailable; the D1 probe
+selects the newest required columns so a missing migration also blocks readiness.
 Configuration details remain in metadata-only Worker logs.
 
 `npm run test:load` is the repeatable local capacity regression: 100 authenticated host sockets

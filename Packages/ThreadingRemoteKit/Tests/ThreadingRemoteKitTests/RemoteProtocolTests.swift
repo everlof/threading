@@ -695,8 +695,16 @@ final class RemoteProtocolTests: XCTestCase {
                 agentKind: "codex",
                 surface: .conversation,
                 state: .working,
+                attention: .init(
+                    knowledge: .unread,
+                    completionGeneration: 4,
+                    seenGeneration: 3
+                ),
                 projectName: "Threading"
-            )
+            ),
+            revision: .init(epoch: "catalogue-a", revision: 9),
+            streamID: "stream-a",
+            sequence: 2
         )
         XCTAssertEqual(
             try JSONDecoder().decode(
@@ -705,6 +713,37 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             delta
         )
+
+        let streamHello = RemoteCatalogueStreamHelloDTO(
+            streamID: "stream-a",
+            revision: .init(epoch: "catalogue-a", revision: 7)
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteCatalogueStreamHelloDTO.self,
+                from: JSONEncoder().encode(streamHello)
+            ),
+            streamHello
+        )
+
+        let visit = RemoteSessionVisitedDTO(
+            session: try XCTUnwrap(delta.session),
+            revision: .init(epoch: "catalogue-a", revision: 9),
+            receiptCommitted: true
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSessionVisitedDTO.self,
+                from: JSONEncoder().encode(visit)
+            ),
+            visit
+        )
+
+        let legacySession = try JSONDecoder().decode(
+            RemoteSessionSummaryDTO.self,
+            from: Data(#"{"id":"legacy","title":"Old","agentKind":"codex","surface":"conversation","state":"idle","projectName":"Threading"}"#.utf8)
+        )
+        XCTAssertNil(legacySession.attention)
 
         let terminalDelta = RemoteSessionsChangedDTO(
             terminal: RemoteProjectTerminalSummaryDTO(

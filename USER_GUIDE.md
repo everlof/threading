@@ -2764,7 +2764,10 @@ dropdown, with the branch under it; choose **Manager** to start a project manage
 agent and account are the disc at the top right, the agent's mark ringed by that account's usage,
 one ring per limit window (the week outside, the five hours inside it, and a model's own window
 innermost when the draft will run a model the plan meters separately), with the full usage
-figures in its menu. The composer at the bottom holds the prompt and, under
+figures in its menu. That menu is a panel of the agents as a strip and the chosen agent's logins
+as rows: tap one, or press anywhere on a group and slide, and the choice follows your finger
+with a tick at each crossing until you lift on the one you want. The model-by-effort matrix
+under the run line answers a finger the same way. The composer at the bottom holds the prompt and, under
 it, one line for the run — **GPT-5.6 Sol · High**, a menu of model, effort and speed — and two
 glyphs for permissions and interface, each a menu; a glyph takes the accent colour once its
 choice departs from the default. This iPhone remembers the model and effort of the last chat that

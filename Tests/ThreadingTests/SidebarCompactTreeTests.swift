@@ -239,6 +239,119 @@ final class SidebarCompactTreeTests: XCTestCase {
         }
     }
 
+    /// Pure Dark exposed the boundary between the cell and AppKit's outline control: the
+    /// selected project's row painted a white accent and correctly switched its title to black,
+    /// while the sibling disclosure stayed white and disappeared. This uses the shipping outline
+    /// and scans the rendered marker pixels, so setting a tint the system button ignores cannot
+    /// satisfy the regression.
+    func testSelectedDisclosureChevronReadsAgainstPureSelection() throws {
+        let previousTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previousTheme) }
+        let pure = try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Pure" })
+        AppThemeLibrary.apply(.system)
+
+        let controller = makeSidebar(compact: false)
+        let window = try XCTUnwrap(windows.last)
+        let view = try XCTUnwrap(window.contentView)
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        window.appearance = appearance
+
+        let projectKey = try XCTUnwrap(
+            controller.presentedRowKeys.first {
+                if case .project = $0 { return true }
+                return false
+            }
+        )
+        let rowIndex = try XCTUnwrap(controller.presentedRow(of: projectKey))
+        let row = try XCTUnwrap(controller.presentedRowView(of: projectKey))
+        let outline = try XCTUnwrap(row.superview as? ThemedOutlineView)
+        outline.fixtureIsKey = true
+        outline.selectRowIndexes(IndexSet(integer: rowIndex), byExtendingSelection: false)
+
+        // Switch after AppKit has built the disclosure so the regression also covers live
+        // theme changes, not just construction under Pure.
+        AppThemeLibrary.apply(pure)
+        AppThemeRefresh.repaint(view)
+        draw()
+
+        let selectedRow = try XCTUnwrap(controller.presentedRowView(of: projectKey))
+        let chevron = try XCTUnwrap(
+            selectedRow.subviews.compactMap { $0 as? NSButton }.first {
+                $0.identifier == NSOutlineView.disclosureButtonIdentifier
+            }
+        )
+
+        var expectedInk = NSColor.clear
+        var selectionFill = NSColor.clear
+        appearance.performAsCurrentDrawingAppearance {
+            expectedInk = Design.Ink.selection.label
+            selectionFill = Design.Surface.selectionFill
+        }
+        let disclosureInk = try XCTUnwrap(
+            (selectedRow as? OutlineDisclosureInkProviding)?.outlineDisclosureInk
+        )
+        XCTAssertEqual(
+            disclosureInk.hexString,
+            expectedInk.hexString,
+            "the disclosure should take the semantic ink measured for its selected row"
+        )
+        XCTAssertTrue(chevron.isTransparent, "the original AppKit button remains the hit target")
+
+        let bitmap = try XCTUnwrap(
+            selectedRow.bitmapImageRepForCachingDisplay(in: selectedRow.bounds)
+        )
+        selectedRow.cacheDisplay(in: selectedRow.bounds, to: bitmap)
+        let marker = chevron.convert(chevron.bounds, to: selectedRow)
+        let probe = marker.insetBy(dx: marker.width / 4, dy: marker.height / 4)
+        let scale = CGFloat(bitmap.pixelsWide) / selectedRow.bounds.width
+        let firstX = max(0, Int((probe.minX * scale).rounded(.down)))
+        let lastX = min(bitmap.pixelsWide - 1, Int((probe.maxX * scale).rounded(.up)))
+        let markerMinY = selectedRow.isFlipped
+            ? selectedRow.bounds.height - probe.maxY
+            : probe.minY
+        let markerMaxY = selectedRow.isFlipped
+            ? selectedRow.bounds.height - probe.minY
+            : probe.maxY
+        let firstY = max(0, Int((markerMinY * scale).rounded(.down)))
+        let lastY = min(bitmap.pixelsHigh - 1, Int((markerMaxY * scale).rounded(.up)))
+        var strongestContrast: CGFloat = 1
+        for x in firstX...lastX {
+            for y in firstY...lastY {
+                guard let pixel = bitmap.colorAt(x: x, y: y) else { continue }
+                strongestContrast = max(
+                    strongestContrast,
+                    ThemeContrast.ratio(pixel, selectionFill)
+                )
+            }
+        }
+        XCTAssertGreaterThanOrEqual(
+            strongestContrast,
+            LabelLegibility.Defaults.glanceRatio,
+            "the drawn chevron should remain visible on Pure's selected-row accent"
+        )
+
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let bounds = NSRect(x: 0, y: view.bounds.height - 150, width: 320, height: 150)
+        let evidence = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: bounds))
+        view.cacheDisplay(in: bounds, to: evidence)
+        let data = try XCTUnwrap(evidence.representation(using: .png, properties: [:]))
+        try data.write(to: directory.appendingPathComponent("sidebar-disclosure-pure-dark.png"))
+
+        AppThemeLibrary.apply(.system)
+        AppThemeRefresh.repaint(view)
+        draw()
+        XCTAssertFalse(chevron.isTransparent, "System restores AppKit's disclosure drawing")
+        XCTAssertFalse(
+            selectedRow.subviews.contains { $0 is GlyphView && $0.frame == chevron.frame },
+            "System should not retain an authored marker beneath the native disclosure"
+        )
+    }
+
     // MARK: - Vertical rhythm
 
     /// The space indentation used to spend beside a group goes above it: top-level project

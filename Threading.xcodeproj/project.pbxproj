@@ -109,6 +109,8 @@
 		A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71600010000000000000002 /* MobileRefreshPolicyTests.swift */; };
 		A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */; };
 		A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */; };
+		A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71900010000000000000002 /* MobileScrubSurfaceTests.swift */; };
+		A72000010000000000000001 /* StatusIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72000010000000000000002 /* StatusIntegrityTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -367,6 +369,8 @@
 		A71600010000000000000002 /* MobileRefreshPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRefreshPolicyTests.swift; sourceTree = "<group>"; };
 		A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileMediaDownloadLimiterTests.swift; sourceTree = "<group>"; };
 		A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRouteHealthLedgerTests.swift; sourceTree = "<group>"; };
+		A71900010000000000000002 /* MobileScrubSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileScrubSurfaceTests.swift; sourceTree = "<group>"; };
+		A72000010000000000000002 /* StatusIntegrityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatusIntegrityTests.swift; sourceTree = "<group>"; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -415,6 +419,7 @@
 				ThreadingMobile/MobileRouteHealthLedger.swift,
 				ThreadingMobile/MobileRowSwipe.swift,
 				ThreadingMobile/MobileRunPlanDisclosure.swift,
+				ThreadingMobile/MobileScrubSurface.swift,
 				ThreadingMobile/MobileSessionConnectionPool.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
 				ThreadingMobile/MobileSessionSettingsView.swift,
@@ -728,6 +733,8 @@
 				A71600010000000000000002 /* MobileRefreshPolicyTests.swift */,
 				A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */,
 				A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */,
+				A71900010000000000000002 /* MobileScrubSurfaceTests.swift */,
+				A72000010000000000000002 /* StatusIntegrityTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1256,6 +1263,9 @@
 				"$(SRCROOT)/scripts/config/theme-boundary.json",
 				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
 				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
+				"$(SRCROOT)/scripts/check_status_integrity.py",
+				"$(SRCROOT)/scripts/config/status-integrity.json",
+				"$(SRCROOT)/scripts/tests/test_status_integrity.py",
 				"$(SRCROOT)/scripts/check_logging_boundaries.py",
 				"$(SRCROOT)/scripts/check_main_actor_latency.sh",
 				"$(SRCROOT)/scripts/main_actor_latency_lint.swift",
@@ -1264,6 +1274,7 @@
 				"$(SRCROOT)/scripts/tests/test_navigator_fact_parity.py",
 				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
 				"$(SRCROOT)/docs/THEME_BOUNDARY.md",
+				"$(SRCROOT)/docs/architecture/status-integrity.md",
 				"$(SRCROOT)/AGENTS.md",
 				"$(SRCROOT)/CLAUDE.md",
 			);
@@ -1500,6 +1511,8 @@
 				A71600010000000000000001 /* MobileRefreshPolicyTests.swift in Sources */,
 				A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */,
 				A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */,
+				A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */,
+				A72000010000000000000001 /* StatusIntegrityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

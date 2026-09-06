@@ -210,6 +210,91 @@ final class MobileHostRefreshSingleFlight {
     }
 }
 
+/// Continuity proof between an authenticated catalogue snapshot and its scoped event stream.
+///
+/// WebSocket delivery is ordered, but reconnects, decode failures and process restarts create
+/// holes outside that guarantee. Once a current host supplies a stream id, only its next sequence
+/// may mutate the snapshot. Any ambiguity latches `requiresRefresh` until an authoritative REST
+/// edition catches up with every revision observed on the stream.
+struct MobileCatalogueStreamFence: Equatable {
+    private(set) var streamID: String?
+    private(set) var sequence: UInt64?
+    private(set) var requiredRevision: RemoteCatalogueRevisionDTO?
+    private(set) var requiresRefresh = false
+
+    var hasCurrentStream: Bool { streamID != nil }
+
+    mutating func begin(
+        _ hello: RemoteCatalogueStreamHelloDTO,
+        currentRevision: RemoteCatalogueRevisionDTO?
+    ) {
+        streamID = hello.streamID
+        sequence = 0
+        requiredRevision = hello.revision
+        requiresRefresh = true
+        reconcile(currentRevision: currentRevision)
+    }
+
+    mutating func accepts(_ update: RemoteSessionsChangedDTO) -> Bool {
+        guard let streamID else {
+            // Compatibility lane for a host predating stream fences. A framed update without a
+            // hello is never legacy; it is a lost fence and must recover from REST.
+            guard update.streamID == nil, update.sequence == nil else {
+                invalidate(revision: update.revision)
+                return false
+            }
+            return true
+        }
+        guard update.streamID == streamID,
+              let candidate = update.sequence,
+              let revision = update.revision,
+              let previous = sequence,
+              previous < UInt64.max,
+              candidate == previous + 1 else {
+            invalidate(revision: update.revision)
+            // Keep following a same-stream tail so one full refresh can cover the whole gap.
+            if update.streamID == streamID, let candidate = update.sequence {
+                sequence = candidate
+            }
+            return false
+        }
+        sequence = candidate
+        noteRequired(revision)
+        return !requiresRefresh
+    }
+
+    mutating func invalidate(revision: RemoteCatalogueRevisionDTO?) {
+        requiresRefresh = true
+        noteRequired(revision)
+    }
+
+    mutating func reconcile(currentRevision: RemoteCatalogueRevisionDTO?) {
+        guard streamID != nil, let requiredRevision else { return }
+        guard let currentRevision,
+              currentRevision.epoch == requiredRevision.epoch,
+              currentRevision.revision >= requiredRevision.revision else {
+            requiresRefresh = true
+            return
+        }
+        requiresRefresh = false
+    }
+
+    mutating func reset() {
+        self = MobileCatalogueStreamFence()
+    }
+
+    private mutating func noteRequired(_ revision: RemoteCatalogueRevisionDTO?) {
+        guard let revision else { return }
+        guard let requiredRevision, requiredRevision.epoch == revision.epoch else {
+            self.requiredRevision = revision
+            return
+        }
+        if revision.revision > requiredRevision.revision {
+            self.requiredRevision = revision
+        }
+    }
+}
+
 @MainActor
 final class RemoteAppModel: ObservableObject {
     enum Phase: Equatable {
@@ -273,6 +358,7 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var me: RemoteMeDTO? {
         didSet {
             catalogueRevision &+= 1
+            reconcileCatalogueStreamFence()
             rememberCurrentTheme()
             rememberCurrentDashboard()
         }
@@ -371,6 +457,7 @@ final class RemoteAppModel: ObservableObject {
     /// names.
     @Published private(set) var lastConnection: MobileConnectionRecord?
     private var themeEventsDidReceiveHello = false
+    private var catalogueStreamFence = MobileCatalogueStreamFence()
     private var themeEventsStartedAt: UInt64?
     private var themeEventsDiagnosticFields: [RemoteDiagnosticField: String] = [:]
     private var sessionsChangedRefreshTask: Task<Void, Never>?
@@ -685,6 +772,22 @@ final class RemoteAppModel: ObservableObject {
 
     func dashboardSession(id: String) -> RemoteSessionSummaryDTO? {
         dashboardCatalogue?.session(id: id)
+    }
+
+    /// Applies the session socket's canonical post-visit row immediately. This is the receipt
+    /// transaction's acknowledgement path; the dashboard event remains necessary for other
+    /// devices, but losing it cannot strand the device that performed the visit.
+    func acceptSessionVisit(
+        _ visit: RemoteSessionVisitedDTO,
+        from hostID: String
+    ) {
+        guard activeHostID == hostID, visit.receiptCommitted, let current = me else { return }
+        let updated = current.applyingCanonicalVisit(visit)
+        guard updated != current else { return }
+        me = updated
+        if updated.revision == nil {
+            scheduleSessionsChangedRefresh(for: hostID, reason: .revisionGap)
+        }
     }
 
     func dashboardTerminal(id: String) -> RemoteProjectTerminalSummaryDTO? {
@@ -1198,6 +1301,7 @@ final class RemoteAppModel: ObservableObject {
     /// is what makes the catalogue in hand authoritative without asking.
     func isEventSocketHealthy(for hostID: String) -> Bool {
         themeEventsTask != nil && themeEventsDidReceiveHello && themeEventsHostID == hostID
+            && !catalogueStreamFence.requiresRefresh
     }
 
     /// Resolves a cached navigation id against an authoritative catalogue before any resume or
@@ -3483,12 +3587,25 @@ final class RemoteAppModel: ObservableObject {
                 guard activeHostID == hostID else { return }
                 guard case let .string(text) = message else { continue }
                 let data = Data(text.utf8)
-                struct Envelope: Decodable { let type: String }
-                guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
-                    continue
+                struct Envelope: Decodable {
+                    let type: String
+                    let streamID: String?
+                    let sequence: UInt64?
+                    let revision: RemoteCatalogueRevisionDTO?
+                    let session: RemoteSessionSummaryDTO?
+                    let removedSessionID: String?
+                    let terminal: RemoteProjectTerminalSummaryDTO?
+                    let removedTerminalID: String?
                 }
-                // The server sends an authoritative appTheme frame immediately after auth. Any
-                // well-formed event proves this socket is authenticated and clears backoff.
+                guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
+                    // An undecodable frame could have been the only catalogue mutation before
+                    // the socket went quiet. Reconnect for a fresh stream fence instead of
+                    // blessing the snapshot merely because no later sequence exposes the hole.
+                    throw RemoteClientError.invalidResponse
+                }
+                // The server sends an authoritative frame immediately after auth. Any
+                // well-formed event proves authentication; catalogue health additionally needs
+                // the stream fence below to agree with the REST snapshot.
                 if !themeEventsDidReceiveHello {
                     themeEventsDidReceiveHello = true
                     cancelThemeEventsHelloDeadline()
@@ -3505,6 +3622,20 @@ final class RemoteAppModel: ObservableObject {
                     connectionRecoveryAttempt = 0
                 }
                 switch envelope.type {
+                case "catalogueHello":
+                    guard let streamID = envelope.streamID, !streamID.isEmpty,
+                          let revision = envelope.revision else {
+                        throw RemoteClientError.invalidResponse
+                    }
+                    let hello = RemoteCatalogueStreamHelloDTO(
+                        streamID: streamID,
+                        revision: revision
+                    )
+                    discardPendingSessionDeltas()
+                    catalogueStreamFence.begin(hello, currentRevision: me?.revision)
+                    if catalogueStreamFence.requiresRefresh {
+                        scheduleSessionsChangedRefresh(for: hostID, reason: .revisionGap)
+                    }
                 case "appTheme":
                     if let update = try? JSONDecoder().decode(
                         RemoteAppThemeUpdateDTO.self,
@@ -3513,10 +3644,16 @@ final class RemoteAppModel: ObservableObject {
                         me = me?.replacing(theme: update.theme)
                     }
                 case "sessionsChanged":
-                    guard let update = try? JSONDecoder().decode(
-                        RemoteSessionsChangedDTO.self,
-                        from: data
-                    ) else { continue }
+                    let update = RemoteSessionsChangedDTO(
+                        session: envelope.session,
+                        removedSessionID: envelope.removedSessionID,
+                        terminal: envelope.terminal,
+                        removedTerminalID: envelope.removedTerminalID,
+                        revision: envelope.revision,
+                        streamID: envelope.streamID,
+                        sequence: envelope.sequence
+                    )
+                    guard acceptCatalogueUpdate(update, for: hostID) else { continue }
                     if me != nil,
                        update.session != nil || update.removedSessionID != nil
                        || update.terminal != nil || update.removedTerminalID != nil
@@ -3630,6 +3767,7 @@ final class RemoteAppModel: ObservableObject {
         themeEventsTask = nil
         themeEventsHostID = nil
         themeEventsDidReceiveHello = false
+        catalogueStreamFence.reset()
         themeEventsStartedAt = nil
         themeEventsDiagnosticFields = [:]
     }
@@ -3752,6 +3890,25 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
+    /// Accepts only the next scoped event in the stream the host fenced. WebSockets preserve
+    /// order, but lifecycle replacement and decoding failures can still leave the client with a
+    /// hole; a hole makes the cached catalogue stale rather than "probably current".
+    private func acceptCatalogueUpdate(
+        _ update: RemoteSessionsChangedDTO,
+        for hostID: String
+    ) -> Bool {
+        guard catalogueStreamFence.accepts(update) else {
+            discardPendingSessionDeltas()
+            scheduleSessionsChangedRefresh(for: hostID, reason: .revisionGap)
+            return false
+        }
+        return true
+    }
+
+    private func reconcileCatalogueStreamFence() {
+        catalogueStreamFence.reconcile(currentRevision: me?.revision)
+    }
+
     private func scheduleSessionDelta(
         _ update: RemoteSessionsChangedDTO,
         for hostID: String
@@ -3852,6 +4009,9 @@ final class RemoteAppModel: ObservableObject {
         await refresh(reason: reason)
         if sessionsChangedRefreshGeneration == generation {
             sessionsChangedRefreshTask = nil
+            if catalogueStreamFence.requiresRefresh {
+                scheduleSessionsChangedRefresh(for: hostID, reason: .revisionGap)
+            }
         }
     }
 
@@ -4325,6 +4485,12 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private static func demoResponse(for mode: String) -> RemoteMeDTO {
+        if mode == MobileDemoFixture.sessionsScrollStress.rawValue {
+            let requestedRows = ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_DASHBOARD_STRESS_ROWS"
+            ].flatMap(Int.init) ?? 1_000
+            return dashboardStressResponse(rowCount: max(1, requestedRows))
+        }
         let response = MobileDemoFixture.isMarketing(mode)
             ? marketingResponse(forMode: mode)
             : demoResponse
@@ -4347,6 +4513,40 @@ final class RemoteAppModel: ObservableObject {
             archivedSessions: response.archivedSessions,
             newSessionCatalog: response.newSessionCatalog,
             features: features
+        )
+    }
+
+    /// The shipping dashboard's deterministic scaling fixture.
+    ///
+    /// One project is deliberate: it exercises the largest plate the collection can own while
+    /// every session remains an independent diffable item and a real reusable dashboard row.
+    private static func dashboardStressResponse(rowCount: Int) -> RemoteMeDTO {
+        let response = demoResponse
+        let now = Date().timeIntervalSince1970
+        let sessions = (0..<rowCount).map { index in
+            RemoteSessionSummaryDTO(
+                id: "dashboard-scroll-\(index)",
+                title: "Dashboard scrolling session \(index)",
+                agentKind: index.isMultiple(of: 2) ? "codex" : "claude",
+                surface: index.isMultiple(of: 3) ? .terminal : .conversation,
+                state: index.isMultiple(of: 11) ? .working : .idle,
+                projectName: "Dashboard Stress",
+                isAvailable: true,
+                lastActiveAt: now - Double(index * 60),
+                isPinned: index.isMultiple(of: 17)
+            )
+        }
+        return RemoteMeDTO(
+            serverProtocol: response.serverProtocol,
+            share: response.share,
+            sessions: sessions,
+            terminals: [],
+            host: response.host,
+            theme: response.theme,
+            themeCatalog: response.themeCatalog,
+            archivedSessions: [],
+            newSessionCatalog: response.newSessionCatalog,
+            features: response.features
         )
     }
 
@@ -4735,14 +4935,58 @@ final class RemoteAppModel: ObservableObject {
 }
 
 extension RemoteMeDTO {
-    func applying(_ updates: [RemoteSessionsChangedDTO]) -> RemoteMeDTO {
-        var updatedSessions = sessions
-        let changedIDs = Set(updates.compactMap { $0.removedSessionID ?? $0.session?.id })
-        updatedSessions.removeAll { changedIDs.contains($0.id) }
-        for session in updates.compactMap(\.session) {
-            if !session.isArchived {
-                updatedSessions.append(session)
+    /// Applies a proof-bearing response from the live session socket.
+    ///
+    /// Unlike an event-stream delta, an equal-edition visit is canonical and may repair a local
+    /// row that somehow diverged while retaining the right edition. An older visit stays stale,
+    /// and a host-process change invalidates the whole snapshot before any payload is trusted.
+    func applyingCanonicalVisit(_ visit: RemoteSessionVisitedDTO) -> RemoteMeDTO {
+        guard visit.receiptCommitted else { return self }
+        if let current = revision {
+            guard visit.revision.epoch == current.epoch else {
+                return replacingCatalogueRevision(nil)
             }
+            guard visit.revision.revision >= current.revision else { return self }
+            if visit.revision.revision == current.revision {
+                return applying([RemoteSessionsChangedDTO(session: visit.session)])
+            }
+        }
+        return applying([RemoteSessionsChangedDTO(
+            session: visit.session,
+            revision: visit.revision
+        )])
+    }
+
+    func applying(_ updates: [RemoteSessionsChangedDTO]) -> RemoteMeDTO {
+        // A frame from another host process cannot safely be merged into this process's
+        // snapshot. Drop the payload and only discard the edition so the caller is forced
+        // through an unconditional refresh.
+        if let current = revision,
+           updates.compactMap(\.revision).contains(where: { $0.epoch != current.epoch }) {
+            return replacingCatalogueRevision(nil)
+        }
+        let candidates = updates.filter { update in
+            guard let current = revision, let candidate = update.revision else { return true }
+            return candidate.revision > current.revision
+        }
+        let applicable: [RemoteSessionsChangedDTO]
+        if candidates.allSatisfy({ $0.revision != nil }) {
+            applicable = candidates.enumerated().sorted { lhs, rhs in
+                let left = lhs.element.revision?.revision ?? 0
+                let right = rhs.element.revision?.revision ?? 0
+                return left == right ? lhs.offset < rhs.offset : left < right
+            }.map(\.element)
+        } else {
+            // A legacy host has no editions. Preserve WebSocket delivery order rather than
+            // combining version and input-order comparisons into a non-transitive sort.
+            applicable = candidates
+        }
+
+        var updatedSessions = sessions
+        for update in applicable {
+            guard let id = update.removedSessionID ?? update.session?.id else { continue }
+            updatedSessions.removeAll { $0.id == id }
+            if let session = update.session, !session.isArchived { updatedSessions.append(session) }
         }
         updatedSessions.sort {
             if $0.isPinned != $1.isPinned { return $0.isPinned }
@@ -4750,11 +4994,11 @@ extension RemoteMeDTO {
         }
         var updatedTerminals = terminals
         if updatedTerminals != nil {
-            let changedTerminalIDs = Set(updates.compactMap {
-                $0.removedTerminalID ?? $0.terminal?.id
-            })
-            updatedTerminals?.removeAll { changedTerminalIDs.contains($0.id) }
-            updatedTerminals?.append(contentsOf: updates.compactMap(\.terminal))
+            for update in applicable {
+                guard let id = update.removedTerminalID ?? update.terminal?.id else { continue }
+                updatedTerminals?.removeAll { $0.id == id }
+                if let terminal = update.terminal { updatedTerminals?.append(terminal) }
+            }
             updatedTerminals?.sort { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
         }
         return RemoteMeDTO(
@@ -4769,8 +5013,26 @@ extension RemoteMeDTO {
             newSessionCatalog: newSessionCatalog,
             features: features,
             revision: revision.map { current in
-                Self.editionAfterApplying(updates, to: current)
+                Self.editionAfterApplying(applicable, to: current)
             } ?? nil
+        )
+    }
+
+    private func replacingCatalogueRevision(
+        _ catalogueRevision: RemoteCatalogueRevisionDTO?
+    ) -> RemoteMeDTO {
+        RemoteMeDTO(
+            serverProtocol: serverProtocol,
+            share: share,
+            sessions: sessions,
+            terminals: terminals,
+            host: host,
+            theme: theme,
+            themeCatalog: themeCatalog,
+            archivedSessions: archivedSessions,
+            newSessionCatalog: newSessionCatalog,
+            features: features,
+            revision: catalogueRevision
         )
     }
 
@@ -4824,6 +5086,7 @@ extension RemoteMeDTO {
                     agentKind: session.agentKind,
                     surface: session.surface,
                     state: session.state,
+                    attention: session.attention,
                     continuation: session.continuation,
                     projectName: session.projectName,
                     projectID: session.projectID,
@@ -4870,6 +5133,7 @@ extension RemoteMeDTO {
                 agentKind: session.agentKind,
                 surface: surface,
                 state: session.state,
+                attention: session.attention,
                 continuation: session.continuation,
                 projectName: session.projectName,
                 projectID: session.projectID,
@@ -4906,7 +5170,8 @@ extension RemoteMeDTO {
             themeCatalog: themeCatalog,
             archivedSessions: archivedSessions?.map(replace),
             newSessionCatalog: newSessionCatalog,
-            features: features
+            features: features,
+            revision: revision
         )
     }
 }

@@ -31,11 +31,16 @@ struct MobileLoadingPlaceholder: View {
         VStack(spacing: MobileDesign.Spacing.medium) {
             ProgressView()
                 .tint(theme.accent)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(theme.secondaryLabel)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, MobileDesign.Spacing.large)
+            MobileMorphingTitle(
+                title: message,
+                textStyle: .subheadline,
+                weight: .regular,
+                textColor: theme.uiSecondaryLabel,
+                groundColor: standsOnContent ? theme.uiFloatingSurface : theme.uiGround,
+                alignment: .center,
+                role: .connectionProgress
+            )
+            .padding(.horizontal, MobileDesign.Spacing.large)
         }
         .padding(standsOnContent ? MobileDesign.Spacing.large : 0)
         .background {

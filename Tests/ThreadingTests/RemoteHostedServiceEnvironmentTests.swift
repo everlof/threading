@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingPeerTransport
 @testable import Threading
 
 @MainActor
@@ -73,5 +74,29 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
 #else
         XCTAssertNotEqual(endpoint?.baseURL, override)
 #endif
+    }
+
+    func testHostedNotificationRejectionPreservesStatusAndServiceCode() {
+        let result = RemoteHostedServiceController.notificationDeliveryFailure(
+            PeerControlPlaneError.rejected(status: 400, code: "invalidRequest"),
+            operation: .push
+        )
+
+        XCTAssertEqual(result.statusCode, 400)
+        XCTAssertEqual(result.failureCode, "invalidRequest")
+        XCTAssertEqual(result.reason, "Hosted push broker refused the request.")
+        XCTAssertFalse(result.accepted)
+    }
+
+    func testHostedNotificationTransportFailureHasNoHTTPStatus() {
+        let result = RemoteHostedServiceController.notificationDeliveryFailure(
+            PeerControlPlaneError.transport("connection reset"),
+            operation: .retraction
+        )
+
+        XCTAssertNil(result.statusCode)
+        XCTAssertEqual(result.failureCode, "network")
+        XCTAssertEqual(result.reason, "Hosted retraction broker was unavailable.")
+        XCTAssertFalse(result.accepted)
     }
 }

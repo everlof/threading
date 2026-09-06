@@ -56,6 +56,19 @@ struct RemoteTurnNotificationPushResult: Equatable, Sendable {
     let accepted: Bool
     let statusCode: Int?
     let providerTrace: String?
+    let failureCode: String?
+
+    init(
+        accepted: Bool,
+        statusCode: Int?,
+        providerTrace: String?,
+        failureCode: String? = nil
+    ) {
+        self.accepted = accepted
+        self.statusCode = statusCode
+        self.providerTrace = providerTrace
+        self.failureCode = failureCode
+    }
 }
 
 /// The diagnostic boundary deliberately cannot carry response content.
@@ -539,6 +552,7 @@ final class RemoteTurnNotificationDeliveryCoordinator {
             .status: result.statusCode.map(String.init) ?? "transport",
         ]
         if let providerTrace = result.providerTrace { fields[.providerTrace] = providerTrace }
+        if let failureCode = result.failureCode { fields[.code] = failureCode }
         fields.merge(previewFields(event)) { _, new in new }
         diagnose(result.accepted ? "sent" : "refused", completion, target: target,
                  additional: fields)

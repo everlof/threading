@@ -569,7 +569,10 @@ public final class ListSelectionStrength {
 ///
 /// Under **System** it defers to `super` entirely, so the stock selection — the user's own
 /// accent, its emphasized and unemphasized strengths, its vibrancy — is untouched.
-public class ThemedTableRowView: NSTableRowView, ThemedComponent {
+public class ThemedTableRowView:
+    NSTableRowView,
+    ThemedComponent,
+    OutlineDisclosureInkProviding {
 
     /// The interactive cell currently asking this row to draw its hover/press plate.
     ///
@@ -697,6 +700,10 @@ public class ThemedTableRowView: NSTableRowView, ThemedComponent {
         guard let ground = selectionGround else { return .chrome }
         return Design.Text.on(ground)
     }
+
+    /// The marker shares the row's actual ink ladder, including System's native selection and
+    /// authored quiet selection surfaces that had to be held back to keep their contents legible.
+    public var outlineDisclosureInk: NSColor { contentInk.tertiary }
 
     /// The opaque colour a **selected** row ends up showing, or `nil` when it is not selected.
     ///
@@ -892,6 +899,17 @@ public enum RowControls {
     }
 }
 
+/// The ink an outline row gives the disclosure control AppKit inserts beside it.
+///
+/// The control is system-owned, but its ground is not: a selected sidebar row paints the
+/// theme's accent while an ordinary themed table row paints its quieter selection surface.
+/// AppKit cannot infer either authored ground, so the row that owns it supplies the matching
+/// semantic ink and `ThemedOutlineView` keeps the contained control up to date.
+@MainActor
+public protocol OutlineDisclosureInkProviding: AnyObject {
+    var outlineDisclosureInk: NSColor { get }
+}
+
 /// `ThemedTableView`'s rule again, one class up: `NSOutlineView` inherits `NSTableView`,
 /// so the two-line duplication here is what lets both keep their real superclass.
 public class ThemedOutlineView:
@@ -933,6 +951,9 @@ public class ThemedOutlineView:
 
     /// Nil draws the ordinary indented tree.
     public var flattenedIndentation: FlattenedIndentation?
+
+    private let disclosureEvents = AppEventObservations()
+    private let disclosureWindowEvents = AppEventObservations()
 
     /// Points of the style's own trailing padding handed back to the cells.
     ///
@@ -1020,12 +1041,12 @@ public class ThemedOutlineView:
 
             let markerFrame = frameOfOutlineCell(atRow: row)
             guard !markerFrame.isEmpty,
-                  let marker = rowView.subviews.first(where: {
-                      $0.identifier == NSOutlineView.disclosureButtonIdentifier
-                  })
+                  let marker = disclosureButton(in: rowView)
             else { return }
             slide(marker, toX: markerFrame.minX, width: markerFrame.width)
         }
+
+        refreshDisclosureInks()
     }
 
     private lazy var selectionStrength = ListSelectionStrength(self)
@@ -1046,6 +1067,26 @@ public class ThemedOutlineView:
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         backgroundColor = .clear
+        disclosureEvents.observe(
+            NSTableView.selectionDidChangeNotification,
+            object: self
+        ) { [weak self] in
+            self?.refreshDisclosureInks()
+        }
+        for name in [
+            NSOutlineView.itemDidExpandNotification,
+            NSOutlineView.itemDidCollapseNotification,
+        ] {
+            disclosureEvents.observe(name, object: self) { [weak self] in
+                self?.refreshDisclosureInks()
+            }
+        }
+        disclosureEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.refreshDisclosureInks()
+        }
+        disclosureEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
+            self?.refreshDisclosureInks()
+        }
     }
 
     @available(*, unavailable)
@@ -1057,11 +1098,19 @@ public class ThemedOutlineView:
         super.viewWillDraw()
         fitSoleColumnToWidth()
         selectionStrength.apply()
+        refreshDisclosureInks()
     }
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         selectionStrength.followWindow()
+        followWindowForDisclosureInk()
+        refreshDisclosureInks()
+    }
+
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshDisclosureInks()
     }
 
     public override func setFrameSize(_ newSize: NSSize) {
@@ -1072,6 +1121,93 @@ public class ThemedOutlineView:
     public override func layout() {
         super.layout()
         fitSoleColumnToWidth()
+        refreshDisclosureInks()
+    }
+
+    /// AppKit's disclosure is a direct child of the row rather than of the cell, so it never
+    /// receives the cell's `interiorBackgroundStyle` update that correctly re-inks the title
+    /// and trailing controls. `contentTintColor` does not affect the private disclosure cell's
+    /// pixels either. Under an authored theme, keep that button as the hit target but make it
+    /// transparent and draw the semantic mark immediately behind it; System keeps AppKit's
+    /// pixels untouched. Work stays bounded to the mounted viewport rows, and resolution happens
+    /// inside the button's appearance for adaptive themes and offscreen fixtures.
+    private func refreshDisclosureInks() {
+        enumerateAvailableRowViews { rowView, row in
+            guard let button = disclosureButton(in: rowView) else { return }
+            button.effectiveAppearance.performAsCurrentDrawingAppearance {
+                guard !AppThemePalette.current.isSystem else {
+                    button.isTransparent = false
+                    disclosureMarker(in: rowView)?.removeFromSuperview()
+                    return
+                }
+
+                let marker = disclosureMarker(in: rowView) ?? makeDisclosureMarker(
+                    in: rowView,
+                    behind: button
+                )
+                let expanded = item(atRow: row).map(isItemExpanded) ?? false
+                let identifier = expanded
+                    ? Self.expandedDisclosureMarkerIdentifier
+                    : Self.collapsedDisclosureMarkerIdentifier
+                if marker.identifier != identifier {
+                    marker.identifier = identifier
+                    marker.setSymbol(
+                        expanded ? "chevron.down" : "chevron.right",
+                        role: .chevron,
+                        weight: .semibold
+                    )
+                }
+                marker.frame = button.frame
+                marker.tint =
+                    (rowView as? OutlineDisclosureInkProviding)?.outlineDisclosureInk
+                    ?? Design.Text.tertiary
+                button.isTransparent = true
+            }
+            button.needsDisplay = true
+        }
+    }
+
+    private static let collapsedDisclosureMarkerIdentifier = NSUserInterfaceItemIdentifier(
+        "ThemedOutlineView.collapsedDisclosureMarker"
+    )
+    private static let expandedDisclosureMarkerIdentifier = NSUserInterfaceItemIdentifier(
+        "ThemedOutlineView.expandedDisclosureMarker"
+    )
+
+    private func disclosureMarker(in rowView: NSTableRowView) -> GlyphView? {
+        rowView.subviews.first(where: {
+            $0.identifier == Self.collapsedDisclosureMarkerIdentifier
+                || $0.identifier == Self.expandedDisclosureMarkerIdentifier
+        }) as? GlyphView
+    }
+
+    private func makeDisclosureMarker(
+        in rowView: NSTableRowView,
+        behind button: NSButton
+    ) -> GlyphView {
+        let marker = GlyphView()
+        marker.translatesAutoresizingMaskIntoConstraints = true
+        rowView.addSubview(marker, positioned: .below, relativeTo: button)
+        return marker
+    }
+
+    private func disclosureButton(in rowView: NSTableRowView) -> NSButton? {
+        rowView.subviews.first(where: {
+            $0.identifier == NSOutlineView.disclosureButtonIdentifier
+        }) as? NSButton
+    }
+
+    /// Selection strength follows the window rather than list focus. The row's fill changes on
+    /// those two transitions, so the system control sitting on that fill has to move with it.
+    private func followWindowForDisclosureInk() {
+        disclosureWindowEvents.removeAll()
+        guard let window else { return }
+
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            disclosureWindowEvents.observe(name, object: window) { [weak self] in
+                self?.refreshDisclosureInks()
+            }
+        }
     }
 
     /// See `ThemedTableRowDefaults.vendedView(for:recycling:)` — this is where a list that says

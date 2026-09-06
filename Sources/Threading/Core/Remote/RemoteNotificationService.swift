@@ -714,7 +714,8 @@ final class RemoteNotificationService {
             completion(.init(
                 accepted: result.accepted,
                 statusCode: result.statusCode,
-                providerTrace: result.apnsID
+                providerTrace: result.apnsID,
+                failureCode: result.failureCode
             ))
         }
     }
@@ -1140,6 +1141,9 @@ final class RemoteNotificationService {
                 if let apnsID = result.apnsID {
                     detail["apnsID"] = apnsID
                 }
+                if let failureCode = result.failureCode {
+                    detail["code"] = failureCode
+                }
                 var diagnosticFields: [RemoteDiagnosticField: String] = [
                     .trace: event.id,
                     .kind: event.kind.rawValue,
@@ -1150,6 +1154,9 @@ final class RemoteNotificationService {
                 ]
                 if let apnsID = result.apnsID {
                     diagnosticFields[.providerTrace] = apnsID
+                }
+                if let failureCode = result.failureCode {
+                    diagnosticFields[.code] = failureCode
                 }
                 MacRemoteDiagnostics.record(
                     result.accepted ? .pushProviderAccepted : .pushProviderRefused,
@@ -1305,6 +1312,19 @@ struct RemoteAPNSDeliveryResult: Equatable, Sendable {
     let statusCode: Int?
     let reason: String
     let apnsID: String?
+    let failureCode: String?
+
+    init(
+        statusCode: Int?,
+        reason: String,
+        apnsID: String?,
+        failureCode: String? = nil
+    ) {
+        self.statusCode = statusCode
+        self.reason = reason
+        self.apnsID = apnsID
+        self.failureCode = failureCode
+    }
 
     var accepted: Bool { statusCode == 200 }
 

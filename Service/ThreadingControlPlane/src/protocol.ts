@@ -1,5 +1,6 @@
 export const BOUNDS = {
   protocolVersion: 1,
+  notificationProtocolVersion: 1,
   maximumEnvelopeBytes: 384 * 1024,
   maximumIdentifierBytes: 256,
   maximumCredentialBytes: 4 * 1024,

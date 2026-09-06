@@ -205,6 +205,48 @@ enum MobileAgentTurnActivity {
     }
 }
 
+/// Minimal typed dispatch for the session socket.
+///
+/// Visit fields are decoded only for their own message because established run-plan frames use
+/// the same `revision` key for a scalar edition. Keeping this pure parser outside the main-actor
+/// connection also keeps keyed decoding out of the UI coordination boundary.
+private struct RemoteSessionServerEnvelope: Decodable {
+    let type: String
+    let session: RemoteSessionSummaryDTO?
+    let revision: RemoteCatalogueRevisionDTO?
+    let receiptCommitted: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case session
+        case revision
+        case receiptCommitted
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        if type == "sessionVisited" {
+            session = try container.decodeIfPresent(
+                RemoteSessionSummaryDTO.self,
+                forKey: .session
+            )
+            revision = try container.decodeIfPresent(
+                RemoteCatalogueRevisionDTO.self,
+                forKey: .revision
+            )
+            receiptCommitted = try container.decodeIfPresent(
+                Bool.self,
+                forKey: .receiptCommitted
+            )
+        } else {
+            session = nil
+            revision = nil
+            receiptCommitted = nil
+        }
+    }
+}
+
 @MainActor
 final class RemoteSessionConnection: ObservableObject {
     enum Phase: Equatable {
@@ -388,6 +430,14 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
     var onWorkspaceChanged: ((RemoteWorkspaceChangedDTO) -> Void)?
+    private var lastSessionVisit: RemoteSessionVisitedDTO?
+    /// The detail socket's authoritative post-visit row. Replaying the last frame lets a warm
+    /// pooled connection settle a dashboard even when SwiftUI installs its callback afterwards.
+    var onSessionVisited: ((RemoteSessionVisitedDTO) -> Void)? {
+        didSet {
+            if let lastSessionVisit { onSessionVisited?(lastSessionVisit) }
+        }
+    }
     /// Set only while the pool owns this connection. A transport that dies while no view is
     /// mounted removes itself from the pool instead of starting an invisible reconnect loop.
     var onPooledConnectionInvalidated: (() -> Void)?
@@ -1535,13 +1585,12 @@ final class RemoteSessionConnection: ObservableObject {
     }
 #endif
 
-    private struct Envelope: Decodable {
-        let type: String
-    }
-
     private func handle(_ text: String) {
         let data = Data(text.utf8)
-        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return }
+        guard let envelope = try? JSONDecoder().decode(
+            RemoteSessionServerEnvelope.self,
+            from: data
+        ) else { return }
         switch envelope.type {
         case "sessionStarting":
             guard phase == .connecting,
@@ -1631,6 +1680,18 @@ final class RemoteSessionConnection: ObservableObject {
             if warmTransportState == .parking {
                 warmTransportState = .parked
             }
+        case "sessionVisited":
+            guard let visitedSession = envelope.session,
+                  let revision = envelope.revision,
+                  let receiptCommitted = envelope.receiptCommitted,
+                  visitedSession.id == session.id else { return }
+            let visit = RemoteSessionVisitedDTO(
+                session: visitedSession,
+                revision: revision,
+                receiptCommitted: receiptCommitted
+            )
+            lastSessionVisit = visit
+            onSessionVisited?(visit)
         case "resize":
             if let resize = try? JSONDecoder().decode(RemoteResizeDTO.self, from: data) {
                 updateTerminalGrid(cols: resize.cols, rows: resize.rows)

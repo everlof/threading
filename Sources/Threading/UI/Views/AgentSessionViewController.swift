@@ -38,6 +38,7 @@ final class AgentSessionViewController: NSViewController {
 
     var activity: SessionActivity { activityTracker.activity }
     var runtimeSnapshot: SessionRuntimeSnapshot { activityTracker.runtimeSnapshot }
+    var hasCodexTurnBoundarySource: Bool { codexTranscriptURL != nil }
 
     /// Structured provider-owned checklist for the current terminal turn.
     private(set) var runProgress: RunProgress?

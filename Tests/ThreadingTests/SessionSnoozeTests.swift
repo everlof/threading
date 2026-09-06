@@ -15,8 +15,8 @@ final class SessionSnoozeTests: XCTestCase {
     private var center: SessionSnoozeCenter!
     private var events: NotificationCenter!
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
+        try await super.setUp()
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-snooze-tests-\(UUID().uuidString)")
         store = ProjectStore(stateManager: StateManager(appSupportDirectory: directory))
@@ -38,13 +38,13 @@ final class SessionSnoozeTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         center = nil
         store = nil
         events = nil
         try? FileManager.default.removeItem(at: directory)
         directory = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testSnoozePersistsBothDatesAndRunningSnapshotAcrossRelaunch() throws {

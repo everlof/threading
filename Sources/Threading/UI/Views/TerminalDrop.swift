@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingRemoteKit
 
 /// What a file dropped on a terminal becomes.
 ///
@@ -30,8 +31,7 @@ enum TerminalDrop {
     /// The text a drop inserts: every path escaped, separated by spaces, and one trailing
     /// space so a second drop or a typed word does not run into the first.
     static func text(for paths: [String]) -> String {
-        guard !paths.isEmpty else { return "" }
-        return paths.map(escaped).joined(separator: " ") + " "
+        RemoteTerminalPaste.filePathText(for: paths)
     }
 
     /// One path, escaped the way a shell reads it back as a single word.
@@ -41,22 +41,6 @@ enum TerminalDrop {
     /// a word ends — the set is deliberately generous, because a needless backslash before a
     /// bracket costs nothing and a missing one before a space loses the file.
     static func escaped(_ path: String) -> String {
-        var result = ""
-        result.reserveCapacity(path.count)
-
-        for character in path {
-            if character == "\\" || escapable.contains(character) {
-                result.append("\\")
-            }
-            result.append(character)
-        }
-        return result
+        RemoteTerminalPaste.escapedFilePath(path)
     }
-
-    /// Shell word-breaking and expansion characters. Newline and tab are in here for the same
-    /// reason as space: a file may legally contain them, and a terminal reads one as *enter*.
-    private static let escapable: Set<Character> = [
-        " ", "\t", "\n", "\"", "'", "`", "$", "&", "*", "?", ";", "|",
-        "<", ">", "(", ")", "[", "]", "{", "}", "!", "#", "~"
-    ]
 }

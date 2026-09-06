@@ -47,6 +47,9 @@ protocol AgentTerminalRuntimeSurface:
     var isVisible: Bool { get set }
     var remoteTerminalSurface: any RemoteTerminalSurface { get }
 
+    /// Whether this surface has a validated Codex rollout it can read for self-opened turns.
+    var hasCodexTurnBoundarySource: Bool { get }
+
     /// Whether this session's child lives in `threading-ptyd` rather than in this process.
     var isHostBacked: Bool { get }
 
@@ -74,6 +77,8 @@ extension AgentTerminalRuntimeSurface {
     /// Defaults so a surface with no pty of its own — and every test double — is unchanged by the
     /// background host existing.
     var isHostBacked: Bool { false }
+
+    var hasCodexTurnBoundarySource: Bool { false }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
 
@@ -467,6 +472,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         )
     }
 
+    func attention(
+        sessionID: SessionID,
+        participantID: String
+    ) -> SessionAttentionProjection {
+        readReceipts.attention(sessionID: sessionID, participantID: participantID)
+    }
+
     /// Why this session's activity last moved, where its runtime keeps that answer.
     ///
     /// Exposed for `AttentionAlertCenter`, so a journalled banner can name the input that
@@ -514,7 +526,11 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         if visibleSessionID == sessionID {
             viewers.insert(SessionReadReceiptStore.ownerParticipantID)
         }
-        _ = readReceipts.recordAttention(for: sessionID, seenBy: viewers)
+        let result = readReceipts.recordAttention(for: sessionID, seenBy: viewers)
+        NotificationCenter.default.post(SessionAttentionDidChange(
+            sessionID: sessionID,
+            persistence: result.persistence
+        ))
         NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
     }
 
@@ -524,15 +540,26 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// may still hold a notification posted by an earlier app process, while this process has no
     /// in-memory activity edge or receipt mutation with which to discover it. Removing by the
     /// session's stable request identifier is idempotent and closes that relaunch path.
-    func acknowledgeAttention(sessionID: SessionID, participantID: String) {
+    @discardableResult
+    func acknowledgeAttention(
+        sessionID: SessionID,
+        participantID: String
+    ) -> SessionReadReceiptMutationResult {
         if participantID == SessionReadReceiptStore.ownerParticipantID {
             ownerAlertWasAcknowledged(sessionID)
         }
-        guard readReceipts.acknowledge(
+        let result = readReceipts.acknowledge(
             sessionID: sessionID,
             participantID: participantID
-        ) else { return }
-        NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+        )
+        if result.didChangeProjection {
+            NotificationCenter.default.post(SessionAttentionDidChange(
+                sessionID: sessionID,
+                persistence: result.persistence
+            ))
+            NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+        }
+        return result
     }
 
     /// Applies a lifecycle report from an agent's own hooks to the session that raised it.
@@ -645,7 +672,9 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                 : nil
             tracker.noteTurnFinished(
                 backgroundWork: report.backgroundWork,
-                continuationGrace: continuationGrace
+                continuationGrace: continuationGrace,
+                allowsOutputInferredContinuation: continuationGrace != nil
+                    && !controller.hasCodexTurnBoundarySource
             )
             if continuationGrace != nil {
                 controller.noteCodexTurnFinishedForContinuationDetection()

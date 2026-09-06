@@ -243,7 +243,14 @@ private struct MobileRunPlanStepRow: View {
     private var reachedColor: Color { step.status == .pending ? theme.divider : theme.positive }
     private var passedColor: Color { step.status == .completed ? theme.positive : theme.divider }
 
-    private var pulses: Bool { step.status == .inProgress && !reduceMotion }
+    private var pulses: Bool {
+#if DEBUG
+        guard ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] == nil else {
+            return false
+        }
+#endif
+        return step.status == .inProgress && !reduceMotion
+    }
 
     private var titleColor: Color {
         step.status == .inProgress ? theme.label : theme.secondaryLabel

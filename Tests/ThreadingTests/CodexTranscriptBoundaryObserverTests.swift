@@ -7,9 +7,9 @@ import XCTest
 final class CodexTranscriptBoundaryObserverTests: XCTestCase {
 
     @MainActor
-    override func tearDown() {
+    override func tearDown() async throws {
         CodexTranscriptTurnBoundary.forgetAll()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     @MainActor

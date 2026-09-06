@@ -58,7 +58,7 @@ struct RemoteAttachmentThumbnailRequestState {
 final class RemoteAttachmentThumbnailStore: ObservableObject {
     /// Fetches one thumbnail through the client the store holds now. The client is nil only in
     /// tests that supply their own bytes.
-    typealias Fetch = (_ id: String, _ client: RemoteClient?) async throws -> Data
+    typealias Fetch = @Sendable (_ id: String, _ client: RemoteClient?) async throws -> Data
 
     static let capacity = 200
 

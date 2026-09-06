@@ -184,6 +184,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
 | The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
 | Session state (`dormant`/`idle`/`working`/`needsAttention`/`limitReached`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
+| Badge/read-receipt proof, catalogue snapshot/event continuity, direct visit settlement and bounded loader states | [`status-integrity.md`](docs/architecture/status-integrity.md) |
 | Routine turn-completion activity suppression, per-device preview consent, generations, retraction, and privacy-safe delivery diagnostics | [`notification-delivery.md`](docs/architecture/notification-delivery.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
 | The draft opt-in for a session-owned detached worktree, execution-directory routing, finish handshake, local merge and disposal | [`managed-workspaces.md`](docs/architecture/managed-workspaces.md) |

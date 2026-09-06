@@ -36,6 +36,7 @@
 #   scripts/profile_threading.sh remote-catalogue-stress [sessions]
 #   scripts/profile_threading.sh remote-conversation-stress [rows]
 #   scripts/profile_threading.sh ios-conversation-stress [seconds] [rows] [booted|simulator-UDID]
+#   scripts/profile_threading.sh ios-dashboard-scroll-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh cross-device-conversation-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [booted|simulator-UDID] [admission-delay-ms]
 #   scripts/profile_threading.sh ios-device-trace "Time Profiler" [seconds] <device-name-or-UDID> [process]
@@ -318,6 +319,103 @@ run_ios_conversation_stress() {
   capture_ios_conversation_fixture \
     conversation-scroll-stress "${seconds}" "${source_rows}" \
     "${simulator_udid}" "${app}" "${output_directory}"
+}
+
+capture_ios_dashboard_scroll_fixture() {
+  local seconds="$1"
+  local source_rows="$2"
+  local simulator_udid="$3"
+  local app="$4"
+  local output_directory="$5"
+  local stdout_path="${output_directory}/ios-dashboard-scroll.stdout.log"
+  local stderr_path="${output_directory}/ios-dashboard-scroll.stderr.log"
+  local sample_path="${output_directory}/iOS-dashboard-scroll.sample.txt"
+
+  echo "Launching iOS dashboard scroll fixture with ${source_rows} source rows…"
+  xcrun simctl install "${simulator_udid}" "${app}"
+  local data_container container_metrics
+  data_container="$(
+    xcrun simctl get_app_container "${simulator_udid}" codes.threading.mobile data
+  )"
+  container_metrics="${data_container}/tmp/threading-dashboard-performance.log"
+  rm -f "${container_metrics}"
+
+  local launch_result pid
+  launch_result="$(
+    SIMCTL_CHILD_THREADING_MOBILE_DEMO=sessions-scroll-stress \
+    SIMCTL_CHILD_THREADING_MOBILE_DASHBOARD_STRESS_ROWS="${source_rows}" \
+    SIMCTL_CHILD_THREADING_MOBILE_DASHBOARD_SCROLL_SECONDS="${seconds}" \
+      xcrun simctl launch \
+        --terminate-running-process \
+        --stdout="${stdout_path}" \
+        --stderr="${stderr_path}" \
+        "${simulator_udid}" \
+        codes.threading.mobile
+  )"
+  pid="${launch_result##*: }"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || {
+    echo "Could not resolve the dashboard fixture pid from: ${launch_result}" >&2
+    return 1
+  }
+
+  local poll_count=$(((seconds + 4) * 10))
+  local poll_index
+  for ((poll_index = 0; poll_index < poll_count; poll_index += 1)); do
+    if [[ -f "${container_metrics}" ]] \
+        && rg -q "THREADING_PERF ios-dashboard-scroll" "${container_metrics}"; then
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ ! -f "${container_metrics}" ]] \
+      || ! rg "THREADING_PERF ios-dashboard-scroll" "${container_metrics}"; then
+    echo "The dashboard scroll fixture produced no THREADING_PERF metric." >&2
+    return 1
+  fi
+  if ! rg -q \
+      "THREADING_PERF ios-dashboard-scroll source_rows=${source_rows} .*peak_visible_cells=([1-9]|[1-3][0-9]) final_top_index=0" \
+      "${container_metrics}"; then
+    echo "The dashboard fixture did not retain its viewport mount and return-to-top invariants." >&2
+    return 1
+  fi
+  cp "${container_metrics}" "${output_directory}/ios-dashboard-scroll.metrics.log"
+
+  launch_result="$(
+    SIMCTL_CHILD_THREADING_MOBILE_DEMO=sessions-scroll-stress \
+    SIMCTL_CHILD_THREADING_MOBILE_DASHBOARD_STRESS_ROWS="${source_rows}" \
+    SIMCTL_CHILD_THREADING_MOBILE_DASHBOARD_SCROLL_SECONDS="${seconds}" \
+      xcrun simctl launch \
+        --terminate-running-process \
+        "${simulator_udid}" \
+        codes.threading.mobile
+  )"
+  pid="${launch_result##*: }"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || {
+    echo "Could not resolve the profiled dashboard fixture pid from: ${launch_result}" >&2
+    return 1
+  }
+  echo "Sampling iOS dashboard scroll fixture pid ${pid} for ${seconds}s…"
+  /usr/bin/sample "${pid}" "${seconds}" 1 -file "${sample_path}"
+}
+
+run_ios_dashboard_scroll_stress() {
+  local output_directory="$1"
+  local seconds="$2"
+  local source_rows="$3"
+  local simulator_udid="$4"
+  [[ "${seconds}" =~ ^[0-9]+$ && "${seconds}" -gt 0 ]] || {
+    echo "iOS dashboard scroll stress seconds must be a positive integer." >&2
+    return 2
+  }
+  [[ "${source_rows}" =~ ^[0-9]+$ && "${source_rows}" -gt 0 ]] || {
+    echo "iOS dashboard scroll stress rows must be a positive integer." >&2
+    return 2
+  }
+
+  build_ios_simulator_app "${simulator_udid}" "${output_directory}" Debug -O
+  local app="${output_directory}/derived-data/Build/Products/Debug-iphonesimulator/ThreadingMobile.app"
+  capture_ios_dashboard_scroll_fixture \
+    "${seconds}" "${source_rows}" "${simulator_udid}" "${app}" "${output_directory}"
 }
 
 prepare_terminal_wire_mac_host() {
@@ -2471,6 +2569,15 @@ case "${command}" in
     simulator_udid="$(resolve_booted_ios_simulator "${4:-booted}")"
     output_directory="$(new_run_directory ios-conversation-stress)"
     run_ios_conversation_stress \
+      "${output_directory}" "${seconds}" "${rows}" "${simulator_udid}"
+    ;;
+
+  ios-dashboard-scroll-stress)
+    seconds="${2:-8}"
+    rows="${3:-1000}"
+    simulator_udid="$(resolve_booted_ios_simulator "${4:-booted}")"
+    output_directory="$(new_run_directory ios-dashboard-scroll-stress)"
+    run_ios_dashboard_scroll_stress \
       "${output_directory}" "${seconds}" "${rows}" "${simulator_udid}"
     ;;
 

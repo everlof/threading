@@ -59,6 +59,11 @@ if ! python3 "${script_directory}/check_failopen_defaults.py" "${repository_dire
   failed=1
 fi
 
+if ! python3 "${script_directory}/check_status_integrity.py" "${repository_directory}"; then
+  echo "architecture-boundary: badges, catalogue continuity and loaders must fail closed" >&2
+  failed=1
+fi
+
 # Run as scripts, not through `-m unittest`. This phase's interpreter is Xcode's own
 # (`Developer/usr/bin/python3`, 3.9.6), which is prepended to PATH ahead of any Homebrew
 # install, and `-m unittest` there rejects an *absolute* file path — "No module named
@@ -77,6 +82,11 @@ fi
 
 if ! python3 "${script_directory}/tests/test_failopen_defaults.py"; then
   echo "architecture-boundary: fail-open default checker regression tests failed" >&2
+  failed=1
+fi
+
+if ! python3 "${script_directory}/tests/test_status_integrity.py"; then
+  echo "architecture-boundary: status-integrity checker regression tests failed" >&2
   failed=1
 fi
 

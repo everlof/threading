@@ -23,7 +23,11 @@ import AppKit
 /// theme colours has to be distinguishable from the plain one AppKit builds, which draws the
 /// system's. This is the sidebar's louder answer to the question `ThemedTableRowView` answers
 /// everywhere else.
-final class SidebarHoverRowView: NSTableRowView, ThemedComponent, SidebarDensityAdopting {
+final class SidebarHoverRowView:
+    NSTableRowView,
+    ThemedComponent,
+    SidebarDensityAdopting,
+    OutlineDisclosureInkProviding {
 
     // MARK: - Properties
 
@@ -63,6 +67,18 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent, SidebarDensity
     override var isEmphasized: Bool {
         get { super.isEmphasized }
         set { super.isEmphasized = listSelectionStrength(insteadOf: newValue) }
+    }
+
+    /// AppKit inserts the disclosure beside the cell, so the cell's selected-background update
+    /// cannot reach it. A selected row measures against the exact full- or reduced-strength
+    /// accent it paints and uses the label tier of the project title it discloses; everywhere
+    /// else the marker remains ordinary quiet sidebar chrome.
+    var outlineDisclosureInk: NSColor {
+        guard isSelected else { return Design.Text.tertiary }
+        let ground = isEmphasized
+            ? Design.Surface.selectionFill
+            : Design.Surface.selectionFillUnemphasized
+        return Design.Text.on(ground).label
     }
 
     override func viewDidMoveToSuperview() {

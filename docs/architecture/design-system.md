@@ -1393,6 +1393,18 @@ The vocabulary these encode, which new work should follow:
   edge, so the last one meets the margin whatever symbol it draws. Those symbols differ in width
   — the terminal is wider than it is tall — and a pull sized to the point size, exact to a third
   of a point for the paperclip, would have put the terminal two points past the line.
+  The terminal key bar takes the third way, for controls that cannot trailing-align because two
+  of them stand side by side: it reads the control's optical inset per edge off SwiftUI's own
+  render of the symbol *inside the 44pt frame it ships in* (`MobileDesign.Size.symbolInsets`,
+  once per symbol, font and frame) and pulls each outermost target out by exactly that. In the
+  frame, because nothing shorter was exact: `keyboard.badge.ellipsis` hangs its badge nearly two
+  points past the box SwiftUI lays out, a render of the bare image cuts that overhang off, UIKit
+  lays the same symbol out 2.7pt wider still, and each of those stood the glyph one to three
+  points over the line. Its paperclip, `⌨︎…`, Direct/Compose and keyboard-toggle glyphs stand on
+  the same 8pt line the bottom row's cap plates start on; by frame, the paperclip had been eleven
+  points inboard of the cap under it.
+  `TerminalKeyboardDismissalTests.testBothRowsStandTheirOutermostMarksOnOneMargin` reads the
+  four positions off a drawn bar.
 
   **Only visible controls earn width.** A session row rests with one inline target reserved for
   its 12pt status mark, then expands the trailing slot before the `...` and archive actions fade

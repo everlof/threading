@@ -1,3 +1,4 @@
+import os
 import XCTest
 @testable import Threading
 
@@ -341,26 +342,33 @@ final class AppSettingDefinitionTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
 
-        var notificationCount = 0
-        var changedSettings: Set<String>?
+        let observed = OSAllocatedUnfairLock(
+            initialState: (count: 0, changedSettings: Set<String>?.none)
+        )
         let observer = NotificationCenter.default.addObserver(
             forName: AppSettingsDidChange.name,
             object: nil,
             queue: nil
         ) { notification in
-            notificationCount += 1
-            changedSettings = (notification.object as? AppSettingsDidChange)?.changedSettings
+            let changedSettings =
+                (notification.object as? AppSettingsDidChange)?.changedSettings
+            observed.withLock {
+                $0.count += 1
+                $0.changedSettings = changedSettings
+            }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
         settings.githubAppClientID = "truthful-client-id"
         XCTAssertEqual(settings.githubAppClientID, "truthful-client-id")
-        XCTAssertEqual(notificationCount, 1)
-        XCTAssertEqual(changedSettings, [AppSettingIdentity.githubAppClientID.rawValue])
+        var snapshot = observed.withLock { $0 }
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertEqual(snapshot.changedSettings, [AppSettingIdentity.githubAppClientID.rawValue])
 
         settings.githubAppClientID = String(repeating: "é", count: 513)
         XCTAssertEqual(settings.githubAppClientID, "truthful-client-id")
-        XCTAssertEqual(notificationCount, 1, "rejected writes must not announce a change")
+        snapshot = observed.withLock { $0 }
+        XCTAssertEqual(snapshot.count, 1, "rejected writes must not announce a change")
     }
 
     @MainActor

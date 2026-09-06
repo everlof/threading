@@ -372,6 +372,16 @@ final class SessionActivityTracker {
     /// the read returned to main.
     private var reportedTurnID: String?
 
+    /// A Codex finish may grant output one bounded chance to stand in for a rollout start when
+    /// no validated rollout is available. The grant exists only during that finish's continuation
+    /// grace and is consumed by the first inferred turn.
+    private var outputInferredContinuationAvailable = false
+
+    /// Distinguishes that granted continuation from an ordinary inferred turn after the runtime
+    /// has begun reporting. Its output may keep the quiet timer alive; unrelated reported output
+    /// may not revive inference.
+    private var outputInferredContinuationInFlight = false
+
     /// The last turn this tracker watched end, kept after its own `reportedTurnID` is cleared.
     ///
     /// The rollout's ending record and its `Stop` hook land milliseconds apart, so a background
@@ -610,6 +620,18 @@ final class SessionActivityTracker {
         guard bytesSinceQuiet >= ActivityDefaults.workingByteThreshold else { return nil }
         let acceptedByteCount = bytesSinceQuiet
 
+        // Sustaining an inferred turn and opening a new one are different permissions. The old
+        // combined gate made a one-time Codex continuation fallback permanent, so each idle TUI
+        // repaint opened and quietly completed another fake turn.
+        if turnInFlight, !turnWasDeclared,
+           !reportsOwnActivity || outputInferredContinuationInFlight {
+            bytesSinceQuiet = 0
+            awaitsUser = false
+            settle(.output)
+            restartQuietTimer()
+            return activity == .working ? acceptedByteCount : nil
+        }
+
         // An agent that reports its own turn *starts* has already said what it is doing, and its
         // output may not start or end one. It answers exactly one question the reports leave
         // open: a burst *inside* a flagged turn means the user answered where they stood and the
@@ -649,8 +671,10 @@ final class SessionActivityTracker {
         }
 
         if !turnInFlight {
+            let isGrantedReportedContinuation = outputInferredContinuationAvailable
             cancelPendingReportedTurnFinish()
             turnWasDeclared = false
+            outputInferredContinuationInFlight = isGrantedReportedContinuation
         }
         turnInFlight = true
         awaitsUser = false
@@ -663,26 +687,19 @@ final class SessionActivityTracker {
 
     /// Whether output is still allowed to open a turn.
     ///
-    /// Three cases, and the middle one is the bug this exists for:
+    /// Three cases:
     ///
     /// - **Nothing reports here.** Shells, Grok, OpenCode: the heuristic is all there is.
-    /// - **The runtime reports endings but has never declared a start.** Codex ends every turn
-    ///   with `Stop`, and in goal mode it *opens* the next one itself — an internal continuation
-    ///   that submits no user prompt, so `UserPromptSubmit` never fires and there is no other
-    ///   turn-start hook to register (`PreToolUse`, `PermissionRequest`, `PostToolUse`,
-    ///   `PreCompact`, `PostCompact`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`,
-    ///   `SubagentStart`, `SubagentStop`, `Stop`, `Interrupt` is the whole vocabulary). Latching
-    ///   on that first `Stop` left the session with no way back into `working` at all: the row
-    ///   read `idle` for over an hour while the pane painted "Working", which is what a phone
-    ///   showing a chat list of stopped-looking chats was reporting.
+    /// - **Codex reported an ending but has no rollout source.** The specific finish grants one
+    ///   output-inferred continuation for its bounded reconciliation window. The grant is not a
+    ///   permanent consequence of having reported some ending: a finished TUI can repaint its
+    ///   idle screen forever, and each repaint used to become another fake turn and notification.
     /// - **The runtime declared a start.** Believed outright, exactly as before.
     ///
-    /// The `reportsTurnEnds` half of the middle case is deliberate rather than redundant: a
-    /// runtime whose first report is a *notice* — Claude's idle-prompt `Notification` — has said
-    /// it is waiting, and admitting a redraw as work there would overwrite what it just said.
     private var outputMayOpenTurn: Bool {
         guard !reportsTurnStarts else { return false }
-        return reportsTurnEnds || !reportsOwnActivity
+        if !reportsOwnActivity { return true }
+        return outputInferredContinuationAvailable && pendingReportedTurnFinish != nil
     }
 
     /// Notes that the terminal was resized.
@@ -783,6 +800,7 @@ final class SessionActivityTracker {
             reportedTurnID = turnID
             // Declared now, so the quiet timer that was standing in for its ending stands down.
             turnWasDeclared = true
+            outputInferredContinuationInFlight = false
             quietTimer?.invalidate()
             quietTimer = nil
             settle(.turnStartedFromTranscript)
@@ -799,6 +817,7 @@ final class SessionActivityTracker {
         attentionEpisodeOpen = false
         turnInFlight = true
         turnWasDeclared = true
+        outputInferredContinuationInFlight = false
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
@@ -827,7 +846,8 @@ final class SessionActivityTracker {
     /// the agent is about to speak again. `BackgroundWorkLedger` draws both lines.
     func noteTurnFinished(
         backgroundWork inFlight: [BackgroundTask] = [],
-        continuationGrace: TimeInterval? = nil
+        continuationGrace: TimeInterval? = nil,
+        allowsOutputInferredContinuation: Bool = false
     ) {
         // A resumed CLI can already be mid-turn when Threading relaunches, so its start hook
         // belonged to the previous app process. In that case `Stop` is the first boundary the
@@ -841,7 +861,8 @@ final class SessionActivityTracker {
             backgroundWork: inFlight,
             cause: .turnFinished,
             continuationGrace: continuationGrace,
-            reconcileUnobservedContinuation: resumedWithoutObservedStart
+            reconcileUnobservedContinuation: resumedWithoutObservedStart,
+            allowsOutputInferredContinuation: allowsOutputInferredContinuation
         )
     }
 
@@ -942,9 +963,11 @@ final class SessionActivityTracker {
         backgroundWork inFlight: [BackgroundTask],
         cause: SessionActivityCause,
         continuationGrace: TimeInterval? = nil,
-        reconcileUnobservedContinuation: Bool = false
+        reconcileUnobservedContinuation: Bool = false,
+        allowsOutputInferredContinuation: Bool = false
     ) {
         cancelPendingReportedTurnFinish()
+        outputInferredContinuationInFlight = false
         reportsTurnEnds = true
         turnInFlight = false
         turnWasDeclared = false
@@ -969,13 +992,18 @@ final class SessionActivityTracker {
         // A Codex `Stop` is not always the user-visible end of work. Goal mode writes the next
         // `task_started` shortly afterwards but has no start hook, so publishing the ordinary
         // unread state here produces a one-frame amber badge before the rollout corrects it.
-        // Keep only a genuinely working, unpaused state provisional; every other state has a
-        // stronger reason to settle immediately, and callers opt in only for Codex terminals.
+        // Keep only a genuinely working, unpaused state provisional. An ending-only runtime
+        // without a rollout source gets the same bounded window even when no start was observed:
+        // that is the exact hole the one-shot output fallback fills. Every other idle state has
+        // a stronger reason to settle immediately, and callers opt in only for Codex terminals.
         if let continuationGrace,
            continuationGrace > 0,
-           (activity == .working || (reconcileUnobservedContinuation && activity == .idle)),
+           (activity == .working
+               || ((reconcileUnobservedContinuation || allowsOutputInferredContinuation)
+                   && activity == .idle)),
            !pausedOnOwnWork {
             pendingReportedTurnFinish = PendingReportedTurnFinish(cause: cause)
+            outputInferredContinuationAvailable = allowsOutputInferredContinuation
             pendingReportedTurnFinishTimer = Timer.scheduledTimer(
                 withTimeInterval: continuationGrace,
                 repeats: false
@@ -994,6 +1022,7 @@ final class SessionActivityTracker {
     private func commitPendingReportedTurnFinish() {
         guard let pendingReportedTurnFinish else { return }
         self.pendingReportedTurnFinish = nil
+        outputInferredContinuationAvailable = false
         pendingReportedTurnFinishTimer?.invalidate()
         pendingReportedTurnFinishTimer = nil
         commitReportedTurnFinish(cause: pendingReportedTurnFinish.cause)
@@ -1004,6 +1033,7 @@ final class SessionActivityTracker {
         pendingReportedTurnFinishTimer?.invalidate()
         pendingReportedTurnFinishTimer = nil
         pendingReportedTurnFinish = nil
+        outputInferredContinuationAvailable = false
     }
 
     /// The ordinary visible/off-screen finish rule, shared by immediate and deferred endings.
@@ -1131,6 +1161,7 @@ final class SessionActivityTracker {
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
+        outputInferredContinuationInFlight = false
         turnInFlight = false
         awaitsUser = false
         openAsks.removeAll()
@@ -1254,6 +1285,7 @@ final class SessionActivityTracker {
         isDormant = true
         turnInFlight = false
         turnWasDeclared = false
+        outputInferredContinuationInFlight = false
         reportedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
@@ -1311,6 +1343,7 @@ final class SessionActivityTracker {
         isDormant = false
         turnInFlight = false
         turnWasDeclared = false
+        outputInferredContinuationInFlight = false
         reportedTurnID = nil
         // A new process writes a new rollout with new turn ids; the old one's last turn is not
         // an answer about any of them.
@@ -1459,6 +1492,7 @@ final class SessionActivityTracker {
 
         guard turnInFlight else { return }
         turnInFlight = false
+        outputInferredContinuationInFlight = false
         reportedTurnID = nil
 
         // Finishing while the session is on screen needs no flag; the user saw it happen.

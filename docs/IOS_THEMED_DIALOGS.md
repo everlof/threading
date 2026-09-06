@@ -242,17 +242,28 @@ the gaps between plates swallowed touches that plainly pointed at a runtime, and
 was answered by nothing at all. `MobileIdentityPickerHitTest` divides each surface by arithmetic
 the way `MobileModelEffortPicker` divides its matrix: every point inside a group belongs to exactly
 one item, including the padding around what is drawn, so the touch target is the whole cell while
-the plate stays inset. One tap-first exclusive gesture per group gives tap and scrub their own
-recognition: `SpatialTapGesture` commits a stationary touch, while a `DragGesture` takes over once
-the finger travels and lights the item under it, firing a selection tick at each crossing before
-the lift commits with the matrix's impact. Asking a zero-distance drag to stand in for both made
-ordinary taps disappear on the shipping popover. While a finger is down the scrubbed item is the
-one that reads as chosen, and the committed login keeps its checkmark throughout, so the panel
-says both what is current and what lifting now would take.
-A point outside a surface resolves to nothing, so a drag that wanders off holds the last item it
-crossed rather than snapping to an edge the finger has left. Logins past what the cap can show
-scroll instead, and scroll only: a pan inside a scroll view belongs to the scroll view, and a
-surface that sometimes scrolls and sometimes scrubs would answer one drag two ways.
+the plate stays inset. **Each group is `mobileScrubSurface`, the one modifier the matrix stands
+on too, and it is one `DragGesture` with no minimum distance** — not a tap composed with a drag.
+Begun on touch-down, the drag lights and ticks the item under the finger before it moves, follows
+every sample with a selection tick at each crossing, and commits on the lift with the matrix's
+impact; a tap is the same gesture with no travel between the two. The split that looked cleaner
+shipped twice broken: a `SpatialTapGesture` given first refusal over the drag held the drag back
+across the runtime strip on the phone, and the login rows still carried a tap recognizer of their
+own for their scrolling shape, which as the child gesture took every stationary touch off the
+group and dropped it — on the simulator, a tap on a login left the popover open while a drag
+across the same rows committed and closed it. So "the zero-distance drag made taps disappear",
+the reading that led to the tap-first split, had named the wrong recognizer: it was the rows'
+own. Two recognizers on one surface are two arbitrations, and the surface has one question —
+which item is under the finger — so the modifier owns the whole surface and nothing inside it
+carries a gesture of its own. `MobileScrubTracker` is the rule beneath it, pure and pinned:
+one tick per crossing, nothing while the finger rests, a lift outside the surface takes the last
+item crossed rather than snapping to the edge the finger left, and a touch that never found an
+item commits nothing. While a finger is down the scrubbed item is the one that reads as chosen,
+and the committed login keeps its checkmark throughout, so the panel says both what is current
+and what lifting now would take. Logins past what the cap can show scroll instead, and scroll
+only — they stay off the modifier: a `DragGesture` inside a scroll view keeps the scroll from
+starting, and a surface that sometimes scrolls and sometimes scrubs would answer one drag two
+ways.
 
 ## Settings surfaces
 

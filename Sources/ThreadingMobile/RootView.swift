@@ -60,6 +60,8 @@ enum MobileDemoScene: Equatable {
     case review(showsAllFiles: Bool)
     /// One of the session-opening placeholders, which own their own ids.
     case sessionOpening(MobileSessionOpeningFixture)
+    /// One standalone project-terminal opening phase, held without starting any operation.
+    case projectTerminalOpening(MobileProjectTerminalOpeningFixture)
     case browserPrivate
     case attachments
     case universalSearch
@@ -157,10 +159,13 @@ extension MobileDemoScene {
         case "workspace": return .workspace
         default:
             // The chain tested this between `review` and `browser-private`. It reads the same
-            // here: no session-opening id is `browser-private`, `attachments` or `workspace`,
+            // here: no opening-fixture id is `browser-private`, `attachments` or `workspace`,
             // and none begins with `attachment-detail-`.
             if let opening = MobileSessionOpeningFixture(rawValue: id) {
                 return .sessionOpening(opening)
+            }
+            if let opening = MobileProjectTerminalOpeningFixture(rawValue: id) {
+                return .projectTerminalOpening(opening)
             }
             return .shippingRoot
         }
@@ -272,6 +277,10 @@ enum MobileDemoFixture: String, CaseIterable {
     case sessionOpeningResuming = "session-opening-resuming"
     case sessionOpeningFailed = "session-opening-failed"
 
+    /// The standalone terminal's single retained loader at both copy phases.
+    case projectTerminalOpeningStarting = "project-terminal-opening-starting"
+    case projectTerminalOpeningConnecting = "project-terminal-opening-connecting"
+
     /// The session workspace and what it opens.
     case workspace = "workspace"
     case browserPrivate = "browser-private"
@@ -302,6 +311,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case sessions = "sessions"
     case sessionsConnecting = "sessions-connecting"
     case sessionsOffline = "sessions-offline"
+    case sessionsScrollStress = "sessions-scroll-stress"
     case projectSessions = "project-sessions"
 
     /// The issue report, presented over whatever the root already shows.
@@ -425,7 +435,10 @@ struct RootView: View {
                     // usage, Workspace and session-actions menu rather than a fixture facsimile.
                     SessionDetailView(evidenceConnection: demoTerminal)
                 } else {
-                    TerminalRemoteView(connection: demoTerminal)
+                    TerminalRemoteView(
+                        connection: demoTerminal,
+                        openingLoaderOwner: .terminalSurface
+                    )
                         .navigationTitle(demoTerminalName)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { demoTerminalToolbar }
@@ -577,6 +590,10 @@ struct RootView: View {
         case .sessionOpening(let openingFixture):
             NavigationStack {
                 SessionDetailView(session: openingFixture.session)
+            }
+        case .projectTerminalOpening(let openingFixture):
+            NavigationStack {
+                ProjectTerminalDetailView(evidenceFixture: openingFixture)
             }
         case .browserPrivate:
             NavigationStack {

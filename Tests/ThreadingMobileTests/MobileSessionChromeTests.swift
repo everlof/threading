@@ -4,6 +4,7 @@ import ThreadingRemoteKit
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
+import os
 @testable import ThreadingMobile
 
 final class MobileSessionChromeTests: XCTestCase {
@@ -14,6 +15,11 @@ final class MobileSessionChromeTests: XCTestCase {
             agentKind: "claude",
             surface: .terminal,
             state: .idle,
+            attention: .init(
+                knowledge: .read,
+                completionGeneration: 3,
+                seenGeneration: 3
+            ),
             continuation: .delegated,
             projectName: "AnotherTerminal",
             projectID: "project-id",
@@ -24,7 +30,8 @@ final class MobileSessionChromeTests: XCTestCase {
         let response = RemoteMeDTO(
             serverProtocol: RemoteProtocolInfo(),
             share: Fixture.share,
-            sessions: [session]
+            sessions: [session],
+            revision: .init(epoch: "fixture", revision: 7)
         )
 
         let changed = try XCTUnwrap(
@@ -35,11 +42,19 @@ final class MobileSessionChromeTests: XCTestCase {
         )
 
         XCTAssertEqual(changed.surface, .conversation)
+        XCTAssertEqual(changed.attention?.knowledge, .read)
         XCTAssertEqual(changed.continuation, .delegated)
         XCTAssertEqual(changed.projectID, "project-id")
         XCTAssertEqual(changed.accountID, "work")
         XCTAssertEqual(changed.limitRecovery, .resumeOnBestAccount)
         XCTAssertEqual(changed.model, "claude-fable-5")
+        XCTAssertEqual(
+            response.replacingSessionSurface(
+                sessionID: Fixture.sessionID,
+                surface: .conversation
+            ).revision,
+            response.revision
+        )
     }
 
     func testRenamedCatalogueTitleReplacesTheStaleLiveDetailTitle() {
@@ -252,7 +267,10 @@ final class MobileSessionChromeTests: XCTestCase {
         )
 
         let screen = NavigationStack {
-            TerminalRemoteView(connection: connection)
+            TerminalRemoteView(
+                connection: connection,
+                openingLoaderOwner: .terminalSurface
+            )
                 .navigationBarTitleDisplayMode(.inline)
         }
             .environmentObject(model)
@@ -838,16 +856,16 @@ final class RemoteAttachmentGalleryTests: XCTestCase {
     /// link carries nothing for it.
     @MainActor
     func testAMacWithoutThumbnailsIsNeverAsked() async throws {
-        var fetches = 0
+        let fetches = OSAllocatedUnfairLock(initialState: 0)
         let store = RemoteAttachmentThumbnailStore(isOffered: false) { _, _ in
-            fetches += 1
+            fetches.withLock { $0 += 1 }
             return Data()
         }
 
         await store.load(id: "attachment-1", hasThumbnail: true)
 
         XCTAssertNil(store.image(for: "attachment-1"))
-        XCTAssertEqual(fetches, 0)
+        XCTAssertEqual(fetches.withLock { $0 }, 0)
     }
 }
 

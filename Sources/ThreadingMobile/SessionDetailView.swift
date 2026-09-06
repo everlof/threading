@@ -318,6 +318,7 @@ struct SessionDetailView: View {
                     TerminalRemoteView(
                         connection: connection,
                         installsPrincipalTitle: installsPrincipalTitle,
+                        openingLoaderOwner: .terminalSurface,
                         isShowingFind: $isShowingTerminalFind
                     )
                 }
@@ -902,6 +903,9 @@ struct SessionDetailView: View {
                 warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
                     workspaceActivity?.receive(event)
                 }
+                warmed.onSessionVisited = { [weak model] visit in
+                    model?.acceptSessionVisit(visit, from: hostID)
+                }
                 connection = warmed
                 return
             }
@@ -921,6 +925,9 @@ struct SessionDetailView: View {
             )
             made.onWorkspaceChanged = { [weak workspaceActivity] event in
                 workspaceActivity?.receive(event)
+            }
+            made.onSessionVisited = { [weak model] visit in
+                model?.acceptSessionVisit(visit, from: hostID)
             }
             connection = made
             made.connect()
@@ -1287,11 +1294,23 @@ private struct RemoteNavigationTitle: View {
     }
 }
 
+/// Which surface owns the loader before a terminal first becomes live.
+///
+/// A session terminal owns its whole opening presentation. A standalone project terminal has a
+/// bounded preparation step before its socket exists, so its containing screen retains one loader
+/// across preparation and hydration. Naming that handoff keeps a second loader from being mounted
+/// accidentally; reconnect presentation remains terminal-owned after the cold open settles.
+enum TerminalOpeningLoaderOwner: Equatable {
+    case terminalSurface
+    case containingScreen
+}
+
 struct TerminalRemoteView: View {
     @ObservedObject var connection: RemoteSessionConnection
     /// False only while the draft that started this session still shows its own title over
     /// this screen; see `SessionDetailView.installsPrincipalTitle`.
     var installsPrincipalTitle = true
+    private let openingLoaderOwner: TerminalOpeningLoaderOwner
     @Binding private var isShowingFind: Bool
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
@@ -1334,10 +1353,13 @@ struct TerminalRemoteView: View {
     init(
         connection: RemoteSessionConnection,
         installsPrincipalTitle: Bool = true,
+        // Intentionally no default: every new surface must choose the one cold-loader owner.
+        openingLoaderOwner: TerminalOpeningLoaderOwner,
         isShowingFind: Binding<Bool> = .constant(false)
     ) {
         self.connection = connection
         self.installsPrincipalTitle = installsPrincipalTitle
+        self.openingLoaderOwner = openingLoaderOwner
         _isShowingFind = isShowingFind
     }
 
@@ -1685,14 +1707,16 @@ struct TerminalRemoteView: View {
                             .opacity(SessionDetailMetrics.reconnectDim)
                             .clipped()
                     }
-                    if showsLoader {
+                    if showsLoader, openingLoaderOwner == .terminalSurface {
                         MobileLoadingPlaceholder(openingStatus, standsOnContent: true)
                     }
                 }
                 .background(terminalBackground)
             case .loader:
-                MobileLoadingPlaceholder(openingStatus)
-                    .background(terminalBackground)
+                if openingLoaderOwner == .terminalSurface {
+                    MobileLoadingPlaceholder(openingStatus)
+                        .background(terminalBackground)
+                }
             }
         }
         // Hydration releases buffered replay and the presentation lock in the same main-actor

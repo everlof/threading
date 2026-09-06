@@ -340,6 +340,23 @@ final class RemoteTurnNotificationDeliveryCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.retractions.map(\.value.eventID), ["event-1"])
     }
 
+    func testBrokerRejectionKeepsHTTPStatusAndMachineCodeInDiagnostics() {
+        let harness = Harness(window: 0)
+        harness.completesPushesImmediately = false
+        harness.coordinator.completed(harness.completion())
+
+        harness.finishPendingPushes(with: .init(
+            accepted: false,
+            statusCode: 400,
+            providerTrace: nil,
+            failureCode: "invalidRequest"
+        ))
+
+        let refused = harness.diagnostics.last { $0.fields[.result] == "refused" }
+        XCTAssertEqual(refused?.fields[.status], "400")
+        XCTAssertEqual(refused?.fields[.code], "invalidRequest")
+    }
+
     func testDiagnosticBoundaryContainsNoSnapshotOrNotificationBody() {
         let secret = "prompt assistant token device-token preview-body"
         let harness = Harness(window: 0)
@@ -426,14 +443,15 @@ private final class Harness {
         activity = RemoteNotificationParticipantActivitySource { window }
     }
 
-    func finishPendingPushes() {
-        let completions = pendingPushCompletions
-        pendingPushCompletions.removeAll()
-        let result = RemoteTurnNotificationPushResult(
+    func finishPendingPushes(
+        with result: RemoteTurnNotificationPushResult = .init(
             accepted: true,
             statusCode: 200,
             providerTrace: "apns-1"
         )
+    ) {
+        let completions = pendingPushCompletions
+        pendingPushCompletions.removeAll()
         completions.forEach { $0(result) }
     }
 

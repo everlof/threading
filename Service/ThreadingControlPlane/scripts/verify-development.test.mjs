@@ -12,11 +12,12 @@ test("verifies isolated routes, credential enforcement, and the Access redirect"
       requests.push({ path: url.pathname, redirect: init.redirect });
       switch (url.pathname) {
         case "/ready":
-          return json({ status: "ready", rendezvousProtocol: 1 }, 200);
+          return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 1 }, 200);
         case "/v1/auth/apple":
         case "/v1/reports":
           return json({ error: { code: "notFound", message: "Endpoint was not found" } }, 404);
         case "/v1/push":
+        case "/v1/push/retractions":
           return json({ error: { code: "unauthorized", message: "Credential required" } }, 401);
         case "/v1/auth/development/start":
           return json({
@@ -43,6 +44,7 @@ test("verifies isolated routes, credential enforcement, and the Access redirect"
     "/v1/auth/apple",
     "/v1/reports",
     "/v1/push",
+    "/v1/push/retractions",
     "/v1/auth/development/start",
     "/v1/auth/development/authorize",
   ]);
@@ -57,11 +59,12 @@ test("rejects an authorization callback that bypasses Access", async () => {
         const url = new URL(input);
         switch (url.pathname) {
           case "/ready":
-            return json({ status: "ready", rendezvousProtocol: 1 }, 200);
+            return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 1 }, 200);
           case "/v1/auth/apple":
           case "/v1/reports":
             return json({}, 404);
           case "/v1/push":
+          case "/v1/push/retractions":
             return json({}, 401);
           case "/v1/auth/development/start":
             return json({
@@ -79,6 +82,47 @@ test("rejects an authorization callback that bypasses Access", async () => {
       reportSuccess: () => {},
     }),
     /browser authorization path is not protected/u,
+  );
+});
+
+test("rejects a deployment without the notification protocol or retraction route", async () => {
+  await assert.rejects(
+    verifyDevelopment({
+      attempts: 1,
+      fetchImplementation: async (input) => {
+        const url = new URL(input);
+        if (url.pathname === "/ready") {
+          return json({ status: "ready", rendezvousProtocol: 1 }, 200);
+        }
+        throw new Error(`unexpected request ${url.pathname}`);
+      },
+      reportSuccess: () => {},
+    }),
+    /development verification failed after 1 attempts/u,
+  );
+
+  await assert.rejects(
+    verifyDevelopment({
+      attempts: 1,
+      fetchImplementation: async (input) => {
+        const url = new URL(input);
+        switch (url.pathname) {
+          case "/ready":
+            return json({ status: "ready", rendezvousProtocol: 1, notificationProtocol: 1 }, 200);
+          case "/v1/auth/apple":
+          case "/v1/reports":
+            return json({}, 404);
+          case "/v1/push":
+            return json({}, 401);
+          case "/v1/push/retractions":
+            return json({}, 404);
+          default:
+            throw new Error(`unexpected request ${url.pathname}`);
+        }
+      },
+      reportSuccess: () => {},
+    }),
+    /development verification failed after 1 attempts/u,
   );
 });
 

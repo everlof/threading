@@ -98,7 +98,10 @@ final class AgentStreamTransportTests: XCTestCase {
         let pipes = TransportPipes()
         let delivered = expectation(description: "no line after detach")
         delivered.isInverted = true
-        let transport = makeTransport(pipes: pipes) { _ in delivered.fulfill() }
+        let transport = makeTransport(
+            pipes: pipes,
+            onLine: { _ in delivered.fulfill() }
+        )
 
         transport.start()
         try pipes.output.fileHandleForWriting.write(contentsOf: Data("late\n".utf8))
