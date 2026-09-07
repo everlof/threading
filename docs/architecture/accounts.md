@@ -1054,6 +1054,12 @@ easy to read as shading or a rendering accident, especially on a six-point bar. 
 written key makes the two linear positions intentional and remains valid over historical progress
 styles, whose authored trough is left untouched.
 
+The clock tick has an opaque white core and black outline. A label colour selected for the
+popover ground cannot contrast with a white usage fill; the paired inks keep the tick visible
+on either side of the fill edge and over segmented materials without guessing one background.
+The outline expands its footprint without moving its time coordinate. Popover render evidence
+covers early time inside a white fill, empty track, and a coincident fill edge.
+
 **Three things the line does not touch**: the fill's length, the printed percentage, and
 consumption past the line — which still draws at full strength, because that spend really
 happened. What moves is the tint, computed against the effective bound. A row reading 47% under a

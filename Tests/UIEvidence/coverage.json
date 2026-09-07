@@ -1059,9 +1059,9 @@
       "priority": "important",
       "title": "Single-account usage popover",
       "description": "The shipping single-account usage controller scrolled into a provider-sized model-window inventory, with its identity and freshness fixed around a bounded virtual viewport.",
-      "states": ["Provider model windows", "Deep virtual scroll", "Fixed identity and freshness"],
+      "states": ["Provider model windows", "Deep virtual scroll", "Fixed identity and freshness", "Clock over fill", "Clock over empty track", "Clock at fill edge"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Pure", "Cyberpunk"],
         "appearances": ["Light", "Dark"],
         "sizes": ["264×400-point popover"]
       },

@@ -66,6 +66,7 @@ final class UsageBarView: NSView {
     /// has to index into is a gauge whose tests break on layering.
     var drawnFillWidth: CGFloat { fillView.isHidden ? 0 : fillView.frame.width }
     var drawnCapMarkFrame: NSRect? { capMarkView.isHidden ? nil : capMarkView.frame }
+    var drawnTimeMarkFrame: NSRect? { markView.isHidden ? nil : markView.frame }
 
     /// How far the fill's colour has crossfaded, 0 = `tintFrom` → 1 = `tint`. Held as a phase
     /// rather than a blended colour because a theme colour resolves against an appearance, and
@@ -349,7 +350,7 @@ final class UsageBarView: NSView {
 
     private func layoutTimeMark() {
         if let timeMark {
-            let markWidth = Design.UsageBar.timeMarkWidth
+            let markWidth = min(Design.UsageBar.outlinedTimeMarkWidth, bounds.width)
             let markCentre = bounds.width * min(max(timeMark, 0), 1)
             let verticalInset: CGFloat = usesHistoricalProgress ? 2 : 0
             markView.frame = NSRect(
@@ -360,12 +361,10 @@ final class UsageBarView: NSView {
             )
             markView.layer?.cornerCurve = .continuous
             markView.layer?.cornerRadius = usesHistoricalProgress ? 0 : markWidth / 2
-            // labelColor adapts to light/dark, so the mark reads against both the track and any
-            // tint fill it overlaps.
-            markView.applyLayerBackground(
-                Design.Text.label.withAlphaComponent(UsageBarDefaults.timeMarkAlpha)
-            )
-            markView.isHidden = false
+            markView.applyLayerBackground(Design.UsageBar.timeMarkInk)
+            markView.applyLayerBorder(Design.UsageBar.timeMarkOutline)
+            markView.layer?.borderWidth = Design.UsageBar.timeMarkOutlineWidth
+            markView.isHidden = bounds.isEmpty
         } else {
             markView.isHidden = true
         }
@@ -416,5 +415,4 @@ final class UsageBarView: NSView {
 
 enum UsageBarDefaults {
     static let height = Design.UsageBar.height
-    static let timeMarkAlpha: CGFloat = 0.85
 }

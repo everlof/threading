@@ -99,6 +99,23 @@ final class UsageBarTravelTests: XCTestCase {
 
     // MARK: - Landing
 
+    func testOutlinedClockKeepsItsCoordinateAndFitsAtBothEnds() throws {
+        let bar = hostedBar(startingAt: 0.8)
+        for position in [0.0, 0.04, 0.5, 1.0] {
+            bar.timeMark = position
+            bar.layoutSubtreeIfNeeded()
+            let mark = try XCTUnwrap(bar.drawnTimeMarkFrame)
+            XCTAssertGreaterThanOrEqual(mark.minX, 0)
+            XCTAssertLessThanOrEqual(mark.maxX, bar.bounds.width)
+            if position > 0, position < 1 {
+                XCTAssertEqual(mark.midX, bar.bounds.width * position, accuracy: 0.001)
+            }
+        }
+        bar.timeMark = nil
+        bar.layoutSubtreeIfNeeded()
+        XCTAssertNil(bar.drawnTimeMarkFrame)
+    }
+
     func testReduceMotionLandsTheFillWithNoTravel() {
         Design.Motion.reduceMotionOverrideForTesting = true
         let bar = hostedBar(startingAt: 0.2)

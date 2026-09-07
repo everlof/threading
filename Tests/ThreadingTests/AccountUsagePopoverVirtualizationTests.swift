@@ -85,6 +85,8 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
         let directory = URL(fileURLWithPath: directoryPath, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
+        try renderTimeMarkers(to: directory)
+
         let previousTheme = AppThemeLibrary.current
         AppThemeLibrary.apply(.system)
         defer { AppThemeLibrary.apply(previousTheme) }
@@ -127,6 +129,76 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
                 to: directory.appendingPathComponent(filename)
             )
         }
+    }
+
+    private func renderTimeMarkers(to directory: URL) throws {
+        let previousTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previousTheme) }
+        let themes = AppThemeLibrary.stock.filter {
+            ["system", "pure", "cyberpunk"].contains($0.id.rawValue)
+        }
+        XCTAssertEqual(themes.count, 3)
+        for theme in themes {
+            AppThemeLibrary.apply(theme)
+            for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                var data: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    let windows = zip([0.13, 0.8, 0.0, 0.5], [0.04, 0.5, 0.6, 0.5]).enumerated().map {
+                        index, pair in
+                        AccountUsage.Window(
+                            id: "clock-\(index)",
+                            label: ["Weekly", "Filled", "Empty", "At fill edge"][index],
+                            fraction: pair.0,
+                            resetsAt: now.addingTimeInterval((1 - pair.1) * 604_800),
+                            windowDuration: 604_800
+                        )
+                    }
+                    let reading = AccountUsageReading.current(AccountUsage(
+                        windows: windows, planLabel: "Pro", observedAt: now, source: .api
+                    ))
+                    let controller = AccountUsagePopoverViewController(
+                        account: fixtureAccount, readingProvider: { _ in reading },
+                        limitsProvider: { _ in [] }, nowProvider: { self.now }
+                    )
+                    let host = laidOut(controller.view, width: UsagePopoverDefaults.width, height: 290)
+                    let window = NSWindow(contentRect: host.bounds, styleMask: .borderless,
+                                          backing: .buffered, defer: false)
+                    window.contentView = host
+                    host.appearance = appearance
+                    controller.view.appearance = appearance
+                    AppThemeRefresh.repaint(host)
+                    host.layoutSubtreeIfNeeded()
+                    data = png(of: host)
+                    XCTAssertEqual(assertTimeMarkerContrast(in: host), 4)
+                    XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+                }
+                try XCTUnwrap(data).write(to: directory.appendingPathComponent(
+                    "account-usage-window-popover-clock-\(theme.id.rawValue)-\(name).png"
+                ))
+            }
+        }
+    }
+
+    private func assertTimeMarkerContrast(in view: NSView) -> Int {
+        var count = 0
+        if let bar = view as? UsageBarView,
+           let frame = bar.drawnTimeMarkFrame,
+           let bitmap = bar.bitmapImageRepForCachingDisplay(in: bar.bounds) {
+            count += 1
+            bar.cacheDisplay(in: bar.bounds, to: bitmap)
+            let scale = CGFloat(bitmap.pixelsWide) / bar.bounds.width
+            let y = bitmap.pixelsHigh / 2
+            if let core = bitmap.colorAt(x: Int(frame.midX * scale), y: y),
+               let outline = bitmap.colorAt(x: Int((frame.minX + 0.5) * scale), y: y) {
+                XCTAssertGreaterThan(ThemeContrast.ratio(core, outline), 7,
+                                     "The clock must retain opposite ink over fill and track")
+            } else {
+                XCTFail("Missing clock marker pixels")
+            }
+        }
+        for child in view.subviews { count += assertTimeMarkerContrast(in: child) }
+        return count
     }
 
     private var fixtureAccount: AgentAccount {
