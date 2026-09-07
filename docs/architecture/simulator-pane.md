@@ -81,32 +81,6 @@ invalidates the session, so a stream stop cannot race an in-flight decode or str
 frame context. The app admits at most four live helpers across all sessions, while the public
 one-frame-per-second screenshot fallback remains available for unsupported Xcode versions.
 
-**The encoder must emit every frame before it is handed the next one.** The helper keeps exactly
-one frame inside the encoder and captures again only when that frame's callback has returned.
-VideoToolbox's hardware H.264 encoder defaults to frame reordering for the Main profile and
-reports a frame delay of three, so left at its defaults it emits the IDR frame at once and then
-holds the second frame waiting for lookahead that never comes. That shipped: every direct stream
-delivered one picture and then idled, the pane kept showing it under a green "Live H.264" label,
-and every process involved sat at zero CPU. The stream restarted around each install, launch and
-screenshot, which advanced the picture by one frame and made it look intermittent. The encoder
-session now disables frame reordering, sets a maximum frame delay of zero, and reads both back
-after preparation; a session that would still hold frames is refused so codec negotiation falls
-through to JPEG rather than adopting an encoder the one-frame-in-flight helper cannot drive.
-`SimulatorFrameEncoderTests` drives the shipped encoder the way the helper does, one frame in
-flight, and fails on the frame that never comes back.
-
-**A visible stream that goes quiet is a failure, not a still screen.** The helper captures at a
-fixed rate whenever the tab is visible, so silence means the helper, its encoder or the
-framebuffer stopped. The ready state used to rest on the handshake alone, which is why a helper
-hanging after one frame kept the live label indefinitely. `SimulatorFrameLivenessMonitor` gives a
-visible stream four seconds to deliver a frame, re-armed by every decoded frame and disarmed by
-hiding the tab; a stall ends the stream through the same path as a lost helper, so the pane shows
-the reason, falls back to public screenshots and offers retry. The compatibility probe, the
-opt-in live integration test and the release matrix all require two decoded frames in sequence
-order rather than one, because one is exactly what a frozen stream produces. The client also
-counts the frames it decoded itself and logs that beside the helper's own statistics, which only
-arrive every few seconds of sent frames and never for a stream that froze early.
-
 ## Device and session ownership
 
 One simulator tab has one stable session-owned identity and one selected UDID. The initial product
@@ -150,18 +124,26 @@ agents to prefer `simulator_prepare` over launching Simulator/Device Hub directl
 group removes both the tools and the preference guidance from discovery.
 
 Read-only screenshots are available while the built-in group is enabled and the session's exact
-lease is alive. Device HID requires one explicit user decision per exact device per app launch;
-both approval and denial are remembered so repeated calls do not pressure the user. Pointer and
-keyboard interaction in the pane and all agent input tools converge on that decision and the same
-live session. The screen component distinguishes a ready input route from a recoverable preview:
-a click on a fallback frame is allowed to express the intended tap and request one direct-stream
-reconnection, but the tap is held until the matching direct session exists and consent succeeds.
-It is never replayed through global macOS coordinates or sent over screenshot fallback. A denied
-gesture remains denied without another sheet; the ordinary Control button is the only route that
-deliberately clears that decision and asks again, and enabling control there spends no device tap.
-Input otherwise fails closed whenever the lease, consent, device identity or stream generation no
-longer matches. This control/recovery truth remains host-owned even though its button, status and
-screen invitation use shared Design components.
+lease is alive. Device HID requires one explicit user decision per exact device. **Approval is
+durable across launches** — a granted UDID stays controllable without another sheet the next time
+the app runs, because re-asking every relaunch was the app's most-repeated permission prompt and
+taught nothing new each time; the grants are a bounded list of UDIDs in `PreferenceStore` (so a
+hosted test writes a scratch suite, not the developer's own preferences). A **denial is
+deliberately not persisted**: it is remembered only for the current launch so repeated gestures do
+not turn the sheet into pressure, while a fresh launch asks cleanly rather than a stray dismissal
+silencing the device forever. Pointer and keyboard interaction in the pane and all agent input
+tools converge on that decision and the same live session. The screen component distinguishes a
+ready input route from a recoverable preview: a click on a fallback frame is allowed to express the
+intended tap and request one direct-stream reconnection, but the tap is held until the matching
+direct session exists and consent succeeds. It is never replayed through global macOS coordinates
+or sent over screenshot fallback. A denied gesture remains denied without another sheet; the
+ordinary Control button is the only route that deliberately clears that decision — forgetting the
+durable grant with it — and asks again, and enabling control there spends no device tap. Becoming
+visible after the stream dropped while the pane was hidden reconnects the direct transport up
+front, so a returning pane taps on the first click instead of spending it to reconnect. Input
+otherwise fails closed whenever the lease, consent, device identity or stream generation no longer
+matches. This control/recovery truth remains host-owned even though its button, status and screen
+invitation use shared Design components.
 
 ## Presentation and customization boundary
 

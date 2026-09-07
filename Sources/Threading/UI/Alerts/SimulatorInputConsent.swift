@@ -21,16 +21,40 @@ extension SimulatorInputAuthorizing {
     func resetDecision(for deviceID: SimulatorDeviceID) {}
 }
 
-/// One explicit decision for one exact adopted device during this app launch.
+/// One explicit decision for one exact adopted device, an **approval remembered across launches**.
 ///
-/// Both approval and denial are remembered. Repeating a denied gesture must not turn the sheet
-/// into pressure, and approval must never float from one UDID to another after the pane switches.
+/// Approving control for a device is a durable user choice: once granted, that exact device stays
+/// controllable without another sheet on the next launch, because re-asking every relaunch was
+/// the app's most-repeated permission prompt and taught nothing new each time. A **denial** is
+/// deliberately *not* persisted — it is remembered only for the current launch so repeated
+/// gestures do not turn the sheet into pressure, and a fresh launch asks cleanly rather than a
+/// stray dismissal silencing the device forever. Approval never floats from one UDID to another
+/// after the pane switches.
 @MainActor
 final class SimulatorInputConsentController: SimulatorInputAuthorizing {
     static let shared = SimulatorInputConsentController()
 
+    private enum Storage {
+        /// The UDIDs the user has granted control, most-recent last.
+        static let grantedDeviceIDsKey = "codes.threading.simulator.controlGrantedDeviceIDs"
+        /// A device the user has not touched in a long time is not worth remembering forever;
+        /// the list is bounded so a machine that churns simulators does not grow it without end.
+        static let maximumRememberedGrants = 64
+    }
+
+    private let store: UserDefaults
     private var decisions: [SimulatorDeviceID: Bool] = [:]
     private var pending: [SimulatorDeviceID: [@MainActor (Bool) -> Void]] = [:]
+
+    /// `store` defaults to `PreferenceStore.shared` so a hosted test writes a scratch suite rather
+    /// than the developer's own preferences, exactly as every other stored user choice does.
+    init(store: UserDefaults = PreferenceStore.shared) {
+        self.store = store
+        for rawValue in persistedGrants() {
+            guard let deviceID = SimulatorDeviceID(rawValue) else { continue }
+            decisions[deviceID] = true
+        }
+    }
 
     func decision(for deviceID: SimulatorDeviceID) -> Bool? {
         decisions[deviceID]
@@ -41,6 +65,7 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
         // what keeps every pending input request converged on one decision.
         guard pending[deviceID] == nil else { return }
         decisions.removeValue(forKey: deviceID)
+        forgetGrant(deviceID)
     }
 
     func authorize(
@@ -64,7 +89,7 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
             message: L10n.string(
                 "Threading and this session's agent will be able to tap, swipe, type, and press "
                     + "buttons on this exact device while it is adopted in the right panel. "
-                    + "Switching devices or closing the pane stops the connection."
+                    + "Threading remembers this choice for this device."
             ),
             confirmTitle: L10n.string("Allow Control"),
             style: .warning
@@ -72,8 +97,33 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
         ConfirmationAlert.ask(request, in: window) { [weak self] approved in
             guard let self else { return }
             decisions[device.id] = approved
+            // Only an approval is durable. A denial stays in memory for this launch so the sheet
+            // does not reappear on the next gesture, but a relaunch asks again from a clean slate.
+            if approved { rememberGrant(device.id) }
             let completions = pending.removeValue(forKey: device.id) ?? []
             completions.forEach { $0(approved) }
         }
+    }
+
+    // MARK: - Persistence
+
+    private func persistedGrants() -> [String] {
+        store.stringArray(forKey: Storage.grantedDeviceIDsKey) ?? []
+    }
+
+    private func rememberGrant(_ deviceID: SimulatorDeviceID) {
+        var grants = persistedGrants().filter { $0 != deviceID.rawValue }
+        grants.append(deviceID.rawValue)
+        if grants.count > Storage.maximumRememberedGrants {
+            grants.removeFirst(grants.count - Storage.maximumRememberedGrants)
+        }
+        store.set(grants, forKey: Storage.grantedDeviceIDsKey)
+    }
+
+    private func forgetGrant(_ deviceID: SimulatorDeviceID) {
+        let grants = persistedGrants()
+        let remaining = grants.filter { $0 != deviceID.rawValue }
+        guard remaining.count != grants.count else { return }
+        store.set(remaining, forKey: Storage.grantedDeviceIDsKey)
     }
 }

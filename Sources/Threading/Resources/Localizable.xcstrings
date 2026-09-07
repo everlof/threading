@@ -47851,13 +47851,13 @@
         }
       }
     },
-    "Threading and this session's agent will be able to tap, swipe, type, and press buttons on this exact device while it is adopted in the right panel. Switching devices or closing the pane stops the connection." : {
+    "Threading and this session's agent will be able to tap, swipe, type, and press buttons on this exact device while it is adopted in the right panel. Threading remembers this choice for this device." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Threading och den här sessionens agent kommer att kunna trycka, svepa, skriva och använda knappar på just den här enheten medan den är ansluten i den högra panelen. Anslutningen stoppas när du byter enhet eller stänger panelen."
+            "value" : "Threading och den här sessionens agent kommer att kunna trycka, svepa, skriva och använda knappar på just den här enheten medan den är ansluten i den högra panelen. Threading kommer ihåg det här valet för den här enheten."
           }
         }
       }
