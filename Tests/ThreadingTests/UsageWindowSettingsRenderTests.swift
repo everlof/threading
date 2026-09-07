@@ -89,6 +89,26 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
         }
     }
 
+    /// The start pop-up has to reach the evening, and the end pop-up midnight. The first version
+    /// stopped offering starts at 13:00, so a working day that begins after another job ended
+    /// could not be entered at all, while the planner would have handled it without change.
+    func testTheScheduleOffersAnEveningWorkingDay() {
+        let starts = Array(UsageWindowPreferencesDefaults.startRange)
+        let ends = Array(UsageWindowPreferencesDefaults.endRange)
+        let minimum = UsageWindowPreferencesDefaults.minimumWorkdayMinutes
+
+        XCTAssertTrue(starts.contains(19 * 60), "a 19:00 start has to be on offer")
+        XCTAssertEqual(ends.last, 24 * 60, "the day has to be able to end at midnight")
+        XCTAssertEqual(
+            starts.last, 24 * 60 - minimum,
+            "the latest start leaves the shortest day before midnight, and no less"
+        )
+        XCTAssertLessThanOrEqual(
+            starts.last ?? .max, UsageWindowPreferencesDefaults.latestEndMinute,
+            "no offered start may run past the last offered end"
+        )
+    }
+
     /// Account discovery is an unbounded provider input, while the Settings viewport is not.
     /// A reading names one account, so it must materialize neither the fleet nor its neighbours.
     @MainActor

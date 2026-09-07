@@ -236,6 +236,42 @@ final class UsageWindowPlanTests: XCTestCase {
         XCTAssertEqual(decision, .hold(.beforePokeTime(date(hour: 7))))
     }
 
+    /// The working day need not be the one with the office in it. Someone who sits down at
+    /// 19:00 after their day job and stops at midnight is planned around exactly like a 09:00
+    /// start: the poke lands `lead` before they arrive, and not a minute earlier.
+    func testAnEveningWorkingDayIsPokedBeforeItStarts() {
+        let evening = schedule(start: 19 * 60, end: 24 * 60)
+        let day = evening.workday(containing: date(hour: 12), calendar: calendar)
+
+        XCTAssertEqual(day, DateInterval(start: date(hour: 19), end: date(hour: 0, day: 4)))
+        XCTAssertEqual(
+            UsageWindowPlan.pokeTime(
+                on: date(hour: 12),
+                schedule: evening,
+                burn: burn,
+                windowLength: windowLength,
+                calendar: calendar
+            ),
+            date(hour: 17)
+        )
+        XCTAssertEqual(
+            UsageWindowPlan.decide(input(
+                now: date(hour: 16),
+                schedule: evening,
+                shortWindow: window(resetsAt: date(hour: 14))
+            )),
+            .hold(.beforePokeTime(date(hour: 17)))
+        )
+        XCTAssertEqual(
+            UsageWindowPlan.decide(input(
+                now: date(hour: 17),
+                schedule: evening,
+                shortWindow: window(resetsAt: date(hour: 14))
+            )),
+            .poke
+        )
+    }
+
     /// A window expiring while nobody is at the keyboard is the case worth reopening: without
     /// it the grid slides by however long lunch took, and the day's last reset lands after
     /// everyone has stopped. It falls out of the same rules rather than being a rule of its own.

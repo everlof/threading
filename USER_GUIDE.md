@@ -2204,7 +2204,9 @@ window resets at two, then again at seven in the evening, after you have stopped
 send one very small message earlier, on the days you choose, so those boundaries land where the
 working day can use them.
 
-Tell it when you start and stop, and it works out the rest. On a nine-hour day it opens the
+Tell it when you start and stop, and it works out the rest. The day can start as late as
+22:00 and end as late as midnight, so an evening spent coding after another job is planned around
+exactly like a morning. On a nine-hour day it opens the
 window about two hours before you sit down: the first window is drained exactly as it resets, and
 a third window's worth of work fits inside the day instead of two. The page draws that comparison
 rather than asserting it, and states where its figures came from — measured from your own

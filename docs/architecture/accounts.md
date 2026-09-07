@@ -939,6 +939,15 @@ consequence of how a subscription meters time, and it sounds like a trick until 
 anchored where the poke puts it: a block per window, the gaps between them the resets, the
 productive stretch filled, and the hour gained in the accent colour beside the second lane.
 
+The two time pop-ups offer starts from 04:00 to 22:00 and ends from 12:00 to midnight. The
+start used to stop at 13:00, which quietly assumed the working day was the one with the office in
+it; someone who sits down at 19:00 after their day job has the same claim on a window opened at
+17:00, and the planner needed no change to give it to them — only the page did. The end stops at
+midnight because `UsageWindowSchedule` reads an end before a start as a half-entered setting,
+not an overnight shift; a day that crosses midnight is not expressible yet, and the latest start
+is placed exactly `minimumWorkdayMinutes` before the latest end so the pair can never describe
+no day.
+
 **Every surface in it is drawn by `ThemedSurface`.** A window block is a trough in whatever the
 current material says a trough is — flat with a hairline edge on the modern themes, a sunken
 bevel under Platinum, and filled with chunks rather than a smooth bar under Win98, whose

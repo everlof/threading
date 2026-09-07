@@ -1144,8 +1144,20 @@ extension UsageWindowPreferencesViewController: NSTextFieldDelegate {
 
 enum UsageWindowPreferencesDefaults {
     /// The times offered for the start and the end of a working day, in half hours.
-    static let startRange = stride(from: 4 * 60, through: 13 * 60, by: 30)
-    static let endRange = stride(from: 12 * 60, through: 23 * 60 + 30, by: 30)
+    ///
+    /// The start runs into the evening because a working day here is not necessarily the one
+    /// with the office in it: someone who sits down at 19:00 after their day job wants the window
+    /// opened at 17:00 just as much as a 09:00 start wants 07:00, and the first version stopped
+    /// offering starts at 13:00, which made that day impossible to describe. The end reaches
+    /// midnight and no further — `UsageWindowSchedule` reads an end before a start as a
+    /// half-entered setting, not an overnight shift — and the latest start leaves exactly
+    /// `minimumWorkdayMinutes` before it.
+    static let startRange = stride(from: 4 * 60, through: latestStartMinute, by: 30)
+    static let endRange = stride(from: 12 * 60, through: latestEndMinute, by: 30)
+
+    /// Midnight, as the end of the day it closes rather than the start of the next.
+    static let latestEndMinute = 24 * 60
+    static let latestStartMinute = latestEndMinute - minimumWorkdayMinutes
 
     /// The shortest day the schedule will describe. Below this the arithmetic still works and the
     /// picture stops meaning anything.
