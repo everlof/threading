@@ -844,6 +844,132 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         wait(for: [unavailable], timeout: 1)
     }
 
+    func testProcessDeathMidScrollFallsBackToNativeWithTheSessionSelected() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "workspace-navigator-process-death-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workspace,
+            withIntermediateDirectories: true
+        )
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let store = ProjectStore(stateManager: manager)
+        let project = try XCTUnwrap(store.addProject(folderURL: workspace))
+        var sessions: [AgentSession] = []
+        for index in 0..<80 {
+            sessions.append(try XCTUnwrap(store.addSession(
+                to: project.id,
+                kind: .claude,
+                title: "Session \(index)"
+            )))
+        }
+        let target = sessions[70]
+        let targetDestination = ExtensionWorkspaceNavigatorDestination.session(
+            id: target.id.uuidString.lowercased(),
+            projectID: project.id.uuidString.lowercased()
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: sessions.enumerated().map { index, session in
+                    .init(
+                        id: "session-\(index)",
+                        content: .text(session.displayTitle, role: .body),
+                        activation: .destination(.session(
+                            id: session.id.uuidString.lowercased(),
+                            projectID: project.id.uuidString.lowercased()
+                        ))
+                    )
+                }
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let native = ProjectSidebarViewController(projectStore: store)
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: native,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { destination in
+                XCTAssertEqual(destination, targetDestination)
+                native.select(sessionID: target.id)
+                return nil
+            }
+        )
+        _ = container.view
+        container.view.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
+        container.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            container.view.widthAnchor.constraint(equalToConstant: 300),
+            container.view.heightAnchor.constraint(equalToConstant: 320),
+        ])
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        container.view.layoutSubtreeIfNeeded()
+        let extensionHost = try XCTUnwrap(container.children.compactMap {
+            $0 as? WorkspaceNavigatorHostViewController
+        }.first)
+        let outline = try XCTUnwrap(
+            descendants(in: extensionHost.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        let scrollView = try XCTUnwrap(outline.enclosingScrollView)
+        let initialVisibleRows = outline.rows(in: outline.visibleRect)
+        let initialScrollOrigin = scrollView.contentView.bounds.origin
+
+        XCTAssertEqual(outline.numberOfRows, sessions.count)
+        XCTAssertFalse(NSLocationInRange(70, initialVisibleRows))
+        XCTAssertLessThan(initialVisibleRows.length, sessions.count)
+        outline.scrollRowToVisible(70)
+        outline.layoutSubtreeIfNeeded()
+        XCTAssertTrue(NSLocationInRange(70, outline.rows(in: outline.visibleRect)))
+        XCTAssertGreaterThan(scrollView.contentView.bounds.origin.y, initialScrollOrigin.y)
+        outline.selectRowIndexes(IndexSet(integer: 70), byExtendingSelection: false)
+        XCTAssertEqual(outline.selectedRow, 70)
+        XCTAssertEqual(native.selectedSessionID, target.id)
+        XCTAssertEqual(store.selectedSessionID, target.id)
+
+        router.defersCompletion = true
+        container.sessionDidChange(target.id)
+
+        let failedBack = expectation(description: "dead process falls back to native")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["session-event"])
+            XCTAssertEqual(container.effectiveSelection, .extensionNavigator(
+                extensionIdentifier: router.inventory.extensionIdentifier,
+                navigatorID: navigator.id
+            ))
+            XCTAssertTrue(extensionHost.parent === container)
+            router.completeDeferred(with: .failure(ExtensionProcessError.processEnded(
+                status: SIGKILL,
+                message: "killed during navigator event"
+            )))
+            XCTAssertEqual(container.effectiveSelection, .extensionNavigator(
+                extensionIdentifier: router.inventory.extensionIdentifier,
+                navigatorID: navigator.id
+            ))
+            XCTAssertTrue(extensionHost.parent === container)
+            DispatchQueue.main.async {
+                XCTAssertEqual(container.effectiveSelection, .native)
+                XCTAssertNil(extensionHost.parent)
+                XCTAssertTrue(container.children.contains { $0 === native })
+                XCTAssertEqual(native.selectedSessionID, target.id)
+                XCTAssertEqual(native.selectedRowKey, .session(target.id))
+                XCTAssertEqual(store.selectedSessionID, target.id)
+                failedBack.fulfill()
+            }
+        }
+        wait(for: [failedBack], timeout: 1)
+    }
+
     func testRejectedActionWithSynchronousCompletionIsAccountedExactlyOnce() throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",
