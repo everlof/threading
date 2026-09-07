@@ -304,6 +304,221 @@ def enum_cases(source: str, name: str) -> Tuple[Set[str], List[str]]:
     return cases, failures
 
 
+def literal_string_enum_cases(
+    source: str,
+    name: str,
+) -> Tuple[Dict[str, str], List[str]]:
+    """Read an enum whose cases each declare one literal string raw value."""
+
+    enum_source = declaration(source, rf"\benum\s+{re.escape(name)}\b")
+    if enum_source is None:
+        return {}, [f"has no {name} enum"]
+
+    masked = mask_comments_and_strings(enum_source)
+    values: Dict[str, str] = {}
+    value_owners: Dict[str, str] = {}
+    failures: List[str] = []
+    for match in ENUM_CASE.finditer(masked):
+        raw_line = enum_source[match.start():match.end()]
+        parsed = re.fullmatch(
+            r'\s*case\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"\n]+)"\s*',
+            raw_line,
+        )
+        if parsed is None:
+            token = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)", match.group(1))
+            label = f" .{token.group(1)}" if token is not None else ""
+            failures.append(
+                f"{name}{label} must declare one literal string raw value"
+            )
+            continue
+        token, value = parsed.groups()
+        if token in values:
+            failures.append(f"{name} repeats .{token}")
+            continue
+        previous = value_owners.get(value)
+        if previous is not None:
+            failures.append(
+                f'{name} raw value "{value}" is shared by .{previous} and .{token}'
+            )
+        values[token] = value
+        if previous is None:
+            value_owners[value] = token
+    if not values:
+        failures.append(f"{name} declares no literal cases")
+    return values, failures
+
+
+def direct_static_array_entries(
+    declaration_source: str,
+    owner: str,
+    inventory: str,
+) -> Tuple[List[str], List[str]]:
+    """Read one static array declared directly on a type, excluding nested shadows."""
+
+    masked = mask_comments_and_strings(declaration_source)
+    pattern = re.compile(
+        rf"\bstatic\s+let\s+{re.escape(inventory)}\s*:\s*"
+        r"\[[^\]]+\]\s*=\s*\["
+    )
+    candidates = [
+        match
+        for match in pattern.finditer(masked)
+        if masked.count("{", 0, match.start())
+        - masked.count("}", 0, match.start())
+        == 1
+    ]
+    if not candidates:
+        return [], [f"{owner} has no direct {inventory} inventory"]
+    if len(candidates) > 1:
+        return [], [f"{owner} has {len(candidates)} direct {inventory} inventories"]
+    start = candidates[0]
+    opening = masked.rfind("[", start.start(), start.end())
+    closing = matching_delimiter(masked, opening, "[", "]")
+    if closing is None:
+        return [], [f"{owner}.{inventory} is unterminated"]
+    return split_top_level(masked[opening + 1:closing]), []
+
+
+def public_option_owners(
+    marker_source: str,
+    dependencies: Set[str],
+    option_ids: Set[str],
+) -> List[str]:
+    """Require a total one-to-one dependency-to-public-option inventory."""
+
+    failures: List[str] = []
+    parity = declaration(marker_source, r"\benum\s+NativeSidebarParity\b")
+    if parity is None:
+        return ["has no NativeSidebarParity enum"]
+    entries, inventory_failures = direct_static_array_entries(
+        parity,
+        "NativeSidebarParity",
+        "publicOptionOwnership",
+    )
+    if inventory_failures:
+        return inventory_failures
+
+    dependency_counts: Counter[str] = Counter()
+    option_id_counts: Counter[str] = Counter()
+    for entry in entries:
+        if not entry.strip():
+            continue
+        match = re.fullmatch(
+            r"\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
+            r"\.([A-Za-z_][A-Za-z0-9_]*)\s*",
+            entry,
+        )
+        if match is None:
+            failures.append("publicOptionOwnership entries must be literal case pairs")
+            continue
+        dependency, option_id = match.groups()
+        dependency_counts[dependency] += 1
+        option_id_counts[option_id] += 1
+        if dependency not in dependencies:
+            failures.append(
+                f"publicOptionOwnership names unknown option dependency .{dependency}"
+            )
+        if option_id not in option_ids:
+            failures.append(
+                f"publicOptionOwnership names unknown pipeline option ID .{option_id}"
+            )
+
+    for dependency in sorted(dependencies):
+        count = dependency_counts[dependency]
+        if count == 0:
+            failures.append(
+                f"option dependency .{dependency} has no publicOptionOwnership entry"
+            )
+        elif count > 1:
+            failures.append(
+                f"option dependency .{dependency} has {count} publicOptionOwnership entries"
+            )
+    for option_id in sorted(option_ids):
+        count = option_id_counts[option_id]
+        if count == 0:
+            failures.append(
+                f"pipeline option ID .{option_id} has no publicOptionOwnership owner"
+            )
+        elif count > 1:
+            failures.append(
+                f"pipeline option ID .{option_id} has {count} publicOptionOwnership owners"
+            )
+    return failures
+
+
+def declared_public_option_ids(
+    source: str,
+    option_ids: Set[str],
+) -> List[str]:
+    """Require every public option ID in exactly one Native declaration array."""
+
+    failures: List[str] = []
+    declared_counts: Counter[str] = Counter()
+    options_source = declaration(source, r"\benum\s+NativeSidebarPipelineOptions\b")
+    if options_source is None:
+        return ["has no NativeSidebarPipelineOptions enum"]
+    for inventory in ("declarations", "registeredFactDeclarations"):
+        entries, inventory_failures = direct_static_array_entries(
+            options_source,
+            "NativeSidebarPipelineOptions",
+            inventory,
+        )
+        if inventory_failures:
+            failures.extend(inventory_failures)
+            continue
+        for entry in entries:
+            if not entry.strip():
+                continue
+            initializer_opening = entry.find("(")
+            initializer_closing = (
+                matching_delimiter(entry, initializer_opening, "(", ")")
+                if initializer_opening >= 0
+                else None
+            )
+            arguments = (
+                split_top_level(entry[initializer_opening + 1:initializer_closing])
+                if initializer_closing is not None
+                else []
+            )
+            id_arguments = [
+                argument
+                for argument in arguments
+                if re.match(r"\s*id\s*:", argument)
+            ]
+            match = (
+                re.fullmatch(
+                    r"\s*id\s*:\s*NativeSidebarPipelineOptionID\."
+                    r"([A-Za-z_][A-Za-z0-9_]*)\.rawValue\s*",
+                    id_arguments[0],
+                )
+                if len(id_arguments) == 1
+                else None
+            )
+            if match is None:
+                failures.append(
+                    f"NativeSidebarPipelineOptions.{inventory} entries must each use one "
+                    "literal NativeSidebarPipelineOptionID raw value as their top-level ID"
+                )
+                continue
+            option_id = match.group(1)
+            declared_counts[option_id] += 1
+            if option_id not in option_ids:
+                failures.append(
+                    f"NativeSidebarPipelineOptions.{inventory} names unknown pipeline "
+                    f"option ID .{option_id}"
+                )
+
+    for option_id in sorted(option_ids):
+        count = declared_counts[option_id]
+        if count == 0:
+            failures.append(f"pipeline option ID .{option_id} has no public declaration")
+        elif count > 1:
+            failures.append(
+                f"pipeline option ID .{option_id} has {count} public declarations"
+            )
+    return failures
+
+
 def host_provider_owners(
     marker_source: str,
     host_dependencies: Set[str],
@@ -1863,12 +2078,32 @@ def check(repository: pathlib.Path) -> List[str]:
         f"{MARKERS}: {failure}"
         for failure in option_source_failures + host_input_failures
     )
+    native_options_source = (repository / NATIVE_OPTIONS).read_text(encoding="utf-8")
+    pipeline_option_ids, pipeline_option_failures = literal_string_enum_cases(
+        native_options_source,
+        "NativeSidebarPipelineOptionID",
+    )
+    failures.extend(f"{NATIVE_OPTIONS}: {failure}" for failure in pipeline_option_failures)
+    failures.extend(
+        f"{MARKERS}: {failure}"
+        for failure in public_option_owners(
+            marker_source,
+            options,
+            set(pipeline_option_ids),
+        )
+    )
+    failures.extend(
+        f"{NATIVE_OPTIONS}: {failure}"
+        for failure in declared_public_option_ids(
+            native_options_source,
+            set(pipeline_option_ids),
+        )
+    )
     allowed = {"fact": facts, "option": options, "host": hosts}
 
     all_usage: Counter[Tuple[str, str]] = Counter()
     all_source_usage: Counter[Tuple[str, str]] = Counter()
 
-    native_options_source = (repository / NATIVE_OPTIONS).read_text(encoding="utf-8")
     native_options_bounds = declaration_slice(
         native_options_source,
         r"\benum\s+NativeSidebarPipelineOptions\b",

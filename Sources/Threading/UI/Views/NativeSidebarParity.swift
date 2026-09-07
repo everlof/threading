@@ -76,9 +76,9 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
 /// Python or JSON field allowlist.
 enum NativeSidebarParity {
     /// Every native option dependency has one public-shaped declaration and durable owner.
-    /// `NativeSidebarPipelineOptionsTests` checks this map is total and one-to-one; the source
-    /// parity lint separately enforces the reads below. Native still layers its host-only
-    /// interaction invariants — notably pin precedence — over those option values.
+    /// The source parity lint checks this map is total and one-to-one with the public option IDs
+    /// and declarations, and separately enforces the reads below. Native still layers its
+    /// host-only interaction invariants — notably pin precedence — over those option values.
     static let publicOptionOwnership: [
         NativeSidebarOptionDependency: NativeSidebarPipelineOptionID
     ] = [

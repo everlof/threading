@@ -83,6 +83,7 @@ enum NativeSidebarOptionDependency: String, CaseIterable, Sendable {
     case sessionOrder
     case branchGrouping
     case compactTree
+    case groupByFact
 }
 
 enum NativeSidebarHostDependency: String, CaseIterable, Sendable {
@@ -103,6 +104,7 @@ enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
     case sessionOrder = "AppSettings.sidebarSessionOrder"
     case branchGrouping = "AppSettings.groupsSessionsByBranch"
     case compactTree = "AppSettings.compactsSidebarTree"
+    case groupByFact = "AppSettings.nativeSidebarGroupByFact"
 }
 
 enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
@@ -112,12 +114,22 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
 }
 
 enum NativeSidebarParity {
+    static let publicOptionOwnership: [
+        NativeSidebarOptionDependency: NativeSidebarPipelineOptionID
+    ] = [
+        .sessionOrder: .sessionOrder,
+        .branchGrouping: .branchGrouping,
+        .compactTree: .compactTree,
+        .groupByFact: .groupByFact,
+    ]
+
     static let optionSourceOwnership: [
         NativeSidebarOptionSourceAlias: NativeSidebarOptionDependency
     ] = [
         .sessionOrder: .sessionOrder,
         .branchGrouping: .branchGrouping,
         .compactTree: .compactTree,
+        .groupByFact: .groupByFact,
     ]
 
     static let hostInputOwnership: [
@@ -267,7 +279,37 @@ final class ProjectSidebarViewController {
 """
 
 NATIVE_OPTIONS = """
-enum NativeSidebarPipelineOptions {}
+enum NativeSidebarPipelineOptionID: String, CaseIterable, Sendable {
+    case sessionOrder = "session-order"
+    case branchGrouping = "branch-grouping"
+    case compactTree = "compact-tree"
+    case groupByFact = "group-by-fact"
+}
+
+enum NativeSidebarPipelineOptions {
+    static let declarations: [ExtensionWorkspaceNavigatorOption] = [
+        ExtensionWorkspaceNavigatorOption(
+            id: NativeSidebarPipelineOptionID.sessionOrder.rawValue
+        ),
+        ExtensionWorkspaceNavigatorOption(
+            id: NativeSidebarPipelineOptionID.branchGrouping.rawValue
+        ),
+        ExtensionWorkspaceNavigatorOption(
+            id: NativeSidebarPipelineOptionID.compactTree.rawValue
+        ),
+    ]
+
+    static let registeredFactDeclarations: [
+        ExtensionWorkspaceNavigatorRegisteredFactOption
+    ] = [
+        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),
+    ]
+
+    static let groupByFact = NativeSidebarParity.option(
+        .groupByFact,
+        AppSettings.nativeSidebarGroupByFact
+    )
+}
 """
 
 
@@ -327,18 +369,211 @@ class NavigatorFactParityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("navigator-fact-parity: clean", result.stdout)
 
+    def test_public_option_ownership_must_cover_every_dependency(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/NativeSidebarParity.swift",
+            "        .groupByFact: .groupByFact,\n",
+            "",
+        )
+
+        self.assert_fails_with(
+            "option dependency .groupByFact has no publicOptionOwnership entry"
+        )
+
+    def test_public_option_ownership_must_be_one_to_one(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/NativeSidebarParity.swift",
+            "        .groupByFact: .groupByFact,\n",
+            "        .groupByFact: .compactTree,\n",
+        )
+
+        self.assert_fails_with(
+            "pipeline option ID .compactTree has 2 publicOptionOwnership owners"
+        )
+
+    def test_pipeline_option_ids_require_unique_literal_wire_values(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            '    case groupByFact = "group-by-fact"\n',
+            '    case groupByFact = "compact-tree"\n',
+        )
+
+        self.assert_fails_with(
+            'NativeSidebarPipelineOptionID raw value "compact-tree" is shared by '
+            ".compactTree and .groupByFact"
+        )
+
+    def test_pipeline_option_ids_reject_implicit_raw_values(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            '    case groupByFact = "group-by-fact"\n',
+            "    case groupByFact\n",
+        )
+
+        self.assert_fails_with(
+            "NativeSidebarPipelineOptionID .groupByFact must declare one literal string raw value"
+        )
+
+    def test_every_pipeline_option_id_requires_one_public_declaration(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),\n",
+            "",
+        )
+
+        self.assert_fails_with(
+            "pipeline option ID .groupByFact has no public declaration"
+        )
+
+    def test_pipeline_option_id_cannot_be_declared_twice(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),\n",
+            "        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),\n"
+            "        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),\n",
+        )
+
+        self.assert_fails_with(
+            "pipeline option ID .groupByFact has 2 public declarations"
+        )
+
+    def test_public_declaration_id_must_reference_the_typed_inventory(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),\n",
+            '        .init(id: "group-by-fact"),\n',
+        )
+
+        self.assert_fails_with(
+            "NativeSidebarPipelineOptions.registeredFactDeclarations entries must each use "
+            "one literal NativeSidebarPipelineOptionID raw value as their top-level ID"
+        )
+
+    def test_public_declaration_inventories_must_belong_to_native_options(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "enum NativeSidebarPipelineOptions {\n",
+            """enum Decoy {
+    static let declarations: [ExtensionWorkspaceNavigatorOption] = []
+    static let registeredFactDeclarations: [
+        ExtensionWorkspaceNavigatorRegisteredFactOption
+    ] = []
+}
+
+enum NativeSidebarPipelineOptions {
+""",
+        )
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "    static let declarations: [ExtensionWorkspaceNavigatorOption] = [\n",
+            "    static let internalDeclarations: [ExtensionWorkspaceNavigatorOption] = [\n",
+        )
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "    static let registeredFactDeclarations: [\n",
+            "    static let internalRegisteredFactDeclarations: [\n",
+        )
+
+        self.assert_fails_with(
+            "NativeSidebarPipelineOptions has no direct declarations inventory"
+        )
+
+    def test_nested_public_option_ownership_cannot_shadow_the_direct_map(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/NativeSidebarParity.swift",
+            "        .groupByFact: .groupByFact,\n",
+            "        .groupByFact: .compactTree,\n",
+        )
+        self.replace(
+            "Sources/Threading/UI/Views/NativeSidebarParity.swift",
+            "enum NativeSidebarParity {\n",
+            """enum NativeSidebarParity {
+    enum Decoy {
+        static let publicOptionOwnership: [
+            NativeSidebarOptionDependency: NativeSidebarPipelineOptionID
+        ] = [
+            .sessionOrder: .sessionOrder,
+            .branchGrouping: .branchGrouping,
+            .compactTree: .compactTree,
+            .groupByFact: .groupByFact,
+        ]
+    }
+
+""",
+        )
+
+        self.assert_fails_with(
+            "pipeline option ID .compactTree has 2 publicOptionOwnership owners"
+        )
+
+    def test_nested_declaration_inventories_cannot_shadow_direct_members(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "    static let declarations: [ExtensionWorkspaceNavigatorOption] = [\n",
+            "    static let internalDeclarations: [ExtensionWorkspaceNavigatorOption] = [\n",
+        )
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "    static let registeredFactDeclarations: [\n",
+            "    static let internalRegisteredFactDeclarations: [\n",
+        )
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "enum NativeSidebarPipelineOptions {\n",
+            """enum NativeSidebarPipelineOptions {
+    enum Decoy {
+        static let declarations: [ExtensionWorkspaceNavigatorOption] = [
+            .init(id: NativeSidebarPipelineOptionID.sessionOrder.rawValue),
+            .init(id: NativeSidebarPipelineOptionID.branchGrouping.rawValue),
+            .init(id: NativeSidebarPipelineOptionID.compactTree.rawValue),
+        ]
+        static let registeredFactDeclarations: [
+            ExtensionWorkspaceNavigatorRegisteredFactOption
+        ] = [
+            .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),
+        ]
+    }
+
+""",
+        )
+
+        self.assert_fails_with(
+            "NativeSidebarPipelineOptions has no direct declarations inventory"
+        )
+
+    def test_nested_choice_id_cannot_disguise_an_invalid_top_level_id(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "        .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue),\n",
+            """        .init(
+            id: "group-by-fact",
+            control: .choice(
+                options: [
+                    .init(id: NativeSidebarPipelineOptionID.groupByFact.rawValue)
+                ]
+            )
+        ),
+""",
+        )
+
+        self.assert_fails_with(
+            "NativeSidebarPipelineOptions.registeredFactDeclarations entries must each use "
+            "one literal NativeSidebarPipelineOptionID raw value as their top-level ID"
+        )
+
     def test_native_option_adapter_is_a_protected_audit_scope(self) -> None:
         self.replace(
             "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
-            "enum NativeSidebarPipelineOptions {}",
-            """enum NativeSidebarPipelineOptions {
-    static let branchGrouping = AppSettings.groupsSessionsByBranch
-}""",
+            "    static let groupByFact = NativeSidebarParity.option(\n"
+            "        .groupByFact,\n"
+            "        AppSettings.nativeSidebarGroupByFact\n"
+            "    )",
+            "    static let groupByFact = AppSettings.nativeSidebarGroupByFact",
         )
 
         self.assert_fails_with(
             "NativeSidebarPipelineOptions reads provider root "
-            "AppSettings.groupsSessionsByBranch outside NativeSidebarParity"
+            "AppSettings.nativeSidebarGroupByFact outside NativeSidebarParity"
         )
 
     def test_typed_option_snapshot_can_cross_builder_entrypoint(self) -> None:
