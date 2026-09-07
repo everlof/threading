@@ -929,6 +929,156 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testShippedNavigatorsUseShippedGitLabFactsWithoutStaticCoupling() throws {
+        let activityPipeline = try activityInboxPipelineFromShippedManifest()
+        let t3Pipeline = try XCTUnwrap(t3SidebarNavigatorFromShippedManifest().pipeline)
+        let gitLabManifest = try shippedManifest(exampleDirectory: "GitLabStateExtension")
+        let gitLabDefinition = try XCTUnwrap(gitLabManifest.factDefinitions.first)
+        let gitLabKey = ExtensionFactKey(id: "gitlab.mr.state")
+        XCTAssertEqual(gitLabManifest.factDefinitions, [gitLabDefinition])
+        XCTAssertEqual(gitLabDefinition.key, gitLabKey)
+
+        for (name, pipeline) in [
+            ("Activity Inbox", activityPipeline),
+            ("T3 Sidebar", t3Pipeline),
+        ] {
+            XCTAssertFalse(
+                pipeline.consumes.contains { $0.key == gitLabKey },
+                "\(name) must discover GitLab state through registered-fact options"
+            )
+            let declaration = String(decoding: try JSONEncoder().encode(pipeline), as: UTF8.self)
+            XCTAssertFalse(
+                declaration.contains(gitLabKey.id),
+                "\(name) must not name the provider-specific fact in its declaration"
+            )
+        }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let referenceDate = date(2026, 9, 7, 12, 0, calendar: calendar)
+        let projectID = "project-1"
+        let projectSubject = ExtensionFactSubject.project(projectID)
+        let repository = ExtensionRepositoryKey(host: "gitlab.com", path: "group/repository")
+        let rows = [
+            (id: "open", title: "Open work", branch: "feature/open"),
+            (id: "merged", title: "Merged work", branch: "feature/merged"),
+            (id: "unknown", title: "Unknown work", branch: "feature/unknown"),
+        ]
+
+        let registry = ExtensionFactRegistry(now: { referenceDate })
+        try registry.replaceHostDefinitions(HostFactCatalog.definitions)
+        let hostFacts = rows.flatMap { row in
+            let subject = ExtensionFactSubject.session(row.id)
+            return [
+                fact(ExtensionHostFactKey.sessionTitle, subject, .string(row.title)),
+                fact(ExtensionHostFactKey.sessionProjectID, subject, .string(projectID)),
+                fact(
+                    ExtensionHostFactKey.sessionDetailedActivity,
+                    subject,
+                    .string(ExtensionSessionDetailedActivity.idle.rawValue)
+                ),
+                fact(ExtensionHostFactKey.sessionBranch, subject, .string(row.branch)),
+                fact(ExtensionHostFactKey.sessionIsArchived, subject, .boolean(false)),
+                fact(ExtensionHostFactKey.sessionIsSnoozed, subject, .boolean(false)),
+                fact(ExtensionHostFactKey.sessionIsPinned, subject, .boolean(false)),
+                fact(ExtensionHostFactKey.sessionLastUsedAt, subject, .date(referenceDate)),
+                fact(
+                    ExtensionHostFactKey.sessionHasScheduledStart,
+                    subject,
+                    .boolean(false)
+                ),
+            ]
+        } + [
+            fact(ExtensionHostFactKey.projectName, projectSubject, .string("Navigator Project")),
+            fact(
+                ExtensionHostFactKey.projectRepositoryHost,
+                projectSubject,
+                .string(repository.host)
+            ),
+            fact(
+                ExtensionHostFactKey.projectRepositoryPath,
+                projectSubject,
+                .string(repository.path)
+            ),
+        ]
+        let hostSubjects = Set(
+            rows.map { ExtensionFactSubject.session($0.id) } + [projectSubject]
+        )
+        try registry.replaceHostFacts(hostFacts, replacing: hostSubjects)
+
+        let gitLabSource = ComponentCustomizationSource(
+            extensionIdentifier: gitLabManifest.identifier,
+            processGeneration: "generation-1",
+            order: 0
+        )
+        try registry.replaceDefinitions([gitLabDefinition], from: gitLabSource)
+        let gitLabFacts = [
+            fact(
+                gitLabKey,
+                .repositoryBranch(repository: repository, branch: "feature/open"),
+                .string("opened"),
+                label: "Open",
+                observedAt: referenceDate
+            ),
+            fact(
+                gitLabKey,
+                .repositoryBranch(repository: repository, branch: "feature/merged"),
+                .string("merged"),
+                label: "Merged",
+                observedAt: referenceDate
+            ),
+        ]
+        try registry.replaceFacts(
+            gitLabFacts,
+            replacing: Set(gitLabFacts.map(\.subject)),
+            from: gitLabSource
+        )
+
+        let consumedKeys = Set(
+            (activityPipeline.consumes + t3Pipeline.consumes).map(\.key)
+        ).union([gitLabKey])
+        let snapshot = registry.snapshot(consuming: consumedKeys)
+        let evaluator = WorkspaceNavigatorPipelineEvaluator(
+            calendar: calendar,
+            now: { referenceDate }
+        )
+
+        for (name, pipeline) in [
+            ("Activity Inbox", activityPipeline),
+            ("T3 Sidebar", t3Pipeline),
+        ] {
+            let grouped = evaluator.evaluate(try ready(
+                pipeline,
+                snapshot: snapshot,
+                optionValues: ["sort-order": .string("recent")],
+                registeredFactSelections: ["group-by-fact": gitLabKey]
+            ))
+            XCTAssertEqual(
+                grouped.sections.map(\.title),
+                ["Merged", "Open", "Unknown"],
+                "\(name) must group by the discovered GitLab fact"
+            )
+            XCTAssertEqual(
+                grouped.sections.map { $0.items.map(\.sourceSessionID) },
+                [["merged"], ["open"], ["unknown"]]
+            )
+
+            let sorted = evaluator.evaluate(try ready(
+                pipeline,
+                snapshot: snapshot,
+                optionValues: ["sort-order": .string("recent")],
+                registeredFactSelections: ["sort-by-fact": gitLabKey]
+            ))
+            XCTAssertEqual(sorted.sections.count, 1, "\(name) fixture must stay in one host bucket")
+            XCTAssertEqual(
+                sorted.sections.flatMap(\.items).map(\.sourceSessionID),
+                ["merged", "open", "unknown"],
+                "\(name) must sort present values first and keep missing values last"
+            )
+        }
+    }
+
     func testShippedT3SidebarPinsSessionsAndOmitsUnavailableScheduledActions() throws {
         let navigator = try t3SidebarNavigatorFromShippedManifest()
         let declaration = try XCTUnwrap(navigator.pipeline)
@@ -1449,19 +1599,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
     private func activityInboxPipelineFromShippedManifest() throws
         -> ExtensionWorkspaceNavigatorPipeline
     {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let manifestURL = repositoryRoot.appendingPathComponent(
-            "Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension/"
-                + "threading-extension.json"
-        )
-        let manifest = try JSONDecoder().decode(
-            ExtensionManifest.self,
-            from: Data(contentsOf: manifestURL)
-        )
-        try manifest.validate()
+        let manifest = try shippedManifest(exampleDirectory: "ActivityInboxExtension")
         let navigator = try XCTUnwrap(
             manifest.workspaceNavigators.first { $0.id == "activity-inbox" }
         )
@@ -1471,12 +1609,19 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
     private func t3SidebarNavigatorFromShippedManifest() throws
         -> ExtensionWorkspaceNavigator
     {
+        let manifest = try shippedManifest(exampleDirectory: "T3SidebarExtension")
+        return try XCTUnwrap(
+            manifest.workspaceNavigators.first { $0.id == "t3-sidebar" }
+        )
+    }
+
+    private func shippedManifest(exampleDirectory: String) throws -> ExtensionManifest {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let manifestURL = repositoryRoot.appendingPathComponent(
-            "Packages/ThreadingExtensionKit/Examples/T3SidebarExtension/"
+            "Packages/ThreadingExtensionKit/Examples/\(exampleDirectory)/"
                 + "threading-extension.json"
         )
         let manifest = try JSONDecoder().decode(
@@ -1484,9 +1629,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             from: Data(contentsOf: manifestURL)
         )
         try manifest.validate()
-        return try XCTUnwrap(
-            manifest.workspaceNavigators.first { $0.id == "t3-sidebar" }
-        )
+        return manifest
     }
 
     private func templateIntents(
@@ -1622,7 +1765,8 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         _ value: ExtensionFactValue,
         label: String? = nil,
         status: ExtensionStatusRole? = nil,
-        icon: ExtensionImageReference? = nil
+        icon: ExtensionImageReference? = nil,
+        observedAt: Date = Date(timeIntervalSinceReferenceDate: 100)
     ) -> ExtensionFact {
         .init(
             key: key,
@@ -1631,7 +1775,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             label: label,
             status: status,
             icon: icon,
-            observedAt: Date(timeIntervalSinceReferenceDate: 100)
+            observedAt: observedAt
         )
     }
 

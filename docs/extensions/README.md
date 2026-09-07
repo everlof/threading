@@ -759,13 +759,16 @@ swift run --package-path Packages/ThreadingExtensionKit SessionInfoExtensionExam
 swift run --package-path Packages/ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated
 THREADING_WASM_SDK_ID=swift-6.3.3-RELEASE_wasm \
-  scripts/verify_activity_inbox_wasi.sh
+  scripts/verify_navigator_examples_wasi.sh
 ```
 
-The final command builds Activity Inbox with the official Swift.org WASI SDK, sends the resulting
-module through Threading's shipping WebAssembly runner in both registration and serve modes, and
-byte-semantically compares the emitted navigator with the shipped manifest. The example target
-uses the same policy plugin generated extensions must use.
+The final command builds Activity Inbox, T3 Sidebar, and GitLab Merge Request State with the
+official Swift.org WASI SDK. It sends each module through Threading's shipping WebAssembly runner,
+checks its exact capabilities and network authority, requires a canonical emitted registration,
+and semantically compares every registered contribution with the shipped manifest. Navigator
+examples are also checked in serve mode. The GitLab provider stops after its finite registration
+because its long-lived serve mode requires an authenticated host channel. The example targets use
+the same policy plugin generated extensions must use.
 Run the catalogue generator with `--check` in verification to detect stale committed docs.
 `--threading-register` is a finite diagnostic handshake. Threading uses `--threading-serve` to keep
 the process alive and exchange action messages.

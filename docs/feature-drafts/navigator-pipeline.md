@@ -7,7 +7,9 @@
 > implemented by 2026-08-30; the three reference extensions now build from the public SDK,
 > dynamic registered-provider facts are selectable through host-owned Group by and Sort by
 > controls, and pipeline collections may expose their complete host-virtualized ordering.
-> Native convergence remains open.
+> Rollout is implemented through step 9's explicit realistic target: Native uses the same
+> catalog-owned fact projections and registered-fact options while retaining its host-owned
+> interactions.
 > No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
@@ -632,9 +634,12 @@ does. An install must never reorder somebody's sidebar on its own.
    `hostVirtualized` output hint. A capable host retains the complete evaluated row ordering off
    the main actor and realizes only viewport templates; an older host ignores the hint and keeps
    the explicit 1,000-row compatibility notice.
-9. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
-   inline rename, LabelMorph titles and hover cards; the realistic target is that native's *facts*
-   and *options* are the published ones, not that native is literally an extension.
+9. **Native on the pipeline — implemented 2026-09-07 to the realistic target.** Full parity
+   includes drag reorder, inline rename, LabelMorph titles and hover cards; Native therefore
+   remains host-owned rather than literally becoming an extension. Its semantic inputs now map to
+   the public fact catalogue under a build-time parity check, and its persisted Group by and Sort
+   by controls consume the same registered provider facts and missing-last ordering as extension
+   navigators.
 
 ## Open questions
 

@@ -87,6 +87,9 @@ verify_navigator_example() {
   EXAMPLE_DIRECTORY="$2"
   EXAMPLE_PRODUCT="$3"
   EXAMPLE_SLUG="$4"
+  EXPECTED_CAPABILITIES="$5"
+  EXPECTED_NETWORK_GRANTS="$6"
+  STARTUP_MODE="$7"
   MANIFEST="$EXTENSION_PACKAGE/Examples/$EXAMPLE_DIRECTORY/threading-extension.json"
 
   "$SWIFT_ORG_COMMAND" build \
@@ -110,25 +113,50 @@ verify_navigator_example() {
   REGISTER_OUTPUT="$TASK_TEMP_ROOT/$EXAMPLE_SLUG-register.json"
   SERVE_OUTPUT="$TASK_TEMP_ROOT/$EXAMPLE_SLUG-serve.json"
   "$RUNNER" --threading-register 4<"$MODULE" >"$REGISTER_OUTPUT"
-  "$RUNNER" --threading-serve 4<"$MODULE" </dev/null >"$SERVE_OUTPUT"
+  case "$STARTUP_MODE" in
+    register-and-serve)
+      "$RUNNER" --threading-serve 4<"$MODULE" </dev/null >"$SERVE_OUTPUT"
+      ;;
+    registration-only)
+      ;;
+    *)
+      echo "Unknown WASI example startup mode: $STARTUP_MODE" >&2
+      exit 64
+      ;;
+  esac
 
-  python3 - "$EXAMPLE_NAME" "$MANIFEST" "$REGISTER_OUTPUT" "$SERVE_OUTPUT" <<'PY'
+  python3 - \
+    "$EXAMPLE_NAME" \
+    "$MANIFEST" \
+    "$REGISTER_OUTPUT" \
+    "$SERVE_OUTPUT" \
+    "$EXPECTED_CAPABILITIES" \
+    "$EXPECTED_NETWORK_GRANTS" \
+    "$STARTUP_MODE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 example_name = sys.argv[1]
-manifest_path, register_path, serve_path = map(Path, sys.argv[2:])
+manifest_path, register_path, serve_path = map(Path, sys.argv[2:5])
+expected_capabilities = json.loads(sys.argv[5])
+expected_network_grants = json.loads(sys.argv[6])
+startup_mode = sys.argv[7]
 manifest = json.loads(manifest_path.read_bytes())
 register_bytes = register_path.read_bytes()
-serve_bytes = serve_path.read_bytes()
 
 if manifest.get("runtime") != "webAssembly":
     raise SystemExit(f"{example_name} manifest must declare the WebAssembly runtime")
-if manifest.get("capabilities") != ["ui.workspace-navigation"]:
-    raise SystemExit(f"{example_name} manifest declares authority outside workspace navigation")
-if register_bytes != serve_bytes:
-    raise SystemExit(f"{example_name} register and serve emitted different startup registrations")
+if manifest.get("capabilities", []) != expected_capabilities:
+    raise SystemExit(f"{example_name} manifest capabilities do not match its exact authority")
+if manifest.get("networkGrants", []) != expected_network_grants:
+    raise SystemExit(f"{example_name} manifest network grants do not match its exact authority")
+if startup_mode == "register-and-serve":
+    serve_bytes = serve_path.read_bytes()
+    if register_bytes != serve_bytes:
+        raise SystemExit(
+            f"{example_name} register and serve emitted different startup registrations"
+        )
 if not register_bytes.endswith(b"\n") or b"\n" in register_bytes[:-1]:
     raise SystemExit(f"{example_name} registration must be one newline-terminated JSON value")
 
@@ -140,49 +168,60 @@ canonical_registration = (
 if register_bytes != canonical_registration:
     raise SystemExit(f"{example_name} registration is not compact sorted-key JSON")
 
-expected_empty = {
+expected_registration = {
     "commands": [],
-    "factDefinitions": [],
+    "factDefinitions": manifest.get("factDefinitions", []),
     "mcpTools": [],
     "panels": [],
     "previewableFileTypes": [],
     "services": [],
+    "workspaceNavigators": manifest.get("workspaceNavigators", []),
 }
-if {key: registration.get(key) for key in expected_empty} != expected_empty:
-    raise SystemExit(f"{example_name} registered authority outside workspace navigation")
-if set(registration) != {*expected_empty, "workspaceNavigators"}:
-    raise SystemExit(f"{example_name} emitted an unexpected registration field")
 
-manifest_navigators = json.dumps(
-    manifest.get("workspaceNavigators"),
-    ensure_ascii=False,
-    separators=(",", ":"),
-    sort_keys=True,
-).encode()
-registered_navigators = json.dumps(
-    registration.get("workspaceNavigators"),
-    ensure_ascii=False,
-    separators=(",", ":"),
-    sort_keys=True,
-).encode()
-if registered_navigators != manifest_navigators:
+
+def normalize_registration(value):
+    normalized = dict(value)
+    normalized["factDefinitions"] = []
+    for definition in value.get("factDefinitions", []):
+        definition = dict(definition)
+        definition["subjectKinds"] = sorted(definition.get("subjectKinds", []))
+        definition["usages"] = sorted(definition.get("usages", []))
+        normalized["factDefinitions"].append(definition)
+    return normalized
+
+
+if normalize_registration(registration) != normalize_registration(expected_registration):
     raise SystemExit(
-        f"{example_name} WASI registration does not match the shipped manifest"
+        f"{example_name} WASI registration does not exactly match its shipped declarations"
     )
 PY
 
-  echo "$EXAMPLE_NAME passed the official WASI and shipping-runner boundary."
+  echo "$EXAMPLE_NAME passed its official WASI and shipping-runner boundary."
 }
 
 verify_navigator_example \
   "Activity Inbox" \
   "ActivityInboxExtension" \
   "ActivityInboxExtensionExample" \
-  "activity-inbox"
+  "activity-inbox" \
+  '["ui.workspace-navigation"]' \
+  '[]' \
+  "register-and-serve"
 verify_navigator_example \
   "T3 Sidebar" \
   "T3SidebarExtension" \
   "T3SidebarExtensionExample" \
-  "t3-sidebar"
+  "t3-sidebar" \
+  '["ui.workspace-navigation"]' \
+  '[]' \
+  "register-and-serve"
+verify_navigator_example \
+  "GitLab Merge Request State" \
+  "GitLabStateExtension" \
+  "GitLabStateExtensionExample" \
+  "gitlab-state" \
+  '["facts.provide","host.projects.read","host.repositories.read","host.events","network.brokered"]' \
+  '[{"host":"gitlab.com","methods":["GET"]}]' \
+  "registration-only"
 
-echo "Navigator examples passed the official WASI boundary ($WASM_SDK_ID)."
+echo "Navigator and fact-provider examples passed the official WASI boundary ($WASM_SDK_ID)."
