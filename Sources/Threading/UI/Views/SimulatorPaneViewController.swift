@@ -253,8 +253,15 @@ final class SimulatorPaneViewController: NSViewController {
         guard presented != isPresented else { return }
         isPresented = presented
         if presented {
-            if lease != nil {
-                if let device = lease?.device { presentationState = .ready(device) }
+            if let lease {
+                presentationState = .ready(lease.device)
+                // The stream can drop while the pane is hidden (a helper loss, or a background
+                // install/launch), which parks it on the screenshot fallback. Reconnecting the
+                // direct transport on the way back in means the returning pane is controllable on
+                // the first click, instead of spending that click to reconnect. A healthy hidden
+                // stream is not on the fallback, so this is a no-op there and `startFrameLoop`
+                // simply re-shows it.
+                reconnectTransportForInputIfNeeded(on: lease.device.id)
                 startFrameLoop()
             } else if preparationTask == nil {
                 prepare(preferredDeviceID)
@@ -838,7 +845,7 @@ final class SimulatorPaneViewController: NSViewController {
             break
         }
         switch liveBackend {
-        case .direct:
+        case .direct, .sharedMemory:
             guard let capabilities = liveCapabilities,
                   capabilities.supportsTouch || capabilities.supportsKeyboard else {
                 return L10n.string("View only")
@@ -909,6 +916,7 @@ final class SimulatorPaneViewController: NSViewController {
             switch liveBackend {
             case .direct(.h264): backend = L10n.string("Live H.264")
             case .direct(.jpeg): backend = L10n.string("Live JPEG")
+            case .sharedMemory: backend = L10n.string("Live shared memory")
             case .screenshotFallback: backend = L10n.string("Preview fallback")
             case nil: backend = L10n.string("Connecting live preview…")
             }

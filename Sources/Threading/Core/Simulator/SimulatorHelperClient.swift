@@ -16,6 +16,9 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         qos: .userInitiated
     )
     private let frameDecoder = SimulatorFrameDecoder()
+    /// Non-nil when the helper selected the shared-memory transport; frames then arrive as
+    /// `sharedFrameReady` control messages read through this instead of the decoder.
+    private var sharedConsumer: SimulatorSharedMemoryConsumer?
     private let helperURL: URL
     private let deviceID: SimulatorDeviceID
     private let developerDirectory: String
@@ -89,7 +92,8 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
                         deviceID: uuid,
                         developerDirectory: developerDirectory,
                         preferredCodecs: [.h264, .jpeg],
-                        requestedFramesPerSecond: 30
+                        requestedFramesPerSecond: 30,
+                        supportsSharedMemory: true
                     )))
                     stateQueue.asyncAfter(deadline: .now() + 6) { [weak self] in
                         guard let self, !self.didCompleteHandshake else { return }
@@ -280,27 +284,43 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
                 stopLocked()
                 return
             }
-            guard let codec = reply.selectedCodec,
-                  let capabilities = reply.capabilities else {
+            guard let capabilities = reply.capabilities else {
+                failHandshake(SimulatorLiveStreamError.invalidFrame)
+                stopLocked()
+                return
+            }
+            let backend: SimulatorLiveBackend
+            if let shared = reply.sharedSurface {
+                guard let consumer = SimulatorSharedMemoryConsumer(descriptor: shared) else {
+                    failHandshake(SimulatorLiveStreamError.refused(
+                        .internalFailure,
+                        "Threading could not map the shared Simulator frame buffers."
+                    ))
+                    stopLocked()
+                    return
+                }
+                sharedConsumer = consumer
+                backend = .sharedMemory
+                handshakeSpan?.end(metadata: ["result": "ready", "transport": "shared-memory"])
+            } else if let codec = reply.selectedCodec {
+                backend = .direct(codec: codec)
+                handshakeSpan?.end(metadata: ["result": "ready", "codec": String(codec.rawValue)])
+                SimulatorStreamDiagnostics.shared.started(id: diagnosticID, codec: codec)
+            } else {
                 failHandshake(SimulatorLiveStreamError.invalidFrame)
                 stopLocked()
                 return
             }
             didCompleteHandshake = true
             didStartDiagnostics = true
-            handshakeSpan?.end(metadata: [
-                "result": "ready",
-                "codec": String(codec.rawValue),
-            ])
             handshakeSpan = nil
-            SimulatorStreamDiagnostics.shared.started(id: diagnosticID, codec: codec)
             ThreadingLogger.simulator.info(
-                "Direct stream started device=\(self.deviceID.rawValue, privacy: .public) codec=\(String(describing: codec), privacy: .public)"
+                "Direct stream started device=\(self.deviceID.rawValue, privacy: .public) backend=\(String(describing: backend), privacy: .public)"
             )
             handshake?.resume()
             handshake = nil
             eventContinuation.yield(.ready(
-                backend: .direct(codec: codec),
+                backend: backend,
                 capabilities: capabilities,
                 coreSimulatorVersion: reply.coreSimulatorVersion,
                 simulatorKitVersion: reply.simulatorKitVersion
@@ -319,6 +339,27 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
             latestStatistics = statistics
             SimulatorStreamDiagnostics.shared.update(id: diagnosticID, statistics: statistics)
             eventContinuation.yield(.statistics(statistics))
+
+        case let .sharedFrameReady(bufferIndex, sequence, presentationTimeNanoseconds):
+            guard let consumer = sharedConsumer else { return }
+            guard let image = consumer.image(forBuffer: bufferIndex) else {
+                eventContinuation.yield(.failed(
+                    SimulatorLiveStreamError.invalidFrame.localizedDescription
+                ))
+                stopLocked()
+                return
+            }
+            receivedFrames += 1
+            livenessMonitor.frameArrived()
+            eventContinuation.yield(.frame(SimulatorLiveFrame(
+                sequence: sequence,
+                image: image,
+                codec: nil,
+                presentationTimeNanoseconds: presentationTimeNanoseconds
+            )))
+            // The shared-memory analogue of acknowledging a frame: the app has copied this buffer
+            // out, so the helper may reuse it.
+            send(.releaseSharedFrame(bufferIndex))
 
         case .failure(let refusal, let detail):
             let error = SimulatorLiveStreamError.refused(refusal, detail)
@@ -373,6 +414,8 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         didStop = true
         livenessMonitor.invalidate()
         frameDecoder.invalidate()
+        sharedConsumer?.close()
+        sharedConsumer = nil
         failHandshake(SimulatorLiveStreamError.disconnected)
         for continuation in pendingInput.values {
             continuation.resume(throwing: SimulatorLiveStreamError.disconnected)

@@ -12,7 +12,9 @@ final class SimulatorBridgeKitTests: XCTestCase {
             .peerTooOld
         )
         XCTAssertEqual(
-            SimulatorBridgeCompatibility.evaluate(peerVersion: 2, peerMinimum: 2),
+            // A peer that requires a version newer than ours is out of reach. (Our `current` is
+            // now 2, so the too-new peer must ask for at least 3.)
+            SimulatorBridgeCompatibility.evaluate(peerVersion: 3, peerMinimum: 3),
             .selfTooOld
         )
     }

@@ -3,6 +3,22 @@ import Foundation
 import IOSurface
 import ThreadingSimulatorKit
 
+/// Set from a signal handler when the app terminates the helper (the client stops a stream with
+/// `process.terminate()`), so the read loop can break and run cleanup — otherwise the shared-memory
+/// transport's mapped temp buffers would leak.
+private nonisolated(unsafe) var helperTerminationRequested: sig_atomic_t = 0
+
+private func installHelperTerminationHandlers() {
+    var action = sigaction()
+    action.__sigaction_u.__sa_handler = { _ in helperTerminationRequested = 1 }
+    // No SA_RESTART: a blocking read must return EINTR on the signal so the loop can notice and
+    // tear down, rather than transparently resuming.
+    action.sa_flags = 0
+    sigemptyset(&action.sa_mask)
+    _ = sigaction(SIGTERM, &action, nil)
+    _ = sigaction(SIGINT, &action, nil)
+}
+
 final class SimulatorHelperServer: @unchecked Sendable {
     private enum Limits {
         static let readBytes = 64 * 1024
@@ -32,6 +48,9 @@ final class SimulatorHelperServer: @unchecked Sendable {
     private var bridge: SimulatorPrivateBridge?
     private var inputSender: SimulatorInputSender?
     private var encoder: (any SimulatorFrameEncoding)?
+    /// Non-nil when the app negotiated the shared-memory transport; the capture loop then copies
+    /// each surface into a shared buffer instead of encoding it.
+    private var sharedProvider: SimulatorSharedMemoryProvider?
     private var framesPerSecond = 30
     private var timer: DispatchSourceTimer?
     private var nextSequence: UInt64 = 1
@@ -63,15 +82,25 @@ final class SimulatorHelperServer: @unchecked Sendable {
             return 77
         }
 
+        installHelperTerminationHandlers()
+        // Every exit path from here — clean stop, a decode error return, an interrupted read — runs
+        // teardown, so the shared-memory transport never leaks its mapped temp buffers. `stop()` is
+        // idempotent.
+        defer { stateQueue.sync { stop() } }
+
         do {
             var buffer = [UInt8](repeating: 0, count: Limits.readBytes)
             while !isStopped {
+                if helperTerminationRequested != 0 { break }
                 let count = buffer.withUnsafeMutableBytes { storage in
                     Darwin.read(inputDescriptor, storage.baseAddress, storage.count)
                 }
                 if count == 0 { break }
                 if count < 0 {
-                    if errno == EINTR { continue }
+                    if errno == EINTR {
+                        if helperTerminationRequested != 0 { break }
+                        continue
+                    }
                     throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
                 }
                 let bytes = Data(buffer.prefix(count))
@@ -94,7 +123,6 @@ final class SimulatorHelperServer: @unchecked Sendable {
             fputs("threading-simulator-helper: socket read failed\n", stderr)
             return 74
         }
-        stateQueue.sync { stop() }
         return 0
     }
 
@@ -115,6 +143,9 @@ final class SimulatorHelperServer: @unchecked Sendable {
 
         case .acknowledgeFrame(let sequence):
             acknowledge(sequence)
+
+        case .releaseSharedFrame(let bufferIndex):
+            sharedProvider?.release(bufferIndex)
 
         case .input(let requestID, let command):
             guard let inputSender else {
@@ -189,6 +220,34 @@ final class SimulatorHelperServer: @unchecked Sendable {
             return
         }
 
+        // Prefer the shared-memory transport when the app can consume it: it copies each surface
+        // into shared buffers with no codec, which is dramatically lower latency for the local
+        // in-panel pane. It only works same-machine (BGRA surfaces mapped in another process); if
+        // the surface format is not compatible the provider declines and we fall back to a codec.
+        let capabilities = SimulatorBridgeCapabilities(
+            codecs: [.h264, .jpeg],
+            supportsTouch: bridge.supportsInput,
+            supportsKeyboard: bridge.supportsInput,
+            supportsButtons: bridge.supportsInput,
+            maximumFramesPerSecond: Limits.maximumFramesPerSecond
+        )
+        if hello.supportsSharedMemory,
+           let provider = SimulatorSharedMemoryProvider(surface: firstSurface, bufferCount: 3) {
+            self.bridge = bridge
+            self.sharedProvider = provider
+            self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge) : nil
+            framesPerSecond = hello.requestedFramesPerSecond
+            writeControl(.hello(SimulatorBridgeHelloReply(
+                selectedCodec: nil,
+                sharedSurface: provider.descriptor,
+                capabilities: capabilities,
+                refusal: nil,
+                coreSimulatorVersion: bridge.coreSimulatorVersion,
+                simulatorKitVersion: bridge.simulatorKitVersion
+            )))
+            return
+        }
+
         let selectedEncoder: (any SimulatorFrameEncoding)? = hello.preferredCodecs.compactMap {
             switch $0 {
             case .h264:
@@ -212,13 +271,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
         framesPerSecond = hello.requestedFramesPerSecond
         writeControl(.hello(SimulatorBridgeHelloReply(
             selectedCodec: selectedEncoder.codec,
-            capabilities: SimulatorBridgeCapabilities(
-                codecs: [.h264, .jpeg],
-                supportsTouch: bridge.supportsInput,
-                supportsKeyboard: bridge.supportsInput,
-                supportsButtons: bridge.supportsInput,
-                maximumFramesPerSecond: Limits.maximumFramesPerSecond
-            ),
+            capabilities: capabilities,
             refusal: nil,
             coreSimulatorVersion: bridge.coreSimulatorVersion,
             simulatorKitVersion: bridge.simulatorKitVersion
@@ -236,7 +289,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
     }
 
     private func startTimer() {
-        guard isVisible, timer == nil, bridge != nil, encoder != nil else { return }
+        guard isVisible, timer == nil, bridge != nil,
+              encoder != nil || sharedProvider != nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: stateQueue)
         timer.schedule(
             deadline: .now(),
@@ -257,7 +311,35 @@ final class SimulatorHelperServer: @unchecked Sendable {
     }
 
     private func capture() {
-        guard isVisible, !isEncoding, let bridge, let encoder,
+        guard isVisible, let bridge else { return }
+        if let sharedProvider {
+            guard let surface = bridge.copyCurrentSurface() else { return }
+            guard let bufferIndex = sharedProvider.write(surface: surface) else {
+                // Every buffer is still held by the app; drop this capture (latest-frame-wins).
+                statistics = SimulatorBridgeStatistics(
+                    capturedFrames: statistics.capturedFrames + 1,
+                    sentFrames: statistics.sentFrames,
+                    replacedFrames: statistics.replacedFrames + 1,
+                    encodedBytes: statistics.encodedBytes
+                )
+                return
+            }
+            let sequence = nextSequence
+            nextSequence &+= 1
+            statistics = SimulatorBridgeStatistics(
+                capturedFrames: statistics.capturedFrames + 1,
+                sentFrames: statistics.sentFrames + 1,
+                replacedFrames: statistics.replacedFrames,
+                encodedBytes: statistics.encodedBytes
+            )
+            writeControl(.sharedFrameReady(
+                bufferIndex: bufferIndex,
+                sequence: sequence,
+                presentationTimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+            ))
+            return
+        }
+        guard !isEncoding, let encoder,
               let surface = bridge.copyCurrentSurface() else { return }
         isEncoding = true
         let sequence = nextSequence
@@ -346,6 +428,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
         stopTimer(clearPending: true)
         encoder?.finish()
         encoder = nil
+        sharedProvider?.teardown()
+        sharedProvider = nil
         writeControl(.statistics(statistics))
     }
 

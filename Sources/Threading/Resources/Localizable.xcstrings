@@ -23924,6 +23924,17 @@
         }
       }
     },
+    "Live shared memory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live delat minne"
+          }
+        }
+      }
+    },
     "Live usage from your Claude login" : {
       "extractionState" : "manual",
       "localizations" : {

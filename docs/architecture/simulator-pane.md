@@ -81,6 +81,63 @@ invalidates the session, so a stream stop cannot race an in-flight decode or str
 frame context. The app admits at most four live helpers across all sessions, while the public
 one-frame-per-second screenshot fallback remains available for unsupported Xcode versions.
 
+### Shared-memory transport (prototype)
+
+For the in-panel pane the helper and app are always on the same machine, so encoding video to move
+pixels between two local processes is wasted work — the codec path's real cost is H.264's
+inter-frame dependency (a dropped frame waits up to a keyframe interval) and the 30 fps
+capture/decode pipeline, not the encode itself. The **shared-memory transport** removes the codec:
+the app advertises `supportsSharedMemory` in the hello; when the device surface is BGRA the helper
+maps a small pool of shared buffers (`SimulatorSharedMemoryProvider`), copies each captured surface
+into a free buffer, and sends a `sharedFrameReady(bufferIndex:)` control message instead of an
+encoded frame; the app maps them read-only (`SimulatorSharedMemoryConsumer`), builds a CGImage with
+one `memcpy` and no decode, and answers `releaseSharedFrame(bufferIndex:)`. A `SimulatorSharedFrameRing`
+tracks which buffers the app still holds so the helper only writes a free one and drops the capture
+(latest-frame-wins) when the app is behind — the shared-memory analogue of the codec path's frame
+window. The pane shows this as **"Live shared memory"**; H.264/JPEG stay as the automatic fallback
+(non-BGRA surface, or a peer that does not offer shared memory), and remain the transport a future
+*remote* viewer would use, since shared memory is same-machine only. Wire protocol is v2, decoded
+back-compatibly so a v1 peer stays on the codec path.
+
+This is an honest prototype, not the finished design: it is shared memory with one bounded copy on
+each side (no codec, no keyframe stalls), not literal IOSurface/mach zero-copy — that needs a
+mach-capable channel the current inherited Unix socket cannot carry. The buffers are `mmap`ed temp
+files (Swift cannot call the variadic `shm_open`) whose path prefix is exchanged over the
+already-signature-verified socket; they are same-user readable, and the helper removes them on every
+exit path (a SIGTERM/SIGINT handler breaks the read loop and a `defer` runs teardown, because the
+client stops a stream with `process.terminate()`). Passing the buffers as inherited file descriptors
+(closing the path-guess surface and the leak-on-SIGKILL window) and then true IOSurface/mach
+zero-copy are the planned next increments. **Because this widens the direct-helper boundary
+(`SimulatorHelperTrust`, this document's [Backend boundary](#backend-boundary)), it needs the trust
+review completed before it ships.** Runtime-verified through the hidden compatibility probe, whose
+report carries a null `codec` when the stream went through shared memory.
+
+**The encoder must emit every frame before it is handed the next one.** The helper keeps exactly
+one frame inside the encoder and captures again only when that frame's callback has returned.
+VideoToolbox's hardware H.264 encoder defaults to frame reordering for the Main profile and
+reports a frame delay of three, so left at its defaults it emits the IDR frame at once and then
+holds the second frame waiting for lookahead that never comes. That shipped: every direct stream
+delivered one picture and then idled, the pane kept showing it under a green "Live H.264" label,
+and every process involved sat at zero CPU. The stream restarted around each install, launch and
+screenshot, which advanced the picture by one frame and made it look intermittent. The encoder
+session now disables frame reordering, sets a maximum frame delay of zero, and reads both back
+after preparation; a session that would still hold frames is refused so codec negotiation falls
+through to JPEG rather than adopting an encoder the one-frame-in-flight helper cannot drive.
+`SimulatorFrameEncoderTests` drives the shipped encoder the way the helper does, one frame in
+flight, and fails on the frame that never comes back.
+
+**A visible stream that goes quiet is a failure, not a still screen.** The helper captures at a
+fixed rate whenever the tab is visible, so silence means the helper, its encoder or the
+framebuffer stopped. The ready state used to rest on the handshake alone, which is why a helper
+hanging after one frame kept the live label indefinitely. `SimulatorFrameLivenessMonitor` gives a
+visible stream four seconds to deliver a frame, re-armed by every decoded frame and disarmed by
+hiding the tab; a stall ends the stream through the same path as a lost helper, so the pane shows
+the reason, falls back to public screenshots and offers retry. The compatibility probe, the
+opt-in live integration test and the release matrix all require two decoded frames in sequence
+order rather than one, because one is exactly what a frozen stream produces. The client also
+counts the frames it decoded itself and logs that beside the helper's own statistics, which only
+arrive every few seconds of sent frames and never for a stream that froze early.
+
 ## Device and session ownership
 
 One simulator tab has one stable session-owned identity and one selected UDID. The initial product

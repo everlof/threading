@@ -5,12 +5,16 @@ import ThreadingSimulatorKit
 struct SimulatorLiveFrame: @unchecked Sendable {
     let sequence: UInt64
     let image: CGImage
-    let codec: SimulatorBridgeCodec
+    /// The codec that produced this frame, or nil for the shared-memory transport, which does not
+    /// encode.
+    let codec: SimulatorBridgeCodec?
     let presentationTimeNanoseconds: UInt64
 }
 
 enum SimulatorLiveBackend: Equatable, Sendable {
     case direct(codec: SimulatorBridgeCodec)
+    /// Frames arrive through shared memory with no codec — the lowest-latency, same-machine path.
+    case sharedMemory
     case screenshotFallback(reason: String)
 }
 

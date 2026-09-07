@@ -84,7 +84,8 @@ struct SimulatorCompatibilityProbeReport: Codable, Equatable, Sendable {
 /// protocol handshake and two decoded frames in sequence order before the app exits.
 enum SimulatorCompatibilityProbe {
     private struct Evidence: Sendable {
-        let codec: SimulatorBridgeCodec
+        /// Nil when the stream used the shared-memory transport, which has no codec.
+        let codec: SimulatorBridgeCodec?
         let coreSimulatorVersion: String?
         let simulatorKitVersion: String?
         let width: Int
@@ -168,7 +169,7 @@ enum SimulatorCompatibilityProbe {
         try await withThrowingTaskGroup(of: Evidence.self) { group in
             group.addTask {
                 var ready: (
-                    SimulatorBridgeCodec,
+                    SimulatorBridgeCodec?,
                     String?,
                     String?
                 )?
@@ -183,7 +184,15 @@ enum SimulatorCompatibilityProbe {
                         let coreSimulatorVersion,
                         let simulatorKitVersion
                     ):
-                        guard case .direct(let codec) = backend else { continue }
+                        // The shared-memory transport is valid compatibility evidence too; it just
+                        // has no codec. A screenshot fallback is not — keep waiting for a direct
+                        // backend.
+                        let codec: SimulatorBridgeCodec?
+                        switch backend {
+                        case .direct(let selected): codec = selected
+                        case .sharedMemory: codec = nil
+                        case .screenshotFallback: continue
+                        }
                         ready = (codec, coreSimulatorVersion, simulatorKitVersion)
                     case .frame(let frame):
                         guard let ready else { continue }
@@ -239,7 +248,7 @@ enum SimulatorCompatibilityProbe {
             hostBundleIdentifier: bundle.bundleIdentifier,
             hostVersion: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
             hostBuild: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-            codec: evidence.map { codecName($0.codec) },
+            codec: evidence.flatMap { $0.codec.map(codecName) },
             coreSimulatorVersion: evidence?.coreSimulatorVersion,
             simulatorKitVersion: evidence?.simulatorKitVersion,
             frameWidth: evidence?.width,

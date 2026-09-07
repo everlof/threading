@@ -41,6 +41,7 @@
 		7C000007000000000000A003 /* SimulatorFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B003 /* SimulatorFrameEncoder.swift */; };
 		7C000007000000000000A013 /* SimulatorFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B003 /* SimulatorFrameEncoder.swift */; };
 		7C000007000000000000A004 /* SimulatorInputSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B004 /* SimulatorInputSender.swift */; };
+		7C000007000000000000A020 /* SimulatorSharedMemoryProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B020 /* SimulatorSharedMemoryProvider.swift */; };
 		7C000007000000000000A005 /* SimulatorPrivateBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B005 /* SimulatorPrivateBridge.m */; };
 		7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B011 /* threading-simulator-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000007000000000000A010 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C010 /* ThreadingSimulatorKit */; };
@@ -318,6 +319,7 @@
 		7C000007000000000000B002 /* SimulatorHelperServer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorHelperServer.swift; sourceTree = "<group>"; };
 		7C000007000000000000B003 /* SimulatorFrameEncoder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorFrameEncoder.swift; sourceTree = "<group>"; };
 		7C000007000000000000B004 /* SimulatorInputSender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorInputSender.swift; sourceTree = "<group>"; };
+		7C000007000000000000B020 /* SimulatorSharedMemoryProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorSharedMemoryProvider.swift; sourceTree = "<group>"; };
 		7C000007000000000000B005 /* SimulatorPrivateBridge.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = SimulatorPrivateBridge.m; sourceTree = "<group>"; };
 		7C000007000000000000B006 /* SimulatorPrivateBridge.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = SimulatorPrivateBridge.h; sourceTree = "<group>"; };
 		7C000007000000000000B007 /* ThreadingSimulatorHelper-Bridging-Header.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "ThreadingSimulatorHelper-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -683,6 +685,7 @@
 				7C000007000000000000B002 /* SimulatorHelperServer.swift */,
 				7C000007000000000000B003 /* SimulatorFrameEncoder.swift */,
 				7C000007000000000000B004 /* SimulatorInputSender.swift */,
+				7C000007000000000000B020 /* SimulatorSharedMemoryProvider.swift */,
 				7C000007000000000000B005 /* SimulatorPrivateBridge.m */,
 				7C000007000000000000B006 /* SimulatorPrivateBridge.h */,
 				7C000007000000000000B007 /* ThreadingSimulatorHelper-Bridging-Header.h */,
@@ -1462,6 +1465,7 @@
 				7C000007000000000000A002 /* SimulatorHelperServer.swift in Sources */,
 				7C000007000000000000A003 /* SimulatorFrameEncoder.swift in Sources */,
 				7C000007000000000000A004 /* SimulatorInputSender.swift in Sources */,
+				7C000007000000000000A020 /* SimulatorSharedMemoryProvider.swift in Sources */,
 				7C000007000000000000A005 /* SimulatorPrivateBridge.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
