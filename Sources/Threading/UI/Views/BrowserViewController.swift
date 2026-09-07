@@ -556,6 +556,9 @@ final class BrowserViewController: NSViewController {
     private var probedAnnotationTargetPoint: CGPoint?
     private var pendingAnnotationTargetPoint: CGPoint?
     private var isProbingAnnotationTarget = false
+    private var probedAnnotationTargetIsPrecise = false
+    private var annotationTargetRevision = 0
+    private weak var annotationScrollTarget: WKWebView?
     private(set) var agentViewportSize: CGSize?
     private(set) var agentColorScheme: BrowserColorScheme = .auto
     private(set) var agentUserAgent: BrowserUserAgentOverride = .automatic
@@ -706,7 +709,7 @@ final class BrowserViewController: NSViewController {
             WKUserScript(
                 source: BrowserAgentScripts.annotationViewportObservation,
                 injectionTime: .atDocumentStart,
-                forMainFrameOnly: true,
+                forMainFrameOnly: false,
                 in: .defaultClient
             )
         )
@@ -757,6 +760,22 @@ final class BrowserViewController: NSViewController {
         }
         annotationOverlay.onTargetProbe = { [weak self] point in
             self?.updateAnnotationTarget(at: point)
+        }
+        annotationOverlay.onScroll = { [weak self] event in
+            guard let self else { return }
+            // Keep the native WebKit recipient through the gesture's momentum tail.
+            if event.phase.contains(.began)
+                || (event.phase.isEmpty && event.momentumPhase.isEmpty)
+                || self.annotationScrollTarget == nil {
+                // WKWebView owns native wheel dispatch and DOM hit testing. Its deepest
+                // AppKit child may be a compositing surface that does not dispatch input.
+                self.annotationScrollTarget = self.webView
+            }
+            self.annotationScrollTarget?.scrollWheel(with: event)
+            if event.momentumPhase.contains(.ended) || event.phase.contains(.cancelled) {
+                self.annotationScrollTarget = nil
+            }
+            self.refreshAnnotationTargetUnderPointer()
         }
         deviceToolbar.onChoosePreset = { [weak self] preset in
             guard let self else { return }
@@ -1473,11 +1492,14 @@ final class BrowserViewController: NSViewController {
     /// tool. Nothing it reads is returned to the agent, and it mints no refs.
     func annotationTargetProbe(
         x: Double,
-        y: Double
+        y: Double,
+        precise: Bool = false
     ) async throws -> BrowserAnnotationTargetProbe {
-        try await callAgentScript(
+        var arguments = pointArguments(x: x, y: y)
+        arguments["precise"] = precise
+        return try await callAgentScript(
             BrowserAgentScripts.annotationTargetProbe,
-            arguments: pointArguments(x: x, y: y)
+            arguments: arguments
         )
     }
 
@@ -2525,7 +2547,10 @@ final class BrowserViewController: NSViewController {
         isAnnotating = active
         annotationOverlay.isAnnotating = active
         chromeBar.setAnnotating(active)
-        if !active {
+        if active {
+            view.window?.makeFirstResponder(annotationOverlay)
+        } else {
+            annotationScrollTarget = nil
             updateAnnotationTarget(at: nil)
         }
         if !active, view.window?.firstResponder === annotationOverlay {
@@ -2541,16 +2566,20 @@ final class BrowserViewController: NSViewController {
     /// name, and the app owns only the drawing. Nil means the pointer left the page.
     private func updateAnnotationTarget(at point: CGPoint?) {
         guard isAnnotating, let point else {
+            annotationTargetRevision += 1
             pendingAnnotationTargetPoint = nil
             probedAnnotationTargetPoint = nil
             annotationOverlay.hoveredTarget = nil
             return
         }
         if let probed = probedAnnotationTargetPoint,
+           probedAnnotationTargetIsPrecise == annotationOverlay.selectsDeepestElement,
+           pendingAnnotationTargetPoint == nil,
            abs(probed.x - point.x) < BrowserDefaults.annotationTargetProbeTolerance,
            abs(probed.y - point.y) < BrowserDefaults.annotationTargetProbeTolerance {
             return
         }
+        annotationTargetRevision += 1
         pendingAnnotationTargetPoint = point
         probeAnnotationTargetIfIdle()
     }
@@ -2575,6 +2604,9 @@ final class BrowserViewController: NSViewController {
         pendingAnnotationTargetPoint = nil
         probedAnnotationTargetPoint = point
         isProbingAnnotationTarget = true
+        let precise = annotationOverlay.selectsDeepestElement
+        probedAnnotationTargetIsPrecise = precise
+        let revision = annotationTargetRevision
 
         // Page zoom scales the page inside a fixed WebKit frame, so the overlay's points and the
         // page's CSS pixels are the same unit only at 100%.
@@ -2585,7 +2617,8 @@ final class BrowserViewController: NSViewController {
             guard let self else { return }
             let probe = try? await self.annotationTargetProbe(
                 x: Double(point.x) / zoom,
-                y: Double(point.y) / zoom
+                y: Double(point.y) / zoom,
+                precise: precise
             )
             self.isProbingAnnotationTarget = false
 
@@ -2593,7 +2626,8 @@ final class BrowserViewController: NSViewController {
             // moved on while it was in flight. The point matters most: a pointer that has since
             // left the page clears the probe it asked for, and an answer arriving after that
             // would put a highlight back under a pointer that is no longer there.
-            let current = self.probedAnnotationTargetPoint == point
+            let current = self.annotationTargetRevision == revision
+                && self.probedAnnotationTargetPoint == point
                 && self.webView === probedWebView
                 && (self.documentSequences[ObjectIdentifier(probedWebView)] ?? 0) == sequence
             if self.isAnnotating, current, let probe, probe.ok {
@@ -2616,6 +2650,13 @@ final class BrowserViewController: NSViewController {
     private func addAnnotation(atViewportPoint point: CGPoint) {
         guard isAnnotating,
               let key = annotationPageKey(for: webView.url) else { return }
+        // Capture the clicked document position before the modal prompt runs its event loop;
+        // a live page can scroll, zoom or navigate while the user is writing the note.
+        let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
+        let documentPoint = CGPoint(
+            x: point.x / browserPageZoom + offset.x,
+            y: point.y / browserPageZoom + offset.y
+        )
         let request = TextPromptRequest(
             title: L10n.string("Add Browser Annotation"),
             message: L10n.string(
@@ -2626,17 +2667,10 @@ final class BrowserViewController: NSViewController {
         )
         guard case .text(let note)? = TextPromptAlert.ask(request) else { return }
 
-        // A note is anchored in the document's own CSS pixels, which are the overlay's points only
-        // at 100%: zoomed in, a pin recorded in points drifts from the component it was placed on
-        // — and now visibly, since the highlight it was aimed with comes back from the page.
-        let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
         let annotation = BrowserAnnotation(
             id: nextAnnotationID,
             note: note,
-            documentPoint: CGPoint(
-                x: point.x / browserPageZoom + offset.x,
-                y: point.y / browserPageZoom + offset.y
-            ),
+            documentPoint: documentPoint,
             url: key
         )
         nextAnnotationID += 1
@@ -4145,14 +4179,17 @@ extension BrowserViewController: WKScriptMessageHandler {
             return
         }
         if message.name == BrowserDefaults.annotationViewportMessageHandler {
-            guard message.frameInfo.isMainFrame,
-                  let messageWebView = message.webView,
+            guard let messageWebView = message.webView,
                   let scrollX = payload["scroll_x"] as? NSNumber,
                   let scrollY = payload["scroll_y"] as? NSNumber else { return }
-            annotationViewportOffsets[ObjectIdentifier(messageWebView)] = CGPoint(
-                x: max(0, scrollX.doubleValue),
-                y: max(0, scrollY.doubleValue)
-            )
+            // Child-frame scrolling invalidates the hover but must not replace the main
+            // document coordinates used by saved pins and the baseline overlay.
+            if message.frameInfo.isMainFrame {
+                annotationViewportOffsets[ObjectIdentifier(messageWebView)] = CGPoint(
+                    x: max(0, scrollX.doubleValue),
+                    y: max(0, scrollY.doubleValue)
+                )
+            }
             if messageWebView === webView {
                 updateAnnotationOverlay()
                 refreshAnnotationTargetUnderPointer()

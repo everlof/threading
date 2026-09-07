@@ -3663,7 +3663,10 @@ is on the browser frames itself in the accent colour and shows an **Annotating**
 bottom-left corner, so it is obvious that a click will leave a note rather than follow a link — press
 Esc or the toolbar button to leave. The component under the pointer is outlined and named —
 `button "Sign in"`, `link "Docs"` — so you can see what a pin is about to land on before you click;
-pointing at the word inside a button highlights the button, not the word. Notes stay in
+pointing at the word inside a button highlights the button. Hold **Option (⌥)** to target the
+innermost element instead. You can scroll while annotating. Highlights use contrasting edges
+without tinting the selected content. Same-origin previews and open shadow roots can be inspected;
+cross-origin frames and closed shadow roots remain opaque. Notes stay in
 Threading's native UI rather than entering the page DOM, so the site cannot read or alter them.
 Click an existing pin while annotation mode is active to edit or delete it. The agent can read the
 notes for the currently authorized page with their document-space coordinates, clearly labelled as

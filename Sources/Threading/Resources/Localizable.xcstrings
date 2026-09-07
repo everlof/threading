@@ -6690,6 +6690,23 @@
         }
       }
     },
+    "Annotating · ⌥ precise" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annotating · ⌥ precise"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Antecknar · ⌥ exakt"
+          }
+        }
+      }
+    },
     "Annotation %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11048,6 +11065,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klicka för att lägga till en numrerad markering. Tryck på mellanslag för att öppna bilden i full storlek."
+          }
+        }
+      }
+    },
+    "Click to annotate. Hold Option to target the innermost element. Scroll to move the page; Escape to finish." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Click to annotate. Hold Option to target the innermost element. Scroll to move the page; Escape to finish."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klicka för att anteckna. Håll ned alternativtangenten för att välja det innersta elementet. Rulla för att flytta sidan; Escape för att avsluta."
           }
         }
       }

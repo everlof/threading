@@ -75,6 +75,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         didSet {
             guard isAnnotating != oldValue else { return }
             setAccessibilityEnabled(isAnnotating)
+            selectsDeepestElement = isAnnotating && NSEvent.modifierFlags.contains(.option)
             if !isAnnotating { hoveredTarget = nil }
             window?.invalidateCursorRects(for: self)
             updateTrackingAreas()
@@ -92,6 +93,9 @@ final class BrowserAnnotationOverlay: ThemedControl {
         )
     }
 
+    private(set) var selectsDeepestElement = false
+    var onScroll: ((NSEvent) -> Void)?
+
     var onAdd: ((CGPoint) -> Void)?
     var onSelect: ((Int) -> Void)?
     var onDismiss: (() -> Void)?
@@ -104,7 +108,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         setAccessibilityRole(.button)
         setAccessibilityLabel(L10n.string("Browser Annotation Canvas"))
         setAccessibilityHelp(
-            L10n.string("Click the page to place an annotation for the agent")
+            L10n.string("Click to annotate. Hold Option to target the innermost element. Scroll to move the page; Escape to finish.")
         )
         setAccessibilityEnabled(false)
     }
@@ -178,7 +182,19 @@ final class BrowserAnnotationOverlay: ThemedControl {
         // A position under an open dropdown is the menu's, not the page's — see
         // `NSView.uncoveredPointerLocation(in:)`.
         guard isAnnotating, let point = uncoveredPointerLocation(in: event) else { return }
+        selectsDeepestElement = event.modifierFlags.contains(.option)
         onTargetProbe?(point)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard isAnnotating else { super.flagsChanged(with: event); return }
+        selectsDeepestElement = event.modifierFlags.contains(.option)
+        onTargetProbe?(pointerLocation)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard isAnnotating else { super.scrollWheel(with: event); return }
+        onScroll?(event)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -224,6 +240,27 @@ final class BrowserAnnotationOverlay: ThemedControl {
 
     // MARK: - Drawing
 
+    /// Accent and its measured opposite make a two-tone edge on arbitrary page pixels.
+    /// The same ink labels the opaque badges; selection ink assumes an AppKit selection ground.
+    var annotationInk: NSColor { Design.Text.on(Design.Surface.accent).label }
+
+    private func strokeAnnotation(_ path: NSBezierPath, width: CGFloat) {
+        annotationInk.setStroke()
+        path.lineWidth = width + Design.Spacing.hairline * 2
+        path.stroke()
+        Design.Surface.accent.setStroke()
+        path.lineWidth = width
+        path.stroke()
+    }
+
+    private func fillAnnotationBadge(_ path: NSBezierPath) {
+        Design.Surface.accent.setFill()
+        path.fill()
+        annotationInk.setStroke()
+        path.lineWidth = Design.Spacing.hairline
+        path.stroke()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if isAnnotating {
@@ -267,14 +304,14 @@ final class BrowserAnnotationOverlay: ThemedControl {
         let path = NSBezierPath(ovalIn: rect)
         Design.Surface.accent.setFill()
         path.fill()
-        Design.Surface.ground.setStroke()
+        annotationInk.setStroke()
         path.lineWidth = Layout.markerBorderWidth
         path.stroke()
 
         let value = "\(marker.id)"
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.numericDetail(weight: .semibold),
-            .foregroundColor: Design.Text.selected
+            .foregroundColor: annotationInk
         ]
         let size = value.size(withAttributes: attributes)
         value.draw(
@@ -299,10 +336,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
             rect: bounds,
             radius: Design.Radius.control(fitting: bounds.size)
         ).inset(by: width / 2)
-        Design.Surface.accent.setStroke()
-        let path = shape.path
-        path.lineWidth = width
-        path.stroke()
+        strokeAnnotation(shape.path, width: width)
     }
 
     /// Names the mode in the corner, in the same accent pill vocabulary as the pins.
@@ -311,10 +345,10 @@ final class BrowserAnnotationOverlay: ThemedControl {
     /// the hovered component's own label is drawn *above* its outline: two labels that never
     /// contend for the same strip of page.
     private func drawModeBadge() {
-        let title = L10n.string("Annotating")
+        let title = L10n.string("Annotating · ⌥ precise")
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.detail(weight: .semibold),
-            .foregroundColor: Design.Text.selected
+            .foregroundColor: annotationInk
         ]
         let textSize = title.size(withAttributes: attributes)
         let glyphWidth = modeBadgeGlyph == nil ? 0 : Layout.modeBadgeGlyphSize + Layout.modeBadgeGlyphGap
@@ -327,11 +361,10 @@ final class BrowserAnnotationOverlay: ThemedControl {
         )
         guard badge.minY > 0, badge.maxX < bounds.width else { return }
 
-        Design.Surface.accent.setFill()
-        ThemedSurface.Shape(
+        fillAnnotationBadge(ThemedSurface.Shape(
             rect: badge,
             radius: Design.Radius.pill(height: badge.height)
-        ).path.fill()
+        ).path)
 
         var textX = badge.minX + Layout.modeBadgePadding
         if let glyph = modeBadgeGlyph {
@@ -343,7 +376,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
                     width: Layout.modeBadgeGlyphSize,
                     height: Layout.modeBadgeGlyphSize
                 ),
-                tint: Design.Text.selected
+                tint: annotationInk
             )
             textX += Layout.modeBadgeGlyphSize + Layout.modeBadgeGlyphGap
         }
@@ -367,12 +400,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
             rect: visible,
             radius: Design.Radius.control(fitting: visible.size)
         ).inset(by: width / 2)
-        Design.Surface.annotationTarget.setFill()
-        shape.path.fill()
-        Design.Surface.accent.setStroke()
-        let path = shape.path
-        path.lineWidth = width
-        path.stroke()
+        strokeAnnotation(shape.path, width: width)
 
         drawLabel(target.label, above: visible)
     }
@@ -386,7 +414,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Design.Typography.detail(weight: .semibold),
-            .foregroundColor: Design.Text.selected,
+            .foregroundColor: annotationInk,
             .paragraphStyle: paragraph
         ]
 
@@ -398,16 +426,15 @@ final class BrowserAnnotationOverlay: ThemedControl {
         let above = rect.minY - Layout.targetLabelHeight - Layout.targetLabelGap
         let chip = CGRect(
             x: min(max(0, rect.minX), max(0, bounds.width - chipWidth)),
-            y: above >= 0 ? above : min(rect.minY + Layout.targetLabelGap, bounds.height),
+            y: above >= 0 ? above : min(rect.minY + Layout.targetLabelGap, max(0, bounds.height - Layout.targetLabelHeight)),
             width: chipWidth,
             height: Layout.targetLabelHeight
         )
 
-        Design.Surface.accent.setFill()
-        ThemedSurface.Shape(
+        fillAnnotationBadge(ThemedSurface.Shape(
             rect: chip,
             radius: Design.Radius.pill(height: chip.height)
-        ).path.fill()
+        ).path)
 
         let textHeight = label.size(withAttributes: attributes).height
         label.draw(

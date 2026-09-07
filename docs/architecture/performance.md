@@ -5025,3 +5025,26 @@ oversized-output fixture then exposed a second problem: scanning the entire accu
 for a newline after every read was quadratic. The parser now remembers the scanned prefix, so
 each byte is examined once before the aggregate output ceiling refuses the response. Helper
 termination and process-group reaping happen on every exit path.
+
+### Browser annotation hover bounds
+
+Annotation hover is a pointer-frequency operation (typically 60–120 events/second) over pages
+that may contain hundreds to tens of thousands of nodes. Native code retains one active WebKit
+probe and one latest queued position, plus one target value; stale revisions cannot repaint.
+Picking follows at most 12 frame contexts, 12 shadow roots per hit and 32 component ancestors.
+Label extraction visits at most 128 nodes per source and eight ARIA references, reads at most
+512 characters from an attribute and returns 80 characters. The former `innerText`/form-value
+fallback could read an entire container despite truncating the result afterward. No DOM tree is
+materialized in AppKit, and drawing touches only the target outline and visible existing pins.
+The shipping-WebKit annotation integration fixture covers the selection and geometry contract.
+
+Measured in Debug on 2026-09-07 through `BrowserAgentBridgeIntegrationTests/
+testAnnotationTargetProbeNamesTheComponentUnderThePointer` with
+`THREADING_STRESS=annotation-hover`: 11 probes per case, fixture construction/layout excluded,
+WebKit execution timed separately from IPC. At 100 nodes both name paths had a 0 ms median
+(the timer has approximately 1 ms resolution); maxima were 1 ms before and 0 ms after. At
+10,000 nodes the former name read measured 3 ms median/max; bounded extraction measured below
+1 ms median and 1 ms max. The matched baseline substitutes only the removed `innerText` name
+read into the same production probe. These are warm Debug hover measurements, not launch or
+Release results. The regression also holds snapshot-independent picking, precise shadow targets,
+scaled-frame geometry and non-disclosure of form values.

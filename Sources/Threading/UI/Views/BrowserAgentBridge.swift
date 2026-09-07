@@ -1257,6 +1257,7 @@ enum BrowserAgentScripts {
           let targetDocument = document;
           let clientX = topX;
           let clientY = topY;
+          let scaleX = 1, scaleY = 1, offsetX = 0, offsetY = 0;
           for (let depth = 0; depth < 12; depth += 1) {
             const element = deepestElementFromPoint(targetDocument, clientX, clientY);
             if (!element) {
@@ -1264,17 +1265,35 @@ enum BrowserAgentScripts {
             }
 
             if (element.tagName?.toLowerCase() !== 'iframe') {
-              return { element, clientX, clientY, topX, topY };
+              return { element, clientX, clientY, topX, topY, scaleX, scaleY, offsetX, offsetY };
             }
             let childDocument = null;
             try { childDocument = element.contentDocument; } catch (_) {}
             if (!childDocument?.documentElement) {
               // Cross-origin frames remain opaque, but the frame element itself is clickable.
-              return { element, clientX, clientY, topX, topY };
+              return { element, clientX, clientY, topX, topY, scaleX, scaleY, offsetX, offsetY };
             }
             const rect = element.getBoundingClientRect();
-            clientX -= rect.left + Number(element.clientLeft || 0);
-            clientY -= rect.top + Number(element.clientTop || 0);
+            const frameScaleX = rect.width / element.offsetWidth;
+            const frameScaleY = rect.height / element.offsetHeight;
+            if (!(frameScaleX > 0 && frameScaleY > 0)) {
+              return { element: null, message: 'The frame has no visible content.' };
+            }
+            const originX = rect.left + element.clientLeft * frameScaleX;
+            const originY = rect.top + element.clientTop * frameScaleY;
+            const childX = (clientX - originX) / frameScaleX;
+            const childY = (clientY - originY) / frameScaleY;
+            // A frame border belongs to the frame, not an unrelated child at negative coordinates.
+            if (childX < 0 || childY < 0
+                || childX >= element.clientWidth || childY >= element.clientHeight) {
+              return { element, clientX, clientY, topX, topY, scaleX, scaleY, offsetX, offsetY };
+            }
+            offsetX += originX * scaleX;
+            offsetY += originY * scaleY;
+            scaleX *= frameScaleX;
+            scaleY *= frameScaleY;
+            clientX = childX;
+            clientY = childY;
             targetDocument = childDocument;
           }
           return { element: null, message: 'The point crosses too many nested page contexts.' };
@@ -1497,14 +1516,9 @@ enum BrowserAgentScripts {
         });
         """#
 
-    /// Names the component under the pointer while the user is placing an annotation.
-    ///
-    /// It answers with a *component* rather than with the innermost node the hit test reaches:
-    /// pointing at the word inside a button means the button, so this climbs to the nearest
-    /// ancestor the agent could address — one already carrying a ref, an ARIA or implicit role,
-    /// or a test id — and falls back to the deepest element when the climb finds nothing.
-    /// Read-only, and bounded: no ref is minted here, so hovering never renumbers the page the
-    /// agent is working against.
+    /// A bounded, snapshot-independent hit test for the native annotation overlay.
+    /// Ordinary picking promotes to a nearby control or text element; precision keeps the
+    /// deepest hit. Never mint refs, read form values, or scan a whole page for a hover label.
     static let annotationTargetProbe = targetPrelude + #"""
         const missed = JSON.stringify({
           ok: false, ref: null, tag: null, role: null, name: null,
@@ -1513,42 +1527,68 @@ enum BrowserAgentScripts {
         const point = resolvePointTarget();
         if (!point || point.message || !point.element) return missed;
 
-        function addressable(candidate) {
-          if (!candidate || candidate.tagName?.toLowerCase() === 'html') return false;
-          if (state.elementToRef.get(candidate)) return true;
-          if (roleOf(candidate)) return true;
-          return Boolean(clean(
-            candidate.getAttribute?.('data-testid')
-              || candidate.getAttribute?.('data-test-id')
-              || candidate.getAttribute?.('data-test')
-              || candidate.getAttribute?.('data-qa')
-          ));
+        const maximumAncestors = 32;
+        const maximumLabelNodes = 128;
+        const maximumLabelCharacters = 80;
+        const boundedClean = value => clean(String(value || '').slice(0, 512), maximumLabelCharacters);
+        function component(candidate) {
+          const role = roleOf(candidate);
+          return (role && !['generic', 'group', 'region', 'presentation', 'none'].includes(role))
+            || candidate.matches('p,h1,h2,h3,h4,h5,h6,li,td,th,img,pre,blockquote,label')
+            || ['data-testid', 'data-test-id', 'data-test', 'data-qa'].some(
+              key => candidate.hasAttribute(key)
+            );
         }
-
         let chosen = point.element;
-        for (let depth = 0; depth < 6 && !addressable(chosen); depth += 1) {
-          const parent = chosen.parentElement
-            || (chosen.getRootNode?.()?.nodeType === 11 ? chosen.getRootNode().host : null);
-          if (!parent) break;
-          chosen = parent;
+        if (!precise) {
+          let candidate = chosen;
+          for (let depth = 0; candidate && depth < maximumAncestors; depth += 1) {
+            if (candidate.matches('html,body,iframe')) break;
+            if (component(candidate)) { chosen = candidate; break; }
+            candidate = candidate.parentElement || candidate.getRootNode?.()?.host;
+          }
         }
-        if (!addressable(chosen)) chosen = point.element;
 
+        function boundedText(element) {
+          if (!element) return '';
+          let text = '';
+          let node = element;
+          for (let count = 0; node && count < maximumLabelNodes; count += 1) {
+            if (node.nodeType === 3) text += ' ' + node.textContent.slice(0, maximumLabelCharacters);
+            if (text.length >= maximumLabelCharacters) break;
+            const skip = node.nodeType === 1
+              && node.matches('script,style,input,textarea,select,[hidden],[aria-hidden="true"]');
+            if (!skip && node.firstChild) { node = node.firstChild; continue; }
+            // Count rejected nodes too. A filtered TreeWalker can scan an unlimited run of
+            // hidden siblings inside one nextNode() despite a bound on returned nodes.
+            while (node !== element && !node.nextSibling) node = node.parentNode;
+            node = node === element ? null : node.nextSibling;
+          }
+          return boundedClean(text);
+        }
+        function annotationName(element) {
+          const authored = boundedClean(element.getAttribute('aria-label'));
+          if (authored) return authored;
+          const ids = boundedClean(element.getAttribute('aria-labelledby')).split(/\s+/).slice(0, 8);
+          const root = element.getRootNode();
+          const referenced = boundedClean(ids.map(id => boundedText(root.getElementById?.(id))).join(' '));
+          if (referenced) return referenced;
+          const label = element.labels?.[0];
+          return boundedText(label)
+            || boundedClean(element.getAttribute('alt') || element.getAttribute('title'))
+            || (element.matches('input,textarea,select,script,style') ? '' : boundedText(element));
+        }
         const rect = chosen.getBoundingClientRect();
-        // The hit test descends through frames; the difference between the point it started from
-        // and the point it ended on is exactly the offset back to the top-level viewport.
-        const offsetX = point.topX - point.clientX;
-        const offsetY = point.topY - point.clientY;
         return JSON.stringify({
           ok: rect.width > 0 && rect.height > 0,
           ref: state.elementToRef.get(chosen) || null,
           tag: chosen.tagName ? chosen.tagName.toLowerCase() : null,
           role: roleOf(chosen) || null,
-          name: clean(nameOf(chosen), 80) || null,
-          x: rect.left + offsetX,
-          y: rect.top + offsetY,
-          width: rect.width,
-          height: rect.height
+          name: annotationName(chosen) || null,
+          x: rect.left * point.scaleX + point.offsetX,
+          y: rect.top * point.scaleY + point.offsetY,
+          width: rect.width * point.scaleX,
+          height: rect.height * point.scaleY
         });
         """#
 
@@ -1822,8 +1862,9 @@ enum BrowserAgentScripts {
         })();
     """#
 
-    /// Reports only main-frame scroll coordinates from an isolated world. Browser annotations
-    /// remain native state; this channel carries no note text and exposes nothing to the page.
+    /// Reports scroll/resize invalidations from isolated frame worlds. Native code retains
+    /// coordinates only from the main frame; child frames only invalidate the hover target.
+    /// This channel carries no note text and exposes nothing to the page.
     static let annotationViewportObservation = #"""
     (() => {
       const handler = globalThis.webkit?.messageHandlers?.threadingAnnotationViewport;
@@ -1843,7 +1884,7 @@ enum BrowserAgentScripts {
         globalThis.requestAnimationFrame(report);
       };
 
-      globalThis.addEventListener("scroll", schedule, { passive: true });
+      globalThis.addEventListener("scroll", schedule, { passive: true, capture: true });
       globalThis.addEventListener("resize", schedule, { passive: true });
       if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", report, { once: true });

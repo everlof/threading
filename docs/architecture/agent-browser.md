@@ -387,15 +387,32 @@ While that mode is on, the overlay also outlines and names the component under t
 a crosshair over live content says where a pin will land and nothing about *what* it will be read
 as. The overlay resolves nothing itself: it reports pointer movement, and the browser answers with
 one bounded read of the page — the box in top-level viewport CSS pixels plus a role and accessible
-name. It answers with a **component**, climbing from the deepest hit element to the nearest ancestor
-the agent could already address (an existing ref, an ARIA or implicit role, a test id) within six
-levels, so pointing at the word inside a button highlights the button. The probe mints no refs: it
-reads `elementToRef` and never writes it, so hovering cannot renumber the page underneath an agent
-mid-task. Everything it returns is page-authored and stays page-authored — collapsed to one line
-and cut to a bounded length before it is drawn, and never added to an annotation, a tool result, or
-`browser_annotations`, whose `user_authored` provenance therefore remains exactly true. One probe
-runs at a time with only the newest pointer position queued behind it, and the highlight is re-asked
-on scroll, which moves the page under a stationary pointer without generating a mouse event.
+name. Ordinary picking promotes to the nearest semantic control, text element or test-id
+within 32 ancestors; Option keeps the deepest hit in an open shadow root or accessible frame.
+Existing snapshot refs never influence that choice and the probe mints no refs, so agent activity
+cannot change what hovering selects. Frame descent composes the scale, border and translation of
+axis-aligned nested iframes; frame borders remain frame targets. Cross-origin frames and closed
+shadow roots remain opaque. Rotated/skewed frame geometry is not supported.
+
+Everything returned is page-authored and stays separate from the user-authored annotation note.
+Labels inspect at most 128 DOM nodes per text source, eight ARIA label references and 80 output
+characters, and never read form values. This avoids a whole-subtree `innerText` layout/read on
+every movement. One probe runs at a time with only the newest pointer position queued, and a
+revision rejects outdated answers, including changes to precision at a stationary pointer.
+Scroll and resize in the main document, nested containers and child frames refresh the target. Native wheel events reach WebKit with a stable recipient
+through momentum; entering annotation mode takes keyboard focus so Option and Escape work before
+the first pin. The clicked document position is captured before the note-entry dialog runs, so movement while
+typing cannot relocate the new note. Notes still record document coordinates rather than durable DOM anchors; scrolling
+an inner container or reflowing a page can move content away from an existing pin.
+
+The overlay remains deliberately host-only: Threading owns picking, note provenance, focus,
+scroll routing and the origin boundary. The native-wheel fixture registers a page wheel listener
+and verifies the resulting document scroll; it does not stand in for a physical trackpad momentum
+check, and unwindowed synthetic events do not reliably exercise WebKit’s asynchronous compositor
+scrolling path. Theme roles supply its accent, with ink measured against
+that actual fill for every label and pin. A second contrasting stroke keeps the outline visible
+on arbitrary light/dark page pixels; the element interior is left unpainted so its content and
+contrast remain available for review.
 
 Password fields refuse agent typing and reveal the browser for user takeover. Form submissions,
 including Enter on a focused form control, require an app-owned confirmation whose description

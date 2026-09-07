@@ -2206,6 +2206,55 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertFalse(overlay.trackingAreas.contains { $0.options.contains(.mouseMoved) })
     }
 
+    @MainActor
+    func testAnnotationOverlayForwardsScrollAndTracksPrecisionModifiers() throws {
+        let overlay = BrowserAnnotationOverlay(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+            wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0))
+        wheel.flags = []
+        let event = try XCTUnwrap(NSEvent(cgEvent: wheel))
+        var forwarded = 0
+        overlay.onScroll = { received in
+            XCTAssertTrue(received === event, "The native event, including momentum, must survive")
+            forwarded += 1
+        }
+        overlay.scrollWheel(with: event)
+        XCTAssertEqual(forwarded, 0)
+        overlay.isAnnotating = true
+        overlay.scrollWheel(with: event)
+        XCTAssertEqual(forwarded, 1)
+        var probes = 0
+        overlay.onTargetProbe = { _ in probes += 1 }
+        for flags: NSEvent.ModifierFlags in [[.option], []] {
+            let change = try XCTUnwrap(NSEvent.keyEvent(with: .flagsChanged, location: .zero,
+                modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 58))
+            overlay.flagsChanged(with: change)
+            XCTAssertEqual(overlay.selectsDeepestElement, flags.contains(.option))
+        }
+        XCTAssertEqual(probes, 2, "Changing precision must re-probe without mouse movement")
+    }
+
+    @MainActor
+    func testAnnotationInkContrastsWithItsOwnAccentAcrossThemes() throws {
+        let original = AppThemePalette.current
+        defer { AppThemePalette.set(original) }
+        for theme in [AppTheme.system, AppThemeStyles.pure, AppThemeStyles.cyberpunk,
+                      AppThemeStyles.swissMinimalist] {
+            AppThemePalette.set(theme)
+            for name in [NSAppearance.Name.aqua, .darkAqua] {
+                let appearance = try XCTUnwrap(NSAppearance(named: name))
+                appearance.performAsCurrentDrawingAppearance {
+                    let overlay = BrowserAnnotationOverlay(frame: .zero)
+                    XCTAssertGreaterThanOrEqual(
+                        ThemeContrast.ratio(overlay.annotationInk, Design.Surface.accent),
+                        ThemeContrast.minimumRatio
+                    )
+                }
+            }
+        }
+    }
+
     /// Annotation mode changes what a click *means*, so it has to be legible on the surface the
     /// click lands on — not only on the toolbar button that started it.
     @MainActor
@@ -3405,6 +3454,51 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertEqual(inFrame.x, 30, accuracy: 2)
         XCTAssertEqual(inFrame.y, 225, accuracy: 2)
 
+        let precise = try await browser.annotationTargetProbe(x: 140, y: 82, precise: true)
+        XCTAssertEqual(precise.tag, "span")
+        XCTAssertLessThan(precise.width, onWord.width)
+
+        // A snapshot may assign a ref to a generic wrapper; it must not change the picker.
+        _ = try await browser.evaluate(#"""
+            document.querySelector('#prose').innerHTML = '<span>Ordinary paragraph text</span>';
+            document.querySelector('iframe').style.cssText +=
+              'transform:scale(0.5);transform-origin:top left;border:4px solid black';
+            """#)
+        let proseBefore = try await browser.annotationTargetProbe(x: 60, y: 150)
+        _ = try await browser.agentSnapshot()
+        let proseAfter = try await browser.annotationTargetProbe(x: 60, y: 150)
+        XCTAssertEqual(proseBefore.tag, "p")
+        XCTAssertEqual(proseAfter.tag, proseBefore.tag)
+        XCTAssertEqual(proseAfter.width, proseBefore.width)
+
+        let scaledFrame = try await browser.annotationTargetProbe(x: 32, y: 222)
+        XCTAssertEqual(scaledFrame.role, "link")
+        XCTAssertEqual(scaledFrame.x, 27, accuracy: 1)
+        XCTAssertEqual(scaledFrame.y, 214.5, accuracy: 1)
+        XCTAssertEqual(scaledFrame.height, 15, accuracy: 1)
+        let border = try await browser.annotationTargetProbe(x: 21, y: 201)
+        XCTAssertEqual(border.tag, "iframe")
+
+        _ = try await browser.evaluate(#"""
+            const host = document.createElement('div');
+            host.id = 'shadow-fixture';
+            host.style.cssText = 'position:absolute;left:350px;top:60px;width:200px;height:44px';
+            document.body.append(host);
+            host.attachShadow({mode:'open'}).innerHTML =
+              '<button style="width:200px;height:44px"><span>Shadow action</span></button>';
+            const input = document.createElement('input');
+            input.type = 'password'; input.value = 'NEVER IN THE OVERLAY';
+            input.style.cssText = 'position:absolute;left:350px;top:140px;width:200px;height:30px';
+            document.body.append(input);
+            """#)
+        let shadow = try await browser.annotationTargetProbe(x: 450, y: 82)
+        XCTAssertEqual(shadow.role, "button")
+        XCTAssertEqual(shadow.name, "Shadow action")
+        let shadowPrecise = try await browser.annotationTargetProbe(x: 450, y: 82, precise: true)
+        XCTAssertEqual(shadowPrecise.tag, "span")
+        let password = try await browser.annotationTargetProbe(x: 400, y: 155)
+        XCTAssertNil(password.name, "A hover label must never fall back to a form value")
+
         let offPage = try await browser.annotationTargetProbe(x: 5_000, y: 5_000)
         XCTAssertFalse(offPage.ok)
         XCTAssertNil(offPage.role)
@@ -3418,6 +3512,137 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             snapshotAfter.nodes.compactMap(\.ref),
             "Hovering must not renumber the refs the agent is working against"
         )
+        let overlay = try XCTUnwrap(browser.webView.superview?.subviews
+            .compactMap { $0 as? BrowserAnnotationOverlay }.first)
+        let chrome = try XCTUnwrap(descendantViews(in: browser.view)
+            .compactMap { $0 as? BrowserChromeBar }.first)
+        chrome.annotationButton.performClick()
+        XCTAssertTrue(overlay.isAnnotating)
+        XCTAssertTrue(window.firstResponder === overlay)
+        _ = try await browser.evaluate("document.body.style.height = '1400px'; window.annotationWheels = 0; window.addEventListener('wheel', () => window.annotationWheels++)")
+        _ = try await annotationPageImage(browser)
+        let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+            wheelCount: 1, wheel1: -120, wheel2: 0, wheel3: 0))
+        wheel.flags = []
+        // A directly delivered NSEvent has no window number. Give its locationInWindow the
+        // same coordinates as a real wheel over the production overlay.
+        let wheelPoint = overlay.convert(CGPoint(x: 300, y: 300), to: nil)
+        wheel.location = CGPoint(x: wheelPoint.x,
+            y: (NSScreen.screens.first?.frame.height ?? 0) - wheelPoint.y)
+        let nativeWheel = try XCTUnwrap(NSEvent(cgEvent: wheel))
+        let pagePoint = browser.webView.convert(nativeWheel.locationInWindow, from: nil)
+        XCTAssertEqual(pagePoint.x, 300, accuracy: 1)
+        XCTAssertEqual(pagePoint.y, 300, accuracy: 1)
+        overlay.scrollWheel(with: nativeWheel)
+        do {
+            try await waitUntilJavaScriptTrue(browser, script: "window.scrollY > 20",
+                description: "native scrolling through the annotation overlay")
+        } catch {
+            print("Annotation wheel diagnostic", try await browser.evaluate("JSON.stringify({viewport:innerHeight,height:document.documentElement.scrollHeight,y:scrollY,wheels:window.annotationWheels})") as Any)
+            chrome.annotationButton.performClick()
+            browser.webView.scrollWheel(with: nativeWheel)
+            try await Task.sleep(nanoseconds: 300_000_000)
+            print("Ordinary browser wheel diagnostic", try await browser.evaluate("JSON.stringify({y:scrollY,wheels:window.annotationWheels})") as Any)
+            throw error
+        }
+        _ = try await browser.evaluate("window.scrollTo(0, 0); document.body.style.height = ''")
+        let capturedTarget = BrowserAnnotationTarget(
+            rect: CGRect(x: onWord.x, y: onWord.y, width: onWord.width, height: onWord.height),
+            label: onWord.label
+        )
+        let originalTheme = AppThemePalette.current
+        defer { AppThemePalette.set(originalTheme) }
+        let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            ?? NSTemporaryDirectory())
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for (name, theme, appearanceName, background, foreground) in [
+            ("pure-white", AppThemeStyles.pure, NSAppearance.Name.darkAqua, "white", "black"),
+            ("pure-dark", AppThemeStyles.pure, NSAppearance.Name.aqua, "#151515", "white"),
+            ("system-white", AppTheme.system, NSAppearance.Name.aqua, "white", "black"),
+            ("cyberpunk-white", AppThemeStyles.cyberpunk, NSAppearance.Name.darkAqua, "white", "black")
+        ] {
+            AppThemePalette.set(theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            window.appearance = appearance
+            _ = try await browser.evaluate("document.body.style.background = '\(background)'; document.body.style.color = '\(foreground)'")
+            AppThemeRefresh.repaint(browser.view)
+            browser.view.layoutSubtreeIfNeeded()
+            let page = try await annotationPageImage(browser)
+            // Live scroll observation can refresh pins while WebKit paints. Install the fixture
+            // note after that await, just as the host renders its current note model.
+            overlay.markers = [BrowserAnnotationMarker(id: 1, point: CGPoint(x: 180, y: 180))]
+            overlay.hoveredTarget = capturedTarget
+            let rep = try XCTUnwrap(browser.view.bitmapImageRepForCachingDisplay(in: browser.view.bounds))
+            appearance.performAsCurrentDrawingAppearance {
+                browser.view.cacheDisplay(in: browser.view.bounds, to: rep)
+                rep.size = browser.view.bounds.size
+                let context = NSGraphicsContext(bitmapImageRep: rep)!
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = context
+                page.draw(in: browser.webView.convert(browser.webView.bounds, to: browser.view))
+                let marks = overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds)!
+                overlay.cacheDisplay(in: overlay.bounds, to: marks)
+                let image = NSImage(size: overlay.bounds.size)
+                image.addRepresentation(marks)
+                image.draw(in: overlay.convert(overlay.bounds, to: browser.view))
+                context.flushGraphics()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("browser-annotation-live-\(name).png"))
+        }
+        if ProcessInfo.processInfo.environment["THREADING_STRESS"] == "annotation-hover" {
+            for count in [100, 10_000] {
+                _ = try await browser.evaluate("""
+                    document.body.innerHTML = '<style>#stress * {pointer-events:none}</style>'
+                      + '<div id="stress" style="position:absolute;inset:0;overflow:auto">'
+                      + Array.from({length:\(count)}, (_, i) => '<div>Label text ' + i + '</div>').join('')
+                      + '</div>';
+                    """)
+                // Force fixture layout before timing either probe. The baseline changes only
+                // the removed whole-container name read, keeping geometry/IPC/fixtures matched.
+                _ = try await annotationPageImage(browser)
+                for (name, probeScript) in [
+                    ("previous-name-read", BrowserAgentScripts.annotationTargetProbe
+                        .replacingOccurrences(of: "name: annotationName(chosen) || null",
+                                              with: "name: clean(nameOf(chosen), 80) || null")),
+                    ("bounded-name-read", BrowserAgentScripts.annotationTargetProbe)
+                ] {
+                    var samples: [Double] = []
+                    for _ in 0..<11 {
+                        let script = "const started = performance.now(); const value = await (async () => {"
+                            + probeScript + "})(); return JSON.stringify({ms:performance.now()-started,value});"
+                        let encoded: String = try await withCheckedThrowingContinuation { continuation in
+                            browser.webView.callAsyncJavaScript(script, arguments: [
+                                "ref": NSNull(), "selector": NSNull(), "locator": NSNull(),
+                                "x": 300, "y": 200, "precise": true
+                            ], in: nil, in: .defaultClient) { result in
+                                continuation.resume(with: result.map { $0 as? String ?? "" })
+                            }
+                        }
+                        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8))
+                            as? [String: Any])
+                        samples.append(try XCTUnwrap(payload["ms"] as? Double))
+                        let value = try XCTUnwrap(payload["value"] as? String)
+                        let target = try JSONDecoder().decode(BrowserAnnotationTargetProbe.self,
+                            from: Data(value.utf8))
+                        XCTAssertTrue(target.ok)
+                        XCTAssertLessThanOrEqual(target.name?.count ?? 0, 80)
+                    }
+                    samples.sort()
+                    print("Annotation hover \(name), \(count) nodes: median \(samples[5]) ms; max \(samples.last!) ms (WebKit only)")
+                }
+            }
+        }
+    }
+
+    private func annotationPageImage(_ browser: BrowserViewController) async throws -> NSImage {
+        try await withCheckedThrowingContinuation { continuation in
+            browser.webView.takeSnapshot(with: nil) { image, error in
+                if let image { continuation.resume(returning: image) }
+                else { continuation.resume(throwing: error ?? BrowserTestError.timedOut("page snapshot")) }
+            }
+        }
     }
 
     func testSnapshotPrioritizesModalAndActionViewportWithinBoundedWork() async throws {
