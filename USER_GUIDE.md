@@ -2678,6 +2678,11 @@ fail over or adopt another advertised address without being paired again.
 
 ### Faster return to a chat on iPhone
 
+The iPhone keeps a blurred preview of each terminal chat you leave for up to three days, with no
+fixed limit on the number of chats. A new capture refreshes that chat's expiry. Previews are kept
+only in memory and may be discarded when memory is needed; after restarting the app, chats show
+the loader until their content arrives.
+
 When you leave a chat, the iPhone normally keeps up to five authenticated connections warm for
 two minutes. It does not keep the terminal running on the phone: while held, that connection gets
 no output or conversation updates, owns no terminal size, and does not appear as a viewer on the

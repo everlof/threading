@@ -90,6 +90,47 @@ final class MobileTerminalPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testSnapshotsRemainSeparateBeyondSixChats() {
+        let cache = MobileTerminalSnapshotCache()
+        let images = (0..<100).map { _ in UIImage() }
+        for (index, image) in images.enumerated() {
+            cache.store(image, for: "chat-\(index)")
+        }
+        for (index, image) in images.enumerated() {
+            XCTAssertTrue(cache.image(for: "chat-\(index)") === image)
+        }
+    }
+
+    @MainActor
+    func testSnapshotExpiresFromCaptureTimeEvenWhenRead() {
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cache = MobileTerminalSnapshotCache(now: { now })
+        cache.store(UIImage(), for: "chat-a")
+        now.addTimeInterval(MobileTerminalSnapshotCache.maximumAge - 1)
+        XCTAssertNotNil(cache.image(for: "chat-a"))
+        now.addTimeInterval(1)
+        XCTAssertNil(cache.image(for: "chat-a"))
+        now.addTimeInterval(-1)
+        XCTAssertNil(cache.image(for: "chat-a"), "An expired snapshot is removed")
+    }
+
+    @MainActor
+    func testRecaptureRefreshesOnlyThatChatsExpiry() {
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cache = MobileTerminalSnapshotCache(now: { now })
+        cache.store(UIImage(), for: "chat-a")
+        cache.store(UIImage(), for: "chat-b")
+        now.addTimeInterval(MobileTerminalSnapshotCache.maximumAge / 2)
+        let replacement = UIImage()
+        cache.store(replacement, for: "chat-a")
+        now.addTimeInterval(MobileTerminalSnapshotCache.maximumAge / 2)
+        XCTAssertTrue(cache.image(for: "chat-a") === replacement)
+        XCTAssertNil(cache.image(for: "chat-b"))
+        now.addTimeInterval(MobileTerminalSnapshotCache.maximumAge / 2)
+        XCTAssertNil(cache.image(for: "chat-a"))
+    }
+
+    @MainActor
     func testTheSnapshotCacheIgnoresAViewWithNoSize() {
         let cache = MobileTerminalSnapshotCache()
         cache.keep(UIView(frame: .zero), for: "chat-a")

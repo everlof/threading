@@ -61,18 +61,30 @@ enum MobileTerminalKeyboardMemory {
 
 /// The last picture of each chat's terminal, kept as the chat is left and shown softened when
 /// it is opened again while its replay is still on the way. Quarter resolution, because it is
-/// only ever seen blurred; a handful of chats, dropped under memory pressure, never persisted —
-/// a cold launch shows the loader instead.
+/// only ever seen blurred. Snapshots expire three days after capture, with no chat-count limit.
+/// NSCache may evict them under memory pressure; they are never persisted, so a cold launch
+/// shows the loader instead.
 @MainActor
 final class MobileTerminalSnapshotCache {
     static let shared = MobileTerminalSnapshotCache()
     static var captureScale: CGFloat { 0.25 }
-    static var capacity: Int { 6 }
+    static var maximumAge: TimeInterval { 3 * 24 * 60 * 60 }
 
-    private let images = NSCache<NSString, UIImage>()
+    private final class Snapshot {
+        let image: UIImage
+        let capturedAt: Date
 
-    init() {
-        images.countLimit = Self.capacity
+        init(image: UIImage, capturedAt: Date) {
+            self.image = image
+            self.capturedAt = capturedAt
+        }
+    }
+
+    private let images = NSCache<NSString, Snapshot>()
+    private let now: () -> Date
+
+    init(now: @escaping () -> Date = { Date() }) {
+        self.now = now
     }
 
     func keep(_ view: UIView, for sessionID: String) {
@@ -86,11 +98,17 @@ final class MobileTerminalSnapshotCache {
     }
 
     func store(_ image: UIImage, for sessionID: String) {
-        images.setObject(image, forKey: sessionID as NSString)
+        images.setObject(Snapshot(image: image, capturedAt: now()), forKey: sessionID as NSString)
     }
 
     func image(for sessionID: String) -> UIImage? {
-        images.object(forKey: sessionID as NSString)
+        guard let snapshot = images.object(forKey: sessionID as NSString) else { return nil }
+        let age = now().timeIntervalSince(snapshot.capturedAt)
+        guard age >= 0, age < Self.maximumAge else {
+            forget(sessionID)
+            return nil
+        }
+        return snapshot.image
     }
 
     func forget(_ sessionID: String) {

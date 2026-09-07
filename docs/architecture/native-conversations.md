@@ -1188,6 +1188,15 @@ submission keeps its PTY-before-replay-receipt ordering. `AppEnvironment` builds
 capability from its injected runtime and `AppDelegate` installs it before the listener starts;
 Core/Remote never obtains an `AgentSessionViewController`, `TerminalSession`, or window.
 
+The iPhone terminal opening preview is an in-memory `NSCache` keyed by session ID, with no
+chat-count limit. Each quarter-resolution snapshot expires three days after capture; reading it
+does not extend its lifetime, while leaving the chat captures a replacement. Lookup checks and
+removes an expired entry in O(1), without scanning other chats or adding timers. Unrequested
+expired entries remain eligible for NSCache eviction, including under memory pressure; expiry
+is a display-validity rule, not a scheduled memory reclamation promise. A cold launch has no
+snapshots. Capture remains one viewport on departure, independent of transcript size; expected
+working sets are tens of visited chats, with a 100-chat regression case covering separate keys.
+
 A reconnect keeps the last complete terminal screen softened while replay and resize repair are
 held behind the ordered `terminalReady` boundary. Crossing that boundary starts the reveal in the
 same main-actor turn as buffered replay is delivered. SwiftTerm is live at that point, so the
