@@ -408,21 +408,22 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             ("pipeline-8", "Define safe row intents", ExtensionSessionDetailedActivity.idle.rawValue, "Planned", .neutral),
         ]
         let calendar = Calendar.current
-        let now = Date()
-        let today = calendar.startOfDay(for: now)
-        let stableToday = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: today)!
+        let today = calendar.startOfDay(for: Date())
+        let todayAt: (Int) -> Date = { hour in
+            calendar.date(bySettingHour: hour, minute: 0, second: 0, of: today)!
+        }
         let lastUsedByID: [String: Date] = [
             "pipeline-1": calendar.date(byAdding: .day, value: -10, to: today)!,
-            // "One hour ago" changes calendar buckets around midnight and used to collapse the
-            // Today section into Yesterday. This fixture is evidence for every section, so pin
-            // its Today row to the current calendar day rather than the current wall-clock hour.
-            "pipeline-2": stableToday,
-            "pipeline-3": calendar.date(byAdding: .hour, value: -2, to: now)!,
-            "pipeline-4": calendar.date(byAdding: .hour, value: -12, to: today)!,
+            // Keep the relative-date sections tied to the host calendar while fixing every
+            // within-section timestamp. Mixing noon with `Date()` made Activity and T3 reverse
+            // otherwise identical rows depending on what hour the evidence happened to run.
+            "pipeline-2": todayAt(12),
+            "pipeline-3": todayAt(10),
+            "pipeline-4": calendar.date(byAdding: .day, value: -1, to: todayAt(12))!,
             "pipeline-5": calendar.date(byAdding: .day, value: -4, to: today)!,
-            "pipeline-6": now,
+            "pipeline-6": todayAt(15),
             "pipeline-7": calendar.date(byAdding: .day, value: -10, to: today)!,
-            "pipeline-8": now,
+            "pipeline-8": todayAt(14),
         ]
         let observedAt = Date(timeIntervalSinceReferenceDate: 50)
         let facts = rows.flatMap { id, title, activity, activityLabel, status in
