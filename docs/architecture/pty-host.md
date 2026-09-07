@@ -980,7 +980,8 @@ launching picks them back up into the same conversations.
 `terminateAll`, which would otherwise kill exactly these children. Each host-backed session sends
 one `detach` carrying three things only this process can produce:
 
-- `screenSeed` — `RemoteScreenSeed.repaint(of:)` of the live emulator. The daemon cannot synthesise
+- `screenSeed` — `RemoteScreenSeed.repaint(of:)` of the emulator's `.liveScreen` snapshot, so
+  browsing scrollback on the Mac cannot displace the restored cursor from its prompt. The daemon cannot synthesise
   a screen because a repaint is derived from an emulator and it has none; the app is present at
   exactly the moment the last watcher leaves, which is what makes this possible at all.
 - `modeSeed` — `RemoteTerminalModeSeed.bytes(for:)` of the modes read off the same snapshot.

@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Dispatch
 import Foundation
+import SwiftTerm
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
@@ -72,6 +73,26 @@ final class PTYHostDetachSessionTests: XCTestCase {
             "the daemon has no emulator, so the repaint is this process's to compute or nobody's"
         )
         XCTAssertFalse(detach.modeSeed.isEmpty)
+    }
+
+    func testDetachReplaysTheLiveScreenWhenTheMacIsBrowsingHistory() throws {
+        let hosted = try startHostBackedSession()
+        let output = (0..<100).map { "history \($0)\r\n" }.joined() + "> live prompt"
+        hosted.transport.send(output: Array(output.utf8))
+        settle()
+        let host = hosted.session.terminalView
+        let live = host.terminalStateSnapshot()
+        host.scrollUp(lines: 1)
+        XCTAssertEqual(host.terminalStateSnapshot().viewportRow, live.viewportRow - 1)
+
+        XCTAssertTrue(hosted.session.detachFromHost(by: Date().addingTimeInterval(1)))
+        let detach = try XCTUnwrap(hosted.transport.detaches.first)
+        let restored = TerminalView(frame: .zero, options: TerminalOptions(
+            cols: live.dimensions.cols, rows: live.dimensions.rows))
+        restored.feed(byteArray: Array(detach.screenSeed)[...])
+        XCTAssertEqual(restored.terminalStateSnapshot().visibleRows.map(\.text),
+                       live.visibleRows.map(\.text))
+        XCTAssertEqual(restored.terminalStateSnapshot().cursor, live.cursor)
     }
 
     /// Handing a session over is not ending it: nothing is killed and nobody is told it stopped.

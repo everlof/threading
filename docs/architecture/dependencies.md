@@ -140,6 +140,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     resizes only that live buffer; SwiftTerm reconciles the normal buffer to the current grid when
     it is restored. That preserves its scrollback and saved cursor without paying to reflow
     content that is not being shown. The fork uses upstream's implementation and tests unchanged.
+  - **Snapshot origin is an embedding seam.** `terminalStateSnapshot(origin: .liveScreen)` copies
+    one grid from `yBase` for remote replay and durable-session detach. Its default `.viewport`
+    keeps diagnostic callers on `yDisp`. The live cursor must never accompany scrolled viewport
+    rows in a replay: a one-row scroll makes subsequent typing land one row above its prompt.
+    Both reads hold the existing parser lock and leave the local viewport and selection alone;
+    choosing the origin adds no history scan. Keep this distinction when re-syncing.
   - **The window-size delivery seam is ours.** `LocalProcessTerminalView.sendWindowSize(_:)` is
     an `open` method the resize path routes through: `sizeChanged` reads `getWindowSize()`,
     updates the adapter's cached size, and then asks this seam to deliver it, taking its answer

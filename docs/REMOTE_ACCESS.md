@@ -780,6 +780,16 @@ asks for the ring again). Separately, the session socket reconnects the moment t
 active instead of serving out a backoff that was counting while the app was suspended.
 `RemoteTerminalViewportLeaseTests` proves both the hold and the untouched first-open reset.
 
+**A replay snapshots the live screen, never the Mac's scrolled viewport.** SwiftTerm's default
+diagnostic snapshot copies rows from `yDisp`, while the cursor and incoming PTY addressing use
+`yBase`. With the Mac one row into history, combining those rows with that cursor puts resumed
+typing on the divider above the displayed prompt. `TerminalSession.remoteTerminalSnapshot`
+requests `.liveScreen` so the rows and cursor share an origin, without scrolling the Mac or
+changing its selection. The same origin is used for the PTY host's detach seed. The copy still
+visits exactly one grid (normally 80×24; a 240×120 remote grid is the stress size), at the existing
+snapshot boundaries, independent of history depth. `RemoteScreenSeedTests` replays the shipping
+session snapshot and continues typing, with separate deep-history and alternate-screen cases.
+
 **What the terminal shows while its content is not yet the truth is three rules, held in one
 resolver.** They were right by accident once and lost in a view change, so
 `TerminalSurfacePresentation.resolve` is where they live and `MobileTerminalPresentationTests`

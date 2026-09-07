@@ -1267,7 +1267,15 @@ public struct TerminalVisibleRowSnapshot: Sendable, Equatable {
     }
 }
 
-/// A copied terminal state for status displays and diagnostics.
+/// Which rows accompany the terminal's live cursor and modes in a state snapshot.
+public enum TerminalSnapshotOrigin: Sendable {
+    /// The user's current scroll position, for inspection and diagnostics.
+    case viewport
+    /// The screen addressed by PTY output, independent of local scrollback browsing.
+    case liveScreen
+}
+
+/// A copied terminal state for status displays, diagnostics, and terminal replay.
 public struct TerminalViewStateSnapshot: Sendable {
     public let dimensions: TerminalDimensions
     public let cursor: Position
@@ -1715,8 +1723,10 @@ extension TerminalView {
     }
 
     /// Returns copied terminal state for status displays and diagnostics.
-    public nonisolated func terminalStateSnapshot() -> TerminalViewStateSnapshot {
-        renderOwner.stateSnapshot()
+    public nonisolated func terminalStateSnapshot(
+        origin: TerminalSnapshotOrigin = .viewport
+    ) -> TerminalViewStateSnapshot {
+        renderOwner.stateSnapshot(origin: origin)
     }
 
     /// Encodes a custom accessory key through SwiftTerm's live keyboard state.

@@ -318,7 +318,7 @@ final class TerminalRenderOwner: Sendable {
         }
     }
 
-    func stateSnapshot() -> TerminalViewStateSnapshot {
+    func stateSnapshot(origin: TerminalSnapshotOrigin) -> TerminalViewStateSnapshot {
         guard let terminal = currentSession()?.terminal else {
             return TerminalViewStateSnapshot(
                 dimensions: TerminalDimensions(cols: 0, rows: 0),
@@ -344,9 +344,12 @@ final class TerminalRenderOwner: Sendable {
         }
         return terminal.terminalLock.withLock {
                 let buffer = terminal.displayBuffer
+                // Replay rows and cursor addressing must share the live origin. Read without
+                // scrolling the host, and copy only one grid regardless of history size.
+                let firstRow = origin == .liveScreen ? buffer.yBase : buffer.yDisp
                 let visibleRows = (0..<terminal.rows).compactMap { row
                     -> TerminalVisibleRowSnapshot? in
-                    let lineIndex = buffer.yDisp + row
+                    let lineIndex = firstRow + row
                     guard lineIndex >= 0, lineIndex < buffer.lines.count else {
                         return nil
                     }
@@ -373,7 +376,7 @@ final class TerminalRenderOwner: Sendable {
                     dimensions: TerminalDimensions(
                         cols: terminal.cols, rows: terminal.rows),
                     cursor: Position(col: buffer.x, row: buffer.y),
-                    viewportRow: buffer.yDisp,
+                    viewportRow: firstRow,
                     currentBidiState: terminal.currentBidiState,
                     bidiArrowKeySwap: terminal.bidiArrowKeySwap,
                     cursorStyle: terminal.options.cursorStyle,

@@ -729,7 +729,7 @@ final class TerminalSession: NSObject {
     func detachFromHost(by deadline: Date) -> Bool {
         guard let hostLink else { return false }
 
-        let terminal = terminalView.terminalStateSnapshot()
+        let terminal = terminalView.terminalStateSnapshot(origin: .liveScreen)
         let sent = hostLink.detach(
             screenSeed: RemoteScreenSeed.repaint(of: terminal),
             modeSeed: RemoteTerminalModeSeed.bytes(for: RemoteTerminalModes(terminal)),
@@ -1317,7 +1317,7 @@ extension TerminalSession: RemoteTerminalSurface {
     }
 
     var remoteTerminalSnapshot: RemoteTerminalSnapshot {
-        let terminal = terminalView.terminalStateSnapshot()
+        let terminal = terminalView.terminalStateSnapshot(origin: .liveScreen)
         let state = RemoteTerminalState(
             grid: RemoteTerminalGrid(
                 cols: terminal.dimensions.cols,

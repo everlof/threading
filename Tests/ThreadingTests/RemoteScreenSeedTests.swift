@@ -230,6 +230,66 @@ final class RemoteScreenSeedTests: XCTestCase {
 
     // MARK: - Cursor
 
+    /// Reconnecting must copy the live grid even when the Mac is reading one row of history.
+    /// Mixing viewport rows with the live cursor puts subsequent typing on the divider above
+    /// the prompt — the reported iPhone app-switch failure.
+    func testSessionReconnectKeepsTypingOnThePromptWhileMacIsScrolledUp() {
+        let session = TerminalSession()
+        let host = session.terminalView
+        host.resize(cols: 80, rows: 12)
+        host.feed(text: (0..<30).map { "history \($0)\r\n" }.joined())
+        host.feed(text: "--------------------\r\n> send again 751 755,\r\n--------------------\r\nstatus")
+        host.feed(text: "\u{1b}[10;22H")
+        let live = host.terminalStateSnapshot()
+        host.scrollUp(lines: 1)
+        let scrolled = host.terminalStateSnapshot()
+        XCTAssertEqual(scrolled.viewportRow, live.viewportRow - 1)
+
+        let phone = makeTerminal(cols: 80, rows: 12)
+        phone.feed(byteArray: Array(session.remoteTerminalSnapshot.screenSeed)[...])
+        XCTAssertEqual(phone.terminalStateSnapshot().visibleRows.map(\.text), live.visibleRows.map(\.text))
+        XCTAssertEqual(host.terminalStateSnapshot().viewportRow, scrolled.viewportRow,
+                       "Taking a remote snapshot must not scroll the Mac")
+
+        host.feed(text: "756,")
+        phone.feed(text: "756,")
+        host.scroll(toPosition: 1)
+        XCTAssertEqual(phone.terminalStateSnapshot().visibleRows.map(\.text),
+                       host.terminalStateSnapshot().visibleRows.map(\.text))
+    }
+
+    func testLiveSnapshotKeepsOneGridWithDeepScrollbackAndPreservesViewport() {
+        let terminal = makeTerminal(cols: 240, rows: 120)
+        terminal.changeHistorySize(10_000)
+        terminal.feed(text: (0..<5_000).map { "history \($0)\r\n" }.joined())
+        terminal.feed(text: "> live prompt")
+        let live = terminal.terminalStateSnapshot()
+        terminal.scroll(toPosition: 0)
+
+        let snapshot = terminal.terminalStateSnapshot(origin: .liveScreen)
+        XCTAssertEqual(snapshot.visibleRows.count, 120)
+        XCTAssertEqual(snapshot.visibleRows.map(\.text), live.visibleRows.map(\.text))
+        XCTAssertEqual(snapshot.viewportRow, live.viewportRow)
+        XCTAssertEqual(terminal.terminalStateSnapshot().viewportRow, 0)
+    }
+
+    func testLiveSnapshotUsesAlternateScreenWhileNormalBufferHasHistory() {
+        let terminal = makeTerminal()
+        terminal.feed(text: (0..<30).map { "history \($0)\r\n" }.joined())
+        terminal.scrollUp(lines: 1)
+        terminal.feed(text: "\u{1b}[?1049h\u{1b}[2;1H> alternate")
+        let snapshot = terminal.terminalStateSnapshot(origin: .liveScreen)
+        let phone = makeTerminal()
+        phone.feed(byteArray: Array(RemoteScreenSeed.repaint(of: snapshot))[...])
+        terminal.feed(text: " input")
+        phone.feed(text: " input")
+
+        XCTAssertTrue(snapshot.isAlternateBuffer)
+        XCTAssertEqual(snapshot.viewportRow, 0)
+        XCTAssertEqual(phone.terminalStateSnapshot().visibleRows.map(\.text),
+                       terminal.terminalStateSnapshot().visibleRows.map(\.text))
+    }
+
     func testCursorIsPlacedWhereTheTerminalLeftIt() {
         let terminal = makeTerminal()
         terminal.feed(text: "one\r\ntwo")

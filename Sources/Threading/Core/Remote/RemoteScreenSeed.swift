@@ -75,7 +75,9 @@ enum RemoteScreenSeed {
 
     // MARK: - Public Methods
 
-    /// The repaint for `terminal`'s visible screen, ready to be replayed into a fresh client.
+    /// The repaint for a `.liveScreen` snapshot, ready to be replayed into a fresh client.
+    /// A scrolled viewport cannot be replayed: its rows disagree with the live cursor and with
+    /// the cursor-addressed PTY output that follows this seed.
     static func repaint(of terminal: TerminalViewStateSnapshot) -> Data {
         var out = ""
 
