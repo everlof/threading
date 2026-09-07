@@ -605,8 +605,25 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
     }
 
     private func write(_ view: NSView, named filename: String) throws {
-        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: rep)
+        // `bitmapImageRepForCachingDisplay` inherits the current screen's backing scale. The
+        // navigator archive is source-pixel evidence, so letting a Retina host choose 2x makes
+        // every existing 1120x720 reference look like a full-frame 2240x1440 product change.
+        // Draw into an explicit 1x store so local and CI evidence describe the same pixels.
+        let bounds = view.bounds.integral
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: max(1, Int(bounds.width)),
+            pixelsHigh: max(1, Int(bounds.height)),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        rep.size = bounds.size
+        view.cacheDisplay(in: bounds, to: rep)
         let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
         try png.write(to: Render.directory.appendingPathComponent(filename))
     }
