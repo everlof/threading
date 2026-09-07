@@ -475,8 +475,10 @@ Use `.action(id:)` for extension-owned behavior such as filters, inbox state, or
 document. Host destinations do not grant project/session read access; request the applicable
 `host.*.read` capabilities if the extension needs to construct its snapshot from host data.
 
-### Search and privacy
+### Materialized-v1 search and privacy
 
-Continuous search remains intentionally explicit: use a text input action and return snapshots.
-The protocol does not expose keystrokes, arbitrary timers, AppKit views, or a private route around
-the host renderer.
+For a materialized v1 navigator, continuous search remains intentionally explicit: use a text
+input action and return snapshots. A pipeline navigator instead declares searchable fact fields;
+the host filters its frozen fact snapshot on every keystroke without sending the query or an
+action to the extension. Neither path exposes AppKit views, arbitrary timers, or a private route
+around the host renderer.

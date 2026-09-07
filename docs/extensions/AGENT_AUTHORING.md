@@ -1442,6 +1442,13 @@ Before reporting an extension complete:
 16. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.
+17. For `ui.workspace-navigation`, validate exact manifest/startup registration parity for a
+    pipeline declaration. For a materialized v1 navigator, validate its registered root plus every
+    declared load or event response within the document and patch bounds. Exercise every
+    applicable option and search path; for a pipeline, also exercise source-session activation and
+    each declared row intent. Prove generation replacement and process-death failback, inspect
+    light/dark rendered evidence, and, when changing the SDK or reference examples, run
+    `scripts/verify_navigator_examples_wasi.sh`.
 
 Threading refuses an installed-package directory above 1,024 visible entries or 256 package
 directories rather than performing unbounded discovery and eager Settings construction. Those are

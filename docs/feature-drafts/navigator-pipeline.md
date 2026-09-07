@@ -1,10 +1,12 @@
 # The Navigator Pipeline
 
-> Status: active feature draft — the product goal is that a user who wants a different sidebar
-> can have one, built by an extension, without Threading having anticipated the shape they wanted. The
-> durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Rollout steps 1–5 and the initial intent contract were
-> implemented by 2026-08-30; the three reference extensions now build from the public SDK,
+> Status: shipped 2026-09-07 — this is the delivery and research record. The durable extension
+> contract lives in [`WORKSPACE_NAVIGATORS.md`](../extensions/WORKSPACE_NAVIGATORS.md), with the
+> measured scaling contract in [`performance.md`](../architecture/performance.md). The product
+> goal is that a user who wants a different sidebar can have one, built by an extension, without
+> Threading having anticipated the shape they wanted. The shipped work is a five-stage pipeline —
+> facts, options, transform, structure, representation — plus a host-executed intent vocabulary.
+> The three reference extensions build from the public SDK,
 > dynamic registered-provider facts are selectable through host-owned Group by and Sort by
 > controls, and pipeline collections may expose their complete host-virtualized ordering.
 > Rollout is implemented through step 9's explicit realistic target: Native uses the same
@@ -23,8 +25,10 @@ Model a navigator as a **transform over facts**, not as a document an extension 
   choices it wants to offer. Threading renders and persists them.
 - It declares a **transform**: filter, bucket, sort, section-order, expressed over facts and
   option values. **Threading evaluates it**, natively, over its own model.
-- It declares the **output shape** (list, outline, grid, sections) and one **item template** with
-  bindings to facts. Threading realizes the template per visible row.
+- Shipped pipeline format 1 declares sections, one single-select **list**, and one **item
+  template** with bindings to facts. Threading realizes the template per visible row. Materialized
+  v1 navigators retain their list, outline, and grid shapes; additional pipeline shapes are future
+  additive formats.
 - Row actions bind to a host-owned **intent** vocabulary. The first shipped slice is pin, unpin,
   and archive, which Threading executes, refuses, persists and undoes.
 
@@ -410,9 +414,11 @@ that scales.
 
 ## Stage 4 — Output
 
-Unchanged from v1 in shape: sections, and a list, outline or grid, with stable IDs the host diffs
-so selection, expansion, scroll position and first responder survive a re-evaluation. What changes
-is that the host produces this by evaluating the transform rather than receiving it.
+Shipped pipeline format 1 produces sections and one single-select list with stable source-session
+IDs, so selection, scroll position and first responder survive a re-evaluation. The host produces
+that list by evaluating the transform rather than receiving it. Materialized v1 documents still
+support list, outline and grid collections; those shapes are not claims about pipeline format 1,
+and any later pipeline shape must be additive.
 
 Format 1 keeps the finite bridge when `output.windowing` is absent: it emits at most 1,000 items
 and requires a host-owned overflow notice rather than truncating silently. The additive
@@ -563,16 +569,15 @@ does. An install must never reorder somebody's sidebar on its own.
 - **The transform grows into a language.** Mitigation: every proposed addition must first be shown
   to be impossible as an off-line fact.
 - **Fact-provider cost.** A provider polling a forge for hundreds of branches is a real cost the
-  user did not ask for. Mitigation: the `consumes` declarations plus subject-scoped subscriptions
-  tell a provider which keys and subjects are actually being consumed, and the existing
-  brokered-network grant rules bound the rest.
+  user did not ask for. Mitigation: bounded fact publication, the GitLab provider's capped and
+  paged polling, and the existing brokered-network grant rules. Routing subject-scoped
+  subscriptions from `consumes` declarations remains future work.
 - **Parity lint churn.** The invariant will fail the build the first time somebody adds a field to
   the native row. That is the point, but it needs a documented, cheap way to add the fact in the
   same change.
-- **Concurrent surfaces.** This draft touches the extension boundary while other work is in flight
-  there — the working tree already adds capabilities (`host.project.files.read`, the attachment
-  surfaces) inside ranges this draft cites. Re-check `ExtensionHostData.swift` and
-  `ExtensionContributions.swift` against `main` before implementing.
+- **Concurrent surfaces.** The delivery landed while other extension capabilities were moving.
+  Future manifest or host-data changes must keep the SDK validator, JSON schemas, startup parity,
+  policy checks and generated references synchronized.
 
 ## Tests
 
@@ -591,8 +596,8 @@ does. An install must never reorder somebody's sidebar on its own.
   that subject.
 - Search: the host-owned query filters per keystroke with zero process messages, and matches
   extension facts declared searchable.
-- Rendered-state tests for all three example extensions, light and dark, per the house convention
-  that appearance is reviewed in pictures.
+- Rendered-state tests for the Activity Inbox and T3 Sidebar examples in light and dark, plus
+  registration, provider and host-join evidence for the intentionally UI-free GitLab example.
 - Stress fixture per the scaling contract, with before/after recorded in `performance.md`.
 - Failback: a navigator whose process dies mid-scroll returns to Native with selection intact.
 

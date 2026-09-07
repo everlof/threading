@@ -714,6 +714,7 @@ Packages/ThreadingExtensionKit/
 ├── Examples/HelloStatusConsumerExtension/
 ├── Examples/GitLabStateExtension/
 ├── Examples/ActivityInboxExtension/
+├── Examples/T3SidebarExtension/
 ├── Examples/SimulatorRelayExtension/
 └── Tests/ThreadingExtensionKitTests/
 
@@ -755,6 +756,7 @@ swift run --package-path Packages/ThreadingExtensionKit HelloStatusExtensionExam
 swift run --package-path Packages/ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit GitLabStateExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit ActivityInboxExtensionExample --threading-register
+swift run --package-path Packages/ThreadingExtensionKit T3SidebarExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit SessionInfoExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated

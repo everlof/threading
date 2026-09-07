@@ -114,11 +114,6 @@ reshuffling it is a line move.
   while exposing bounded composition, churn, coupling, and anonymized ownership through a reusable
   safe-extension data and project-panel contract. Needs its two host seams first: the bounded
   repository-analysis capability, and a project action that opens an extension panel.
-- [The navigator pipeline](navigator-pipeline.md) — make the sidebar a transform over typed facts
-  rather than a document an extension renders, so a t3-style list, a ChatGPT-style activity inbox,
-  and a GitLab provider with no UI at all are each buildable from the published SDK. Its first
-  slice — live session edges and targeted row patches on v1 — was implemented 2026-08-29; the
-  host fact registry and parity gate are now in progress.
 - [Traffic inspector extension and workbench surfaces](network-inspector-extension.md) — put a
   lightweight, agent-readable HTTP(S) inspector in the existing bottom drawer while adding the
   isolated rich surface, live companion data plane and crash-safe system leases other ambitious
@@ -149,6 +144,15 @@ reshuffling it is a line move.
 
 ### Shipped — pointers remain
 
+- [The navigator pipeline](navigator-pipeline.md) — **shipped** 2026-09-07. Extensions can define
+  a focused sidebar as a host-evaluated transform over typed host and provider facts, with
+  persisted static and registered-fact options, host-owned search and row intents, virtualized
+  complete ordering, and permanent Native failback. Activity Inbox and T3 Sidebar are the visible
+  reference navigators; the UI-free GitLab provider proves cross-extension facts. The durable
+  authoring contract is in
+  [`WORKSPACE_NAVIGATORS.md`](../extensions/WORKSPACE_NAVIGATORS.md), and the draft remains as the
+  delivery and research record. Later pipeline shapes and subject-scoped provider subscriptions
+  remain additive future work rather than rollout blockers.
 - [Native extension tier](native-extension-tier.md) — **Plan A shipped** 2026-09-02. Threading
   `dlopen`s a signed code bundle, hosts its `NSView` in a pane, and hands it the host's whole theme
   so it draws with the real components; `ThreadingPluginKit` is the contract both sides link and
