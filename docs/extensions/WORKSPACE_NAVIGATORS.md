@@ -288,14 +288,18 @@ truncation. The complete machine-readable contract is
 is the complete safe-extension example. Its manifest requests only `ui.workspace-navigation`; its
 static pipeline produces Priority, Today, Yesterday and Last 7 days sections from published
 host facts, shows working state from the detailed activity fact, and lets the host own search,
-sorting, the clock, row realization and source-session activation. There is no session snapshot
-read and no extension callback on a fact or calendar edge.
+sorting, the clock, row realization and source-session activation. Its host-owned Group by and
+Sort by controls also admit eligible facts registered by other extensions, so a provider can add
+an arrangement choice without Activity Inbox knowing it exists. There is no session snapshot read
+and no extension callback on a fact or calendar edge.
 
 [`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension) is the
 matching host-intent example. Its static pipeline presents a flat session list with project
 subtitles, a Pinned section, host search, and a persisted sort option. It declares `pin`, `unpin`,
 and `archive`, conditionally shows the applicable controls, and omits them for scheduled-start
-rows which Threading would refuse. The extension still receives no session snapshot or callback.
+rows which Threading would refuse. Like Activity Inbox, its Group by and Sort by controls discover
+eligible registered facts entirely inside the host. The extension still receives no session
+snapshot or callback.
 
 `session.activity.detailed@1` currently publishes six named raw values through
 `ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `ready-with-background-work`,

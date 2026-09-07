@@ -47,6 +47,18 @@ final class ActivityInboxExtensionTests: XCTestCase {
         XCTAssertEqual(pipeline.output.collectionID, "activity-sessions")
         XCTAssertEqual(pipeline.output.windowing, .hostVirtualized)
         XCTAssertEqual(navigator.options.map(\.id), ["sort-order"])
+        XCTAssertEqual(pipeline.registeredFactOptions, [
+            .init(
+                id: "group-by-fact",
+                title: "Group by",
+                application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+            ),
+            .init(
+                id: "sort-by-fact",
+                title: "Sort by",
+                application: .sort(direction: .ascending)
+            ),
+        ])
 
         guard case let .rules(rules, unmatched) = pipeline.buckets.first?.strategy else {
             return XCTFail("Activity Inbox must use ordered host-evaluated rule buckets")

@@ -50,6 +50,18 @@ final class T3SidebarExtensionTests: XCTestCase {
         XCTAssertEqual(pipeline.output.collectionID, "t3-sessions")
         XCTAssertEqual(pipeline.output.windowing, .hostVirtualized)
         XCTAssertEqual(navigator.options.map(\.id), ["sort-order"])
+        XCTAssertEqual(pipeline.registeredFactOptions, [
+            .init(
+                id: "group-by-fact",
+                title: "Group by",
+                application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+            ),
+            .init(
+                id: "sort-by-fact",
+                title: "Sort by",
+                application: .sort(direction: .ascending)
+            ),
+        ])
         XCTAssertEqual(templateIntents(in: pipeline.output.rowTemplate), [
             .pin, .unpin, .archive,
         ])

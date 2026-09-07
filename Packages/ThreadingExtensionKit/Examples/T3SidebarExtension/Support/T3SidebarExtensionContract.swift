@@ -85,6 +85,21 @@ public enum T3SidebarExtensionContract {
                     .init(key: lastUsed.key, requirement: .required),
                     .init(key: hasScheduledStart.key, requirement: .required),
                 ],
+                registeredFactOptions: [
+                    .init(
+                        id: "group-by-fact",
+                        title: "Group by",
+                        application: .bucket(
+                            direction: .ascending,
+                            unknownTitle: "Unknown"
+                        )
+                    ),
+                    .init(
+                        id: "sort-by-fact",
+                        title: "Sort by",
+                        application: .sort(direction: .ascending)
+                    ),
+                ],
                 search: .init(
                     placeholder: "Search sessions",
                     accessibilityLabel: "Search T3 Sidebar sessions",

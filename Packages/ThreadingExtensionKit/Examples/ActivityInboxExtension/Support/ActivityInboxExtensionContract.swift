@@ -60,6 +60,21 @@ public enum ActivityInboxExtensionContract {
                     .init(key: archived.key, requirement: .required),
                     .init(key: snoozed.key, requirement: .required),
                 ],
+                registeredFactOptions: [
+                    .init(
+                        id: "group-by-fact",
+                        title: "Group by",
+                        application: .bucket(
+                            direction: .ascending,
+                            unknownTitle: "Unknown"
+                        )
+                    ),
+                    .init(
+                        id: "sort-by-fact",
+                        title: "Sort by",
+                        application: .sort(direction: .ascending)
+                    ),
+                ],
                 search: .init(
                     placeholder: "Search sessions",
                     accessibilityLabel: "Search Activity Inbox sessions",

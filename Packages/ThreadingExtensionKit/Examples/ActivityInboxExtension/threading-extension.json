@@ -161,6 +161,25 @@
             "requirement": "required"
           }
         ],
+        "registeredFactOptions": [
+          {
+            "application": {
+              "direction": "ascending",
+              "type": "bucket",
+              "unknownTitle": "Unknown"
+            },
+            "id": "group-by-fact",
+            "title": "Group by"
+          },
+          {
+            "application": {
+              "direction": "ascending",
+              "type": "sort"
+            },
+            "id": "sort-by-fact",
+            "title": "Sort by"
+          }
+        ],
         "filters": [
           {
             "predicate": {
