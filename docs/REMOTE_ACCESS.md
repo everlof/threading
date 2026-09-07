@@ -197,6 +197,26 @@ keep their sequential failover and their longer per-attempt timeout; they gain t
 but no ceiling, since abandoning an operation with side effects is not the same trade as
 abandoning a read.
 
+**A sequential walk starts from the route that answered last, prepares the hosted tunnel only
+when it reaches it, and replays a lost response only on its last attempt.** The wave order above
+ranks a stable address above the one in use, which is right for a race and wrong for a walk: after
+the 2026-09-06 relaunch, notification registration tried a Tailscale address that refused, then
+two LAN addresses at sixteen seconds each, and reached the Tailscale address that had answered
+the catalogue thirty-three seconds earlier at attempt 4 of 14, fifty seconds in. Sixteen, against
+an eight-second budget, because `RemoteClient` replays a mutation whose answer was lost — the Mac
+may already have applied it — and inside a walk the next address replays it under the same id
+anyway, so the replay on a dead address only doubled its cost. And every mutation negotiated a
+rendezvous and an ICE session before sending anything and tried the tunnel first, so the first
+mutation after a direct read moved the whole app onto the tunnel and dropped the event socket to
+do it, which is how a phone on Tailscale came to hold a hosted route at all.
+`MobileRouteWalkPlan`, pure and unit-tested, now orders both walks: `lastConnection`'s address
+first when it is among the candidates, hosted next (first only when hosted answered last, and
+prepared when the walk gets there), then the Mac's other addresses in wave order; the client
+replays on the last attempt only. A registration walk joins any catalogue refresh in flight for
+the Mac before it starts (`registrationRoutes(for:)`), so one started beside a launch walks the
+route the race found rather than the order it was persisted in. Mutation semantics are unchanged:
+one request id, sequential, no ceiling.
+
 Owner responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
 decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed
@@ -254,8 +274,8 @@ On 22 August the socket's own attempt counter became `connectionRecoveryAttempt`
 dashboard's recovery card, and a catalogue success began resetting it, because for the card a
 catalogue is "we are back". The conditional refresh of 5 September then made socket recovery one
 `304` request on the warm route, without the race and its teardown, and the mutation walk, which
-still prepares a tunnel for every mutation and adopts it, was left as the only thing setting the
-socket route. The next day the phone was in the loop. The 2026-09-06 report is what that costs.
+then still prepared a tunnel for every mutation and adopted it, was left as the only thing
+setting the socket route. The next day the phone was in the loop. The 2026-09-06 report is what that costs.
 Every second, for as long as the journal reached back, the event socket dialled the hosted
 loopback origin and failed in 20 ms (`url.-1004`: nothing listening), its recovery ran one
 conditional refresh over Tailscale that answered `304`, and the socket dialled the loopback again

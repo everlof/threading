@@ -819,14 +819,21 @@ struct RemoteClient {
     /// Tailscale IP and a VPN IP do not carry their transport kind in their spelling.
     let endpointKind: RemoteHostEndpointKind
 
+    /// Whether a mutation whose answer was lost is sent once more to this same address. A route
+    /// walk turns this off for every attempt but its last, because the next address replays the
+    /// request under the same id anyway; see `MobileRouteWalkPlan`.
+    let replaysLostResponse: Bool
+
     init(
         link: RemoteConnectionLink,
         requestTimeout: TimeInterval? = nil,
-        endpointKind: RemoteHostEndpointKind? = nil
+        endpointKind: RemoteHostEndpointKind? = nil,
+        replaysLostResponse: Bool = true
     ) {
         self.link = link
         self.requestTimeout = requestTimeout
         self.endpointKind = endpointKind ?? PairedRemoteHost.endpointKind(for: link.baseURL)
+        self.replaysLostResponse = replaysLostResponse
     }
 
     /// The one pinning delegate, shared by every session this client opens.
@@ -1627,7 +1634,10 @@ struct RemoteClient {
 
     /// A lost response is ambiguous: the Mac may already have applied the mutation. Retrying
     /// the same immutable request once is safe because the request id is replayed verbatim and
-    /// the Mac coalesces or returns the original response for that id.
+    /// the Mac coalesces or returns the original response for that id. A client inside a route
+    /// walk leaves the replay to the walk's next address, which sends the same id; replaying on
+    /// an address that just timed out only doubled its cost (2026-09-06: sixteen seconds per dead
+    /// LAN address against an eight-second budget).
     private func dataReplayingNetworkFailure(
         for request: URLRequest
     ) async throws -> (Data, URLResponse) {
@@ -1635,7 +1645,7 @@ struct RemoteClient {
             return try await Self.session.data(for: request)
         } catch is CancellationError {
             throw CancellationError()
-        } catch let error as URLError where error.code != .cancelled {
+        } catch let error as URLError where error.code != .cancelled && replaysLostResponse {
             return try await Self.session.data(for: request)
         }
     }

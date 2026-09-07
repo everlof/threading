@@ -180,6 +180,13 @@ final class MobileHostRefreshSingleFlight {
         flight?.hostID == hostID
     }
 
+    /// Waits for the flight in progress for `hostID`, if there is one, and starts nothing. For
+    /// work that wants the route a refresh is about to find rather than a refresh of its own.
+    func join(hostID: String) async {
+        guard let flight, flight.hostID == hostID else { return }
+        await flight.task.value
+    }
+
     func run(hostID: String, operation: @escaping Operation) async {
         if let flight, flight.hostID == hostID {
             await flight.task.value
@@ -1389,6 +1396,25 @@ final class RemoteAppModel: ObservableObject {
     /// way round, and neither dials the old origin on its own.
     func isDashboardRecoveryPending(for hostID: String) -> Bool {
         hostRefreshSingleFlight.hasFlight(for: hostID) || themeEventsRecoveryHostID == hostID
+    }
+
+    /// The routes a notification registration walks for `host`, in the order a mutation would
+    /// take them. Joined to any catalogue refresh in flight for that Mac first: a registration
+    /// started beside a launch used to walk the persisted order while the race beside it was
+    /// finding the Mac, and reached the route the race had found at attempt 4 of 14.
+    func registrationRoutes(for host: PairedRemoteHost) async -> [RemoteHostConnectionCandidate] {
+        await hostRefreshSingleFlight.join(hostID: host.id)
+        let admitted = routeHealth.admitting(
+            host.candidates(preferring: discoveredAddresses[host.id]),
+            origin: { $0.link.baseURL }
+        )
+        return MobileRouteWalkPlan.plan(
+            direct: admitted,
+            hasHostedRoute: false,
+            hostID: host.id,
+            lastConnection: lastConnection,
+            origin: { $0.link.baseURL }
+        ).direct
     }
 
     /// The origin and kind of address a new socket would be given now. See ``MobileRouteIdentity``.
@@ -3122,6 +3148,11 @@ final class RemoteAppModel: ObservableObject {
     /// Tries every policy-approved endpoint with one request id. A timeout after the Mac has
     /// committed the operation therefore cannot create a second session or apply an action
     /// twice when the client continues over another route.
+    ///
+    /// The order is `MobileRouteWalkPlan`'s: the route that answered last, then the hosted
+    /// tunnel — prepared here, when the walk reaches it, rather than before the first request —
+    /// then the Mac's other addresses in wave order. Only the last attempt replays a lost
+    /// response on its own address; every earlier one is replayed by the address after it.
     private func performMutation<Response>(
         for hostID: String,
         operation: (RemoteClient, String) async throws -> Response
@@ -3133,33 +3164,64 @@ final class RemoteAppModel: ObservableObject {
         defer { endRouteWalk() }
         let requestID = UUID().uuidString.lowercased()
         let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
-        let preparedAt = MobileDiagnostics.monotonicNow()
-        let preparationFields: [RemoteDiagnosticField: String] = [
-            .trace: requestID,
-            .peer: peer,
-            .phase: "mutation.prepare",
-            .result: "started",
-        ]
-        MobileDiagnostics.recordConnectivity(.hostRouteStarted, fields: preparationFields)
-        let prepared = await connectionCandidates(for: host, trace: requestID)
-        var preparedFields = preparationFields
-        preparedFields[.result] = prepared.candidates.isEmpty ? "failed" : "succeeded"
-        preparedFields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(since: preparedAt)
-        if let error = prepared.error {
-            preparedFields[.code] = MobileDiagnostics.errorCode(error)
-        }
-        MobileDiagnostics.recordConnectivity(
-            .hostRouteEnded,
-            level: prepared.candidates.isEmpty ? .warning : .info,
-            fields: preparedFields
+        let plan = MobileRouteWalkPlan.plan(
+            direct: routeHealth.admitting(
+                host.candidates(preferring: discoveredAddresses[host.id]),
+                origin: { $0.link.baseURL }
+            ),
+            hasHostedRoute: host.isOwnerDevice
+                && host.hostedServiceURL != nil
+                && host.hostedCredential != nil,
+            hostID: hostID,
+            lastConnection: lastConnection,
+            origin: { $0.link.baseURL }
         )
-        var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
+        let total = plan.steps.count
+        let direct = plan.direct.map { planned in
+            ConnectionCandidate(
+                link: planned.link,
+                isHosted: false,
+                kind: planned.kind,
+                doorID: planned.doorID,
+                wave: planned.wave
+            )
+        }
+        var lastError: Error = RemoteClientError.invalidResponse
         var closedDoors: Set<String> = []
-        for (index, candidate) in prepared.candidates.enumerated() {
-            if let doorID = candidate.doorID, closedDoors.contains(doorID) { continue }
+        for (index, step) in plan.steps.enumerated() {
+            let candidate: ConnectionCandidate
+            switch step {
+            case .hosted:
+                guard let prepared = await prepareHostedRouteForWalk(
+                    for: host,
+                    trace: requestID,
+                    peer: peer,
+                    lastError: &lastError
+                ) else { continue }
+                candidate = ConnectionCandidate(
+                    link: prepared.link,
+                    isHosted: true,
+                    kind: RemoteHostEndpointKind.hosted,
+                    doorID: nil,
+                    diagnosticAttempt: index + 1,
+                    diagnosticTotal: total
+                )
+            case let .direct(position):
+                let planned = direct[position]
+                if let doorID = planned.doorID, closedDoors.contains(doorID) { continue }
+                candidate = ConnectionCandidate(
+                    link: planned.link,
+                    isHosted: false,
+                    kind: planned.kind,
+                    doorID: planned.doorID,
+                    wave: planned.wave,
+                    diagnosticAttempt: index + 1,
+                    diagnosticTotal: total
+                )
+            }
             let timeout = RemoteRouteWalkBudget.mutationTimeout(
                 for: candidate.wave,
-                isOnlyCandidateInWalk: prepared.candidates.count == 1
+                isOnlyCandidateInWalk: total == 1
             )
             let startedAt = MobileDiagnostics.monotonicNow()
             var routeFields: [RemoteDiagnosticField: String] = [
@@ -3170,7 +3232,7 @@ final class RemoteAppModel: ObservableObject {
                 .phase: "mutation.request",
                 .result: "started",
                 .attempt: String(index + 1),
-                .total: String(prepared.candidates.count),
+                .total: String(total),
                 .timeoutMS: MobileDiagnostics.milliseconds(timeout),
             ]
             if let wave = candidate.wave { routeFields[.wave] = wave.rawValue }
@@ -3181,7 +3243,11 @@ final class RemoteAppModel: ObservableObject {
                     RemoteClient(
                         link: candidate.link,
                         requestTimeout: timeout,
-                        endpointKind: candidate.kind
+                        endpointKind: candidate.kind,
+                        replaysLostResponse: MobileRouteWalkPlan.replaysLostResponse(
+                            at: index,
+                            of: total
+                        )
                     ),
                     requestID
                 )
@@ -3254,15 +3320,17 @@ final class RemoteAppModel: ObservableObject {
                 // id keeps trying the next route safe even if the Mac did receive it.
                 if error.allowsMutationRouteFailover {
                     lastError = error
-                    Self.closeDoor(
-                        for: error,
-                        candidates: prepared.candidates,
-                        index: index,
-                        closedDoors: &closedDoors,
-                        trace: requestID,
-                        phase: "mutation.request",
-                        peer: peer
-                    )
+                    if case let .direct(position) = step {
+                        Self.closeDoor(
+                            for: error,
+                            candidates: direct,
+                            index: position,
+                            closedDoors: &closedDoors,
+                            trace: requestID,
+                            phase: "mutation.request",
+                            peer: peer
+                        )
+                    }
                     if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                     continue
                 }
@@ -3280,67 +3348,84 @@ final class RemoteAppModel: ObservableObject {
                     ]) { _, new in new }
                 )
                 lastError = error
-                Self.closeDoor(
-                    for: error,
-                    candidates: prepared.candidates,
-                    index: index,
-                    closedDoors: &closedDoors,
-                    trace: requestID,
-                    phase: "mutation.request",
-                    peer: peer
-                )
+                if case let .direct(position) = step {
+                    Self.closeDoor(
+                        for: error,
+                        candidates: direct,
+                        index: position,
+                        closedDoors: &closedDoors,
+                        trace: requestID,
+                        phase: "mutation.request",
+                        peer: peer
+                    )
+                }
                 if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
             }
         }
         throw lastError
     }
 
-    private func connectionCandidates(
+    /// Prepares the hosted tunnel for a mutation walk that has reached it: the manager's standing
+    /// tunnel when there is one, a rendezvous and an ICE session otherwise. Nil when there is no
+    /// route to prepare or the preparation did not finish; what went wrong is recorded and left
+    /// in `lastError` for the walk to throw if nothing else answers.
+    private func prepareHostedRouteForWalk(
         for host: PairedRemoteHost,
-        routeWillBegin: ((RemoteHostEndpointKind) -> Void)? = nil,
-        trace: String? = nil
-    ) async -> (candidates: [ConnectionCandidate], error: Error?) {
-        var candidates: [ConnectionCandidate] = []
-        var preparationError: Error?
-        do {
-            if host.hostedServiceURL != nil, host.hostedCredential != nil {
-                routeWillBegin?(RemoteHostEndpointKind.hosted)
-            }
-            if let prepared = try await hostedConnections.route(for: host, trace: trace) {
-                candidates.append(
-                    ConnectionCandidate(
-                        link: prepared.link,
-                        isHosted: true,
-                        kind: RemoteHostEndpointKind.hosted,
-                        doorID: nil
-                    )
-                )
-                if activeHostID == host.id {
-                    hostedRoute.adopt(prepared, for: host.id)
-                }
-            }
-        } catch is CancellationError {
-            preparationError = CancellationError()
-        } catch {
-            preparationError = error
-            await hostedConnectionFailed(hostID: host.id)
-        }
-        let admitted = routeHealth.admitting(
-            host.candidates(preferring: discoveredAddresses[host.id]),
-            origin: { $0.link.baseURL }
+        trace: String,
+        peer: String,
+        lastError: inout Error
+    ) async -> HostedRemoteRoute? {
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let fields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .peer: peer,
+            .transport: RemoteHostEndpointKind.hosted.rawValue,
+            .phase: "mutation.prepare",
+            .timeoutMS: MobileDiagnostics.milliseconds(PeerTransportBounds.negotiationTimeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: fields.merging([.result: "started"]) { _, new in new }
         )
-        for candidate in admitted
-            where !candidates.contains(where: { $0.link == candidate.link })
-        {
-            candidates.append(ConnectionCandidate(
-                link: candidate.link,
-                isHosted: false,
-                kind: candidate.kind,
-                doorID: candidate.doorID,
-                wave: candidate.wave
-            ))
+        do {
+            guard let prepared = try await hostedConnections.route(for: host, trace: trace) else {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: fields.merging([
+                        .result: "unavailable",
+                        .code: "hosted.unavailable",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
+                return nil
+            }
+            if activeHostID == host.id {
+                hostedRoute.adopt(prepared, for: host.id)
+            }
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                fields: fields.merging([
+                    .result: "succeeded",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
+            return prepared
+        } catch {
+            let cancelled = error is CancellationError || Task.isCancelled
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                level: cancelled ? .info : .warning,
+                fields: fields.merging([
+                    .result: cancelled ? "cancelled" : "failed",
+                    .code: cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
+            if !cancelled { await hostedConnectionFailed(hostID: host.id) }
+            lastError = cancelled ? CancellationError() : error
+            return nil
         }
-        return (candidates, preparationError)
     }
 
     private func hostedConnectionFailed(hostID: String) async {

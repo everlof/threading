@@ -110,3 +110,93 @@ final class MobileLiveRoutePolicyTests: XCTestCase {
         XCTAssertEqual(route, MobileLiveRoute(link: host.link, kind: .tailscale, isHosted: false))
     }
 }
+
+/// The order a sequential walk takes, and which attempt may replay a lost response.
+///
+/// After the 2026-09-06 relaunch, notification registration tried a refused Tailscale address, two
+/// LAN addresses at sixteen seconds each, and only then the Tailscale address that had answered
+/// the catalogue thirty-three seconds earlier. Every mutation negotiated a hosted tunnel first
+/// and tried it first. These pin the plan that ends both.
+final class MobileRouteWalkPlanTests: XCTestCase {
+    private enum Fixture {
+        static let now = Date(timeIntervalSince1970: 1_800_000_000)
+        static let stableTailnet = URL(string: "https://mac-a.tailnet-demo.ts.net:8443/")!
+        static let lanOne = URL(string: "https://192.168.1.42:8760/")!
+        static let lanTwo = URL(string: "https://10.0.0.7:8760/")!
+        static let answeringTailnet = URL(string: "https://mac-b.tailnet-demo.ts.net:8443/")!
+        static let persistedOrder = [stableTailnet, lanOne, lanTwo, answeringTailnet]
+
+        static func answered(_ url: URL, isHosted: Bool = false, hostID: String = "mac") -> MobileConnectionRecord {
+            MobileConnectionRecord(
+                hostID: hostID,
+                kind: isHosted ? .hosted : .tailscale,
+                baseURL: url,
+                isHosted: isHosted,
+                connectedAt: now,
+                metrics: nil,
+                serverProtocol: nil
+            )
+        }
+    }
+
+    private func plan(
+        lastConnection: MobileConnectionRecord?,
+        hasHostedRoute: Bool = true
+    ) -> MobileRouteWalkPlan.Plan<URL> {
+        MobileRouteWalkPlan.plan(
+            direct: Fixture.persistedOrder,
+            hasHostedRoute: hasHostedRoute,
+            hostID: "mac",
+            lastConnection: lastConnection,
+            origin: { $0 }
+        )
+    }
+
+    /// The report's registration walk: the address that answered last was attempt 4 of 14.
+    func testTheRouteThatAnsweredLastLeadsAndHostedFollowsIt() {
+        let plan = plan(lastConnection: Fixture.answered(Fixture.answeringTailnet))
+        XCTAssertEqual(
+            plan.direct,
+            [Fixture.answeringTailnet, Fixture.stableTailnet, Fixture.lanOne, Fixture.lanTwo]
+        )
+        XCTAssertEqual(plan.steps, [.direct(0), .hosted, .direct(1), .direct(2), .direct(3)])
+    }
+
+    func testAHostedAnswerKeepsHostedFirstAndTheDirectOrderAlone() {
+        let plan = plan(lastConnection: Fixture.answered(URL(string: "http://127.0.0.1:5001/")!, isHosted: true))
+        XCTAssertEqual(plan.direct, Fixture.persistedOrder)
+        XCTAssertEqual(plan.steps, [.hosted, .direct(0), .direct(1), .direct(2), .direct(3)])
+    }
+
+    func testNothingAnsweredYetWalksTheGivenOrderWithHostedFirst() {
+        let plan = plan(lastConnection: nil)
+        XCTAssertEqual(plan.direct, Fixture.persistedOrder)
+        XCTAssertEqual(plan.steps, [.hosted, .direct(0), .direct(1), .direct(2), .direct(3)])
+    }
+
+    func testAnAnswerNoLongerAmongTheCandidatesChangesNothing() {
+        let plan = plan(lastConnection: Fixture.answered(URL(string: "https://gone.example:8443/")!))
+        XCTAssertEqual(plan.direct, Fixture.persistedOrder)
+        XCTAssertEqual(plan.steps, [.hosted, .direct(0), .direct(1), .direct(2), .direct(3)])
+    }
+
+    func testAnotherMacsAnswerChangesNothing() {
+        let plan = plan(lastConnection: Fixture.answered(Fixture.lanTwo, hostID: "other-mac"))
+        XCTAssertEqual(plan.direct, Fixture.persistedOrder)
+    }
+
+    func testAMacWithoutAHostedRouteWalksOnlyItsAddresses() {
+        let plan = plan(lastConnection: Fixture.answered(Fixture.lanTwo), hasHostedRoute: false)
+        XCTAssertEqual(plan.direct, [Fixture.lanTwo, Fixture.stableTailnet, Fixture.lanOne, Fixture.answeringTailnet])
+        XCTAssertEqual(plan.steps, [.direct(0), .direct(1), .direct(2), .direct(3)])
+    }
+
+    /// Inside a walk the next address is the replay; only the last attempt has no next address.
+    func testOnlyTheLastAttemptReplaysALostResponse() {
+        XCTAssertEqual(
+            (0 ..< 4).map { MobileRouteWalkPlan.replaysLostResponse(at: $0, of: 4) },
+            [false, false, false, true]
+        )
+        XCTAssertTrue(MobileRouteWalkPlan.replaysLostResponse(at: 0, of: 1))
+    }
+}

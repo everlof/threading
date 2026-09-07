@@ -260,6 +260,9 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         model = RemoteAppModel(continuity: continuity)
         notifications = RemoteNotificationManager()
         super.init()
+        notifications.routePlanner = { [weak model] host in
+            await model?.registrationRoutes(for: host) ?? host.candidates
+        }
     }
 
     func application(
@@ -1275,6 +1278,11 @@ final class RemoteNotificationSyncGate<Value> {
 @MainActor
 final class RemoteNotificationManager: ObservableObject {
 
+    /// The routes a registration walks for a Mac, in the model's order: the route that answered
+    /// last first, joined to any refresh in flight. Set by the app; without it a registration
+    /// walks the record's own order.
+    var routePlanner: (@MainActor (PairedRemoteHost) async -> [RemoteHostConnectionCandidate])?
+
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var deviceToken: String?
     @Published private(set) var deliveryByConnection: [String: RemoteNotificationDelivery] = [:]
@@ -1676,7 +1684,7 @@ final class RemoteNotificationManager: ObservableObject {
         let requestID = UUID().uuidString.lowercased()
         let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         var lastError: Error = RemoteClientError.invalidResponse
-        let candidates = host.candidates
+        let candidates = await routePlanner?(host) ?? host.candidates
         for (index, candidate) in candidates.enumerated() {
             let link = candidate.link
             let timeout = candidates.count > 1 && index < candidates.count - 1
@@ -1701,7 +1709,11 @@ final class RemoteNotificationManager: ObservableObject {
                 let response = try await RemoteClient(
                     link: link,
                     requestTimeout: timeout,
-                    endpointKind: candidate.kind
+                    endpointKind: candidate.kind,
+                    replaysLostResponse: MobileRouteWalkPlan.replaysLostResponse(
+                        at: index,
+                        of: candidates.count
+                    )
                 ).registerNotifications(registration, requestID: requestID)
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,

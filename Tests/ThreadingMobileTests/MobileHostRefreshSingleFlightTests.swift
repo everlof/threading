@@ -198,6 +198,38 @@ final class MobileHostRefreshSingleFlightTests: XCTestCase {
 
         XCTAssertEqual(starts, 2, "a later explicit refresh must perform fresh work")
     }
+
+    /// A notification registration wants the route a refresh is about to find, not a refresh of
+    /// its own: joining waits for the flight in progress and starts nothing.
+    func testJoiningWaitsForTheFlightInProgressAndStartsNone() async {
+        let coordinator = MobileHostRefreshSingleFlight()
+        let gate = HostRefreshTestGate()
+        var starts = 0
+        var finished = false
+
+        let flight = Task { @MainActor in
+            await coordinator.run(hostID: "mac") {
+                starts += 1
+                await gate.wait()
+                finished = true
+            }
+        }
+        while !coordinator.hasFlight(for: "mac") { await Task.yield() }
+
+        let joiner = Task { @MainActor in await coordinator.join(hostID: "mac") }
+        await Task.yield()
+        XCTAssertFalse(finished, "the joiner is still waiting while the flight runs")
+
+        await gate.open()
+        await joiner.value
+        await flight.value
+        XCTAssertTrue(finished)
+        XCTAssertEqual(starts, 1, "joining never starts a flight")
+
+        await coordinator.join(hostID: "mac")
+        await coordinator.join(hostID: "another-mac")
+        XCTAssertEqual(starts, 1, "with nothing in flight, joining returns at once")
+    }
 }
 
 private actor HostRefreshTestGate {
