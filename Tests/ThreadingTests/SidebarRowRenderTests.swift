@@ -205,7 +205,7 @@ final class SidebarRowRenderTests: XCTestCase {
                         x: 0,
                         y: 0,
                         width: Fixture.width,
-                        height: Fixture.height * 5
+                        height: Fixture.height * 6
                     )
                 )
                 host.appearance = appearance
@@ -217,7 +217,14 @@ final class SidebarRowRenderTests: XCTestCase {
                 let session = AgentSession(kind: .claude, title: "Fix the hover state")
 
                 let rows: [NSView] = [
-                    Self.hoveredProjectRow { $0.configureAsRepository(named: "Threading", count: 2) },
+                    Self.hoveredProjectRow {
+                        $0.configureAsRepository(
+                            named: "Threading",
+                            count: 2,
+                            representing: project
+                        )
+                    },
+                    Self.hoveredProjectRow { $0.configureAsRepository(named: "Archived", count: 2) },
                     Self.hoveredProjectRow {
                         $0.configure(with: project, collapsedSessionCount: 0)
                     },
@@ -546,6 +553,48 @@ final class SidebarRowRenderTests: XCTestCase {
             of: sessionRow,
             equals: margin,
             "the session row's archive button"
+        )
+    }
+
+    /// A repository root and a bare heading use the same cell and must not be the same row.
+    ///
+    /// The root is the one place a repository's mark is drawn — its checkouts deliberately draw
+    /// none, so before this the mark appeared nowhere at all — and the one place `New Worktree…`
+    /// can be reached, which is what the `+` is for. The archive heading has neither: it stands
+    /// for no repository and there is nothing to create in it.
+    ///
+    /// Asserted on one recycled row rather than two fresh ones, because that is how the outline
+    /// uses the cell: both states share `SidebarIdentifiers.repoCell`, so a root's icon or `+`
+    /// left behind would show up on the archive heading that reuses it.
+    func testARepositoryRootDrawsItsMarkAndOffersCreationWhileABareHeadingDoesNeither() throws {
+        let project = Project(
+            name: "Threading",
+            folderURL: URL(fileURLWithPath: "/tmp/Threading")
+        )
+
+        let row = ProjectRowView(customizationLookup: { _ in .empty })
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.configureAsRepository(named: "Threading", count: 2, representing: project)
+        Self.layOut(row)
+
+        let icon = try XCTUnwrap(row.descendant(identified: "sidebar.project.identity"))
+        XCTAssertFalse(icon.isHidden, "a repository root drew no mark")
+        XCTAssertFalse(
+            try XCTUnwrap(row.descendant(identified: "sidebar.project.create")).isHidden,
+            "a repository root offered no way to create anything"
+        )
+
+        row.prepareForReuse()
+        row.configureAsRepository(named: "Archived", count: 2)
+        Self.layOut(row)
+
+        XCTAssertTrue(
+            try XCTUnwrap(row.descendant(identified: "sidebar.project.identity")).isHidden,
+            "a bare heading kept the mark of the repository root that used the cell before it"
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(row.descendant(identified: "sidebar.project.create")).isHidden,
+            "a bare heading kept the + of the repository root that used the cell before it"
         )
     }
 

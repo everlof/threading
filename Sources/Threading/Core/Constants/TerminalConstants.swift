@@ -339,10 +339,14 @@ public enum SidebarDefaults {
     /// Project rows are a single line — the branch shows in a hover popover, not beneath the
     /// name — so one compact height covers them all.
     public static let projectCompactRowHeight: CGFloat = 30
-    /// Group headings (a repository above its checkouts, the archive) get extra height,
+    /// A repository root above its checkouts, and the archive heading, get extra height,
     /// which reads as space between groups.
     public static let headingRowHeight: CGFloat = 32
     public static let indentationPerLevel: CGFloat = 14
+
+    /// Where the repository roots the user folded away are remembered, by repository identity.
+    /// A `PreferenceStore` key, not a `.standard` one — it records a user's choice.
+    public static let collapsedRepositoriesKey = "sidebarCollapsedRepositories"
 
     /// The column width at and above which the list gives nothing up — the width the app opens
     /// itself to. Below it every gutter in `SidebarDensity` closes in step with the drag.

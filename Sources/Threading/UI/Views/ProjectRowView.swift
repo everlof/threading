@@ -105,8 +105,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     private var isPresentingMenu = false
     private var presentsHoverControls: Bool { isHovered || isPresentingMenu }
 
-    /// Whether this row's role offers hover controls; repository headings keep a quiet edge.
-    private var showsHoverButton = false
+    /// Whether this row has trailing hover controls to crossfade in at all — `+`, `⋯`, or the
+    /// grouping gear. False for a row that offers none, such as the archive heading.
+    private var showsHoverControls = false
     private var hasCount = false
 
     /// Invoked when the `⋯`/gear is pressed, carrying the anchor to hang a menu from.
@@ -130,6 +131,11 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         return scheduler
     }()
 
+    /// Whether this row draws in the quiet heading ink rather than a row's own.
+    ///
+    /// Not "is a group row": a repository root groups its checkouts and still reads as the
+    /// primary row of its column, because it carries the repository's mark and its `+`. Only a
+    /// row that names something and offers nothing — the archive heading — stays quiet.
     /// Retained so colours can be reapplied when the selection state changes.
     private var isHeading = false
 
@@ -266,22 +272,51 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         )
     }
 
-    /// Shows a group heading — a repository above its checkouts, or the archive — with an
+    /// Shows a repository's root row above its checkouts, or the archive heading, with an
     /// optional count of what it contains.
-    func configureAsRepository(named name: String, count: Int = 0) {
-        isHeading = true
+    ///
+    /// `representing` is the checkout that answers for the repository — see
+    /// `RepoGroupNode.representativeProjectID`. Given one, the row is a real root: it draws the
+    /// repository's mark and offers `+`. The repository's own checkouts draw no mark of their
+    /// own (`Style.checkout`), so the icon appears exactly once per repository, at the top,
+    /// rather than once per row or — as it did before this — nowhere at all.
+    ///
+    /// Without one it stays the quiet heading it always was, which is what the archive is.
+    func configureAsRepository(
+        named name: String,
+        count: Int = 0,
+        representing project: Project? = nil
+    ) {
         popoverProject = nil
         dismissPopover()
-        hideIcon()
-        setHoverControls(moreSymbol: nil, showsCreate: false)
-        nameLabel.applyFont(.caption)
+
+        // A represented root is a row, not a label over one: full ink, like the project rows
+        // it sits above. The bare heading below keeps the quiet treatment.
+        isHeading = project == nil
+
+        if let project {
+            showIcon(for: project)
+            // The repository's name, not the checkout's: the icon is borrowed from a record,
+            // the name is not.
+            shownProjectName = name
+            applyIconImage()
+            setHoverControls(moreSymbol: nil, showsCreate: true)
+            bindCreateButton(to: project.id)
+            nameLabel.applyFont(.emphasizedBody)
+            nativeToolTip = GitInfo.repositoryRoot(for: project.folderPath)?.path
+        } else {
+            hideIcon()
+            setHoverControls(moreSymbol: nil, showsCreate: false)
+            nameLabel.applyFont(.caption)
+            nativeToolTip = nil
+        }
+
         nativeName = name
         setCount(count)
-        // A heading has no record and therefore no settings of its own. Cleared explicitly
+        // A repository has no record and therefore no settings of its own. Cleared explicitly
         // because this view is recycled: a mark left over from the checkout that used the cell
-        // before would be a group claiming a chat's configuration.
+        // before would be a root claiming a chat's configuration.
         setConductMark(nil)
-        nativeToolTip = nil
         animatesNextName = false
         applyTextColors()
         captureNativePresentation()
@@ -332,13 +367,16 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             hoverButton.setSymbol(moreSymbol, accessibility: moreAccessibility)
         }
 
-        showsHoverButton = moreSymbol != nil
+        // Whether the row has *any* trailing hover control, not just the `⋯`/gear: the
+        // repository root offers `+` alone, and gating the crossfade on the `⋯` left its `+`
+        // permanently at alpha zero — installed, laid out, and invisible.
+        showsHoverControls = moreSymbol != nil || showsCreate
         trailingWidthConstraint?.constant = showsCreate
             ? SidebarRowDefaults.projectTrailingSlotWidth
             : SidebarRowDefaults.trailingSlotSize
         updateTrailingSlotVisibility()
 
-        if showsHoverButton {
+        if showsHoverControls {
             setHoverButtonVisible(presentsHoverControls, animated: false)
         } else {
             hoverControls.alphaValue = 0
@@ -586,6 +624,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         // not here — see `bindCreateButton`.
         createButton.presentsMenu = true
         createButton.translatesAutoresizingMaskIntoConstraints = false
+        createButton.setAccessibilityIdentifier("sidebar.project.create")
 
         hoverControls.orientation = .horizontal
         hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
@@ -792,7 +831,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Crossfades the trailing slot between the count and the hover controls. Alpha rather than
     /// visibility, and both permanently installed, so hovering never re-lays out the row.
     private func setHoverButtonVisible(_ visible: Bool, animated: Bool) {
-        guard showsHoverButton else { return }
+        guard showsHoverControls else { return }
 
         if visible {
             if !createButton.isHidden { createButton.materializeGlyphIfNeeded() }
@@ -885,7 +924,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     }
 
     private func updateTrailingSlotVisibility() {
-        trailingSlot.isHidden = !showsHoverButton && !hasCount
+        trailingSlot.isHidden = !showsHoverControls && !hasCount
     }
 
     /// Applies the row's colours for its current role and selection state. The icon tint

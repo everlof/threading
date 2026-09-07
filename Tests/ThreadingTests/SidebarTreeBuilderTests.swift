@@ -29,6 +29,67 @@ final class SidebarTreeBuilderTests: XCTestCase {
         return project
     }
 
+    /// A real repository on disk with one commit, so `git worktree add` has something to
+    /// stand on. Cleaned up when the test case ends.
+    ///
+    /// Real rather than stubbed because the grouping key is `git rev-parse --git-common-dir`
+    /// read off disk: a fake path answers "not a repository" and every assertion below would
+    /// pass against a tree that never grouped anything.
+    private func makeRepository(named name: String) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-repo-\(name)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        _ = try GitProcess.run(["init"], in: root)
+        _ = try GitProcess.run(["config", "user.email", "tests@example.com"], in: root)
+        _ = try GitProcess.run(["config", "user.name", "Tests"], in: root)
+        try "seed".write(
+            to: root.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "."], in: root)
+        _ = try GitProcess.run(["commit", "-m", "seed"], in: root)
+        return root
+    }
+
+    /// The key the sidebar groups on, for a test that has to name the repository row it expects.
+    private func repositoryIdentity(of directory: URL) throws -> String {
+        try XCTUnwrap(GitInfo.repositoryIdentity(for: directory.path))
+    }
+
+    /// Initializes a repository on `main` with one commit and then switches it to `branch`, so
+    /// chats recorded on `main` are chats on a branch the checkout has since left.
+    private func initialize(_ directory: URL, thenSwitchTo branch: String) throws {
+        _ = try GitProcess.run(["init", "--initial-branch=main"], in: directory)
+        _ = try GitProcess.run(["config", "user.email", "tests@example.com"], in: directory)
+        _ = try GitProcess.run(["config", "user.name", "Tests"], in: directory)
+        try "seed".write(
+            to: directory.appendingPathComponent("seed.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "."], in: directory)
+        _ = try GitProcess.run(["commit", "-m", "seed"], in: directory)
+        _ = try GitProcess.run(["checkout", "-b", branch], in: directory)
+    }
+
+    /// A linked worktree of `repository`, which shares its `git-common-dir` and so belongs
+    /// under the same root.
+    private func makeWorktree(named branch: String, of repository: URL) throws -> URL {
+        let destination = repository
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(repository.lastPathComponent)-\(branch)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: destination) }
+
+        _ = try GitProcess.run(
+            ["worktree", "add", "-b", branch, destination.path],
+            in: repository
+        )
+        return destination
+    }
+
     private func session(
         _ title: String,
         branch: String? = nil,
@@ -420,9 +481,13 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
-    /// A second row on a branch creates a heading, so the exact-leaf path must hand that real
-    /// regrouping to the project-local builder instead of leaving two bare rows behind.
-    func testSessionCreationFallsBackWhenItsBranchEarnsAGroup() throws {
+    /// A new chat records the branch its checkout is standing on, and the checkout row already
+    /// says what that is — so a second chat there earns no heading, and the exact-leaf path
+    /// keeps the insertion rather than handing a regrouping to the project-local builder.
+    ///
+    /// This is the case that used to produce the duplicated row: a checkout named
+    /// `dev/feature/live-fw-logs` with a heading of the same name directly under it.
+    func testASecondChatOnTheCheckoutsOwnBranchEarnsNoHeadingUnderIt() throws {
         try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
             try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
                 try withDefault(true, forKey: "groupsSessionsByBranch") {
@@ -457,26 +522,28 @@ final class SidebarTreeBuilderTests: XCTestCase {
                     XCTAssertEqual(
                         controller.presentedRowKeys,
                         [
+                            .repository(try repositoryIdentity(of: directory)),
                             .project(stored.id),
-                            .branch(stored.id, "main"),
                             .session(standing.id),
                             .session(added.id)
                         ]
                     )
                     #if DEBUG
-                    XCTAssertGreaterThan(
-                        controller.lastProjectStructurePerformance.treeNanoseconds,
-                        0
-                    )
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.treeNanoseconds, 0)
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.shapeNanoseconds, 0)
                     #endif
                 }
             }
         }
     }
 
-    /// Once a branch heading already exists, appending another session is one leaf insertion
-    /// under that heading; grouping being enabled must not force a project rebuild forever.
-    func testSessionCreationInsertsExactlyIntoAnExistingBranchGroup() throws {
+    /// A heading for a branch the checkout has *left* is real, and a new chat lands beside it
+    /// rather than in it — the new chat is on the branch the row above names, and those rows
+    /// stay at the checkout's own level.
+    ///
+    /// The heading has to come from a left branch because that is the only way one can exist:
+    /// a chat records the branch it ran on, and a chat created now records the current one.
+    func testANewChatLandsBesideTheHeadingOfABranchItsCheckoutHasLeft() throws {
         try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
             try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
                 try withDefault(true, forKey: "groupsSessionsByBranch") {
@@ -489,7 +556,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                         withIntermediateDirectories: true
                     )
                     defer { try? FileManager.default.removeItem(at: directory) }
-                    _ = try GitProcess.run(["init", "--initial-branch=main"], in: directory)
+                    try initialize(directory, thenSwitchTo: "work")
 
                     let first = session("First", branch: "main")
                     let second = session("Second", branch: "main")
@@ -512,6 +579,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
                     XCTAssertEqual(
                         controller.presentedRowKeys,
                         [
+                            .repository(try repositoryIdentity(of: directory)),
                             .project(stored.id),
                             .branch(stored.id, "main"),
                             .session(first.id),
@@ -567,9 +635,9 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
-    /// A terminal that becomes the second row on a branch creates a heading, so that uncommon
-    /// regrouping remains on the authoritative project-local builder.
-    func testTerminalCreationFallsBackWhenItsBranchEarnsAGroup() throws {
+    /// The same for a terminal, which takes its branch from its working directory: it stands on
+    /// the branch the checkout row already names, so it earns no heading either.
+    func testATerminalOnTheCheckoutsOwnBranchEarnsNoHeadingUnderIt() throws {
         try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
             try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
                 try withDefault(true, forKey: "groupsSessionsByBranch") {
@@ -603,18 +671,12 @@ final class SidebarTreeBuilderTests: XCTestCase {
                     XCTAssertEqual(
                         controller.presentedRowKeys,
                         [
+                            .repository(try repositoryIdentity(of: directory)),
                             .project(stored.id),
-                            .branch(stored.id, "main"),
                             .session(standing.id),
                             .terminal(added.id)
                         ]
                     )
-                    #if DEBUG
-                    XCTAssertGreaterThan(
-                        controller.lastProjectStructurePerformance.treeNanoseconds,
-                        0
-                    )
-                    #endif
                 }
             }
         }
@@ -663,13 +725,143 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(allSessionIDs(in: snoozedRoots), [snoozed.id])
     }
 
-    /// One checkout is a plain project row. The repository level exists to tell *several*
-    /// checkouts apart, and an extra level that groups one thing says nothing.
-    func testASingleCheckoutIsNotGrouped() {
+    /// A folder outside any repository has no repository to sit under, so it stays a plain
+    /// project row. This is the only remaining case of a bare project at the root.
+    func testAFolderOutsideARepositoryIsNotGrouped() {
         let roots = SidebarTreeBuilder.rootNodes(from: [project("one", sessions: [session("a")])])
 
         XCTAssertEqual(roots.count, 1)
-        XCTAssertTrue(roots.first is ProjectNode, "a lone project grew a repository heading")
+        XCTAssertTrue(roots.first is ProjectNode, "a plain folder grew a repository root")
+    }
+
+    /// The rule that replaced "two or more checkouts earn a level": a repository is a root at
+    /// one checkout exactly as it is at five, so its shape does not change under the pointer
+    /// as worktrees come and go.
+    func testASingleCheckoutStillSitsUnderItsRepositoryRoot() throws {
+        let repository = try makeRepository(named: "solo")
+        var checkout = project("solo", sessions: [session("a")])
+        checkout.folderPath = repository.path
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [checkout])
+
+        let root = try XCTUnwrap(roots.first as? RepoGroupNode, "one checkout earned no root")
+        XCTAssertEqual(roots.count, 1)
+        XCTAssertEqual(root.projectNodes.map(\.projectID), [checkout.id])
+    }
+
+    /// The root borrows a record from a checkout to draw its mark and aim its `+`, and it asks
+    /// for the *main* worktree by name rather than taking whichever checkout happens to be
+    /// first in the user's arrangement.
+    func testTheRootIsRepresentedByTheMainWorktreeWhicheverOrderTheCheckoutsAreIn() throws {
+        let repository = try makeRepository(named: "represented")
+        let linked = try makeWorktree(named: "side", of: repository)
+
+        var main = project("main", sessions: [])
+        main.folderPath = repository.path
+        var side = project("side", sessions: [])
+        side.folderPath = linked.path
+
+        for arrangement in [[main, side], [side, main]] {
+            let roots = SidebarTreeBuilder.rootNodes(from: arrangement)
+            let root = try XCTUnwrap(roots.first as? RepoGroupNode)
+
+            XCTAssertEqual(roots.count, 1, "the two checkouts did not share a root")
+            XCTAssertEqual(
+                root.representativeProjectID,
+                main.id,
+                "the linked worktree answered for the repository"
+            )
+        }
+    }
+
+    /// The root says what the user calls the repository. A project can be renamed, and the main
+    /// working tree's record *is* the repository's, so a rename of it names the root.
+    func testRenamingTheMainWorkingTreeRenamesTheRepositoryRoot() throws {
+        let repository = try makeRepository(named: "named")
+        var checkout = project("A Better Name", sessions: [])
+        checkout.folderPath = repository.path
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [checkout])
+
+        XCTAssertEqual(try XCTUnwrap(roots.first as? RepoGroupNode).name, "A Better Name")
+    }
+
+    /// A package inside a monorepo resolves to the monorepo's git directory and has no worktree
+    /// name of its own, so "not a linked worktree" is not enough to make it speak for the
+    /// repository. It is not the repository's working tree, and naming the whole root after one
+    /// package would be wrong.
+    func testAMonorepoPackageDoesNotSpeakForTheWholeRepository() throws {
+        let repository = try makeRepository(named: "mono")
+        let package = repository
+            .appendingPathComponent("packages", isDirectory: true)
+            .appendingPathComponent("api", isDirectory: true)
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+
+        var api = project("api", sessions: [])
+        api.folderPath = package.path
+        var root = project("mono", sessions: [])
+        root.folderPath = repository.path
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [api, root])
+        let group = try XCTUnwrap(roots.first as? RepoGroupNode)
+
+        XCTAssertEqual(group.name, "mono", "a package named the repository it lives in")
+        XCTAssertEqual(
+            group.representativeProjectID,
+            root.id,
+            "a package answered for the repository it lives in"
+        )
+    }
+
+    /// The duplicated row: a checkout is named by its branch, so a branch heading repeating
+    /// that name says the same thing twice. Only that one is suppressed.
+    func testTheCheckoutsOwnBranchEarnsNoHeadingBeneathIt() throws {
+        let repository = try makeRepository(named: "doubled")
+        let current = try XCTUnwrap(GitInfo.currentBranch(for: repository.path))
+
+        var checkout = project("doubled", sessions: [
+            session("first", branch: current),
+            session("second", branch: current)
+        ])
+        checkout.folderPath = repository.path
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [checkout])
+        let root = try XCTUnwrap(roots.first as? RepoGroupNode)
+        let node = try XCTUnwrap(root.projectNodes.first)
+
+        XCTAssertTrue(
+            node.childNodes.compactMap { $0 as? BranchGroupNode }.isEmpty,
+            "the checkout's own branch repeated itself as a heading under the row naming it"
+        )
+        XCTAssertEqual(sessionNodes(in: node.childNodes).count, 2)
+    }
+
+    /// The other half of that rule. A checkout can `git switch`, and a chat records the branch
+    /// it *ran* on, so chats from a branch the checkout has since left are the ones a heading
+    /// is genuinely for — and they keep it.
+    func testABranchTheCheckoutHasLeftKeepsItsHeading() throws {
+        let repository = try makeRepository(named: "switched")
+        let current = try XCTUnwrap(GitInfo.currentBranch(for: repository.path))
+
+        var checkout = project("switched", sessions: [
+            session("here", branch: current),
+            session("there-first", branch: "an-older-branch"),
+            session("there-second", branch: "an-older-branch")
+        ])
+        checkout.folderPath = repository.path
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [checkout])
+        let root = try XCTUnwrap(roots.first as? RepoGroupNode)
+        let node = try XCTUnwrap(root.projectNodes.first)
+        let groups = node.childNodes.compactMap { $0 as? BranchGroupNode }
+
+        XCTAssertEqual(groups.map(\.branch), ["an-older-branch"])
+        XCTAssertEqual(groups.first?.sessionNodes.count, 2)
+        XCTAssertEqual(
+            sessionNodes(in: node.childNodes).count,
+            1,
+            "only the chat on the checkout's own branch belongs at the project's level"
+        )
     }
 
     /// With the lone-branch refinement off, a branch groups its sessions only when it has
@@ -1304,11 +1496,17 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
         let roots = SidebarTreeBuilder.rootNodes(from: [nested, scratchpad])
 
-        XCTAssertNil(roots.first { $0 is RepoGroupNode }, "no heading should have appeared")
+        // The scratchpad is a bare row, first, and did not take the nested project with it.
+        // The nested project is inside a repository and gets that repository's root like any
+        // other checkout — but the root is *its* doing, not the scratchpad's, and the
+        // scratchpad is not under it.
         XCTAssertEqual(
             roots.compactMap { ($0 as? ProjectNode)?.projectID },
-            [scratchpad.id, nested.id]
+            [scratchpad.id],
+            "the scratchpad moved, or the nested project stayed bare"
         )
+        let group = try XCTUnwrap(roots.last as? RepoGroupNode)
+        XCTAssertEqual(group.projectNodes.map(\.projectID), [nested.id])
     }
 
     // MARK: - Stress profiling

@@ -2379,51 +2379,15 @@ final class SessionComposerViewController: NSViewController {
     }
 
     private func createWorktree() {
-        guard let projectID, let project = ProjectStore.shared.project(withID: projectID) else {
-            return
-        }
+        guard let projectID,
+              let project = ProjectStore.shared.project(withID: projectID),
+              let created = WorktreeCreation.requestWorktree(from: project) else { return }
 
-        guard let branch = promptForBranchName() else { return }
-        guard let destination = GitWorktree.suggestedLocation(forBranch: branch, in: project) else {
-            present(error: GitWorktree.Failure.notARepository)
-            return
-        }
-
-        do {
-            let created = try GitWorktree.create(branch: branch, at: destination, from: project)
-            delegate?.sessionComposer(self, didCreateWorktreeAt: created, branch: branch)
-        } catch {
-            present(error: error)
-        }
-    }
-
-    // MARK: - Private Methods
-
-    private func promptForBranchName() -> String? {
-        let request = TextPromptRequest(
-            title: L10n.string("New Worktree"),
-            message: L10n.string(
-                "A worktree lets a session run on its own branch without disturbing this checkout."
-            ),
-            confirmTitle: L10n.string("Create"),
-            placeholder: L10n.string("branch name"),
-            fieldSize: NSSize(
-                width: ComposerDefaults.branchFieldWidth,
-                height: ComposerDefaults.branchFieldHeight
-            )
+        delegate?.sessionComposer(
+            self,
+            didCreateWorktreeAt: created,
+            branch: WorktreeCreation.branch(of: created) ?? created.lastPathComponent
         )
-
-        guard case .text(let branch)? = TextPromptAlert.ask(request) else { return nil }
-        return branch
-    }
-
-    private func present(error: Error) {
-        let alert = ThemedAlert()
-        alert.messageText = L10n.string("Could not create worktree")
-        alert.informativeText = error.localizedDescription
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: L10n.string("OK"))
-        alert.runModal()
     }
 }
 

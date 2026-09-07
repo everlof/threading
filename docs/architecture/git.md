@@ -30,9 +30,37 @@ sidebar's grouping key. **`worktreeIdentity` is the durable key for "which check
 branch is only ever a display value.** A submodule keeps its own identity under `/modules/`,
 correctly — it is a separate repository that happens to live inside another.
 
-The sidebar groups **only when a repository has more than one checkout added**, so the common
-single-checkout case keeps the flatter two-level layout. Grouped checkouts are labelled by
-branch, since the repository name is already shown above them.
+Every repository is a **root row** in the sidebar, with its added checkouts beneath it, at one
+checkout exactly as at five. The checkouts are labelled by branch, since the repository name is
+already shown above them, and the repository's mark is drawn once — on the root — rather than
+repeated down the column or, as it was before this, nowhere at all. A folder outside any
+repository has no repository to sit under and stays a plain project row; so does the scratchpad,
+deliberately (below).
+
+This replaced an "earns its level" rule that withheld the root until a repository had two or more
+checkouts. The argument for it was that a level grouping one thing says nothing, and it was wrong
+twice over in use. The shape of a repository *changed* as worktrees were added and removed, so
+the row a user was aiming at moved and the branch a row stated appeared and disappeared with it.
+And the root is the only place `New Worktree…` belongs — it makes a sibling of every row under it
+— so a repository without a root had no way to grow a second checkout from the sidebar at all,
+which is a rule that prevented its own exit. Branch grouping keeps its earns-its-level rule; it
+groups rows *inside* one checkout and is not a place anything is created.
+
+**A checkout's own branch earns no heading beneath it.** The row is already named by
+`GitInfo.currentBranch`, so a branch group repeating that name is one row saying a thing and the
+next row repeating it — which shipped, and read as duplicated rows. Only that branch is
+suppressed, and it is left out of the census that decides whether *other* lone branches earn
+headings. Every other branch under a checkout keeps its heading: a checkout can `git switch`, and
+a chat records the branch it **ran** on, so those rows are genuinely on another branch and the
+heading is the only thing saying so.
+
+The root borrows a record from one of its checkouts — `RepoGroupNode.representativeProjectID`, the
+main worktree when one has been added — to draw its icon and to aim its `+`. A repository has no
+record of its own; the alternative was a second place to store a repository's icon, which would
+then disagree with the icon set on the checkout. A root the user folds away stays folded across
+launches (`SidebarDefaults.collapsedRepositoriesKey`, through `PreferenceStore`), unlike a branch
+group, whose collapse is kept for the run only: a repository is a directory that outlives every
+chat under it, and folding one away is the one gesture that puts a whole repository out of sight.
 
 The grouping is about checkouts Threading has been **added**, which is not the same as checkouts
 that exist. A worktree an agent makes with `git worktree add` is invisible here until something
@@ -59,6 +87,13 @@ That item lives *in the menu* rather than in a chip of its own, where it read as
 one of the selected choices in the row — when it is an action. It closes the run-here section
 rather than opening the navigate-there one, because it is the row that does both: it makes a
 place and then moves the composer to it.
+
+The sidebar's repository root offers the same item from its `+`, in the same closing position and
+for the same reason. The two are the only places it appears, and they ask different questions —
+the composer asks *where should this session run*, the root asks the repository to grow a checkout
+— so they differ in what they do with the result and in nothing else. The prompt, the destination
+and the failure alert are therefore one thing (`WorktreeCreation`), not two that drift into two
+wordings for one act.
 
 A *session*, though, carries its own branch record (`AgentSession.branch`): captured at
 creation, re-read by `ProjectStore.refreshBranch` at the same stopped-working moment, and —

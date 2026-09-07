@@ -190,15 +190,25 @@ extension TerminalNode: SidebarOutlineNode {
     }
 }
 
-/// Groups the checkouts of one repository.
+/// The root row of one repository, holding every checkout of it that has been added.
 ///
-/// Only created when a repository has more than one checkout added, so a repository with a
-/// single checkout keeps the flatter two-level layout.
+/// Created for every repository, at one checkout as well as at five — see
+/// `SidebarTreeBuilder.rootNodes` for why the old "two or more" threshold was dropped.
 final class RepoGroupNode: NSObject {
-    /// The repository this heading stands for — its identity on disk, which is what makes the
-    /// heading the same heading across rebuilds. The `name` below is only what it is *called*.
+    /// The repository this row stands for — its identity on disk, which is what makes the
+    /// root the same root across rebuilds. The `name` below is only what it is *called*.
     let identity: String
-    private(set) var name: String
+    fileprivate(set) var name: String
+
+    /// The checkout that answers for the repository where a row needs a record rather than an
+    /// identity: whose icon the root draws, and where its `+` starts a chat. The main worktree
+    /// when one has been added, otherwise the first checkout in the user's own order.
+    ///
+    /// A repository has no record of its own — only checkouts do — so this is the alternative
+    /// to inventing a second place to store a repository's icon, which would then disagree with
+    /// the icon of the checkout the user actually set.
+    fileprivate(set) var representativeProjectID: ProjectID?
+
     var projectNodes: [ProjectNode] = [] {
         didSet { outlineChildren = nil }
     }
@@ -207,6 +217,19 @@ final class RepoGroupNode: NSObject {
     init(identity: String, name: String) {
         self.identity = identity
         self.name = name
+    }
+
+    /// Takes the repository's main working tree as the checkout that answers for it — its name
+    /// as well as its record.
+    ///
+    /// The name matters because a project can be renamed, and the main working tree's record
+    /// *is* the repository's: a user who renames it is naming the repository, and a root that
+    /// kept saying what the directory holding `.git` is called would throw that away. Only the
+    /// main working tree may do this. A linked worktree is named for its branch, and a monorepo
+    /// package is named for the package, so either one naming the root would be wrong.
+    fileprivate func adopt(named projectName: String, as projectID: ProjectID) {
+        representativeProjectID = projectID
+        name = projectName
     }
 }
 
@@ -231,6 +254,7 @@ extension RepoGroupNode: SidebarOutlineNode {
     ) {
         guard let rebuilt = rebuilt as? RepoGroupNode else { return }
         name = rebuilt.name
+        representativeProjectID = rebuilt.representativeProjectID
         projectNodes = rebuilt.projectNodes.map(substituting.callAsFunction)
     }
 }
@@ -317,11 +341,19 @@ enum SidebarSessionVisibility: Equatable {
 @MainActor
 enum SidebarTreeBuilder {
 
-    /// Arranges projects into the tree, grouping only where a repository has more than one
-    /// checkout added. A single-checkout repository stays a plain project row, so the extra
-    /// level never appears without cause.
+    /// Arranges projects into the tree: every checkout of a repository sits under that
+    /// repository's own root row, whether the repository has one checkout added or five.
     ///
-    /// The scratchpad is pinned to the top and never grouped — see `pinningScratchpad`.
+    /// This used to group only at two or more checkouts, on an "earns its level" argument. The
+    /// argument was wrong in practice for two reasons. The shape of a repository changed as
+    /// worktrees were added and removed, so the row a user aimed at moved and the branch a row
+    /// stated appeared and disappeared with it; and the repository row is the only place
+    /// `New Worktree…` belongs, so a repository without one had no way to grow a second
+    /// checkout from the sidebar at all. One shape at one checkout and at five is worth the
+    /// level.
+    ///
+    /// A folder outside any repository has no repository to sit under and stays a plain project
+    /// row. The scratchpad is pinned to the top and never grouped — see `pinningScratchpad`.
     static func rootNodes(
         from projects: [Project],
         visibility: SidebarSessionVisibility = .attention,
@@ -357,11 +389,6 @@ enum SidebarTreeBuilder {
                     GitInfo.repositoryIdentity(for: localRepositoryPath)
                 )
         }
-        var checkoutCounts: [String: Int] = [:]
-        for identity in identities.compactMap({ $0 }) {
-            checkoutCounts[identity, default: 0] += 1
-        }
-
         var roots: [NSObject] = []
         var groupsByIdentity: [String: RepoGroupNode] = [:]
 
@@ -380,16 +407,31 @@ enum SidebarTreeBuilder {
                 optionValues: optionValues,
                 visibility: visibilityScope,
                 excludingSessionIDs: transientExclusions,
-                date: evaluationDate
+                date: evaluationDate,
+                checkoutBranch: identity == nil ? nil : checkoutBranch(of: project)
             )
 
-            guard let identity, checkoutCounts[identity, default: 0] > 1 else {
+            guard let identity else {
                 roots.append(node)
                 continue
             }
 
+            // The repository's main working tree answers for it wherever a record is needed.
+            // Asked for by what it *is* rather than by position, because the checkouts are in
+            // the user's arrangement and the main one is not necessarily first in it — and
+            // because "first" would let a monorepo package speak for the whole repository.
+            let speaksForTheRepository = isTheRepositoriesMainWorkingTree(
+                NativeSidebarParity.host(.localRepositoryContext, project.folderPath)
+            )
+
             if let group = groupsByIdentity[identity] {
                 group.projectNodes.append(node)
+                if speaksForTheRepository {
+                    group.adopt(
+                        named: NativeSidebarParity.fact(.projectName, project.name),
+                        as: node.projectID
+                    )
+                }
                 continue
             }
 
@@ -401,6 +443,15 @@ enum SidebarTreeBuilder {
                 )
             )
             group.projectNodes.append(node)
+            // A first checkout stands in until the main working tree turns up, so a root is
+            // never left with nothing to draw or aim its `+` at.
+            group.representativeProjectID = node.projectID
+            if speaksForTheRepository {
+                group.adopt(
+                    named: NativeSidebarParity.fact(.projectName, project.name),
+                    as: node.projectID
+                )
+            }
             groupsByIdentity[identity] = group
             roots.append(group)
         }
@@ -455,7 +506,43 @@ enum SidebarTreeBuilder {
             terminals: visibilityScope == .attention ? terminals : [],
             optionValues: optionValues,
             visibility: visibilityScope,
-            excludingSessionIDs: transientExclusions
+            excludingSessionIDs: transientExclusions,
+            checkoutBranch: checkoutBranch(of: project)
+        )
+    }
+
+    /// Whether this project is the repository's own working tree, rather than a linked worktree
+    /// or a directory inside one.
+    ///
+    /// Both halves are load-bearing. Without the first, a linked worktree would answer for the
+    /// repository. Without the second, a monorepo package — `mono/packages/api`, which resolves
+    /// to `mono`'s git directory and has no worktree name — would answer for it too, and name
+    /// the whole repository's root row `api`.
+    private static func isTheRepositoriesMainWorkingTree(_ path: String) -> Bool {
+        guard let location = NativeSidebarParity.host(
+            .localRepositoryContext,
+            GitInfo.worktreeLocation(for: path)
+        ) else { return false }
+
+        return location.worktreeName == nil
+            && location.root.standardizedFileURL.path
+                == URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    /// The branch a checkout row states about itself, or nil for a folder outside a repository.
+    ///
+    /// One small read of the worktree's `HEAD` on top of the `worktreeLocation` memo the
+    /// grouping pass has already warmed for this path — the same read the row itself makes
+    /// when it names itself.
+    ///
+    /// Internal rather than private because the sidebar's exact-insertion path has to reach the
+    /// same answer: it decides whether an arriving row would earn a branch heading without
+    /// rebuilding the project, and a copy of that rule missing this one clause sent every new
+    /// chat through a project rebuild it did not need.
+    static func checkoutBranch(of project: Project) -> String? {
+        NativeSidebarParity.host(
+            .localRepositoryContext,
+            GitInfo.currentBranch(for: project.folderPath)
         )
     }
 
@@ -465,7 +552,8 @@ enum SidebarTreeBuilder {
         optionValues: NativeSidebarPipelineOptionValues,
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
-        date: Date = Date()
+        date: Date = Date(),
+        checkoutBranch: String? = nil
     ) -> ProjectNode {
         let order = optionValues.sessionOrder
         let isReversed = optionValues.sessionOrderReversed
@@ -506,7 +594,8 @@ enum SidebarTreeBuilder {
             sessionNodes: top.nodes,
             terminals: terminals,
             terminalNodes: node.terminalNodes,
-            optionValues: optionValues
+            optionValues: optionValues,
+            checkoutBranch: checkoutBranch
         )
         return node
     }
@@ -744,13 +833,22 @@ enum SidebarTreeBuilder {
     /// beside a bare row on its own branch reads as though the bare row had none, but a
     /// project whose branches are all singletons stays flat — all-or-nothing labelling, so
     /// the extra level never appears without cause.
+    ///
+    /// `checkoutBranch` is the branch the *row above* already states, and the one branch that
+    /// therefore earns no heading here: a checkout named `dev/feature/live-fw-logs` holding a
+    /// heading of the same name is one row saying a thing and the next row repeating it, which
+    /// is how this shipped and read as duplicated rows. Only that branch is suppressed. A
+    /// checkout can `git switch`, and a chat records the branch it *ran* on, so the other
+    /// branches under a checkout are genuinely other branches and keep their headings — they
+    /// are the ones saying something the row above does not.
     private static func childNodes(
         projectID: ProjectID,
         sessions: [AgentSession],
         sessionNodes: [SessionNode],
         terminals: [ProjectTerminal],
         terminalNodes: [TerminalNode],
-        optionValues: NativeSidebarPipelineOptionValues
+        optionValues: NativeSidebarPipelineOptionValues,
+        checkoutBranch: String? = nil
     ) -> [NSObject] {
         let order = optionValues.sessionOrder
         let isReversed = optionValues.sessionOrderReversed
@@ -763,14 +861,21 @@ enum SidebarTreeBuilder {
             return sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
         }
 
+        // The checkout's own branch is left out of the census as well as out of the headings.
+        // It cannot earn a level it is not allowed to occupy, and counting it would let a
+        // suppressed heading be the reason every *other* lone branch grew one.
+        func isNamedByTheRowAbove(_ branch: String) -> Bool { branch == checkoutBranch }
+
         var itemCounts: [String: Int] = [:]
         for session in sessions {
-            if let branch = NativeSidebarParity.fact(.sessionBranch, session.branch) {
+            if let branch = NativeSidebarParity.fact(.sessionBranch, session.branch),
+               !isNamedByTheRowAbove(branch) {
                 itemCounts[branch, default: 0] += 1
             }
         }
         for terminal in terminals {
-            if let branch = NativeSidebarParity.fact(.terminalBranch, terminal.branch) {
+            if let branch = NativeSidebarParity.fact(.terminalBranch, terminal.branch),
+               !isNamedByTheRowAbove(branch) {
                 itemCounts[branch, default: 0] += 1
             }
         }
@@ -783,6 +888,7 @@ enum SidebarTreeBuilder {
 
         func append(_ session: AgentSession, node: SessionNode) {
             guard let branch = NativeSidebarParity.fact(.sessionBranch, session.branch),
+                  !isNamedByTheRowAbove(branch),
                   groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
                 children.append(node)
                 return
@@ -802,6 +908,7 @@ enum SidebarTreeBuilder {
 
         func append(_ terminal: ProjectTerminal, node: TerminalNode) {
             guard let branch = NativeSidebarParity.fact(.terminalBranch, terminal.branch),
+                  !isNamedByTheRowAbove(branch),
                   groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
                 children.append(node)
                 return

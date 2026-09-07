@@ -57,6 +57,8 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case projectNodeExclusions = "SidebarTreeBuilder.projectNode.excludingSessionIDs"
     case repositoryIdentity = "GitInfo.repositoryIdentity"
     case repositoryName = "GitInfo.repositoryName"
+    case worktreeLocation = "GitInfo.worktreeLocation"
+    case checkoutBranch = "GitInfo.currentBranch"
 }
 
 /// Compiler-visible ownership markers for the navigator parity checker.
@@ -100,6 +102,8 @@ enum NativeSidebarParity {
         .projectNodeExclusions: .transientExclusion,
         .repositoryIdentity: .localRepositoryContext,
         .repositoryName: .localRepositoryContext,
+        .worktreeLocation: .localRepositoryContext,
+        .checkoutBranch: .localRepositoryContext,
     ]
 
     static let providerOwnership: [

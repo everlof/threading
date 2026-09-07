@@ -336,6 +336,32 @@ final class ProjectSidebarViewController: NSViewController {
     /// their expansion the way projects persist theirs would outlive the thing it describes.
     private var collapsedBranchKeys: Set<String> = []
 
+    /// Repository roots the user folded away, by repository identity, remembered across
+    /// launches.
+    ///
+    /// Kept *unlike* `collapsedBranchKeys` because a repository is not transient: it is a
+    /// directory on disk that outlives every chat under it, and folding one away is the one
+    /// gesture that puts a whole repository out of sight. A root that reopened itself on every
+    /// launch would make that gesture worth nothing. It is stored through `PreferenceStore`
+    /// rather than `.standard` because it records a *user's choice* — see `themes.md` for the
+    /// line, and `persistence.md` for what a hosted test would otherwise write into the
+    /// developer's own sidebar.
+    private var collapsedRepositoryIdentities: Set<String> {
+        get {
+            Set(
+                PreferenceStore.shared.stringArray(
+                    forKey: SidebarDefaults.collapsedRepositoriesKey
+                ) ?? []
+            )
+        }
+        set {
+            PreferenceStore.shared.set(
+                Array(newValue),
+                forKey: SidebarDefaults.collapsedRepositoriesKey
+            )
+        }
+    }
+
     /// Sessions whose side chats the user folded away, for this run only — kept transient
     /// for the same reason as `collapsedBranchKeys`, and because a session with no side
     /// chats has no disclosure triangle to remember a state for.
@@ -1140,7 +1166,12 @@ extension ProjectSidebarViewController {
             child is TerminalNode
                 || ((child as? BranchGroupNode)?.sessionNodes.isEmpty == true)
         }
-        if optionValues.branchGrouping, let branch = session.branch {
+        // A row on the branch its checkout is standing on earns no heading — the checkout row
+        // already says it. The tree builder's rule, asked here rather than restated, because
+        // this path has to reach the same shape without building the project.
+        if optionValues.branchGrouping,
+           let branch = session.branch,
+           branch != checkoutBranch(ofProjectWithID: projectID) {
             if let group = projectNode.childNodes.compactMap({ $0 as? BranchGroupNode })
                 .first(where: { $0.branch == branch }) {
                 parent = group
@@ -1263,7 +1294,10 @@ extension ProjectSidebarViewController {
         }
         let parent: any SidebarOutlineNode
         let childIndex: Int
-        if optionValues.branchGrouping, let branch = terminal.branch {
+        // The same rule as the session path above.
+        if optionValues.branchGrouping,
+           let branch = terminal.branch,
+           branch != checkoutBranch(ofProjectWithID: projectID) {
             if let group = projectNode.childNodes.compactMap({ $0 as? BranchGroupNode })
                 .first(where: { $0.branch == branch }) {
                 parent = group
@@ -1641,11 +1675,17 @@ extension ProjectSidebarViewController {
 
         let outline = animated ? outlineView.animator() : outlineView
 
-        // Repository headings have no persisted disclosure state. A project can also be a root
-        // when it is the repository's only checkout, but its persisted state is handled below;
-        // expanding every root here silently reopened those standalone projects on launch.
+        // A repository root reopens unless the user folded it away, which is remembered across
+        // launches — see `collapsedRepositoryIdentities`. A project can also be a root, when its
+        // folder is outside any repository, but its persisted state is handled below; expanding
+        // every root here silently reopened those standalone projects on launch.
+        let foldedAway = collapsedRepositoryIdentities
         for case let repository as RepoGroupNode in rootNodes {
-            outline.expandItem(repository)
+            if foldedAway.contains(repository.identity) {
+                outline.collapseItem(repository)
+            } else {
+                outline.expandItem(repository)
+            }
         }
 
         for node in allProjectNodes {
@@ -1865,6 +1905,12 @@ extension ProjectSidebarViewController {
         for root in rootNodes {
             walk(root, ancestors: [], projectNode: nil)
         }
+    }
+
+    /// The branch the project's own row states, so an arriving row can be told apart from one
+    /// on a branch the checkout has left.
+    private func checkoutBranch(ofProjectWithID projectID: ProjectID) -> String? {
+        projectStore.project(withID: projectID).flatMap(SidebarTreeBuilder.checkoutBranch(of:))
     }
 
     private static func branchKey(_ node: BranchGroupNode) -> String {
@@ -2933,6 +2979,11 @@ private extension ProjectSidebarViewController {
         if let node = outlineView.item(atRow: row) as? BranchGroupNode {
             return node.projectID
         }
+        // A repository is not a place a chat can run — a checkout is — so a root row answers
+        // with the checkout that stands for it. See `RepoGroupNode.representativeProjectID`.
+        if let node = outlineView.item(atRow: row) as? RepoGroupNode {
+            return node.representativeProjectID
+        }
         if let node = outlineView.item(atRow: row) as? SessionNode {
             return projectNodesBySessionID[node.sessionID]?.projectID
         }
@@ -2963,32 +3014,86 @@ private extension ProjectSidebarViewController {
     ) -> Bool {
         guard let row = projectRow(for: projectID) else { return false }
         return presentSidebarMenu(
-            [
+            creationEntries(pinnedTo: row),
+            from: source,
+            anchor: anchor
+        )
+    }
+
+    /// The repository root's `+`: the same three things a checkout can start, run in the
+    /// checkout that stands for the repository, and then the one act only a repository can
+    /// perform.
+    ///
+    /// `New Worktree…` belongs here and nowhere else in the sidebar. It makes a *sibling* of
+    /// every row under this one, so offering it from a checkout would have it read as something
+    /// that happens inside that checkout; and it closes the list rather than opening it because
+    /// it is the row that both makes a place and goes there — the same reasoning, and the same
+    /// position, the composer's location menu already uses.
+    @discardableResult
+    private func showRepositoryCreationMenu(
+        for identity: String,
+        checkout projectID: ProjectID,
+        from source: NSView,
+        anchor: ThemedMenuAnchor = .control
+    ) -> Bool {
+        guard let node = nodesByKey[.repository(identity)] else { return false }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return false }
+
+        return presentSidebarMenu(
+            creationEntries(pinnedTo: row) + [
+                .separator,
                 .item(ThemedMenuItem(
-                    title: L10n.string("New Chat…"),
-                    shortcut: ShortcutOverrideStore.shared.shortcut(
-                        forID: AppCommands.ID.newSession
-                    ),
-                    image: ThemedMenuIcon.symbol("bubble.left"),
-                    onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
-                )),
-                .item(ThemedMenuItem(
-                    title: L10n.string("New Manager…"),
-                    shortcut: ShortcutOverrideStore.shared.shortcut(
-                        forID: AppCommands.ID.newManager
-                    ),
-                    image: ThemedMenuIcon.symbol("person.3"),
-                    onChoose: pinnedAction(row) { $0.newProjectManagerClicked() }
-                )),
-                .item(ThemedMenuItem(
-                    title: L10n.string("New Terminal"),
-                    image: ThemedMenuIcon.symbol("terminal"),
-                    onChoose: pinnedAction(row) { $0.newProjectTerminalClicked() }
+                    title: L10n.string("New Worktree…"),
+                    image: ThemedMenuIcon.symbol("arrow.branch"),
+                    onChoose: pinnedAction(row) { $0.createWorktree(from: projectID) }
                 ))
             ],
             from: source,
             anchor: anchor
         )
+    }
+
+    /// What a `+` offers wherever it appears, bound to the row it was pressed on.
+    private func creationEntries(pinnedTo row: Int) -> [ThemedMenuEntry] {
+        [
+            .item(ThemedMenuItem(
+                title: L10n.string("New Chat…"),
+                shortcut: ShortcutOverrideStore.shared.shortcut(
+                    forID: AppCommands.ID.newSession
+                ),
+                image: ThemedMenuIcon.symbol("bubble.left"),
+                onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("New Manager…"),
+                shortcut: ShortcutOverrideStore.shared.shortcut(
+                    forID: AppCommands.ID.newManager
+                ),
+                image: ThemedMenuIcon.symbol("person.3"),
+                onChoose: pinnedAction(row) { $0.newProjectManagerClicked() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("New Terminal"),
+                image: ThemedMenuIcon.symbol("terminal"),
+                onChoose: pinnedAction(row) { $0.newProjectTerminalClicked() }
+            ))
+        ]
+    }
+
+    /// Makes a worktree of `projectID`'s repository and adds it, so the new checkout appears
+    /// under the same root as the one it was made from.
+    ///
+    /// The checkout is only where git is *run*: a worktree is added to the repository, and
+    /// `GitWorktree` needs some checkout of it to run in. Which one makes no difference to the
+    /// result, which is why the root can hand it the representative.
+    private func createWorktree(from projectID: ProjectID) {
+        guard let project = projectStore.project(withID: projectID),
+              let created = WorktreeCreation.requestWorktree(from: project),
+              let added = projectStore.addProject(folderURL: created) else { return }
+
+        reload()
+        select(projectID: added.id)
     }
 
     private func projectRow(for projectID: ProjectID) -> Int? {
@@ -3250,7 +3355,26 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     @discardableResult
     private func apply(_ item: Any, to view: NSTableCellView) -> Bool {
         if let groupNode = item as? RepoGroupNode, let cell = view as? ProjectRowView {
-            cell.configureAsRepository(named: groupNode.name)
+            // A collapsed repository says how many checkouts it is hiding, the same promise a
+            // collapsed project makes about its chats.
+            let hiddenCheckouts = outlineView.isItemExpanded(groupNode)
+                ? 0
+                : groupNode.projectNodes.count
+
+            cell.configureAsRepository(
+                named: groupNode.name,
+                count: hiddenCheckouts,
+                representing: groupNode.representativeProjectID
+                    .flatMap { projectStore.project(withID: $0) }
+            )
+            cell.onCreateMenuAction = { [weak self] projectID, anchor, menuAnchor in
+                self?.showRepositoryCreationMenu(
+                    for: groupNode.identity,
+                    checkout: projectID,
+                    from: anchor,
+                    anchor: menuAnchor
+                ) ?? false
+            }
             return true
         }
 
@@ -3476,6 +3600,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return
         }
 
+        if let repository = notification.userInfo?["NSObject"] as? RepoGroupNode {
+            collapsedRepositoryIdentities.remove(repository.identity)
+            reloadRow(for: repository)
+            return
+        }
+
         guard let node = notification.userInfo?["NSObject"] as? ProjectNode else { return }
         projectStore.setProject(id: node.projectID, expanded: true)
         expandStandingDescendants(of: node, in: outlineView)
@@ -3493,6 +3623,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if let sessionNode = notification.userInfo?["NSObject"] as? SessionNode {
             collapsedSideChatParents.insert(sessionNode.sessionID)
+            return
+        }
+
+        if let repository = notification.userInfo?["NSObject"] as? RepoGroupNode {
+            collapsedRepositoryIdentities.insert(repository.identity)
+            reloadRow(for: repository)
             return
         }
 
