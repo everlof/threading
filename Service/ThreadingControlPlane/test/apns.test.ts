@@ -160,7 +160,7 @@ describe("hosted APNs broker", () => {
     expect(encodedLog).toContain('"previewBytes":51');
   });
 
-  it("sends turn-completion retractions as short-lived background pushes", async () => {
+  it.each([NotificationKind.turnCompleted, NotificationKind.agentQuestion, NotificationKind.permissionRequest])("sends %s retractions as short-lived background pushes", async (kind) => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
     const apnsID = crypto.randomUUID();
@@ -179,7 +179,7 @@ describe("hosted APNs broker", () => {
         hostID,
         sessionID,
         eventID,
-        kind: NotificationKind.turnCompleted,
+        kind,
       },
     });
     const after = Math.floor(Date.now() / 1_000);
@@ -207,14 +207,14 @@ describe("hosted APNs broker", () => {
         hostID,
         sessionID,
         eventID,
-        kind: "turnCompleted",
+        kind,
       },
     });
     expect(payload.aps.alert).toBeUndefined();
     expect(payload.aps.sound).toBeUndefined();
   });
 
-  it("uses the completion collapse id for its retraction", async () => {
+  it.each([NotificationKind.turnCompleted, NotificationKind.agentQuestion, NotificationKind.permissionRequest])("keeps old %s retractions separate from a newer alert", async (kind) => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
     const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -224,10 +224,12 @@ describe("hosted APNs broker", () => {
     const sessionID = crypto.randomUUID().toLowerCase();
     const body = pushBody(hostID, eventID, registrationID);
     const event = body.event as Record<string, unknown>;
-    event.kind = NotificationKind.turnCompleted;
+    event.kind = kind;
     event.sessionID = sessionID;
 
     await sendPush(hostCredential, body);
+    const newer = { ...body, event: { ...event, id: crypto.randomUUID().toLowerCase() } };
+    await sendPush(hostCredential, newer);
     await sendRetraction(hostCredential, {
       registrationID,
       retraction: {
@@ -235,13 +237,15 @@ describe("hosted APNs broker", () => {
         hostID,
         sessionID,
         eventID,
-        kind: NotificationKind.turnCompleted,
+        kind,
       },
     });
 
-    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(upstream).toHaveBeenCalledTimes(3);
     const firstHeaders = new Headers(upstream.mock.calls[0]?.[1]?.headers);
-    const secondHeaders = new Headers(upstream.mock.calls[1]?.[1]?.headers);
+    const newerHeaders = new Headers(upstream.mock.calls[1]?.[1]?.headers);
+    const secondHeaders = new Headers(upstream.mock.calls[2]?.[1]?.headers);
+    expect(secondHeaders.get("apns-collapse-id")).not.toBe(newerHeaders.get("apns-collapse-id"));
     expect(secondHeaders.get("apns-collapse-id")).toBe(
       firstHeaders.get("apns-collapse-id"),
     );

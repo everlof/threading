@@ -432,7 +432,7 @@ struct SessionDetailView: View {
         .task {
             if let host = model.activeHost,
                let hostID = host.hostID ?? model.activeHostID {
-                await notifications.clearTurnCompletions(
+                await notifications.clearSessionStateNotifications(
                     hostID: hostID,
                     sessionID: session.id
                 )
@@ -452,7 +452,7 @@ struct SessionDetailView: View {
                   let host = model.activeHost,
                   let hostID = host.hostID ?? model.activeHostID else { return }
             Task {
-                await notifications.clearTurnCompletions(
+                await notifications.clearSessionStateNotifications(
                     hostID: hostID,
                     sessionID: session.id
                 )

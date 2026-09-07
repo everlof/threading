@@ -3053,13 +3053,16 @@ cancels that participant's obsolete completion across this Mac's shared chats wi
 anyone else. The owner can also choose **Settings → Remote Access → Notification Delivery → Mac
 activity window**: Off, 1, 2, 5 or 10 minutes, with 2 minutes as the default. Deliberate Mac
 clicking, typing or scrolling defers the owner's completion until that window expires; another
-interaction cancels it as already seen. Permission requests, questions, direct human requests and
-notifications explicitly requested from an agent or extension remain immediate.
+interaction cancels it as already seen. Permission and question pushes also wait while their
+recipient is active; they remain pending until answered or until that person leaves or goes idle.
+Mac activity applies only to the owner. Direct human requests and notifications explicitly
+requested from an agent or extension remain immediate.
 
 If a completion becomes obsolete after Apple accepted it, Threading attempts to retract it live
 and with a best-effort silent push. iOS may postpone or discard silent pushes, especially after a
-force-quit, so the phone also clears precisely matching Threading completion alerts when the app
-next activates or that chat opens.
+force-quit, so the phone also clears Threading completion, question and permission alerts when
+that chat opens. Simply opening the app clears completions but preserves requests in other chats. Answering a question or permission request on the Mac or phone
+also retracts its exact notification, subject to the same silent-push delivery limits.
 
 The iPhone obtains and registers its APNs token automatically after you enable notifications;
 there is no token to copy in ordinary use. The Mac keeps that registration with the pairing and

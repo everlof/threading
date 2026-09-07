@@ -27,6 +27,25 @@ export enum NotificationKind {
   agentMessage = "agentMessage",
   attentionRequest = "attentionRequest",
 }
+type RetractableNotificationKind = NotificationKind.turnCompleted
+  | NotificationKind.agentQuestion | NotificationKind.permissionRequest;
+
+// Exhaustive: a new wire kind must explicitly choose whether it has a retractable lifetime.
+function supportsRetraction(kind: NotificationKind): kind is RetractableNotificationKind {
+  switch (kind) {
+    case NotificationKind.turnCompleted:
+    case NotificationKind.agentQuestion:
+    case NotificationKind.permissionRequest:
+      return true;
+    case NotificationKind.sharedSession:
+    case NotificationKind.agentMessage:
+    case NotificationKind.attentionRequest:
+      return false;
+  }
+  const unclassified: never = kind;
+  return unclassified;
+}
+
 const kinds = new Set<NotificationKind>(Object.values(NotificationKind));
 const destinationKinds = new Set(["session", "attachment", "browserTab", "extensionPanel"]);
 const machineTokenPattern = /^[A-Za-z0-9._:-]+$/u;
@@ -59,7 +78,7 @@ interface NotificationRetraction {
   hostID: string;
   sessionID: string;
   eventID: string;
-  kind: NotificationKind.turnCompleted;
+  kind: RetractableNotificationKind;
 }
 
 export async function handleAPNSPush(request: Request, env: Env): Promise<Response> {
@@ -255,7 +274,7 @@ function normalizedRetraction(value: Record<string, unknown>): NotificationRetra
   const eventID = machineToken(value.eventID, "retraction.eventID", 128);
   const kind = boundedEnum(value.kind, kinds);
   if (!validateIdentifier(hostID) || !validateIdentifier(sessionID)
-    || kind !== NotificationKind.turnCompleted) invalid("retraction is invalid");
+    || !supportsRetraction(kind)) invalid("retraction is invalid");
   return { type: "notificationRetraction", hostID, sessionID, eventID, kind };
 }
 
@@ -377,6 +396,9 @@ function configuredAPNSTopic(env: Env): string {
 }
 
 async function eventCollapseID(event: NotificationEvent): Promise<string> {
+  if (supportsRetraction(event.kind)) {
+    return retractableCollapseID(event.hostID, event.sessionID, event.kind, event.id);
+  }
   const source = event.kind === "agentMessage"
     ? `event:${event.id}`
     : `session:${event.kind}:${event.sessionID}`;
@@ -384,7 +406,18 @@ async function eventCollapseID(event: NotificationEvent): Promise<string> {
 }
 
 async function retractionCollapseID(retraction: NotificationRetraction): Promise<string> {
-  return (await sha256Hex(`session:${retraction.kind}:${retraction.sessionID}`)).slice(0, 64);
+  return retractableCollapseID(
+    retraction.hostID, retraction.sessionID, retraction.kind, retraction.eventID,
+  );
+}
+
+async function retractableCollapseID(
+  hostID: string, sessionID: string, kind: NotificationKind, eventID: string,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const identity = [hostID, sessionID, kind, eventID]
+    .map(value => `${encoder.encode(value).byteLength}:${value}`).join("");
+  return sha256Hex(identity);
 }
 
 async function apnsResponseReason(response: Response): Promise<string | undefined> {

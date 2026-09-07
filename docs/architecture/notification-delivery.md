@@ -4,13 +4,43 @@ Read this with [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), which owns the user
 notification and privacy contract. This note owns the implementation seams that must remain true
 when routine turn-completion delivery changes.
 
-## One coordinator owns the decision
+## Explicit lifetimes share one activity source and transport
+
+`RemoteNotificationKind.lifecycle` exhaustively classifies each kind as a completed turn, an
+unresolved response request or an independent event. Adding a kind requires an explicit decision;
+the immediate fan-out refuses state events. Completion and response lifetimes share transport
+identity and provider-result types, subscription authorization and APNs/retraction senders.
 
 `RemoteTurnNotificationDeliveryCoordinator` is the sole delivery policy for routine
 `turnCompleted` events. Its clock, scheduler, activity source, target source and live, push,
 retraction and diagnostic sinks are injectable so deadline and cancellation races are tested
-without wall-clock sleeps. Urgent permission requests, agent questions, person-to-person requests
-and explicitly requested agent or extension notifications keep their established immediate path.
+without wall-clock sleeps. `RemoteResponseNotificationCoordinator` applies the same participant
+activity source to permission requests and agent questions. Person-to-person requests and
+explicitly requested agent or extension notifications keep their immediate path.
+
+Response requests have a different lifetime from completions: unrelated Mac input extends their
+deferral instead of canceling an unanswered question. Mac deactivation or the last foreground
+phone detaching re-evaluates outstanding requests; the Mac deadline reads the latest shared
+activity timestamp. The hot input path remains O(1). At most 256 request/device pairs (normally
+1–4), including timers and in-flight delivery state, are retained. A stress fixture submits
+1,000 pairs and proves the bound and cancellation of stale timers.
+
+Only `SessionRuntimeDidChange` creates or resolves terminal questions from semantic blocker
+transitions. Read-receipt and badge presentation events cannot authorize delivery.
+The semantic transition out of `awaitingUser` resolves a terminal question. Native permission
+cards resolve their exact permission notification before promoting the next card; process exit
+clears both. Editing bytes and viewing a session do not claim to answer a request. Resolution
+retracts live events and accepted pushes by exact event identity, and late APNs acceptance checks
+that identity again. Authorization and activity are rechecked immediately before network I/O.
+
+Response delivery states are pending, sending, accepted and refused. Transport errors, HTTP 429
+and server failures retry after 1, 5 and 30 seconds, retaining one event identity and one timer.
+Presence events cannot shorten that backoff; answering cancels it. Other HTTP refusals wait for a
+registration or provider change, which can reopen a refused attempt with a fresh retry budget.
+An accepted request remains unanswered until its semantic resolution, even if the user returns
+while APNs is accepting it. Mac activity is sampled before dispatch; it cannot undo network I/O
+that already began. State is process-local: restarting the Mac loses unresolved delivery tracking,
+and the phone's session-open cleanup remains the fallback for pre-restart response alerts.
 
 The coordinator keys pending work by session and participant and gives every completed turn a
 stable generation from `CompletedTurnSnapshotStore`. Generations are allocated across the whole
@@ -55,14 +85,20 @@ entry. Invalidating one creates
 a typed `RemoteNotificationRetractionDTO` containing opaque host, session, event and kind
 identifiers. It travels over an authenticated live connection and, for capable devices, the
 dedicated hosted background-push endpoint. iOS removes a delivered or pending Threading request
-only after all identifiers and `turnCompleted` match.
+only after all identifiers and the retractable kind (`turnCompleted`, `agentQuestion` or
+`permissionRequest`) match.
 
 Background APNs is advisory: iOS can delay or discard it, particularly after force-quit. Local
-clearing on application activation and session open is the reliable fallback. Retraction support
+clearing on session open is the fallback for completion, question and permission alerts.
+Global app activation and completion-preference changes clear only completion alerts: opening an
+unrelated screen is not evidence that an outstanding question was answered. Retraction support
 and preview consent are optional capability-registration fields, so absence retains the old
 generic-alert behavior.
 
-The alert and background retraction use the same APNs collapse identifier. If Apple has accepted
+Each alert and its background retraction use the same APNs collapse identifier, derived from
+host, session, kind and **event** identity. Different events in one session must never collide:
+a late retraction of A must not replace a newer alert B in Apple's queue. Both local and hosted
+senders use the same length-prefixed identity hash, covered by transport regression tests. If Apple has accepted
 but not delivered the alert, the retraction replaces it in the provider queue; if it has already
 arrived, iOS removes the exact request. iOS also records a bounded 24-hour tombstone before it
 queries `UNUserNotificationCenter`, preventing a late live event from recreating an alert after

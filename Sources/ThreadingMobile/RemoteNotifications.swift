@@ -95,7 +95,7 @@ enum RemoteNotificationPayloadValidation {
 
     static func accepts(_ retraction: RemoteNotificationRetractionDTO) -> Bool {
         retraction.type == "notificationRetraction"
-            && retraction.kind == .turnCompleted
+            && retraction.kind.supportsRetraction
             && machineToken(retraction.hostID, maximumBytes: maximumIdentifierBytes)
             && machineToken(retraction.sessionID, maximumBytes: maximumIdentifierBytes)
             && machineToken(retraction.eventID, maximumBytes: maximumIdentifierBytes)
@@ -212,7 +212,7 @@ enum RemoteNotificationRemovalPolicy {
         hostID: String,
         sessionID: String
     ) -> Bool {
-        event.hostID == hostID && event.sessionID == sessionID && event.kind == .turnCompleted
+        event.hostID == hostID && event.sessionID == sessionID && event.kind.supportsRetraction
     }
 
     static func matchesApplicationActivation(_ event: RemoteNotificationEventDTO) -> Bool {
@@ -1798,7 +1798,7 @@ final class RemoteNotificationManager: ObservableObject {
         return true
     }
 
-    func clearTurnCompletions(hostID: String, sessionID: String) async {
+    func clearSessionStateNotifications(hostID: String, sessionID: String) async {
         let identifiers = await matchingNotificationIdentifiers {
             RemoteNotificationRemovalPolicy.matchesSession(
                 $0,
@@ -1817,15 +1817,13 @@ final class RemoteNotificationManager: ObservableObject {
                 prefix: "device"
             ),
             .session: MobileDiagnostics.pseudonym(sessionID, prefix: "session"),
-            .kind: RemoteNotificationKind.turnCompleted.rawValue,
             .reason: "sessionOpened",
             .total: String(identifiers.count),
         ])
     }
 
-    /// Becoming foreground means the participant is present again. Routine completions are now
-    /// represented in-app, so remove only those Threading notifications; permission, question,
-    /// requested-update and person-to-person alerts retain their independent urgency semantics.
+    /// App presence can acknowledge a completion, but cannot answer an outstanding question.
+    /// Response alerts clear only by exact retraction or opening their actual chat.
     func clearTurnCompletionsOnApplicationActivation() async {
         await clearAllTurnCompletions(reason: "appActive")
     }

@@ -633,6 +633,7 @@ extension ConversationViewController {
         let card = PermissionRequestView(request: pending.request) { [weak self] decision in
             pending.decide(decision)
             guard let self else { return }
+            RemoteNotificationService.shared.permissionResolved(sessionID: self.sessionID)
             self.activePermissionCard = nil
             self.transcript.remove(cardID)
             self.delegate?.conversationDidChangeActivity(self)

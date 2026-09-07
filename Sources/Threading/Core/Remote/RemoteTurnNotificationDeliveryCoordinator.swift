@@ -7,11 +7,7 @@ enum RemoteNotificationParticipantID: Hashable, Sendable {
 }
 
 struct RemoteTurnNotificationTarget: Sendable {
-    struct Identity: Hashable, Sendable {
-        let shareID: String
-        let deviceID: String
-        let participantID: RemoteNotificationParticipantID
-    }
+    typealias Identity = RemoteNotificationTargetIdentity
 
     let shareID: String
     let deviceID: String
@@ -50,25 +46,6 @@ struct RemoteTurnNotificationCompletion: Sendable {
     let title: String
     let snapshot: CompletedTurnSnapshot?
     let createdAt: Double
-}
-
-struct RemoteTurnNotificationPushResult: Equatable, Sendable {
-    let accepted: Bool
-    let statusCode: Int?
-    let providerTrace: String?
-    let failureCode: String?
-
-    init(
-        accepted: Bool,
-        statusCode: Int?,
-        providerTrace: String?,
-        failureCode: String? = nil
-    ) {
-        self.accepted = accepted
-        self.statusCode = statusCode
-        self.providerTrace = providerTrace
-        self.failureCode = failureCode
-    }
 }
 
 /// The diagnostic boundary deliberately cannot carry response content.
@@ -229,8 +206,9 @@ final class RemoteNotificationParticipantActivitySource {
     }
 }
 
-/// Coordinates only routine turn completions. Permission requests, agent questions, requested
-/// milestones, and person-to-person attention keep the immediate established delivery path.
+/// Coordinates routine turn completions. Response requests use their own coordinator because
+/// activity defers an unanswered request rather than marking it seen. Explicit milestones and
+/// person-to-person attention keep the immediate delivery path.
 @MainActor
 final class RemoteTurnNotificationDeliveryCoordinator {
     typealias TargetSource = @MainActor (
@@ -245,7 +223,7 @@ final class RemoteTurnNotificationDeliveryCoordinator {
     typealias PushSink = @MainActor (
         RemoteNotificationEventDTO,
         RemoteTurnNotificationTarget,
-        @escaping @MainActor (RemoteTurnNotificationPushResult) -> Void
+        @escaping @MainActor (RemoteNotificationPushResult) -> Void
     ) -> Void
     typealias RetractionSink = @MainActor (
         RemoteNotificationRetractionDTO,
@@ -543,7 +521,7 @@ final class RemoteTurnNotificationDeliveryCoordinator {
         target: RemoteTurnNotificationTarget,
         event: RemoteNotificationEventDTO,
         interactionEpoch: UInt64,
-        result: RemoteTurnNotificationPushResult
+        result: RemoteNotificationPushResult
     ) {
         var fields: [RemoteDiagnosticField: String] = [
             .transport: "apns",

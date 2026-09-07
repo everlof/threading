@@ -26,6 +26,24 @@ final class RemoteTurnNotificationDeliveryCoordinatorTests: XCTestCase {
         )
     }
 
+    func testOldRetractionCannotCollapseNewerStateAlertInTheSameSession() {
+        for kind in RemoteNotificationKind.allCases where kind.supportsRetraction {
+            let first = RemoteNotificationEventDTO(
+                id: "old", kind: kind, hostID: "host", sessionID: "session", title: "Chat", body: "State"
+            )
+            let next = RemoteNotificationEventDTO(
+                id: "new", kind: kind, hostID: "host", sessionID: "session", title: "Chat", body: "State"
+            )
+            let removal = RemoteNotificationRetractionDTO(
+                hostID: first.hostID, sessionID: first.sessionID, eventID: first.id, kind: kind
+            )
+            XCTAssertEqual(RemoteAPNSPushSender.collapseIdentifier(for: first),
+                           RemoteAPNSPushSender.collapseIdentifier(for: removal))
+            XCTAssertNotEqual(RemoteAPNSPushSender.collapseIdentifier(for: next),
+                              RemoteAPNSPushSender.collapseIdentifier(for: removal))
+        }
+    }
+
     func testOffSendsImmediatelyAndEveryConfiguredWindowWaitsForItsDeadline() {
         let sessionID = SessionID()
 
@@ -394,7 +412,7 @@ private final class Harness {
     var retractions: [Retraction] = []
     var diagnostics: [Diagnostic] = []
     var completesPushesImmediately = true
-    var pendingPushCompletions: [@MainActor (RemoteTurnNotificationPushResult) -> Void] = []
+    var pendingPushCompletions: [@MainActor (RemoteNotificationPushResult) -> Void] = []
     lazy var coordinator = RemoteTurnNotificationDeliveryCoordinator(
         clock: clock,
         scheduler: scheduler,
@@ -411,7 +429,7 @@ private final class Harness {
         },
         pushSink: { [unowned self] event, target, completion in
             self.pushes.append(Push(event: event, target: target))
-            let result = RemoteTurnNotificationPushResult(
+            let result = RemoteNotificationPushResult(
                 accepted: true,
                 statusCode: 200,
                 providerTrace: "apns-1"
@@ -444,7 +462,7 @@ private final class Harness {
     }
 
     func finishPendingPushes(
-        with result: RemoteTurnNotificationPushResult = .init(
+        with result: RemoteNotificationPushResult = .init(
             accepted: true,
             statusCode: 200,
             providerTrace: "apns-1"

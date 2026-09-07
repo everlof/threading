@@ -1545,12 +1545,12 @@ For the owner, activating Threading or deliberately clicking, typing or scrollin
 Mac active. **Settings → Remote Access → Notification Delivery → Mac activity window** controls
 how long: Off, 1 minute, 2 minutes, 5 minutes or 10 minutes; 2 minutes is the default. Off means
 Mac input never suppresses paired-device notifications. Leaving the app, locking the session or
-sleeping the display makes it inactive immediately. A recently active Mac defers only a routine
-`turnCompleted` notification for the owner. A later Mac interaction cancels that completion as
-seen; otherwise the coordinator revalidates it at the deadline and delivers it if it is still
-current. This never delays a guest's completion, a permission request, a question, a person's
-explicit request for input, an explicit extension notification or an agent update the user asked
-for. Pointer movement alone is not activity, and deliberate-input handling is constant-time;
+sleeping the display makes it inactive immediately. A recently active Mac defers the owner's
+routine completion, permission and question pushes. A later Mac interaction cancels a completion
+as seen. An unanswered question or permission request remains pending until answered or until
+the owner leaves or becomes inactive, when delivery is revalidated. Mac activity never delays a
+guest's notifications, a person's explicit request for input, an explicit extension notification
+or an agent update the user asked for. Pointer movement alone is not activity, and deliberate-input handling is constant-time;
 queue work and diagnostics are coalesced off the AppKit event callback.
 
 Each iPhone has a device-local **Include response previews** switch under its turn-completion
@@ -1587,11 +1587,16 @@ and session identifiers, generation and time—never notification text—and att
 when a newer turn or participant interaction makes it stale. Capable foreground phones receive a
 typed retraction on the authenticated live connection; capable background phones receive a
 best-effort silent push from the separate `/v1/push/retractions` endpoint. That endpoint accepts
-only turn-completion identifiers, uses APNs background priority 5 with a short expiration, and
+only completion, agent-question and permission-request identifiers, uses APNs background priority
+5 with a short expiration, and
 contains no alert or sound. iOS removes only delivered Threading notifications whose host,
 session, event and kind all match. Silent pushes can be delayed or discarded, especially after a
-force-quit, so activation and opening the affected session perform the reliable local clearing
-fallback.
+force-quit, so opening the affected session performs the local clearing fallback for completion,
+question and permission alerts. Global app activation clears only completions, preserving
+unanswered requests in other chats. Delivery tracking is process-local;
+a Mac restart also relies on this local cleanup for alerts from the previous process. Answering a question or permission request on either device also
+retracts that exact request; receiving these new retractions requires updated Mac, iPhone and
+hosted-service builds.
 
 Capabilities and preview consent are optional registration fields. Missing fields mean preview
 off and no retraction support, which keeps old registrations and old phones compatible. New Macs

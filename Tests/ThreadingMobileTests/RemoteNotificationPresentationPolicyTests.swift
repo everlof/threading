@@ -56,7 +56,28 @@ final class RemoteNotificationPresentationPolicyTests: XCTestCase {
         )
     }
 
-    func testRetractionDecoderRejectsWrongTypeAndNonCompletionKind() {
+    func testResponseRetractionsDecodeAndTombstoneOnlyTheExactRequest() throws {
+        for kind in [RemoteNotificationKind.agentQuestion, .permissionRequest] {
+            let retraction = RemoteNotificationRetractionDTO(
+                hostID: "host", sessionID: "session", eventID: "event", kind: kind
+            )
+            let data = try JSONEncoder().encode(retraction)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [AnyHashable: Any])
+            XCTAssertEqual(RemoteNotificationPayloadDecoder.retraction(from: ["retraction": object]), retraction)
+            var tombstones = RemoteNotificationRetractionTombstones()
+            tombstones.insert(retraction)
+            let event = RemoteNotificationEventDTO(
+                id: "event", kind: kind, hostID: "host", sessionID: "session", title: "Chat", body: "Respond"
+            )
+            XCTAssertTrue(tombstones.contains(event))
+            XCTAssertTrue(RemoteNotificationRemovalPolicy.matches(event, retraction: retraction))
+            XCTAssertFalse(RemoteNotificationRemovalPolicy.matches(event, retraction: .init(
+                hostID: "host", sessionID: "session", eventID: "new-request", kind: kind
+            )))
+        }
+    }
+
+    func testRetractionDecoderRejectsWrongTypeAndNonRetractableKind() {
         let base: [String: Any] = [
             "type": "notificationRetraction",
             "hostID": "host-1",
@@ -175,7 +196,7 @@ final class RemoteNotificationPresentationPolicyTests: XCTestCase {
         }
     }
 
-    func testApplicationActivationClearsOnlyRoutineTurnCompletions() {
+    func testApplicationActivationPreservesUnansweredRequestsAndExplicitMessages() {
         for kind in RemoteNotificationKind.allCases {
             let event = RemoteNotificationEventDTO(
                 id: "event-1",
@@ -190,6 +211,23 @@ final class RemoteNotificationPresentationPolicyTests: XCTestCase {
                 kind == .turnCompleted,
                 "Unexpected activation clearing policy for \(kind.rawValue)"
             )
+        }
+    }
+
+    func testOpeningAChatClearsOnlyThatChatsStateAlerts() {
+        for kind in RemoteNotificationKind.allCases {
+            let event = RemoteNotificationEventDTO(
+                id: "event", kind: kind, hostID: "host", sessionID: "session", title: "Chat", body: "Body"
+            )
+            XCTAssertEqual(RemoteNotificationRemovalPolicy.matchesSession(
+                event, hostID: "host", sessionID: "session"
+            ), [.turnCompleted, .agentQuestion, .permissionRequest].contains(kind))
+            XCTAssertFalse(RemoteNotificationRemovalPolicy.matchesSession(
+                event, hostID: "host", sessionID: "another-chat"
+            ))
+            XCTAssertFalse(RemoteNotificationRemovalPolicy.matchesSession(
+                event, hostID: "another-host", sessionID: "session"
+            ))
         }
     }
 
