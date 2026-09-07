@@ -161,19 +161,30 @@ under the pinned row like sessions under any project.
 A project is a **folder**, not a repository — because a repository can have several checkouts
 at once, each on its own branch.
 
-When you add two or more folders belonging to the same repository (typically git worktrees),
-they are grouped automatically under one repository heading, each labelled with its branch:
+Every folder you add that belongs to a git repository sits under that **repository's own row**,
+labelled with its branch. The repository row carries the icon and the folder path; the checkouts
+under it carry the branches:
 
 ```
-▾ sonda
+▾ sonda                 ← the repository — icon and + live here
   ▾ develop            ← main checkout
       ✦ Claude Code
   ▾ feature-auth       ← worktree
       ✦ Claude Code
 ```
 
-A repository with a single checkout stays as it is — no extra nesting appears unless it earns
-its place.
+This is the same shape whether the repository has one checkout or five, so nothing moves under
+your pointer as you add and remove worktrees. A folder that is not in a git repository has no
+repository to sit under and stays a plain row on its own.
+
+**+ on a repository row** starts a chat, manager or terminal in that repository's main checkout,
+and — under a line, because it is the one item that makes a place rather than using one — offers
+**New Worktree…**. That creates a worktree on a new branch and adds it as a checkout under the
+same repository, which is the only place in the sidebar it can be done from.
+
+**Collapse a repository row** to fold the whole repository away, checkouts and chats together.
+That stays folded the next time you open Threading; the row then says how many checkouts it is
+hiding.
 
 Other cases:
 - **Monorepo package** — adding `mono/packages/api` names the project `api`.
@@ -185,9 +196,14 @@ Other cases:
 ones), which agent and account it runs, the folder it runs in, the current branch (and
 worktree name, for a linked worktree), and whether it is working, running, or dormant. The
 branch is not shown on rows themselves: a checkout's branch changes and one repository can
-have several checkouts at once, so stating it as an identity would be misleading. A grouped
-checkout is the exception, named by its branch, since that is what tells the checkouts under
+have several checkouts at once, so stating it as an identity would be misleading. A checkout under
+a repository row is the exception, named by its branch, since that is what tells the checkouts of
 one repository apart.
+
+Because a checkout row already states its branch, chats on that branch sit directly under it
+rather than gaining a branch heading that repeats the row above. Chats that ran on a branch the
+checkout has since left keep their heading — that heading is the only thing saying they are not
+on the branch the row names.
 
 The branch is re-read whenever a session finishes working, so an agent switching branches is
 reflected the next time you hover, without you refreshing anything.
