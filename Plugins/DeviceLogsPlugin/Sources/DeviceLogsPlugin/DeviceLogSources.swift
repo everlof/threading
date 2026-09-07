@@ -800,6 +800,27 @@ public struct DeviceLogSourceOption: Equatable {
         case app(deviceID: String, bundleID: String, appName: String)
     }
 
+    /// The machine this source is read from.
+    ///
+    /// Grouping is the pane's business, but the *answer* is discovery's: only it knows a device's
+    /// name, and recovering that name by parsing it back out of a source title is how a rename
+    /// becomes a second device in the menu. It also gives identity somewhere to hang — two phones
+    /// both offer "System log", and only the machine tells them apart.
+    public struct Machine: Equatable, Hashable {
+        public let id: String
+        public let title: String
+        public let isSimulator: Bool
+
+        public init(id: String, title: String, isSimulator: Bool) {
+            self.id = id
+            self.title = title
+            self.isSimulator = isSimulator
+        }
+    }
+
+    public let machine: Machine
+    /// What this source is called *within its machine* — "System log", or an app's name. The
+    /// device it belongs to is `machine`, not a suffix on this.
     public let title: String
     public let kind: Kind
 
@@ -869,24 +890,39 @@ public enum DeviceLogSourceCatalog {
 
     public static func discover(completion: @escaping @Sendable ([DeviceLogSourceOption]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
+            // A simulator is its own machine and offers exactly one thing to read, so it is a
+            // group of one rather than a special case in the menu.
             var options = bootedSimulators().map {
-                DeviceLogSourceOption(title: $0.name, kind: .simulator(udid: $0.udid))
+                DeviceLogSourceOption(
+                    machine: .init(id: $0.udid, title: $0.name, isSimulator: true),
+                    title: L10n.string("System log"),
+                    kind: .simulator(udid: $0.udid)
+                )
             }
             let devices = pairedDevices()
             for device in devices {
-                let route = device.overNetwork ? "Wi-Fi" : "USB"
+                let transport = device.overNetwork ? "Wi-Fi" : "USB"
                 let name = deviceName(udid: device.udid, overNetwork: device.overNetwork)
                     ?? String(device.udid.prefix(8)) + "…"
+                // The device's name is the *machine's*, so it is stated once here rather than
+                // repeated into every source title. The transport stays on the system log because
+                // it describes that reader, not the phone.
+                let machine = DeviceLogSourceOption.Machine(
+                    id: device.udid,
+                    title: name,
+                    isSimulator: false
+                )
                 options.append(DeviceLogSourceOption(
-                    title: "\(name) — system log (\(route))",
+                    machine: machine,
+                    title: L10n.format("System log (%@)", transport),
                     kind: .device(udid: device.udid, overNetwork: device.overNetwork)
                 ))
                 // One entry per app the user builds themselves. This is the route worth reaching
                 // for first: live, Apple-native, and unredacted, unlike the system log beside it.
                 for app in developerApps(deviceID: device.udid) {
-                    let suffix = devices.count > 1 ? " · \(name)" : ""
                     options.append(DeviceLogSourceOption(
-                        title: "\(app.name)\(suffix)",
+                        machine: machine,
+                        title: app.name,
                         kind: .app(
                             deviceID: device.udid,
                             bundleID: app.bundleID,

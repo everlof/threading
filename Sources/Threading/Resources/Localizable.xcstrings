@@ -26702,6 +26702,17 @@
         }
       }
     },
+    "No devices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga enheter"
+          }
+        }
+      }
+    },
     "No directories were removed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41641,6 +41652,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Systembehörigheter"
+          }
+        }
+      }
+    },
+    "System log" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Systemlogg"
+          }
+        }
+      }
+    },
+    "System log (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Systemlogg (%@)"
           }
         }
       }

@@ -53,6 +53,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     // MARK: Chrome
 
+    private let devicePopUp = ThemedPopUp()
     private let sourcePopUp = ThemedPopUp()
     private let routePopUp = ThemedPopUp()
     private let levelPopUp = ThemedPopUp()
@@ -68,6 +69,13 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// A dead reader and a quiet device look identical, and the pane could not tell them apart
     /// because nothing told it. Cleared whenever a source is started.
     private var endedReason: String?
+
+    /// Which machine's sources the source popup is showing. Held rather than derived, so a
+    /// rescan that finds the same machines does not move the reader off the one being watched.
+    private var selectedMachine: DeviceLogSourceOption.Machine?
+
+    /// The running source's title *within* its machine, used to re-find it after a rescan.
+    private var runningSourceTitleWithinMachine: String?
 
     private let followPlate = FollowPlateView()
 
@@ -263,31 +271,41 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// A phone carries every app its owner has ever built — 29 here — and alphabetical order says
     /// nothing about which of them is being worked on today. Ordering by what was last opened lets
     /// the list organise itself, and costs no round trip to the device to work out.
+    /// What to select when the pane opens, per machine.
+    ///
+    /// Deliberately separate from how the menu is *arranged*. Recents used to reorder the one flat
+    /// list, which hoisted two apps above the simulator and the phone they belong to — the list
+    /// stopped describing anything. Remembering a choice and ordering a menu are different jobs.
     private enum Recents {
-        static let key = "deviceLogRecentSources"
-        static let capacity = 12
+        static let machineKey = "deviceLogRecentMachine"
+        static let sourceKeyPrefix = "deviceLogRecentSource."
 
-        static func titles() -> [String] {
-            PreferenceStore.shared.stringArray(forKey: key) ?? []
+        static func machineID() -> String? {
+            PreferenceStore.shared.string(forKey: machineKey)
         }
 
-        static func remember(_ title: String) {
-            var titles = self.titles().filter { $0 != title }
-            titles.insert(title, at: 0)
-            PreferenceStore.shared.set(Array(titles.prefix(capacity)), forKey: key)
+        static func rememberMachine(_ id: String) {
+            PreferenceStore.shared.set(id, forKey: machineKey)
         }
 
-        /// Recently used first, in the order they were used; everything else after, as found.
-        static func ordered(_ options: [DeviceLogSourceOption]) -> [DeviceLogSourceOption] {
-            let ranks = titles().enumerated().reduce(into: [String: Int]()) { $0[$1.element] = $1.offset }
-            let recent = options.filter { ranks[$0.title] != nil }
-                .sorted { (ranks[$0.title] ?? 0) < (ranks[$1.title] ?? 0) }
-            let rest = options.filter { ranks[$0.title] == nil }
-            return recent + rest
+        static func sourceTitle(forMachine id: String) -> String? {
+            PreferenceStore.shared.string(forKey: sourceKeyPrefix + id)
+        }
+
+        static func rememberSource(_ title: String, forMachine id: String) {
+            PreferenceStore.shared.set(title, forKey: sourceKeyPrefix + id)
         }
     }
 
     private func buildChrome() {
+        // Two controls rather than one: the machine, then what to read from it. A single list put
+        // one simulator, one phone and twenty-six of that phone's apps side by side as equals,
+        // which reads as a jumble because it is one — an app is not a peer of the device it is
+        // installed on.
+        devicePopUp.target = self
+        devicePopUp.action = #selector(deviceChanged)
+        devicePopUp.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
         sourcePopUp.target = self
         sourcePopUp.action = #selector(sourceChanged)
 
@@ -329,7 +347,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         statusLabel.font = Design.Typography.compactCode()
         statusLabel.textColor = Design.Text.secondary
 
-        let bar = NSStackView(views: [sourcePopUp, routePopUp, rescan, levelPopUp, filterField, clear])
+        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, rescan, levelPopUp, filterField, clear])
         bar.orientation = .horizontal
         bar.spacing = Design.Spacing.small
         bar.alignment = .centerY
@@ -339,7 +357,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             bottom: Design.Spacing.small,
             right: Design.Spacing.medium
         )
-        for control in [sourcePopUp, routePopUp, levelPopUp] as [NSView] + [rescan, clear, filterField] {
+        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp] as [NSView] + [rescan, clear, filterField] {
             control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         }
 
@@ -418,48 +436,125 @@ public final class DeviceLogPaneViewController: NSViewController {
         DeviceLogSourceCatalog.discover { [weak self] found in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.options = Recents.ordered(found)
-                let found = self.options
-                // Populating must not read as a user choice: AppKit sends a popup's action as
-                // items are added, which restarted the stream on the wrong source.
-                let action = self.sourcePopUp.action
-                self.sourcePopUp.action = nil
-                self.sourcePopUp.removeAllItems()
-                found.forEach { self.sourcePopUp.addItem(withTitle: $0.title) }
-                // Rescan looks for sources; it is not a request to change the one being read.
-                // Keep the running selection when it survived the rescan, so plugging a phone in
-                // does not yank the pane off the simulator it was watching.
-                let keep = self.runningSourceTitle.flatMap { title in
-                    found.firstIndex { $0.title == title }
-                }
-                if found.isEmpty {
-                    // An empty popup draws as a bare chevron, which does not read as a control at
-                    // all — the one place the pane most needs to look like somewhere you choose a
-                    // device is the case where it has not found one.
-                    self.sourcePopUp.addItem(withTitle: L10n.string("No log sources"))
-                    self.sourcePopUp.isEnabled = false
-                } else {
-                    self.sourcePopUp.isEnabled = true
-                    self.sourcePopUp.selectItem(at: keep ?? 0)
-                }
-                self.sourcePopUp.action = action
+                self.options = found
+                self.rebuildMenus()
                 self.startSelectedSource()
             }
         }
     }
 
-    private func startSelectedSource() {
+    /// The machines, in discovery order, each appearing once.
+    private var machines: [DeviceLogSourceOption.Machine] {
+        var seen: Set<DeviceLogSourceOption.Machine> = []
+        return options.compactMap { seen.insert($0.machine).inserted ? $0.machine : nil }
+    }
+
+    private func sources(of machine: DeviceLogSourceOption.Machine?) -> [DeviceLogSourceOption] {
+        guard let machine else { return [] }
+        return options.filter { $0.machine == machine }
+    }
+
+    /// Fills both popups and restores the selection.
+    ///
+    /// Populating must not read as a user choice: AppKit sends a popup's action as items are
+    /// added, which restarted the stream on the wrong source.
+    private func rebuildMenus() {
+        let deviceAction = devicePopUp.action
+        let sourceAction = sourcePopUp.action
+        devicePopUp.action = nil
+        sourcePopUp.action = nil
+        defer {
+            devicePopUp.action = deviceAction
+            sourcePopUp.action = sourceAction
+        }
+
+        let machines = self.machines
+        devicePopUp.removeAllItems()
+        sourcePopUp.removeAllItems()
+
+        guard !machines.isEmpty else {
+            // An empty popup draws as a bare chevron, which does not read as a control at all —
+            // the one place the pane most needs to look like somewhere you choose a device is the
+            // case where it has not found one.
+            devicePopUp.addItem(withTitle: L10n.string("No devices"))
+            sourcePopUp.addItem(withTitle: L10n.string("No log sources"))
+            devicePopUp.isEnabled = false
+            sourcePopUp.isEnabled = false
+            selectedMachine = nil
+            return
+        }
+        devicePopUp.isEnabled = true
+        sourcePopUp.isEnabled = true
+
+        // A rescan looks for machines; it is not a request to change the one being read. Keep the
+        // current machine when it survived, so plugging a phone in does not yank the pane off the
+        // simulator it was watching.
+        let machine = machines.first { $0 == selectedMachine }
+            ?? machines.first { $0.id == Recents.machineID() }
+            ?? machines[0]
+        selectedMachine = machine
+        machines.forEach { devicePopUp.addItem(withTitle: $0.title) }
+        devicePopUp.selectItem(at: machines.firstIndex(of: machine) ?? 0)
+
+        let sources = self.sources(of: machine)
+        sources.forEach { sourcePopUp.addItem(withTitle: $0.title) }
+        // By title within the machine rather than by a remembered index: the list changes shape
+        // whenever an app is installed or removed, and an index would then name something else.
+        let wanted = Recents.sourceTitle(forMachine: machine.id)
+        let keep = sources.firstIndex { $0.title == runningSourceTitleWithinMachine }
+            ?? sources.firstIndex { $0.title == wanted }
+            ?? 0
+        sourcePopUp.selectItem(at: keep)
+        updateRouteVisibility()
+    }
+
+    /// The route chooses between an app's two logs, so it belongs to the *selection* rather than
+    /// to starting a reader. Setting it only on start left "App log" standing beside a simulator,
+    /// which has one log and no choice to make — a control offering a decision that does not
+    /// exist.
+    private func updateRouteVisibility() {
+        guard let option = selectedOption else {
+            routePopUp.isHidden = true
+            return
+        }
+        if case .app = option.kind {
+            routePopUp.isHidden = false
+        } else {
+            routePopUp.isHidden = true
+        }
+    }
+
+    @objc private func deviceChanged() {
+        let machines = self.machines
+        let index = devicePopUp.indexOfSelectedItem
+        guard machines.indices.contains(index) else { return }
+        selectedMachine = machines[index]
+        Recents.rememberMachine(machines[index].id)
+        rebuildMenus()
+        startSelectedSource()
+    }
+
+    /// The selected source, resolved through the machine rather than through a flat index.
+    private var selectedOption: DeviceLogSourceOption? {
+        let sources = self.sources(of: selectedMachine)
         let index = sourcePopUp.indexOfSelectedItem
-        guard index >= 0, index < options.count else {
+        guard sources.indices.contains(index) else { return nil }
+        return sources[index]
+    }
+
+    private func startSelectedSource() {
+        guard let option = selectedOption else {
             updateStatus()
             return
         }
-        let option = options[index]
         // The route only means something for an app; a device's system log has just the one.
         var isApp = false
         if case .app = option.kind { isApp = true }
-        routePopUp.isHidden = !isApp
-        let identity = isApp ? "\(option.title)#\(route.rawValue)" : option.title
+        updateRouteVisibility()
+        // Scoped to the machine, because two phones both offer a "System log" and only the
+        // machine tells them apart. A bare title would make switching between them look like
+        // staying put, and the pane would never restart the reader.
+        let identity = "\(option.machine.id)/\(option.title)" + (isApp ? "#\(route.rawValue)" : "")
         // Already reading this one: restarting would throw away every row read so far.
         guard identity != runningSourceTitle || source == nil else { return }
         // Resuming the same source after the pane was hidden keeps what is on screen. Only a
@@ -468,7 +563,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         // for a live tail and better than an empty pane.
         let isSameSource = identity == runningSourceTitle
         runningSourceTitle = identity
-        Recents.remember(option.title)
+        runningSourceTitleWithinMachine = option.title
+        Recents.rememberMachine(option.machine.id)
+        Recents.rememberSource(option.title, forMachine: option.machine.id)
 
         source?.stop()
         if !isSameSource {
@@ -504,7 +601,10 @@ public final class DeviceLogPaneViewController: NSViewController {
         updateStatus()
     }
 
-    @objc private func sourceChanged() { startSelectedSource() }
+    @objc private func sourceChanged() {
+        updateRouteVisibility()
+        startSelectedSource()
+    }
 
     @objc private func routeChanged() {
         // The menu is built from `allCases` in order, so its index *is* the route. An index that
@@ -602,6 +702,15 @@ public final class DeviceLogPaneViewController: NSViewController {
     public var isReadingForTesting: Bool { source != nil }
 
     public func setRunningSourceTitleForTesting(_ title: String?) { runningSourceTitle = title }
+
+    /// Fill both popups without discovery, so the control bar can be drawn and reviewed. Discovery
+    /// spawns child processes and takes tens of seconds, which no render test should wait for.
+    public func installSourcesForTesting(_ fixture: [DeviceLogSourceOption]) {
+        options = fixture
+        rebuildMenus()
+    }
+
+    public var isRouteControlHiddenForTesting: Bool { routePopUp.isHidden }
 
     public var agentNoteForTesting: String? { agentNote }
     public var agentHitsForTesting: Set<Int> { agentHits }
