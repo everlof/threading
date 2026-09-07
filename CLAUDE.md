@@ -248,8 +248,9 @@ It runs from the **Enforce Repository Boundaries** build phase, together with
 express across files, including the provider-capability rule) and, through the theme script's
 own chained lines, `scripts/check_mobile_theme_boundaries.py` and
 `scripts/check_localization_boundaries.sh`. All therefore fail an ordinary
-`xcodebuild`, which is the point: the push gate runs tests only, and this repository has no
-remote for it to gate. `scripts/ci.sh` runs the same set for CI and release preflight.
+`xcodebuild`, which is the point: the push gate runs tests only, so a boundary violation has to be
+caught where the code is compiled rather than where it is published. `scripts/ci.sh` runs the same
+set for CI and release preflight.
 
 The iPhone app has its own half of the boundary, because SwiftUI fails differently: a `List`
 supplies its own row plate and a sheet is a hosting scene that inherits neither the palette nor
@@ -514,9 +515,12 @@ remote stays addressable by sha. See
 
 **Never run `git push` to try something out.** `submodule.recurse` is true, so a push recurses
 into `Packages/Vendor/LabelMorph` and `Packages/Vendor/ThinkingOrbs` and publishes them to their real GitHub
-remotes — even when the outer push targets a local throwaway path, and even though the main repo
-has no remote configured. To exercise the hook, pipe fabricated ref lines into
-`scripts/pre_push.sh` directly. The sole scripted publication exception is
+remotes — even when the outer push targets a local throwaway path. The outer repository has a
+remote of its own, `origin git@github.com:everlof/threading.git`, and `master` normally stands a
+long way ahead of it — 203 commits on 2026-09-06 — so a bare `git push` publishes that whole
+backlog too, and the submodules with it. Use `git fetch --prune --no-recurse-submodules origin`
+when you need to know what is already published. To exercise the hook, pipe fabricated ref lines
+into `scripts/pre_push.sh` directly. The sole scripted publication exception is
 `scripts/publish_local_release.sh`: it names the tested commit's outer `master` and one annotated
 tag as explicit refspecs and disables recursion in both configuration and the push option. Do not generalize its
 push primitive into a convenience command. Before either ref moves it runs both `scripts/test.sh
