@@ -20,6 +20,13 @@ import CoreText
 @MainActor
 public enum Design {
 
+    enum AccountAppearanceEditor {
+        static let width: CGFloat = 560
+        static let height: CGFloat = 650
+        static let textWidth: CGFloat = 150
+        static let colorWidth: CGFloat = 100
+    }
+
     // MARK: - Spacing
 
     /// A 2/4/6/10/12/20/32 scale. Anything between these is almost always a mistake.

@@ -641,20 +641,20 @@ private final class AccountUsageFleetCardView: NSView {
         wantsLayer = true
         applySurface(fill: Design.Surface.panel, radius: .panel, border: Design.Surface.border)
 
-        let icon = NSImageView(image: item.account.provider.icon ?? NSImage())
+        let icon = NSImageView(image: AccountBadge.mark(for: item.account, surface: .usage) ?? NSImage())
         icon.imageScaling = .scaleProportionallyDown
         icon.contentTintColor = Design.Text.secondary
         icon.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(
-            labelWithString: "\(item.account.provider.displayName) — \(item.account.displayName)"
+            labelWithString: L10n.format("%@ — %@", item.account.provider.displayName, item.account.presentation(in: .usage).visibleName)
         )
         title.applyFont(.body)
         title.textColor = Design.Text.label
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let details = [item.account.handle.name, item.reading.usage?.planLabel]
+        let details = [item.account.presentation(in: .usage).email, item.reading.usage?.planLabel]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")

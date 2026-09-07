@@ -1459,6 +1459,41 @@
         "providers": ["Representative native provider"],
         "sizes": ["1400×900 points"]
       }
+    },
+    {
+      "id": "account-appearance",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Account appearance",
+      "description": "The production account appearance editor, pinned previews, inherited surface controls and badge colors.",
+      "states": [
+        "Custom emoji",
+        "Short name",
+        "Custom background",
+        "Inherited surface controls"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Swiss Minimalist"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "560×650-point editor"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountAppearanceTests.swift",
+        "test": "ThreadingTests/AccountAppearanceTests/testRendersAccountAppearanceEditor"
+      },
+      "capture": {
+        "glob": "account-appearance-*.png"
+      }
     }
   ]
 }

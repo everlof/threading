@@ -779,9 +779,11 @@ final class RemoteSessionMirrorRegistry {
             )
         }
 
+        var publishedImageIDs: Set<String> = []
+        var remainingImageBytes = 2 * 1024 * 1024
         let agents = AgentKind.allCases.map { kind in
             let discoveredAccounts = AgentAccountDiscovery.accounts(for: kind)
-            let accountNames = AccountName.names(for: discoveredAccounts)
+            let accountNames = AccountName.names(for: AgentAccountDiscovery.allAccounts(for: kind))
 
             let accounts: [RemoteAccountChoiceDTO]
             if discoveredAccounts.isEmpty {
@@ -806,11 +808,21 @@ final class RemoteSessionMirrorRegistry {
                         for: kind,
                         account: account
                     )
+                    var images: [String: Data] = [:]
+                    for (id, data) in RemoteAccountBridge.images(for: account) {
+                        guard !publishedImageIDs.contains(id), data.count <= remainingImageBytes else { continue }
+                        publishedImageIDs.insert(id)
+                        remainingImageBytes -= data.count
+                        images[id] = data
+                    }
                     return RemoteAccountChoiceDTO(
                         id: account.handle.name,
                         name: accountNames[account.id] ?? account.displayName,
                         email: RemoteAccountBridge.email(for: account),
                         emoji: account.emoji,
+                        presentation: RemoteAccountBridge.identity(for: account, surface: .chooser),
+                        appearances: RemoteAccountBridge.appearances(for: account),
+                        images: images,
                         usageSummary: usage?.compactSummary(metering: model),
                         usageFraction: usage?.bindingWindow(metering: model)?.fraction,
                         usageError: reading.error?.message,

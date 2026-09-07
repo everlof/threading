@@ -117,7 +117,7 @@ final class LiveExtensionHostSnapshotProvider:
                     providerID: provider.rawValue,
                     displayName: account.displayName,
                     isDefault: account.isDefault,
-                    hasUserSelectedImage: account.emoji != nil,
+                    hasUserSelectedImage: account.emoji != nil || account.presentation(in: .sidebar).hasExplicitBadge,
                     image: AccountBadge.chip(for: account).map { _ in
                         .hostAsset(ExtensionIdentityAssetID.account(account.id.rawValue))
                     }

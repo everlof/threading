@@ -158,7 +158,9 @@ enum MobileSessionChrome {
     /// the same person, so a row can be handed "everlof@gmail.com" as both. Printing it twice
     /// would look like a bug in the app rather than a fact about the account.
     static func usageMenuAddress(for account: RemoteAccountChoiceDTO) -> String? {
-        guard let email = account.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+        let source = account.appearance(in: .usage) != nil
+            ? account.appearance(in: .usage)?.email : account.email
+        guard let email = source?.trimmingCharacters(in: .whitespacesAndNewlines),
               !email.isEmpty,
               email.compare(account.name, options: .caseInsensitive) != .orderedSame
         else {
@@ -360,7 +362,7 @@ struct SessionDetailView: View {
                             activity: workspaceActivity,
                             identity: .resolve(currentSession.agentKind),
                             reading: sessionUsageReading,
-                            account: currentSession.account
+                            account: sessionAccount?.appearance(in: .usage) ?? currentSession.account
                         )
                     }
                     .accessibilityLabel(
@@ -740,7 +742,7 @@ struct SessionDetailView: View {
               let agent = model.me?.newSessionCatalog?.agents.first(where: {
                   $0.id == currentSession.agentKind
               }) else { return nil }
-        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
+        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name, accountID: agent.id + ":" + account.id)
     }
 
     /// The menu's account block, in whichever shape is being tried.
@@ -757,10 +759,10 @@ struct SessionDetailView: View {
         let address = MobileSessionChrome.usageMenuAddress(for: account)
         switch MobileUsageMenuShape.current {
         case .reset:
-            usageRow(title: account.name, detail: detail, reading: reading)
+            usageRow(title: (account.appearance(in: .usage)?.visibleName ?? account.name), detail: detail, reading: reading)
         case .address:
             usageRow(
-                title: account.name,
+                title: (account.appearance(in: .usage)?.visibleName ?? account.name),
                 detail: [address, detail]
                     .compactMap { $0 }
                     .joined(separator: MobileUsageDefaults.segmentSeparator),
@@ -770,15 +772,15 @@ struct SessionDetailView: View {
             Button {
                 isShowingSessionSettings = true
             } label: {
-                Text(account.name)
+                Text((account.appearance(in: .usage)?.visibleName ?? account.name))
                 Text(address ?? MobileL10n.string("Account"))
                 Image(systemName: "person.crop.circle")
             }
             .disabled(!canOpenSessionSettings)
             usageRow(title: MobileL10n.string("Usage"), detail: detail, reading: reading)
         case .header:
-            Section(address ?? account.name) {
-                usageRow(title: account.name, detail: detail, reading: reading)
+            Section(address ?? account.appearance(in: .usage)?.visibleName ?? account.name) {
+                usageRow(title: (account.appearance(in: .usage)?.visibleName ?? account.name), detail: detail, reading: reading)
             }
         }
     }

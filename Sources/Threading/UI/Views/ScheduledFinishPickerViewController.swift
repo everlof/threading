@@ -49,7 +49,7 @@ enum ScheduledFinishCandidates {
                 guard snapshot.hasPendingOutcome, snapshot.reportsOwnTurns else { continue }
                 let agentName = session.accountHandle.isStandard
                     ? session.kind.displayName
-                    : "\(session.kind.displayName) · \(session.accountHandle.name)"
+                    : "\(session.kind.displayName) · \(AccountPresentationLabels.name(for: AccountID(provider: session.kind, handle: session.accountHandle)))"
                 candidates.append(ScheduledFinishCandidate(
                     id: session.id,
                     title: session.displayTitle,

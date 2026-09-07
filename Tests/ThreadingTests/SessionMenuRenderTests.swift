@@ -127,8 +127,7 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
         }
         let sidebar = ProjectSidebarViewController(decorateAccountUsage: { item, account, model, agent in
             guard let usage = readings[account.id] else { return }
-            item.image = agent.map { AccountMarkImage.make(for: $0) }
-                ?? UsageRingImage.make(for: usage, at: now, metering: model)
+            item.image = AccountBadge.mark(for: account, surface: .chooser)
             AccountUsageMenu.apply(usage, to: &item, metering: model, at: now)
         })
         var session = AgentSession(kind: .codex, title: "Compare accounts")

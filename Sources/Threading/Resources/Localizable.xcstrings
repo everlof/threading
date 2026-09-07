@@ -4880,6 +4880,23 @@
         }
       }
     },
+    "Account name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontonamn"
+          }
+        }
+      }
+    },
     "Account usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6217,6 +6234,23 @@
         }
       }
     },
+    "All surfaces" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All surfaces"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla ytor"
+          }
+        }
+      }
+    },
     "Allow" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6916,6 +6950,23 @@
         }
       }
     },
+    "Appearance…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appearance…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utseende…"
+          }
+        }
+      }
+    },
     "Appears when a supported OpenCode export reports OpenRouter as its billing route." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7033,6 +7084,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillämpa ett tema på denna konversation, dess projekt eller som standard."
+          }
+        }
+      }
+    },
+    "Apply to" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply to"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillämpa på"
           }
         }
       }
@@ -7675,6 +7743,23 @@
         }
       }
     },
+    "Automatic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatiskt"
+          }
+        }
+      }
+    },
     "Automatic review publishing currently requires a GitHub origin remote." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7945,6 +8030,23 @@
         }
       }
     },
+    "Background color" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background color"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bakgrundsfärg"
+          }
+        }
+      }
+    },
     "Background host" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7952,6 +8054,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bakgrundsvärd"
+          }
+        }
+      }
+    },
+    "Badge content" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Badge content"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Märkesinnehåll"
+          }
+        }
+      }
+    },
+    "Badge image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Badge image"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Märkesbild"
+          }
+        }
+      }
+    },
+    "Badge on default account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Badge on default account"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Märke på standardkontot"
           }
         }
       }
@@ -8216,6 +8369,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Svart"
+          }
+        }
+      }
+    },
+    "Blank values follow the shared appearance." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blank values follow the shared appearance."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tomma värden följer det gemensamma utseendet."
           }
         }
       }
@@ -10090,6 +10260,23 @@
         }
       }
     },
+    "Choose Image…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Image…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj bild…"
+          }
+        }
+      }
+    },
     "Choose Simulator" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10295,6 +10482,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj en ikon"
+          }
+        }
+      }
+    },
+    "Choose an image smaller than 4 MB." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose an image smaller than 4 MB."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en bild som är mindre än 4 MB."
           }
         }
       }
@@ -10537,6 +10741,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj vilket tillägg som ersätter agentleverantörsmarkeringar."
+          }
+        }
+      }
+    },
+    "Chooser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chooser"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väljare"
           }
         }
       }
@@ -13849,6 +14070,23 @@
         }
       }
     },
+    "Could not read image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not read image"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte läsa bilden"
+          }
+        }
+      }
+    },
     "Could not read the test credential (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16643,6 +16881,23 @@
         }
       }
     },
+    "Emoji" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emoji"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emoji"
+          }
+        }
+      }
+    },
     "Empty Tree" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19141,6 +19396,23 @@
         }
       }
     },
+    "Foreground color" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foreground color"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förgrundsfärg"
+          }
+        }
+      }
+    },
     "Forgets the window size, the sidebar width and the panel widths." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19302,6 +19574,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hela filer"
+          }
+        }
+      }
+    },
+    "Full name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fullständigt namn"
           }
         }
       }
@@ -21348,6 +21637,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ärv (%@)"
+          }
+        }
+      }
+    },
+    "Inheritance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inheritance"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arv"
           }
         }
       }
@@ -26012,6 +26318,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nattlig version"
+          }
+        }
+      }
+    },
+    "No" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nej"
           }
         }
       }
@@ -34515,6 +34838,23 @@
         }
       }
     },
+    "Restore Appearance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore Appearance"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återställ utseende"
+          }
+        }
+      }
+    },
     "Restore Name & Icon" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34566,6 +34906,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställ kontots upptäckta namn och leverantörsikon"
+          }
+        }
+      }
+    },
+    "Restore this surface" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore this surface"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återställ denna yta"
           }
         }
       }
@@ -37958,6 +38315,23 @@
         }
       }
     },
+    "Shared account appearance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shared account appearance"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gemensamt kontoutseende"
+          }
+        }
+      }
+    },
     "Share…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38042,6 +38416,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skift-Return börjar en ny rad."
+          }
+        }
+      }
+    },
+    "Short name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Short name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kortnamn"
           }
         }
       }
@@ -38211,6 +38602,23 @@
         }
       }
     },
+    "Show account name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show account name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa kontonamn"
+          }
+        }
+      }
+    },
     "Show all account usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38229,6 +38637,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa bilagor från"
+          }
+        }
+      }
+    },
+    "Show badge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show badge"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa märke"
           }
         }
       }
@@ -38284,6 +38709,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa tidigare oförändrade rader"
+          }
+        }
+      }
+    },
+    "Show email" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show email"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa e-postadress"
           }
         }
       }
@@ -41606,6 +42048,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Textinmatning"
+          }
+        }
+      }
+    },
+    "Text or emoji" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text or emoji"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text eller emoji"
           }
         }
       }
@@ -49559,6 +50018,23 @@
         }
       }
     },
+    "Up to 3 characters" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to 3 characters"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upp till 3 tecken"
+          }
+        }
+      }
+    },
     "Upcoming turn" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50197,6 +50673,23 @@
         }
       }
     },
+    "Use full name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use full name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd fullständigt namn"
+          }
+        }
+      }
+    },
     "Use reset" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50204,6 +50697,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd återställning"
+          }
+        }
+      }
+    },
+    "Use short name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use short name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd kortnamn"
           }
         }
       }
@@ -52239,6 +52749,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gul"
+          }
+        }
+      }
+    },
+    "Yes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yes"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ja"
           }
         }
       }

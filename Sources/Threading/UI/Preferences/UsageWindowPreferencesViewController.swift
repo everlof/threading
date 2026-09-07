@@ -782,7 +782,7 @@ final class UsageWindowPreferencesViewController: NSViewController {
     private func accountRow(for account: AgentAccount) -> NSView {
         let decision = decisionProvider(account)
         return SettingsUI.row(
-            title: AccountName.display(for: account),
+            title: account.presentation(in: .usage).visibleName,
             subtitle: state(of: decision),
             control: accountControls(for: account, decision: decision),
             localizes: false
@@ -894,7 +894,7 @@ final class UsageWindowPreferencesViewController: NSViewController {
             .flatMap { id in
                 accounts.first { $0.id == id }
             }
-            .map { AccountName.display(for: $0) } ?? record.accountID
+            .map { $0.presentation(in: .usage).visibleName } ?? record.accountID
 
         let when = UsageFormat.absolute(record.at)
 

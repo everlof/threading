@@ -1294,7 +1294,6 @@ final class SessionComposerViewController: NSViewController {
             : ComposerDefaults.promptPlaceholder
         refreshStartButton()
 
-        let accounts = availableAccounts
         let account = selectedAgent.supportsAccounts
             ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
             : nil
@@ -1303,10 +1302,10 @@ final class SessionComposerViewController: NSViewController {
         // to decide whether an account chip appeared at all. A single-login agent would
         // otherwise spend half of this chip stating something nobody can act on.
         identityChip.configure(
-            icon: selectedAgent.icon,
+            icon: account.flatMap { AccountBadge.mark(for: $0, surface: .chooser) } ?? selectedAgent.icon,
             title: ComposerDefaults.identityTitle(
                 agent: selectedAgent.displayName,
-                account: accounts.count < 2 ? nil : account.map(AccountName.display)
+                account: account.map { $0.presentation(in: .chooser).visibleName }
             )
         )
         roleChip.configure(
@@ -1663,7 +1662,7 @@ final class SessionComposerViewController: NSViewController {
 
         usageLabel.readings = readings
         usageLabel.toolTip = usageDetail(
-            accountName: AccountName.display(for: account),
+            accountName: account.presentation(in: .usage).visibleName,
             planLabel: usage.planLabel,
             readings: readings,
             observedAt: usage.observedAt,
@@ -1889,12 +1888,12 @@ final class SessionComposerViewController: NSViewController {
     /// `identityItems()` for why they are not filed under a heading.
     private func accountItems(for kind: AgentKind, accounts: [AgentAccount]) -> [ThemedMenuEntry] {
         accounts.map { account in
-            let name = AccountName.display(for: account)
+            let name = account.presentation(in: .chooser).visibleName
             var item = ThemedMenuItem(
                 // The emoji when the account has one: it is how the same login is identified in
                 // the sidebar, and a menu that names it differently makes the user learn it
                 // twice.
-                title: account.emoji.map { "\($0)  \(name)" } ?? name,
+                title: name,
                 representedValue: ComposerIdentity(agent: kind, account: account.handle),
                 isSelected: kind == selectedAgent && account.handle == selectedAccountHandle
             )

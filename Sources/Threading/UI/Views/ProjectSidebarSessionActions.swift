@@ -777,7 +777,7 @@ enum SessionActionMenuDefaults {
         case .resumeOnBestAccount:
             return limitRecoveryBestLoginTitle
         case .resumeVia(let accountID):
-            return limitRecoveryLoginTitle(accountID.handle.name)
+            return limitRecoveryLoginTitle(AccountPresentationLabels.name(for: accountID))
         }
     }
 
@@ -1725,7 +1725,7 @@ extension ProjectSidebarViewController {
             var item = ThemedMenuItem(
                 title: account.provider.supportsAccounts
                     ? accountMenuLabel(account) : account.provider.displayName,
-                image: AccountMarkImage.make(for: account.provider),
+                image: AccountBadge.mark(for: account, surface: .chooser),
                 onChoose: { [weak self] in self?.continueWith(account) }
             )
             if account.provider.supportsAccounts {
@@ -1737,8 +1737,7 @@ extension ProjectSidebarViewController {
     }
 
     private func accountMenuLabel(_ account: AgentAccount) -> String {
-        let name = AccountName.display(for: account)
-        return account.emoji.map { "\($0)  \(name)" } ?? name
+        return account.presentation(in: .chooser).visibleName
     }
 
     // MARK: - Handlers

@@ -72,8 +72,8 @@ final class SessionInfoPopoverViewController: NSViewController {
                 handle: session.accountHandle
             )
             var line = session.kind.displayName
-            if let account, !account.isDefault {
-                line += " · \(account.displayName)"
+            if let account, !account.presentation().visibleName.isEmpty {
+                line += " · \(account.presentation().visibleName)"
             }
 
             // A side chat's row shows a fork glyph instead of its agent's mark, so this is

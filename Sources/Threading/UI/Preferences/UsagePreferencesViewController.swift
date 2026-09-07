@@ -83,6 +83,7 @@ final class UsagePreferencesViewController: NSViewController {
             self?.usageChanged(event)
         }
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            self?.loadLimitHistory(animated: false)
             self?.reloadLiveCapacity()
             self?.refreshAuthoritativeLimits(force: false)
         }

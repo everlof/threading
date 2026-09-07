@@ -1846,7 +1846,7 @@ final class TerminalContainerViewController: NSViewController {
     /// how a test can ask what a plan reads as without standing a container up.
     static func scheduledConfiguration(_ plan: ScheduledSessionPlan) -> String {
         var parts = [plan.kind.displayName]
-        if !plan.accountHandle.isStandard { parts.append(plan.accountHandle.name) }
+        if !plan.accountHandle.isStandard { parts.append(AccountPresentationLabels.name(for: AccountID(provider: plan.kind, handle: plan.accountHandle))) }
         if let model = plan.model { parts.append(ModelName.display(for: model)) }
         if let effort = plan.reasoningEffort {
             parts.append(AgentReasoningLevel(effort: effort, description: "").displayName)

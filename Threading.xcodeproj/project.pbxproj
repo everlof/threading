@@ -404,6 +404,7 @@
 				ThreadingMobile/FirstSuccessfulTaskRace.swift,
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
 				ThreadingMobile/Localizable.xcstrings,
+				ThreadingMobile/MobileAccountImages.swift,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,

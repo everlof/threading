@@ -221,8 +221,24 @@ public struct RemoteSessionAccountDTO: Codable, Equatable, Sendable {
     /// person keeps one colour across the agents they are logged into.
     public let hue: Double?
 
-    public init(name: String, glyph: String, isEmoji: Bool, hue: Double?) {
+    public let backgroundHex: String?
+    public let foregroundHex: String?
+    public let imageID: String?
+    public let badgeHidden: Bool?
+    public let displayLabel: String?
+    public let email: String?
+    public var visibleName: String { displayLabel ?? name }
+
+    public init(name: String, glyph: String, isEmoji: Bool, hue: Double?,
+                backgroundHex: String? = nil, foregroundHex: String? = nil,
+                imageID: String? = nil, badgeHidden: Bool? = nil, displayLabel: String? = nil, email: String? = nil) {
         self.name = name
+        self.backgroundHex = backgroundHex
+        self.foregroundHex = foregroundHex
+        self.imageID = imageID
+        self.badgeHidden = badgeHidden
+        self.displayLabel = displayLabel
+        self.email = email
         self.glyph = glyph
         self.isEmoji = isEmoji
         self.hue = hue
@@ -890,6 +906,14 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
     /// every guest scope.
     public let email: String?
     public let emoji: String?
+    public let presentation: RemoteSessionAccountDTO?
+    public let imagePNG: Data?
+    public let appearances: [String: RemoteSessionAccountDTO]?
+    public let images: [String: Data]?
+    public func appearance(in surface: AccountAppearanceSurface) -> RemoteSessionAccountDTO? {
+        appearances?[surface.rawValue] ?? presentation
+    }
+    public var visibleName: String { presentation?.visibleName ?? name }
     /// For example `5h 43% · 7d 73%`.
     public let usageSummary: String?
     /// Peak consumed fraction, 0...1, so clients can tint a compact usage cue consistently.
@@ -907,6 +931,10 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
         name: String,
         email: String? = nil,
         emoji: String? = nil,
+        presentation: RemoteSessionAccountDTO? = nil,
+        imagePNG: Data? = nil,
+        appearances: [String: RemoteSessionAccountDTO]? = nil,
+        images: [String: Data]? = nil,
         usageSummary: String? = nil,
         usageFraction: Double? = nil,
         usageError: String? = nil,
@@ -918,6 +946,10 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
         self.name = name
         self.email = email
         self.emoji = emoji
+        self.presentation = presentation
+        self.imagePNG = imagePNG
+        self.appearances = appearances
+        self.images = images
         self.usageSummary = usageSummary
         self.usageFraction = usageFraction
         self.usageError = usageError
@@ -1586,6 +1618,7 @@ public struct RemoteUsageCoverageDTO: Codable, Equatable, Sendable {
 }
 
 public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Identifiable {
+    public let accountID: String?
     public let id: String
     public let runtimeName: String
     public let accountName: String
@@ -1603,6 +1636,7 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
 
     public init(
         id: String,
+        accountID: String? = nil,
         runtimeName: String,
         accountName: String,
         windowLabel: String,
@@ -1614,6 +1648,7 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
         canRedeemBankedReset: Bool? = nil
     ) {
         self.id = id
+        self.accountID = accountID
         self.runtimeName = runtimeName
         self.accountName = accountName
         self.windowLabel = windowLabel

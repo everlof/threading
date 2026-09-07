@@ -432,6 +432,17 @@ gallery selection, navigation, playback transport and visibility teardown; letti
 replace any of those would either grant file authority the preview contract does not carry or put
 high-frequency playback across the extension boundary.
 
+## Account appearance editor
+
+The existing `settings.account-icon-picker` host-only surface now edits the complete account
+appearance, including shared defaults. Threading owns inheritance, persistence, image admission,
+account routing, full accessibility identity, live preview and dismissal. Extensions retain the
+existing account icon resolver seam; an explicit user badge choice wins over that contribution.
+An absent or invalid appearance field inherits, an unavailable image falls back to initials,
+and disabling an extension restores the native resolved badge without changing user preferences.
+Sidebar, chooser, usage, details and notification labels consume the host's common presentation
+value; notification chrome remains owned by the operating system.
+
 ## Gate for every new surface
 
 Before adding a component:

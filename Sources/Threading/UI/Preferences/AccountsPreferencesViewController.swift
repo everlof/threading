@@ -10,6 +10,7 @@ import AppKit
 final class AccountsPreferencesViewController: NSViewController {
 
     private enum PresentationRow {
+        case appearanceDefaults
         case modelRefresh
         case setup
         case accountCaption
@@ -194,7 +195,7 @@ final class AccountsPreferencesViewController: NSViewController {
     /// [`performance.md`](../../../../docs/architecture/performance.md).
     private func reloadPresentationRows() {
         presentationRebuildCount += 1
-        var rows: [PresentationRow] = [.modelRefresh, .setup, .accountCaption]
+        var rows: [PresentationRow] = [.appearanceDefaults, .modelRefresh, .setup, .accountCaption]
         if accounts.isEmpty {
             rows.append(.emptyAccount)
         } else {
@@ -331,8 +332,10 @@ final class AccountsPreferencesViewController: NSViewController {
         identity.spacing = Design.Spacing.medium
         labels.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
+        let appearance = SettingsUI.button("Appearance…", target: self, action: #selector(iconClicked(_:)))
+        appearance.tag = index
         let actions = SettingsUI.controlGroup(
-            [restore, reconnect],
+            [appearance, restore, reconnect],
             spacing: Design.Spacing.small
         )
         let actionSpacer = NSView()
@@ -356,14 +359,15 @@ final class AccountsPreferencesViewController: NSViewController {
     /// The fallback icon is dimmed, so an unset account still hints at what the well is for.
     private func makeIconButton(for account: AgentAccount, row index: Int) -> ThemedButton {
         let button = ThemedButton(
-            title: account.emoji ?? account.provider.fallbackIcon,
+            title: "",
             target: self,
             action: #selector(iconClicked(_:))
         )
+        button.image = AccountBadge.chip(for: account, surface: .details) ?? account.provider.icon
         button.isBordered = false
         button.applyFont(.accountEmoji)
         button.tag = index
-        button.alphaValue = account.emoji == nil ? AccountsPreferencesLayout.unsetIconAlpha : 1
+        button.alphaValue = 1
         button.toolTip = AccountsPreferencesStrings.iconWellTooltip
         button.translatesAutoresizingMaskIntoConstraints = false
         button.applySurface(
@@ -453,17 +457,14 @@ final class AccountsPreferencesViewController: NSViewController {
         modelRefresh.start()
     }
 
-    /// Opens the emoji picker beneath the clicked icon well.
+    /// Opens the appearance editor beneath the clicked icon well.
     @objc private func iconClicked(_ sender: ThemedButton) {
         guard let account = account(at: sender.tag) else { return }
 
-        let picker = EmojiPickerViewController(showsRemove: account.emoji != nil)
-        picker.onPick = { [weak self] emoji in
-            guard let self else { return }
-            self.accountStore.setEmoji(emoji, for: account.id)
-            self.iconPopover?.close()
-            self.iconPopover = nil
-            self.refreshAccountPresentation(at: sender.tag)
+        let picker = AccountAppearanceViewController(account: account, store: accountStore)
+        let rowIndex = sender.tag
+        picker.onChange = { [weak self] in
+            self?.restampAppearanceEditorAnchor(at: rowIndex)
         }
 
         let popover = HostPopoverFactory.make(.settingsAccountIconPicker)
@@ -473,6 +474,51 @@ final class AccountsPreferencesViewController: NSViewController {
         // a click back in the main window.
         popover.behavior = .semitransient
         popover.contentViewController = picker
+        popover.onClose = { [weak self] in self?.refreshAccountPresentation(at: rowIndex) }
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        iconPopover = popover
+    }
+
+    /// Keep the editor's anchor alive while its values change. Rebuilding its virtual row would
+    /// replace the view the open popover is attached to.
+    private func restampAppearanceEditorAnchor(at index: Int, refreshed: [AgentAccount]? = nil) {
+        let refreshed = refreshed ?? accountsProvider()
+        guard refreshed.indices.contains(index), accounts.indices.contains(index),
+              refreshed[index].id == accounts[index].id else { return }
+        accounts[index] = refreshed[index]
+        guard let row = presentationRows.firstIndex(where: {
+            if case .account(let value) = $0 { return value == index }
+            return false
+        }), let host = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
+        func update(_ view: NSView) {
+            if let field = view as? ThemedTextField, field.isEditable, field.tag == index {
+                field.stringValue = accounts[index].displayName
+            }
+            if let button = view as? ThemedButton, button.title.isEmpty {
+                button.image = AccountBadge.chip(for: accounts[index], surface: .details)
+                    ?? accounts[index].provider.icon
+            }
+            for child in view.subviews { update(child) }
+        }
+        update(host)
+    }
+
+    @objc private func appearanceDefaultsClicked(_ sender: ThemedButton) {
+        let editor = AccountAppearanceViewController(account: nil, store: accountStore)
+        editor.onChange = { [weak self] in
+            guard let self else { return }
+            let refreshed = accountsProvider()
+            let visible = tableView.rows(in: tableView.visibleRect)
+            guard visible.location != NSNotFound else { return }
+            for row in visible.location..<NSMaxRange(visible) where presentationRows.indices.contains(row) {
+                if case .account(let index) = presentationRows[row] {
+                    restampAppearanceEditorAnchor(at: index, refreshed: refreshed)
+                }
+            }
+        }
+        let popover = HostPopoverFactory.make(.settingsAccountIconPicker)
+        popover.behavior = .semitransient
+        popover.contentViewController = editor
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         iconPopover = popover
     }
@@ -629,6 +675,12 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
 
     private func content(for row: PresentationRow) -> NSView {
         switch row {
+        case .appearanceDefaults:
+            return SettingsUI.row(
+                title: "Shared account appearance",
+                control: SettingsUI.button("Customize…", target: self,
+                    action: #selector(appearanceDefaultsClicked(_:)))
+            )
         case .modelRefresh:
             return makeModelRefreshRow()
         case .setup:
@@ -664,7 +716,7 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
     private func topInset(forRowAt index: Int) -> CGFloat {
         guard presentationRows.indices.contains(index) else { return 0 }
         switch presentationRows[index] {
-        case .modelRefresh, .setup, .accountCaption, .accountNote:
+        case .appearanceDefaults, .modelRefresh, .setup, .accountCaption, .accountNote:
             return Design.Spacing.large
         case .emptyAccount, .account:
             return Design.Spacing.small
@@ -726,7 +778,7 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
                 } else {
                     extensionBounds[sectionIndex] = (index, index)
                 }
-            case .modelRefresh, .setup, .accountCaption, .accountNote, .extensionCaption:
+            case .appearanceDefaults, .modelRefresh, .setup, .accountCaption, .accountNote, .extensionCaption:
                 break
             }
         }
@@ -802,7 +854,7 @@ enum AccountsPreferencesStrings {
     }
     static var iconWellTooltip: String { L10n.string("Choose an icon") }
     static var restorePresentationButton: String {
-        L10n.string("Restore Name & Icon")
+        L10n.string("Restore Appearance")
     }
     static var restorePresentationTooltip: String {
         L10n.string("Restore this account's detected name and provider icon")

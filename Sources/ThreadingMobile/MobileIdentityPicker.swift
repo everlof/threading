@@ -451,13 +451,14 @@ struct MobileIdentityPicker: View {
                     email: account.email,
                     name: account.name
                 ),
-                reading: reading
+                reading: reading,
+                presentation: account.presentation
             )
 
             // The text column owns the width the disc and the checkmark leave it, the way
             // `MobileDraftChooser`'s does; a spacer here measured a wrapping line one line tall.
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                Text(account.name)
+                Text(account.visibleName)
                     .font(.subheadline.weight(chosen ? .semibold : .medium))
                     .foregroundStyle(theme.label)
                 Text(words.text)
@@ -506,12 +507,16 @@ struct MobileIdentityPicker: View {
 struct MobileAccountGlyphDisc: View {
     let glyph: MobileAccountGlyph
     let reading: MobileAccountUsageReading?
+    var presentation: RemoteSessionAccountDTO? = nil
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         ZStack {
             Circle().fill(theme.controlResting)
-            mark
+            if let presentation {
+                MobileResolvedAccountGlyph(presentation: presentation,
+                    glyphSize: MobileDesign.Size.rowMarkGlyph, emojiSize: MobileDesign.Size.accountDiscEmoji)
+            } else { mark }
             if let reading {
                 MobileAccountUsageRings(reading: reading, theme: theme)
             }

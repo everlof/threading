@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 // MARK: - Account Badge
 
@@ -42,30 +43,66 @@ enum AccountBadge {
 
     /// The chip for an account, or nil when the row has nothing extra to say — no account
     /// at all (a shell), or the CLI's default one.
-    static func chip(for account: AgentAccount?) -> NSImage? {
-        guard let account, !account.isDefault else { return nil }
-
-        // Resolved before the key is built, since the chip's content *is* its identity: a
-        // chip drawn while an avatar was still being fetched is replaced when it lands.
-        let avatar = AccountAvatarStore.avatar(for: account)
-        let initial = initial(for: account)
-        let key = cacheKey(account: account, hasAvatar: avatar != nil, initial: initial)
-
-        if let cached = cache.object(forKey: key) {
-            // Restamped rather than assumed. The name is what this chip *announces*, not what it
-            // draws — the initial comes from the login address — so it is deliberately not part
-            // of the key, and a cache hit after a rename would otherwise keep telling VoiceOver
-            // the old one for the life of the process.
-            cached.accessibilityDescription = account.displayName
+    static func chip(
+        for account: AgentAccount?,
+        surface: AccountAppearanceSurface = .sidebar,
+        store: AccountPreferencesStore = .shared,
+        resolved: AccountPresentation? = nil
+    ) -> NSImage? {
+        guard let account else { return nil }
+        let presentation = resolved ?? AccountPresentation.resolve(account, surface: surface, store: store)
+        guard presentation.showsBadge(isDefault: account.isDefault, surface: surface) else { return nil }
+        let avatar = presentation.imageID.flatMap { AccountImageStore.image($0) }
+        let key = [
+            account.id.rawValue, surface.rawValue, presentation.glyph,
+            String(presentation.isEmoji), presentation.background.hexString,
+            presentation.foreground.hexString, presentation.imageID ?? "",
+            avatar.map { String(ObjectIdentifier($0).hashValue) } ?? ""
+        ].joined(separator: "|") as NSString
+        if resolved == nil, let cached = cache.object(forKey: key) {
+            cached.accessibilityDescription = presentation.name
             publishedCache.setObject(cached, forKey: account.id.rawValue as NSString)
             return cached
         }
-
-        let image = draw(account: account, avatar: avatar, initial: initial)
-        image.accessibilityDescription = account.displayName
-        cache.setObject(image, forKey: key)
-        publishedCache.setObject(image, forKey: account.id.rawValue as NSString)
+        let image: NSImage
+        if let avatar { image = drawAvatar(avatar) }
+        else if presentation.isEmoji && AccountAppearance.normalizedHex(presentation.style.backgroundHex) == nil {
+            image = drawEmoji(presentation.glyph)
+        } else {
+            image = chipImage { bounds in
+                presentation.background.setFill()
+                NSBezierPath(ovalIn: bounds).fill()
+                drawCentred(
+                    text: presentation.glyph,
+                    font: .systemFont(
+                        ofSize: presentation.glyph.count > 1
+                            ? AccountBadgeDefaults.fontSize / 1.4 : AccountBadgeDefaults.fontSize,
+                        weight: .heavy
+                    ),
+                    colour: presentation.foreground, in: bounds
+                )
+            }
+        }
+        image.accessibilityDescription = presentation.name
+        if resolved == nil {
+            cache.countLimit = 256
+            cache.setObject(image, forKey: key)
+            publishedCache.setObject(image, forKey: account.id.rawValue as NSString)
+        }
         return image
+    }
+
+    /// Provider identity and account content share one menu image without competing for a slot.
+    static func mark(for account: AgentAccount, surface: AccountAppearanceSurface,
+                     store: AccountPreferencesStore = .shared, resolved: AccountPresentation? = nil) -> NSImage? {
+        guard let mark = account.provider.icon else { return chip(for: account, surface: surface, store: store, resolved: resolved) }
+        guard let chip = chip(for: account, surface: surface, store: store, resolved: resolved) else { return mark }
+        return NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            TemplateImageDrawing.draw(mark, in: NSRect(x: 0, y: 4, width: 14, height: 14),
+                                      tint: Design.Text.label)
+            chip.draw(in: NSRect(x: 9, y: 0, width: 9, height: 9))
+            return true
+        }
     }
 
     /// Returns only an image which `chip(for:)` already admitted while building host identity
@@ -77,55 +114,14 @@ enum AccountBadge {
     /// The letter a chip falls back to: the first letter or digit of the account's login
     /// email, else of its display name for an account whose email cannot be read.
     static func initial(for account: AgentAccount) -> String {
-        if let email = AccountAvatarStore.cachedEmail(for: account),
-           let letter = email.first(where: { $0.isLetter || $0.isNumber }) {
-            return String(letter).uppercased()
-        }
-
-        if let letter = account.displayName.first(where: { $0.isLetter || $0.isNumber }) {
-            return String(letter).uppercased()
-        }
-
-        return AccountBadgeDefaults.fallbackGlyph
+        account.presentation(in: .sidebar).glyph
     }
 
     // MARK: - Private Methods
 
-    private static func cacheKey(
-        account: AgentAccount,
-        hasAvatar: Bool,
-        initial: String
-    ) -> NSString {
-        let parts = [account.id.rawValue, account.emoji ?? "", hasAvatar ? "avatar" : "", initial]
-        return parts.joined(separator: AccountBadgeDefaults.cacheKeySeparator) as NSString
-    }
-
-    private static func draw(
-        account: AgentAccount,
-        avatar: NSImage?,
-        initial: String
-    ) -> NSImage {
-        if let emoji = account.emoji {
-            return drawEmoji(emoji)
-        }
-        if let avatar {
-            return drawAvatar(avatar)
-        }
-        return drawInitial(initial, seed: colourSeed(for: account))
-    }
-
-    /// What the fill hashes: the login email when there is one, so a person keeps one colour
-    /// across the agents they are logged into, else the account's own id.
-    private static func colourSeed(for account: AgentAccount) -> String {
-        AccountAvatarStore.cachedEmail(for: account) ?? account.id.rawValue
-    }
-
-    /// The disc's hue as a fraction of the wheel.
-    ///
-    /// Public because a remote client draws this chip too, from `RemoteSessionAccountDTO`, and the
-    /// two must agree by construction rather than by two copies of the same hash.
     static func hue(for account: AgentAccount) -> CGFloat {
-        hue(seed: colourSeed(for: account))
+        hue(seed: AccountAvatarStore.cachedEmail(for: account)
+            ?? AccountEmailProbe.cachedEmail(for: account) ?? account.id.rawValue)
     }
 
     private static func hue(seed: String) -> CGFloat {
@@ -146,7 +142,12 @@ enum AccountBadge {
     private static func drawAvatar(_ avatar: NSImage) -> NSImage {
         chipImage { bounds in
             NSBezierPath(ovalIn: bounds).addClip()
-            avatar.draw(in: bounds)
+            let scale = max(bounds.width / max(avatar.size.width, 1),
+                            bounds.height / max(avatar.size.height, 1))
+            let size = NSSize(width: avatar.size.width * scale, height: avatar.size.height * scale)
+            avatar.draw(in: NSRect(x: bounds.midX - size.width / 2,
+                                  y: bounds.midY - size.height / 2,
+                                  width: size.width, height: size.height))
         }
     }
 
@@ -190,6 +191,10 @@ enum AccountBadge {
         var attributes: [NSAttributedString.Key: Any] = [.font: font]
         attributes[.foregroundColor] = colour
 
+        let measured = NSAttributedString(string: text, attributes: attributes).size()
+        if measured.width > bounds.width {
+            attributes[.font] = font.withSize(font.pointSize * bounds.width / measured.width)
+        }
         let string = NSAttributedString(string: text, attributes: attributes)
         let size = string.size()
         string.draw(

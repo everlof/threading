@@ -62,15 +62,8 @@ enum AccountUsageMenu {
 
         let usage = AccountUsageService.shared.usage(for: account)
 
-        if let agent {
-            // The plain mark, not the metered one. `AccountMarkImage`'s 2pt underline existed
-            // because a 14pt image slot was the only room a reading had; at that size it could
-            // carry a hue and never a length, which the value's own tint already said. The
-            // columns carry the length now, so the mark goes back to being identity alone.
-            item.image = AccountMarkImage.make(for: agent)
-        } else if let usage, let ring = UsageRingImage.make(for: usage, metering: model) {
-            item.image = ring
-        }
+        // The reading columns carry usage; the icon consistently carries account identity.
+        item.image = AccountBadge.mark(for: account, surface: .chooser)
 
         guard let usage else { return }
         apply(
@@ -289,7 +282,7 @@ enum AccountUsageMenu {
         )
         guard !segments.isEmpty else { return nil }
 
-        var item = ThemedMenuItem(title: account.displayName, isEnabled: false)
+        var item = ThemedMenuItem(title: account.presentation(in: .usage).visibleName, isEnabled: false)
         item.setSubtitle(segments)
         return item
     }

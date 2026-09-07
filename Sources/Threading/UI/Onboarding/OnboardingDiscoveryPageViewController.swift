@@ -193,7 +193,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
 
     private func row(for account: AgentAccount, at index: Int) -> NSView {
         let icon = NSImageView()
-        icon.image = account.provider.icon
+        icon.image = AccountBadge.mark(for: account, surface: .details)
         icon.imageScaling = .scaleProportionallyDown
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.setAccessibilityElement(false)
@@ -202,10 +202,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
             icon.heightAnchor.constraint(equalToConstant: Layout.iconSide)
         ])
 
-        var name = AccountName.display(for: account)
-        if let emoji = account.emoji {
-            name = "\(emoji)  \(name)"
-        }
+        let name = account.presentation().visibleName
         let title = NSTextField(labelWithString: name)
         title.applyFont(.body)
         title.textColor = Design.Text.label

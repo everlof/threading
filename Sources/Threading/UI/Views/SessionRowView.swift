@@ -1079,7 +1079,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // visible row scan every account directory and parse shell aliases during cold launch.
         // Alternate rows still resolve synchronously because their chip is visible content;
         // the hover card performs its own complete lookup only when requested.
-        let account = accountHandle.isStandard
+        let account = accountHandle.isStandard && !AccountPresentation.showsStandardBadge(provider: provider)
             ? nil
             : NativeSidebarParity.host(
                 .identityPresentation,
@@ -1239,6 +1239,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let builtInChip = AccountBadge.chip(for: account)
         let chip: NSImage?
         if let account, account.emoji == nil,
+           !account.presentation(in: .sidebar).hasExplicitBadge,
            let resolution = NativeSidebarParity.host(
                .identityPresentation,
                ExtensionIdentityResolverProviderSlot.shared.accountIcon(

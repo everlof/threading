@@ -357,6 +357,7 @@ final class RemoteAppModel: ObservableObject {
 
     @Published private(set) var me: RemoteMeDTO? {
         didSet {
+            MobileAccountImages.shared.receive(me?.newSessionCatalog)
             catalogueRevision &+= 1
             reconcileCatalogueStreamFence()
             rememberCurrentTheme()
@@ -4653,6 +4654,10 @@ final class RemoteAppModel: ObservableObject {
                     name: account.name,
                     email: account.email,
                     emoji: account.emoji,
+                    presentation: account.presentation,
+                    imagePNG: account.imagePNG,
+                    appearances: account.appearances,
+                    images: account.images,
                     usageSummary: "5h 31% · 7d 56%",
                     usageFraction: 0.56,
                     usageError: account.usageError,
@@ -4848,6 +4853,9 @@ final class RemoteAppModel: ObservableObject {
                             .init(
                                 id: "codex-work",
                                 name: "Work",
+                                presentation: .init(name: "Work", glyph: "DV", isEmoji: false, hue: nil,
+                                    backgroundHex: "#F4C95D", foregroundHex: "#000000",
+                                    badgeHidden: false, displayLabel: "Work"),
                                 usageSummary: "5h 44% · 7d 28%",
                                 usageFraction: 0.44,
                                 models: [

@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingRemoteKit
 
 // MARK: - Account Preference
 
@@ -6,6 +7,8 @@ import Foundation
 struct AccountPreference: Codable, Equatable {
     /// Emoji shown in place of the agent's symbol. Nil uses the symbol.
     var emoji: String?
+
+    var appearance: AccountAppearancePreferences?
 
     /// Name shown instead of the alias-derived one. Nil uses the discovered name.
     var displayNameOverride: String?
@@ -45,6 +48,7 @@ struct AccountPreference: Codable, Equatable {
 
     var isEmpty: Bool {
         emoji == nil
+            && appearance == nil
             && displayNameOverride == nil
             && isDisabled == nil
             && lastReportedModel == nil
@@ -96,6 +100,33 @@ final class AccountPreferencesStore {
 
     func preference(for accountID: AccountID) -> AccountPreference {
         preferences[accountID.rawValue] ?? AccountPreference()
+    }
+
+    var defaultAppearance: AccountAppearancePreferences {
+        preferences[Keys.appearanceDefaults]?.appearance ?? AccountAppearancePreferences()
+    }
+
+    func appearance(for accountID: AccountID) -> AccountAppearancePreferences {
+        preferences[accountID.rawValue]?.appearance ?? AccountAppearancePreferences()
+    }
+
+    func setAppearance(_ value: AccountAppearancePreferences, for accountID: AccountID?) {
+        var normalizedValue = value
+        normalizedValue.shortName = normalized(value.shortName).map { String($0.prefix(80)) }
+        normalizedValue.shared = value.shared?.normalized()
+        normalizedValue.surfaces = value.surfaces.map { surfaces in
+            Dictionary(uniqueKeysWithValues: AccountAppearanceSurface.allCases.compactMap { surface in
+                surfaces[surface.rawValue].map { (surface.rawValue, $0.normalized()) }
+            })
+        }
+        let key = accountID?.rawValue ?? Keys.appearanceDefaults
+        var candidate = preferences
+        var preference = candidate[key] ?? AccountPreference()
+        preference.appearance = normalizedValue == AccountAppearancePreferences() ? nil : normalizedValue
+        candidate[key] = preference.isEmpty ? nil : preference
+        guard candidate != preferences, persistence.save(candidate) else { return }
+        preferences = candidate
+        NotificationCenter.default.post(AccountPreferencesDidChange())
     }
 
     func emoji(for accountID: AccountID) -> String? {
@@ -211,6 +242,7 @@ final class AccountPreferencesStore {
         update(accountID) {
             $0.emoji = nil
             $0.displayNameOverride = nil
+            $0.appearance = nil
         }
     }
 
@@ -241,6 +273,7 @@ final class AccountPreferencesStore {
 
     private enum Keys {
         static let accountPreferences = "accountPreferences"
+        static let appearanceDefaults = "_appearanceDefaults"
     }
 
     private enum ModelVisibility {

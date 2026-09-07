@@ -441,7 +441,7 @@ extension SessionImportViewController: NSTableViewDelegate {
               )
         else { return when }
 
-        return "\(account.displayName) · \(when)"
+        return "\(account.presentation().visibleName) · \(when)"
     }
 }
 

@@ -571,6 +571,10 @@ struct MobileAccountChip: View {
 
     var body: some View {
         ZStack {
+            if account.backgroundHex != nil || account.imageID != nil || account.badgeHidden != nil {
+                MobileResolvedAccountGlyph(presentation: account)
+            } else {
+
             if let hue = account.hue {
                 Circle().fill(Color(
                     hue: hue,
@@ -589,6 +593,7 @@ struct MobileAccountChip: View {
                 .minimumScaleFactor(MobileDesign.Colour.accountChipMinimumScale)
                 .lineLimit(1)
         }
+        }
         .frame(
             width: MobileDesign.Size.accountChip,
             height: MobileDesign.Size.accountChip
@@ -598,6 +603,7 @@ struct MobileAccountChip: View {
         .overlay(
             Circle().strokeBorder(theme.panel, lineWidth: MobileDesign.Size.accountChipRing)
         )
+        .opacity(account.badgeHidden == true ? 0 : 1)
         .accessibilityHidden(true)
     }
 }

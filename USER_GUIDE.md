@@ -1939,33 +1939,41 @@ emoji if you have chosen one, otherwise a lettered badge from the account's name
 the row shows the full account name.
 
 ### Icons and names
-**Settings > Agents & Accounts** lists every account that was found. Click an account's icon to open
-the emoji picker — choose from the grid, type any other emoji into its field, or **Remove**
-the current one. The icon tells accounts apart at a glance in the sidebar.
+**Settings > Agents & Accounts** lists every discovered account. Click **Appearance…** or the
+account icon to edit its full name, short name, badge and colors. **Shared account appearance > Customize…** sets the
+defaults for all accounts.
 
-A session row shows **both** the agent and the account. The icon is always the agent's own
-mark — Claude's starburst, OpenAI's knot, a terminal symbol for shells — and a session on an
-alternate account carries a small **chip** on its corner: your chosen emoji, else the
-account's discovered avatar, else its initial on a colour of its own. Sessions on the
-default login carry no chip, since the mark already says everything there is to say.
+Badges support automatic initials, up to three letters, one emoji (including joined emoji),
+a chosen image, or no badge. Choose foreground and background colors with the swatch or a hex
+value. **Automatic** selects the derived background or a contrasting foreground; a blank field
+inherits the shared setting. Images are centered and cropped to a circle; choose a file under
+4 MB. Threading keeps a normalized 64-pixel copy.
 
-The initial comes from the account's **login email**, not its alias, because aliases are
-named after the agent and collide: `claude-nhartley` and `claude-ikeller` are both `c`, while
-`nova.hartley3@…` and `keller.ines@…` are `N` and `K`. The colour is derived from the
-whole address, so two accounts sharing an initial still differ. Hover a session for the
-account's full name.
+**Apply to** selects all surfaces or an override for Sidebar, Chooser, Details, Usage or
+Notifications. Each surface can inherit or override badge visibility, account-name visibility,
+email visibility, short-name use and the default account's sidebar badge. These choices affect
+identity where that surface already shows it; they do not add an email to every sidebar row.
+Notifications use the chosen account label; macOS owns notification icons and colors.
+The pinned preview compares Sidebar, Chooser, Details, Usage and Notifications while you type.
+The iPhone preview follows the selected surface; its caption says which location it represents. Changes save when you leave a field or close the editor.
 
-The avatar is looked up from the account's login email (read from the CLI's own records):
-**Gravatar** first, then GitHub for accounts whose *public* profile email matches. Most
-emails resolve nowhere, and a miss just leaves the rest of the chain in place. Unlike
-project icons, a face is exactly right here — an account is a person, and different logins
-mean different faces. Only a hash of the email (Gravatar) or the email as a search query
-(GitHub) ever leaves the machine, and **Settings > General > Discover account avatars**
-turns the whole thing off. Rename an account
-if the discovered name is not what you call it; clearing a name restores the one from your
-shell alias, and **Restore Name & Icon** clears both custom choices. A name you type is saved
-when you leave the field or close Settings—Return is not required—and it replaces the automatic
-email-derived name beside the account image and in account choosers.
+A session keeps its provider's mark, with the account badge on its corner. Automatic mode uses
+your existing emoji, then a discovered avatar, then an initial derived from the login email
+(or name when no email is known). The background hashes the full email, so accounts sharing an
+initial can still differ. Default accounts omit the sidebar badge unless you enable it.
+The paired iPhone receives the resolved presentation and badge images from the Mac; older hosts
+continue to use the phone's original rendering. The iPhone's local **Account initials** switch
+continues to control whether the session action disc shows its account badge.
+
+Automatic avatars use Gravatar, then GitHub accounts whose public profile email matches.
+**Settings > General > Discover account avatars** controls these lookups. Chosen images work
+independently of automatic discovery.
+
+Clearing the full-name field restores the automatically resolved name. **Restore this surface**
+clears that surface's overrides; **Restore Appearance** clears the account's name, short name,
+legacy emoji and all appearance overrides. Account enablement, credentials, model preferences
+and usage limits remain intact. Identity settings and accessibility retain the full account name
+even when another surface hides or abbreviates its visible label.
 
 **Add Login** creates a bounded isolated home for Claude Code or Codex, launches that provider's
 official browser sign-in, and registers the location only after the provider verifies it. Threading
@@ -1989,8 +1997,7 @@ Each row carries a **switch**. Turning it off withdraws that login from everywhe
 is offered — the composer's identity chip, the new-session menus, the usage readings and the
 import list — without deleting anything. The config directory, its conversations and the
 sessions already running on that account are untouched, and those sessions still resume on it.
-A switched-off account stays listed here, dimmed, so you can switch it back on; **Restore Name
-& Icon** restores only those two presentation choices and leaves the switch and usage readings
+A switched-off account stays listed here, dimmed, so you can switch it back on; **Restore Appearance** restores only presentation choices and leaves the switch and usage readings
 alone.
 
 If the account you switch off is the one a fresh composer would have remembered, the next most

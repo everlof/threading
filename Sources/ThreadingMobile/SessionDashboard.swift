@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import ThreadingRemoteKit
 import UIKit
 
@@ -1318,6 +1319,9 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     private let markImageView = UIImageView()
     private let accountChip = MobileThemeOutlineView()
     private let accountGlyph = UILabel()
+    private let accountImage = UIImageView()
+    private var accountImageSubscription: AnyCancellable?
+    private var currentAccountImageID: String?
     private let statusDot = UIView()
     private let titleView = MobileMorphingTitleLabel()
     private let availabilityImageView = UIImageView()
@@ -1369,6 +1373,15 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         markView.addSubview(accountChip)
         markView.addSubview(statusDot)
         accountChip.addSubview(accountGlyph)
+        accountChip.addSubview(accountImage)
+        accountImageSubscription = MobileAccountImages.shared.$revision.sink { [weak self] _ in
+            guard let self else { return }
+            accountImage.image = MobileAccountImages.shared.image(currentAccountImageID)
+            accountImage.isHidden = accountImage.image == nil
+            accountGlyph.isHidden = accountImage.image != nil
+        }
+        accountImage.contentMode = .scaleAspectFill
+        accountImage.clipsToBounds = true
 
         markView.layer.cornerCurve = .continuous
         markView.layer.cornerRadius = MobileDesign.Size.rowMarkRadius
@@ -1492,6 +1505,8 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
             height: chipSize
         )
         accountGlyph.frame = accountChip.bounds
+        accountImage.frame = accountChip.bounds
+        accountImage.layer.cornerRadius = accountChip.bounds.width / 2
 
         let textX = DashboardRowMetrics.textLeadingEdge
         let trailingWidth = layoutTrailing(in: bounds)
@@ -1733,14 +1748,19 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     }
 
     private func applyAccount(_ account: RemoteSessionAccountDTO?, theme: RemoteThemePalette) {
-        guard let account else {
+        guard let account, account.badgeHidden != true else {
             accountChip.isHidden = true
             return
         }
         accountChip.isHidden = false
+        currentAccountImageID = account.imageID
+        accountImage.image = MobileAccountImages.shared.image(account.imageID)
+        accountImage.isHidden = accountImage.image == nil
+        accountGlyph.isHidden = accountImage.image != nil
         accountGlyph.text = account.glyph
-        accountGlyph.textColor = account.isEmoji ? theme.uiLabel : .white
-        accountChip.backgroundColor = account.hue.map {
+        accountGlyph.textColor = account.foregroundHex.flatMap(UIColor.init(remoteHex:))
+            ?? (account.isEmoji ? theme.uiLabel : .white)
+        accountChip.backgroundColor = account.backgroundHex.flatMap(UIColor.init(remoteHex:)) ?? account.hue.map {
             UIColor(
                 hue: $0,
                 saturation: MobileDesign.Colour.accountChipSaturation,
@@ -1816,7 +1836,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
                 ))
             }
             result.append(NSAttributedString(
-                string: account.name,
+                string: account.visibleName,
                 attributes: [.foregroundColor: theme.uiSecondaryLabel]
             ))
         }
@@ -4569,7 +4589,7 @@ private struct SessionRow: View {
             parts.append(Text(word).foregroundStyle(theme.warning))
         }
         if let account = session.account {
-            parts.append(Text(account.name).foregroundStyle(theme.secondaryLabel))
+            parts.append(Text(account.visibleName).foregroundStyle(theme.secondaryLabel))
         }
         guard let first = parts.first else { return nil }
         return parts.dropFirst().reduce(first) { line, part in

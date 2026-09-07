@@ -46,8 +46,9 @@ enum HostPopoverID: String, CaseIterable {
             )
         case .settingsAccountIconPicker:
             return .hostOnly(
-                reason: "Edits an explicit user-owned identity choice; extensions contribute "
-                    + "icon resolvers but cannot replace the native picker."
+                reason: "Edits user-owned account appearance and shared defaults. Threading owns "
+                    + "inheritance, persistence, image admission, accessibility and dismissal; "
+                    + "extensions contribute icon resolvers but cannot replace the native editor."
             )
         case .conversationChangedFileDiff:
             return .hostOnly(

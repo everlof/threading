@@ -43,7 +43,7 @@ and collide on it (`claude-nhartley` and `claude-ikeller` are both `c`), while t
 give `N` and `K`. Its disc hashes the whole address through `GeneratedProjectIcon.stableHash`,
 so two accounts sharing an initial still differ by colour, on a brighter ramp than the project
 tiles — a 9pt disc has far less area to carry a hue than a 16pt tile. The **default account
-gets no chip**: its agent's mark already says everything the row knows.
+gets no chip by default**; account appearance settings can enable it.
 
 `AccountAvatarStore.cachedEmail` memoizes the address, hit or miss. The badge asks on every
 row configure and rows reconfigure constantly while an agent works, where the uncached answer
@@ -57,10 +57,16 @@ about the *account* is decided there: `RemoteAccountBridge` resolves the chip on
 `RemoteSessionAccountDTO` — glyph, whether it is an emoji, and the hue — because every input is here
 (the account directories, the login address, the user's chosen emoji, the hash). `AccountBadge.hue`
 exists for that reason: one hash, used by the drawn chip and the wire, rather than two that agree
-until one is edited. A discovered avatar is deliberately not carried; it would be image bytes per
-row, and per the coverage note above the hashed initial is the working case anyway. The default
-login sends no chip, matching the sidebar rule and keeping the projection off the account
-directories for most rows.
+until one is edited. The DTO also carries resolved colors, visible label, badge visibility and an
+image identifier. The catalogue carries each normalized image once within a 2 MiB aggregate
+budget; session rows never carry image bytes. Clients decode on a utility worker and refresh
+after the image arrives. The default login retains the no-discovery shortcut unless its badge
+has been enabled.
+
+Account appearance can explicitly choose text, emoji, an image, or no badge, with foreground and
+background overrides. Automatic mode preserves the legacy emoji → discovered avatar → initial
+chain. Explicit user styles precede an extension's account icon replacement. The appearance
+editor and inheritance contract live in [accounts.md](accounts.md#account-appearance-resolution).
 
 `AgentKind.symbolName` and its iOS twin must stay in step; the phone keeps its own table rather than
 waiting on bytes it would have to draw an empty slot for. What the phone must never do is take a

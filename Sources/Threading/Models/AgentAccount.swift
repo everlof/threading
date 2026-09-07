@@ -19,6 +19,8 @@ struct AgentAccount: Equatable, Identifiable, Sendable {
 
     /// Name shown in menus. A user override wins, then the user's own shell alias.
     let displayName: String
+    let discoveredName: String
+    let presentationNameIsResolved: Bool
 
     /// The explicit name the user chose, before falling back to discovery.
     ///
@@ -50,13 +52,17 @@ struct AgentAccount: Equatable, Identifiable, Sendable {
         handle: AccountHandle,
         configPath: String,
         displayName: String? = nil,
+        discoveredName: String? = nil,
         displayNameOverride: String? = nil,
         emoji: String? = nil,
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        presentationNameIsResolved: Bool = false
     ) {
+        self.presentationNameIsResolved = presentationNameIsResolved
         self.provider = provider
         self.handle = handle
         self.configPath = configPath
+        self.discoveredName = discoveredName ?? displayName ?? handle.name
         self.displayNameOverride = displayNameOverride
         self.displayName = displayNameOverride ?? displayName ?? handle.name
         self.emoji = emoji
@@ -76,11 +82,11 @@ extension AgentSession {
     @MainActor
     var accountLineText: String? {
         guard let account = AgentAccountDiscovery.account(for: kind, handle: accountHandle),
-              !account.isDefault,
-              !displayTitle.localizedCaseInsensitiveContains(account.displayName)
+              !account.presentation(in: .sidebar).visibleName.isEmpty,
+              !displayTitle.localizedCaseInsensitiveContains(account.presentation(in: .sidebar).visibleName)
         else { return nil }
 
-        return account.displayName
+        return account.presentation(in: .sidebar).visibleName
     }
 }
 

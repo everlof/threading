@@ -320,6 +320,17 @@ final class RemoteUsageDashboardTests: XCTestCase {
         )
     }
 
+    func testHiddenOrIdenticalLabelsDoNotMergeDistinctAccounts() {
+        let accounts = MobileUsageFleetProjection.accounts(from: [
+            series("first", account: "", accountID: "claude:first"),
+            series("second", account: "", accountID: "claude:second")
+        ])
+        XCTAssertEqual(Set(accounts.map(\.id)), ["claude:first", "claude:second"])
+        XCTAssertEqual(MobileUsageFleetProjection.startingAccountID(in: accounts,
+            focus: .init(runtimeName: "Claude", accountName: "", accountID: "claude:second")),
+            "claude:second")
+    }
+
     func testFleetProjectionGroupsProviderWindowsByAccount() {
         let accounts = MobileUsageFleetProjection.accounts(from: [
             series("weekly", runtime: "Claude", account: "Work", window: "Weekly"),
@@ -395,10 +406,12 @@ final class RemoteUsageDashboardTests: XCTestCase {
         window: String = "5-hour",
         fraction: Double? = 0.20,
         resetsAt: Double = 1_800_003_600,
-        windowDuration: Double? = nil
+        windowDuration: Double? = nil,
+        accountID: String? = nil
     ) -> RemoteUsageLimitSeriesSummaryDTO {
         RemoteUsageLimitSeriesSummaryDTO(
             id: id,
+            accountID: accountID,
             runtimeName: runtime,
             accountName: account,
             windowLabel: window,

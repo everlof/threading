@@ -41,6 +41,7 @@ private enum MobileUsageScope: Hashable, CaseIterable {
 struct MobileUsageAccountFocus: Equatable {
     let runtimeName: String
     let accountName: String
+    var accountID: String? = nil
 }
 
 enum MobileUsageFleetProjection {
@@ -49,7 +50,7 @@ enum MobileUsageFleetProjection {
         let accountName: String
         let windows: [RemoteUsageLimitSeriesSummaryDTO]
 
-        var id: String { "\(runtimeName)|\(accountName)" }
+        var id: String { windows.first?.accountID ?? "\(runtimeName)|\(accountName)" }
     }
 
     struct Summary: Equatable {
@@ -68,6 +69,7 @@ enum MobileUsageFleetProjection {
         focus: MobileUsageAccountFocus?
     ) -> String? {
         if let focus {
+            if let id = focus.accountID, let exact = accounts.first(where: { $0.id == id }) { return exact.id }
             if let exact = accounts.first(where: {
                 $0.runtimeName == focus.runtimeName && $0.accountName == focus.accountName
             }) {
@@ -83,7 +85,7 @@ enum MobileUsageFleetProjection {
     static func accounts(
         from series: [RemoteUsageLimitSeriesSummaryDTO]
     ) -> [Account] {
-        Dictionary(grouping: series) { "\($0.runtimeName)|\($0.accountName)" }
+        Dictionary(grouping: series) { $0.accountID ?? "\($0.runtimeName)|\($0.accountName)" }
             .values
             .map {
                 Account(

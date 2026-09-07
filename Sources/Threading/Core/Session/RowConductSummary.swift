@@ -358,7 +358,7 @@ enum RowConductStrings {
         case .resumeOnBestAccount:
             return L10n.string("Moves to a login with room")
         case .resumeVia(let accountID):
-            return L10n.format("Moves to %@", accountID.handle.name)
+            return L10n.format("Moves to %@", AccountPresentationLabels.name(for: accountID))
         }
     }
 

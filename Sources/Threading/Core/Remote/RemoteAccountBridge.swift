@@ -23,11 +23,14 @@ enum RemoteAccountBridge {
     /// most rows, answers before any directory is scanned. `SessionRowView` takes the same
     /// shortcut for the same reason.
     static func identity(for session: AgentSession) -> RemoteSessionAccountDTO? {
-        guard session.kind.supportsAccounts, !session.accountHandle.isStandard else { return nil }
+        guard session.kind.supportsAccounts else { return nil }
+        guard session.accountHandle != .standard || AccountPresentation.showsStandardBadge(provider: session.kind) else { return nil }
         guard let account = AgentAccountDiscovery.account(
             for: session.kind,
             handle: session.accountHandle
-        ), !account.isDefault else { return nil }
+        ) else { return nil }
+        let p = account.presentation(in: .sidebar)
+        guard !account.isDefault || p.style.showDefaultBadge == true else { return nil }
 
         return identity(for: account)
     }
@@ -36,21 +39,17 @@ enum RemoteAccountBridge {
     ///
     /// Separate from the session lookup so a test can state an account and read the chip without a
     /// home directory to discover it in.
-    static func identity(for account: AgentAccount) -> RemoteSessionAccountDTO {
-        if let emoji = account.emoji {
-            return RemoteSessionAccountDTO(
-                name: AccountName.display(for: account),
-                glyph: emoji,
-                isEmoji: true,
-                hue: nil
-            )
-        }
-
+    static func identity(
+        for account: AgentAccount, surface: AccountAppearanceSurface = .sidebar
+    ) -> RemoteSessionAccountDTO {
+        let value = account.presentation(in: surface)
         return RemoteSessionAccountDTO(
-            name: AccountName.display(for: account),
-            glyph: AccountBadge.initial(for: account),
-            isEmoji: false,
-            hue: Double(AccountBadge.hue(for: account))
+            name: value.name, glyph: value.glyph, isEmoji: value.isEmoji,
+            hue: value.isEmoji ? nil : Double(AccountBadge.hue(for: account)),
+            backgroundHex: value.isEmoji && AccountAppearance.normalizedHex(value.style.backgroundHex) == nil ? nil : value.background.hexString,
+            foregroundHex: value.foreground.hexString, imageID: value.imageID,
+            badgeHidden: !value.showsBadge(isDefault: account.isDefault, surface: surface),
+            displayLabel: value.visibleName, email: value.email
         )
     }
 
@@ -64,7 +63,22 @@ enum RemoteAccountBridge {
     /// the same two caches for the same accounts a couple of lines earlier, to derive the names.
     /// This adds a dictionary read, not a directory scan.
     static func email(for account: AgentAccount) -> String? {
-        AccountAvatarStore.cachedEmail(for: account) ?? AccountEmailProbe.cachedEmail(for: account)
+        account.presentation().email
+    }
+
+    static func appearances(for account: AgentAccount) -> [String: RemoteSessionAccountDTO] {
+        Dictionary(uniqueKeysWithValues: AccountAppearanceSurface.allCases.map {
+            ($0.rawValue, identity(for: account, surface: $0))
+        })
+    }
+
+    static func images(for account: AgentAccount) -> [String: Data] {
+        var images: [String: Data] = [:]
+        for surface in AccountAppearanceSurface.allCases {
+            if let id = account.presentation(in: surface).imageID,
+               let png = AccountImageStore.png(id) { images[id] = png }
+        }
+        return images
     }
 
     // MARK: - Usage

@@ -201,6 +201,7 @@ enum RemoteUsageBridge {
     ) -> RemoteUsageLimitSeriesSummaryDTO {
         RemoteUsageLimitSeriesSummaryDTO(
             id: source.id,
+            accountID: source.accountID,
             runtimeName: source.runtimeName,
             accountName: source.accountName,
             windowLabel: source.windowLabel,
@@ -222,6 +223,7 @@ enum RemoteUsageBridge {
     ) -> RemoteUsageLimitSeriesSummaryDTO {
         RemoteUsageLimitSeriesSummaryDTO(
             id: source.id,
+            accountID: source.accountID,
             runtimeName: source.runtimeName,
             accountName: source.accountName,
             windowLabel: source.windowLabel,

@@ -95,6 +95,7 @@ enum AccountName {
     static func display(for account: AgentAccount) -> String {
         // Every login, switched off or not: a name is resolved against its collisions, and a
         // disabled sibling still owns the address that would make this one ambiguous.
+        if account.presentationNameIsResolved { return account.displayName }
         let siblings = AgentAccountDiscovery.allAccounts(for: account.provider)
         return names(for: siblings)[account.id] ?? account.displayName
     }

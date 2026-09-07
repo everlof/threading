@@ -112,7 +112,7 @@ enum MobileSessionSettingsPresentation {
                 .map { account in
                     .init(
                         policy: .resumeVia(accountID: account.id),
-                        title: MobileL10n.string("Continue as %@", account.name),
+                        title: MobileL10n.string("Continue as %@", account.visibleName),
                         usage: accountUsage(account, model: session.model)
                     )
                 })
@@ -168,7 +168,7 @@ struct MobileSessionSettingsView: View {
     /// The screen opens on this chat's login.
     private var usageFocus: MobileUsageAccountFocus? {
         guard let agent, let account = currentAccount else { return nil }
-        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
+        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name, accountID: agent.id + ":" + account.id)
     }
 
     private var session: RemoteSessionSummaryDTO? {
@@ -330,7 +330,7 @@ struct MobileSessionSettingsView: View {
                         pendingAccount = account
                         isConfirmingAccountMove = true
                     } label: {
-                        Text(account.name)
+                        Text((account.appearance(in: .details)?.visibleName ?? account.name))
                         Text(MobileSessionSettingsPresentation.accountUsage(
                             account, model: session.model
                         ))

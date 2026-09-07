@@ -8,6 +8,21 @@ import XCTest
 /// says beneath its name, and which model it is ringed for are pinned here.
 final class MobileIdentityPickerTests: XCTestCase {
 
+    func testHostPresentationPreservesHiddenLabelsAndSurfaceOverrides() throws {
+        let chooser = RemoteSessionAccountDTO(name: "Research", glyph: "DV", isEmoji: false,
+            hue: nil, backgroundHex: "#F4C95D", foregroundHex: "#000000",
+            badgeHidden: false, displayLabel: "")
+        let usage = RemoteSessionAccountDTO(name: "Research", glyph: "🦊", isEmoji: true,
+            hue: nil, badgeHidden: false, displayLabel: "R&D")
+        let account = RemoteAccountChoiceDTO(id: "work", name: "Research",
+            presentation: chooser, appearances: ["usage": usage], models: [], defaultModelID: nil)
+        XCTAssertEqual(account.visibleName, "")
+        XCTAssertEqual(account.appearance(in: .usage), usage)
+        XCTAssertEqual(account.appearance(in: .details), chooser)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteAccountChoiceDTO.self,
+            from: JSONEncoder().encode(account)), account)
+    }
+
     // MARK: - What a login's disc shows
 
     func testAnEmojiLeadsTheDiscBeforeAnyInitial() {

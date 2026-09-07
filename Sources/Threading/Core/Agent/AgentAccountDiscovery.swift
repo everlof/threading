@@ -86,7 +86,22 @@ enum AgentAccountDiscovery {
             }
         }
 
-        return discovered.map(applyingPreferences)
+        return resolvingPresentation(discovered, provider: provider)
+    }
+
+    private static func resolvingPresentation(_ discovered: [AgentAccount], provider: AgentKind) -> [AgentAccount] {
+        let accounts = discovered.map(applyingPreferences)
+        let names = AccountName.names(for: accounts)
+        AccountPresentationLabels.publish(names, provider: provider)
+        return accounts.map { account in
+            AgentAccount(
+                provider: account.provider, handle: account.handle, configPath: account.configPath,
+                displayName: names[account.id] ?? account.displayName,
+                discoveredName: account.discoveredName,
+                displayNameOverride: account.displayNameOverride, emoji: account.emoji,
+                isEnabled: account.isEnabled, presentationNameIsResolved: true
+            )
+        }
     }
 
     /// Looks up an account by handle, falling back to the provider's default.
@@ -264,7 +279,7 @@ enum AgentAccountDiscovery {
         let discovered = await Task.detached(priority: .userInitiated) {
             discoverCodexAccounts(records: records)
         }.value
-        return discovered.map(applyingPreferences).filter(\.isEnabled)
+        return resolvingPresentation(discovered, provider: .codex).filter(\.isEnabled)
     }
 
     nonisolated private static func discoverCodexAccounts(

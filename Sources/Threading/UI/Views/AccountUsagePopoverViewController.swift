@@ -13,7 +13,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
 
     // MARK: - Properties
 
-    private let account: AgentAccount
+    private var account: AgentAccount
     private let isEmbedded: Bool
     private let readingProvider: (AgentAccount) -> AccountUsageReading
     private let limitsProvider: LimitsProvider
@@ -161,6 +161,14 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         view = container
         render()
 
+        appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            guard let self else { return }
+            if let refreshed = AgentAccountDiscovery.allAccounts(for: account.provider)
+                .first(where: { $0.id == self.account.id }) {
+                account = refreshed
+            }
+            render()
+        }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
             self?.usageDidChange(event)
         }
@@ -191,7 +199,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         renderedAt = nowProvider()
         limits = limitsProvider(account.id)
 
-        nameLabel.stringValue = "\(account.provider.displayName) — \(account.displayName)"
+        nameLabel.stringValue = L10n.format("%@ — %@", account.provider.displayName, account.presentation(in: .usage).visibleName)
         planLabel.stringValue = usage?.planLabel ?? ""
         planLabel.isHidden = planLabel.stringValue.isEmpty
         footerLabel.stringValue = footerText(reading: reading, now: renderedAt)

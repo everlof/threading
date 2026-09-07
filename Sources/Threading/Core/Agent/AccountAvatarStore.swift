@@ -61,7 +61,7 @@ enum AccountAvatarStore {
         }
 
         if let data = try? BoundedFileReader.read(
-            fileURL(for: account),
+            cachedImageURL(for: account),
             maximumBytes: ProjectIconDefaults.maximumSourceBytes
         ), let stored = NSImage(data: data), stored.isValid {
             let composed = ProjectIconStore.roundedDisplay(stored)
@@ -132,7 +132,7 @@ enum AccountAvatarStore {
     // MARK: - Private Methods
 
     @MainActor
-    private static func fileURL(for account: AgentAccount) -> URL {
+    static func cachedImageURL(for account: AgentAccount) -> URL {
         directory.appendingPathComponent(fileName(for: account), isDirectory: false)
     }
 
@@ -151,11 +151,12 @@ enum AccountAvatarStore {
     }
 
     @MainActor
-    private static func discoverIfNeeded(_ account: AgentAccount) {
+    static func discoverIfNeeded(_ account: AgentAccount) {
         guard !attempted.contains(account.id) else { return }
         attempted.insert(account.id)
 
-        let target = fileURL(for: account)
+        let target = cachedImageURL(for: account)
+        let targetDirectory = directory
         ThreadingLogger.agent.debug(
             "Account avatar discovery started provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash))"
         )
@@ -180,27 +181,17 @@ enum AccountAvatarStore {
                 return
             }
 
+            do {
+                try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+                try png.write(to: target, options: .atomic)
+            } catch {
+                ThreadingLogger.agent.error("Could not store account avatar: \(error.localizedDescription, privacy: .private)")
+                return
+            }
             DispatchQueue.main.async {
-                do {
-                    try FileManager.default.createDirectory(
-                        at: directory,
-                        withIntermediateDirectories: true
-                    )
-                    try png.write(to: target, options: .atomic)
-                } catch {
-                    ThreadingLogger.agent.error(
-                        "Could not store account avatar provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
-                    )
-                    return
-                }
-
-                ThreadingLogger.agent.info(
-                    "Account avatar stored provider=\(account.provider.rawValue, privacy: .public) account=\(account.id.rawValue, privacy: .private(mask: .hash)) bytes=\(png.count, privacy: .public)"
-                )
-
-                // The same route an emoji edit takes: the sidebar rebuilds and the rows
-                // pick the file up from disk.
-                NotificationCenter.default.post(ProjectsDidChange())
+                composedCache.removeObject(forKey: account.id.rawValue as NSString)
+                AccountImageStore.avatarDidArrive(for: account)
+                NotificationCenter.default.post(AccountPreferencesDidChange())
             }
         }
     }

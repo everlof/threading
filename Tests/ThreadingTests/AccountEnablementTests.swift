@@ -75,7 +75,7 @@ final class AccountEnablementTests: XCTestCase {
     func testThePresentationRestoreNamesExactlyWhatItChanges() {
         XCTAssertEqual(
             AccountsPreferencesStrings.restorePresentationButton,
-            "Restore Name & Icon"
+            "Restore Appearance"
         )
         XCTAssertFalse(
             AccountsPreferencesStrings.restorePresentationButton.localizedCaseInsensitiveContains(

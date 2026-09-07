@@ -127,10 +127,9 @@ posts that event itself. Limit edits announce themselves through `CustomLimitsDi
 The page's own repair, and the 80 ms hiding inside it, are in
 [`performance.md`](performance.md#renaming-a-login-in-settings-measured-2026-09-05).
 
-The presentation action on that row is deliberately **Restore Name & Icon**, not Reset. It
-clears only the display-name and emoji overrides and leaves enablement, credentials, sessions,
-and every usage reading untouched. “Reset” beside the Usage destinations made the last of those
-easy to misread; the button now names the complete scope of its action on its face.
+The presentation action is **Restore Appearance**. It clears the display name, short name,
+legacy emoji, shared account style and all surface overrides, leaving enablement, credentials,
+sessions, model choices and every usage reading untouched. Shared defaults still apply.
 
 **Refresh Models** is a host-owned action in Agents & Accounts and the command palette
 (`app.refreshModels`). `CodexModelRefreshService` refreshes every enabled Codex login through the
@@ -1325,3 +1324,53 @@ Two defects the render caught and no assertion would have, both now asserted dir
   failure; a view that *is* one section has to restate it internally.
 - with the label column cut to that width, a one-line caption wrapped into five lines and
   `Claude Code` truncated to `Clau`.
+
+
+## Account appearance resolution
+
+`AccountPresentation` is the host's presentation value for sidebar, chooser, details, usage
+and notification surfaces. Resolution overlays shared defaults, the shared surface override,
+the account's shared override, then its surface override. Optional booleans distinguish inherit
+from false; the color sentinel `automatic` restores derived color without inheriting a parent's
+explicit hex value. Routing handles, credentials, provider plans, quota readings and enablement
+remain host-owned facts.
+
+Discovery resolves automatic names against every sibling, including disabled logins, once for
+the returned roster. `AgentAccount.discoveredName` retains the pre-resolution name so clearing
+a user override can recover it. `AccountPresentationLabels` publishes value-only labels for
+summary and usage projections that cannot perform discovery in a hot callback. Full names
+remain available independently of a hidden or shortened visible label.
+
+Preferences remain in the recoverable account preference envelope: optional `appearance` adds
+short name, shared style and five surface overrides; the reserved `_appearanceDefaults` entry
+owns global defaults. Old name and emoji choices continue to work. Restoring appearance clears
+only presentation fields. The Settings editor is deliberately host-only: it owns persistence,
+image admission, preview, accessibility and dismissal. Existing public account icon replacement
+remains available, with explicit user badge choices taking precedence.
+
+Mac renderers and the remote bridge consume the same resolved values. The account catalogue
+sends per-surface presentation DTOs and deduplicated images; session rows send image identifiers.
+All additions are optional for old payload compatibility. Usage series carry stable account IDs,
+so hiding or shortening two labels does not merge their history.
+
+### Appearance scaling gate
+
+Expected roster: 1–8 accounts; stress roster: 256. The editor is created only on opening and
+contains a fixed number of controls and six identity previews in a two-column grid.
+Five previews resolve their own surface; the iPhone preview follows the editor's selected surface.
+Notifications preview the account label without a customizable icon; details and usage include
+the real cached email when their visibility rules permit it. Global edits fetch one account snapshot
+and restamp visible Settings rows without rebuilding the popover anchor. Default session badges
+remain a preference-only early exit before account discovery.
+
+Image admission uses one utility worker, bounded 4 MiB input, 64-pixel normalization and 32 KiB
+PNG output. Each client keeps at most 64 decoded images and 64 pending image loads. The remote
+catalogue deduplicates image IDs and caps aggregate image data at 2 MiB. Draw callbacks consume
+memory; image arrival posts an appearance refresh. Missing files fall back to the initial.
+
+The warm resolver fixture (`AccountAppearanceTests/testWarmResolutionAtExpectedAndStressRosterSizes`,
+Debug, 2026-09-07) measured ten complete passes at 2.18 ms for 8 accounts and 21.83 ms for
+256 accounts: approximately 0.22 ms and 2.18 ms per roster respectively. This measures cached
+value resolution, not cold credential discovery, network avatar lookup or end-to-end popover
+latency. The editor's render contract fixes its width and height and scrolls to the lower controls;
+account Settings and fleet retain their existing viewport virtualization tests.

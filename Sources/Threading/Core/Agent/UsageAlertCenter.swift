@@ -175,7 +175,7 @@ final class UsageAlertCenter {
             ?? UsageDefaults.label(forWindowID: evaluation.rule.windowID)
 
         let content = UNMutableNotificationContent()
-        content.title = account.displayName
+        content.title = account.presentation(in: .notifications).visibleName
         content.subtitle = account.provider.displayName
         content.body = CustomLimitReceipt.announcement(
             for: evaluation,
