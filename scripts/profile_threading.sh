@@ -1737,6 +1737,7 @@ run_sidebar_stress() {
       THREADING_SIDEBAR_STRESS_ORDER="${order}" \
       THREADING_SIDEBAR_STRESS_PROJECTS="${projects}" \
       THREADING_SIDEBAR_STRESS_SESSIONS="${sessions}" \
+      THREADING_SIDEBAR_STRESS_REGISTERED_FACT="${THREADING_SIDEBAR_STRESS_REGISTERED_FACT:-}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
         xcrun xctest \

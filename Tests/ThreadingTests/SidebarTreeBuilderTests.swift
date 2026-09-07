@@ -1,5 +1,6 @@
 import XCTest
 @testable import Threading
+import ThreadingExtensionKit
 
 /// How the sidebar decides what nests under what.
 ///
@@ -144,14 +145,67 @@ final class SidebarTreeBuilderTests: XCTestCase {
         order: SidebarSessionOrder = .manual,
         reversed: Bool = false,
         branchGrouping: Bool = true,
-        loneBranchHeadings: Bool = true
+        loneBranchHeadings: Bool = true,
+        groupByFact: ExtensionFactKey? = nil,
+        sortByFact: ExtensionFactKey? = nil
     ) -> NativeSidebarPipelineOptionValues {
         NativeSidebarPipelineOptionValues(
             sessionOrder: order,
             sessionOrderReversed: reversed,
             branchGrouping: branchGrouping,
             loneBranchHeadings: loneBranchHeadings,
-            compactTree: false
+            compactTree: false,
+            groupByFact: groupByFact,
+            sortByFact: sortByFact
+        )
+    }
+
+    private func factSnapshot(
+        sessionIDs: [SessionID],
+        definitions: [ExtensionFactDefinition],
+        facts: [ExtensionFact]
+    ) -> ExtensionFactSnapshot {
+        let allDefinitions = HostFactCatalog.definitions + definitions
+        let definitionsByKey = Dictionary(
+            uniqueKeysWithValues: allDefinitions.map { ($0.key, $0) }
+        )
+        var table: ExtensionFactSnapshot.FactTable = [:]
+        for fact in facts {
+            let definition = definitionsByKey[fact.key]!
+            table[fact.subject, default: [:]][fact.key] = .init(
+                fact: fact,
+                definition: definition,
+                source: .host,
+                receivedAt: fact.observedAt
+            )
+        }
+        return ExtensionFactSnapshot(
+            revision: 1,
+            sessionSubjects: sessionIDs.map {
+                .session($0.uuidString.lowercased())
+            },
+            definitionsByKey: definitionsByKey,
+            providersByKey: Dictionary(
+                uniqueKeysWithValues: allDefinitions.map {
+                    ($0.key, Set([ExtensionFactResolutionSource.host]))
+                }
+            ),
+            factsBySubject: table
+        )
+    }
+
+    private func fact(
+        _ key: ExtensionFactKey,
+        subject: ExtensionFactSubject,
+        value: ExtensionFactValue,
+        label: String? = nil
+    ) -> ExtensionFact {
+        ExtensionFact(
+            key: key,
+            subject: subject,
+            value: value,
+            label: label,
+            observedAt: Date(timeIntervalSinceReferenceDate: 1)
         )
     }
 
@@ -238,6 +292,315 @@ final class SidebarTreeBuilderTests: XCTestCase {
             ["shared", "lone"]
         )
         XCTAssertTrue(allHeadingsProject.childNodes.compactMap { $0 as? SessionNode }.isEmpty)
+    }
+
+    func testRegisteredFactGroupingUsesRepositoryBranchJoinAndKeepsHostStructure() throws {
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let definition = ExtensionFactDefinition(
+            key: key,
+            displayName: "Merge request state",
+            valueType: .string,
+            subjectKinds: [.repositoryBranch],
+            usages: [.groupable, .sortable]
+        )
+        let parent = session("Parent", branch: "feature/open")
+        let sideChat = session("Side chat", branch: "feature/open", forkedFrom: parent.id)
+        let merged = session("Merged", branch: "feature/merged")
+        let unknown = session("Unknown", branch: "feature/unknown")
+        let shell = terminal("/tmp", branch: "feature/open")
+        let source = project(
+            "p",
+            sessions: [parent, sideChat, merged, unknown],
+            terminals: [shell]
+        )
+        let repository = ExtensionRepositoryKey(host: "gitlab.com", path: "group/repo")
+        let projectSubject = ExtensionFactSubject.project(source.id.uuidString.lowercased())
+        let sessionProjectFacts = [parent, sideChat, merged, unknown].map {
+            fact(
+                ExtensionHostFactKey.sessionProjectID,
+                subject: .session($0.id.uuidString.lowercased()),
+                value: .string(source.id.uuidString.lowercased())
+            )
+        }
+        let sessionBranchFacts = [parent, sideChat, merged, unknown].compactMap { value in
+            value.branch.map {
+                fact(
+                    ExtensionHostFactKey.sessionBranch,
+                    subject: .session(value.id.uuidString.lowercased()),
+                    value: .string($0)
+                )
+            }
+        }
+        let snapshot = factSnapshot(
+            sessionIDs: [parent.id, sideChat.id, merged.id, unknown.id],
+            definitions: [definition],
+            facts: sessionProjectFacts + sessionBranchFacts + [
+                fact(
+                    ExtensionHostFactKey.projectRepositoryHost,
+                    subject: projectSubject,
+                    value: .string(repository.host)
+                ),
+                fact(
+                    ExtensionHostFactKey.projectRepositoryPath,
+                    subject: projectSubject,
+                    value: .string(repository.path)
+                ),
+                fact(
+                    key,
+                    subject: .repositoryBranch(
+                        repository: repository,
+                        branch: "feature/open"
+                    ),
+                    value: .string("1-open"),
+                    label: "Open"
+                ),
+                fact(
+                    key,
+                    subject: .repositoryBranch(
+                        repository: repository,
+                        branch: "feature/merged"
+                    ),
+                    value: .string("2-merged"),
+                    label: "Merged"
+                ),
+            ]
+        )
+
+        let roots = SidebarTreeBuilder.rootNodes(
+            from: [source],
+            optionValues: optionValues(groupByFact: key),
+            factSnapshot: snapshot
+        )
+        let node = try XCTUnwrap(roots.first as? ProjectNode)
+        let groups = node.childNodes.compactMap { $0 as? RegisteredFactGroupNode }
+
+        XCTAssertEqual(groups.map(\.title), ["Open", "Merged", "Unknown"])
+        XCTAssertEqual(groups[0].sessionNodes.map(\.sessionID), [parent.id])
+        XCTAssertEqual(groups[0].sessionNodes.first?.childNodes.map(\.sessionID), [sideChat.id])
+        XCTAssertEqual(groups[1].sessionNodes.map(\.sessionID), [merged.id])
+        XCTAssertEqual(groups[2].sessionNodes.map(\.sessionID), [unknown.id])
+        XCTAssertTrue(node.childNodes.compactMap { $0 as? BranchGroupNode }.isEmpty)
+        XCTAssertEqual((node.childNodes.last as? TerminalNode)?.terminalID, shell.id)
+    }
+
+    func testRegisteredFactSortIsPrimaryUsesStaticTieBreakAndKeepsMissingLast() {
+        let key = ExtensionFactKey(id: "example.score")
+        let definition = ExtensionFactDefinition(
+            key: key,
+            displayName: "Score",
+            valueType: .integer,
+            subjectKinds: [.session],
+            usages: [.sortable]
+        )
+        let zulu = session("Zulu")
+        let bravo = session("Bravo")
+        let alpha = session("Alpha")
+        let missing = session("Aaron")
+        let sessions = [zulu, bravo, alpha, missing]
+        let snapshot = factSnapshot(
+            sessionIDs: sessions.map(\.id),
+            definitions: [definition],
+            facts: [
+                fact(key, subject: .session(zulu.id.uuidString.lowercased()), value: .integer(2)),
+                fact(key, subject: .session(bravo.id.uuidString.lowercased()), value: .integer(1)),
+                fact(key, subject: .session(alpha.id.uuidString.lowercased()), value: .integer(1)),
+            ]
+        )
+        let source = project("p", sessions: sessions)
+
+        let ascending = SidebarTreeBuilder.rootNodes(
+            from: [source],
+            optionValues: optionValues(order: .name, sortByFact: key),
+            factSnapshot: snapshot
+        )
+        let descending = SidebarTreeBuilder.rootNodes(
+            from: [source],
+            optionValues: optionValues(order: .name, reversed: true, sortByFact: key),
+            factSnapshot: snapshot
+        )
+
+        XCTAssertEqual(allSessionIDs(in: ascending), [alpha.id, bravo.id, zulu.id, missing.id])
+        XCTAssertEqual(allSessionIDs(in: descending), [zulu.id, bravo.id, alpha.id, missing.id])
+    }
+
+    func testPinnedSessionsLeadARegisteredFactSort() {
+        let key = ExtensionFactKey(id: "example.score")
+        let pinnedHigh = session("Pinned", isPinned: true)
+        let unpinnedLow = session("Unpinned")
+        let snapshot = factSnapshot(
+            sessionIDs: [pinnedHigh.id, unpinnedLow.id],
+            definitions: [ExtensionFactDefinition(
+                key: key,
+                displayName: "Score",
+                valueType: .integer,
+                subjectKinds: [.session],
+                usages: [.sortable]
+            )],
+            facts: [
+                fact(
+                    key,
+                    subject: .session(pinnedHigh.id.uuidString.lowercased()),
+                    value: .integer(99)
+                ),
+                fact(
+                    key,
+                    subject: .session(unpinnedLow.id.uuidString.lowercased()),
+                    value: .integer(1)
+                ),
+            ]
+        )
+
+        let roots = SidebarTreeBuilder.rootNodes(
+            from: [project("p", sessions: [unpinnedLow, pinnedHigh])],
+            optionValues: optionValues(sortByFact: key),
+            factSnapshot: snapshot
+        )
+
+        XCTAssertEqual(allSessionIDs(in: roots), [pinnedHigh.id, unpinnedLow.id])
+    }
+
+    func testUnavailableRegisteredFactsDegradeToUnknownGroupingAndStaticSort() throws {
+        let key = ExtensionFactKey(id: "missing.fact")
+        let bravo = session("Bravo")
+        let alpha = session("Alpha")
+        let source = project("p", sessions: [bravo, alpha])
+        let snapshot = factSnapshot(
+            sessionIDs: [bravo.id, alpha.id],
+            definitions: [],
+            facts: []
+        )
+
+        let grouped = SidebarTreeBuilder.rootNodes(
+            from: [source],
+            optionValues: optionValues(order: .name, groupByFact: key),
+            factSnapshot: snapshot
+        )
+        let groupedProject = try XCTUnwrap(grouped.first as? ProjectNode)
+        let group = try XCTUnwrap(groupedProject.childNodes.first as? RegisteredFactGroupNode)
+        XCTAssertEqual(group.title, "Unknown")
+        XCTAssertEqual(group.sessionNodes.map(\.sessionID), [alpha.id, bravo.id])
+
+        let sorted = SidebarTreeBuilder.rootNodes(
+            from: [source],
+            optionValues: optionValues(order: .name, sortByFact: key),
+            factSnapshot: snapshot
+        )
+        XCTAssertEqual(allSessionIDs(in: sorted), [alpha.id, bravo.id])
+    }
+
+    func testSelectedRegisteredFactEdgesCoalesceIntoOneProjectLocalSnapshotPatch() throws {
+        let key = ExtensionFactKey(id: "example.live-group")
+        let definition = ExtensionFactDefinition(
+            key: key,
+            displayName: "Live group",
+            valueType: .string,
+            subjectKinds: [.session],
+            usages: [.groupable]
+        )
+        let alpha = session("Alpha")
+        let bravo = session("Bravo")
+        let stored = project("p", sessions: [alpha, bravo])
+        var currentSnapshot = factSnapshot(
+            sessionIDs: [alpha.id, bravo.id],
+            definitions: [definition],
+            facts: [
+                fact(key, subject: .session(alpha.id.uuidString.lowercased()), value: .string("a")),
+                fact(key, subject: .session(bravo.id.uuidString.lowercased()), value: .string("b")),
+            ]
+        )
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-sidebar-fact-edge-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+
+        try withDefault(
+            NativeSidebarPipelineOptions.registeredFactWire(key),
+            forKey: "nativeSidebarGroupByFact"
+        ) {
+            var snapshotReads = 0
+            var patchReads = 0
+            let controller = ProjectSidebarViewController(
+                projectStore: ProjectStore(stateManager: manager),
+                factSnapshotProvider: { requested in
+                    XCTAssertEqual(requested, [key])
+                    snapshotReads += 1
+                    return currentSnapshot
+                },
+                factSnapshotPatchProvider: { _, cells, requested in
+                    XCTAssertEqual(requested, [key])
+                    XCTAssertEqual(cells, [
+                        .init(subject: .session(alpha.id.uuidString.lowercased()), key: key),
+                        .init(subject: .session(bravo.id.uuidString.lowercased()), key: key),
+                    ])
+                    patchReads += 1
+                    return ExtensionFactSnapshotPatch(
+                        snapshot: currentSnapshot,
+                        affectedSourceSessionIDs: [
+                            alpha.id.uuidString.lowercased(),
+                            bravo.id.uuidString.lowercased(),
+                        ]
+                    )
+                }
+            )
+            _ = controller.view
+            XCTAssertEqual(snapshotReads, 1)
+            XCTAssertEqual(
+                controller.presentedRowKeys,
+                [
+                    .project(stored.id),
+                    .registeredFactGroup(stored.id, key, .string("a")),
+                    .session(alpha.id),
+                    .registeredFactGroup(stored.id, key, .string("b")),
+                    .session(bravo.id),
+                ]
+            )
+            controller.select(sessionID: alpha.id, notifyDelegate: false)
+            XCTAssertEqual(controller.selectedSessionID, alpha.id)
+
+            currentSnapshot = factSnapshot(
+                sessionIDs: [alpha.id, bravo.id],
+                definitions: [definition],
+                facts: [
+                    fact(
+                        key,
+                        subject: .session(alpha.id.uuidString.lowercased()),
+                        value: .string("c")
+                    ),
+                    fact(
+                        key,
+                        subject: .session(bravo.id.uuidString.lowercased()),
+                        value: .string("d")
+                    ),
+                ]
+            )
+            NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([
+                .init(subject: .session(alpha.id.uuidString.lowercased()), key: key),
+            ])))
+            NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([
+                .init(subject: .session(bravo.id.uuidString.lowercased()), key: key),
+            ])))
+            let delivered = expectation(description: "registered fact edge delivered")
+            DispatchQueue.main.async { delivered.fulfill() }
+            wait(for: [delivered], timeout: 1)
+
+            XCTAssertEqual(snapshotReads, 1)
+            XCTAssertEqual(patchReads, 1)
+            XCTAssertEqual(
+                controller.presentedRowKeys,
+                [
+                    .project(stored.id),
+                    .registeredFactGroup(stored.id, key, .string("c")),
+                    .session(alpha.id),
+                    .registeredFactGroup(stored.id, key, .string("d")),
+                    .session(bravo.id),
+                ]
+            )
+            XCTAssertEqual(controller.selectedSessionID, alpha.id)
+        }
     }
 
     /// The main window passes through toolbar and saved-frame layouts before it is shown. A
@@ -1521,17 +1884,40 @@ final class SidebarTreeBuilderTests: XCTestCase {
         )
 
         let defaults = UserDefaults.standard
+        let registeredFactSetting = ProcessInfo.processInfo.environment[
+            "THREADING_SIDEBAR_STRESS_REGISTERED_FACT"
+        ]
+        let registeredFactMode = registeredFactSetting == "group" ? "group"
+            : (registeredFactSetting == "1" || registeredFactSetting == "sort" ? "sort" : "none")
+        let usesRegisteredFact = registeredFactMode != "none"
+        let registeredFactKey = ExtensionFactKey(id: "stress.dynamic-rank")
         let stressOrder = ProcessInfo.processInfo.environment["THREADING_SIDEBAR_STRESS_ORDER"]
             .flatMap(SidebarSessionOrder.init(rawValue:))
             ?? .manual
-        let deterministicDefaults: [(String, Any)] = [
+        var deterministicDefaults: [(String, Any)] = [
             ("sidebarSessionOrder", stressOrder.rawValue),
             ("groupsSessionsByBranch", true),
             ("groupsLoneBranches", true)
         ]
-        let previousDefaults = deterministicDefaults.map { key, _ in
+        if usesRegisteredFact {
+            deterministicDefaults.append((
+                registeredFactMode == "group"
+                    ? "nativeSidebarGroupByFact"
+                    : "nativeSidebarSortByFact",
+                NativeSidebarPipelineOptions.registeredFactWire(registeredFactKey)
+            ))
+        }
+        let preferenceKeys = Set(
+            deterministicDefaults.map(\.0) + [
+                "nativeSidebarGroupByFact",
+                "nativeSidebarSortByFact",
+            ]
+        )
+        let previousDefaults = preferenceKeys.map { key in
             (key, defaults.object(forKey: key))
         }
+        defaults.removeObject(forKey: "nativeSidebarGroupByFact")
+        defaults.removeObject(forKey: "nativeSidebarSortByFact")
         for (key, value) in deterministicDefaults { defaults.set(value, forKey: key) }
         defer {
             for (key, value) in previousDefaults {
@@ -1565,6 +1951,29 @@ final class SidebarTreeBuilderTests: XCTestCase {
             sessionsPerProject: sessionsPerProject,
             directory: directory
         )
+        let registeredFactSnapshot: ExtensionFactSnapshot? = if usesRegisteredFact {
+            factSnapshot(
+                sessionIDs: fixture.projects.flatMap(\.sessions).map(\.id),
+                definitions: [ExtensionFactDefinition(
+                    key: registeredFactKey,
+                    displayName: "Dynamic rank",
+                    valueType: registeredFactMode == "group" ? .date : .integer,
+                    subjectKinds: [.session],
+                    usages: registeredFactMode == "group" ? [.groupable] : [.sortable]
+                )],
+                facts: fixture.projects.flatMap(\.sessions).enumerated().map { offset, session in
+                    fact(
+                        registeredFactKey,
+                        subject: .session(session.id.uuidString.lowercased()),
+                        value: registeredFactMode == "group"
+                            ? .date(Date(timeIntervalSinceReferenceDate: TimeInterval(offset)))
+                            : .integer(Int64(offset % 17))
+                    )
+                }
+            )
+        } else {
+            nil
+        }
         let manager = StateManager(appSupportDirectory: directory)
         // This opt-in workload deletes its isolated store on return. Close SQLite first: unlinking
         // the WAL underneath a live connection is an API violation and can crash xctest while
@@ -1577,6 +1986,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
         // zero-sized standalone view measured a transient layout the product deliberately avoids.
         let controller = ProjectSidebarViewController(
             projectStore: store,
+            factSnapshotProvider: { _ in registeredFactSnapshot },
             defersInitialTreeMount: true
         )
 
@@ -1649,7 +2059,10 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let churnElapsed = DispatchTime.now().uptimeNanoseconds - churnStarted
 
         let treeStarted = DispatchTime.now().uptimeNanoseconds
-        let roots = SidebarTreeBuilder.rootNodes(from: store.projects)
+        let roots = SidebarTreeBuilder.rootNodes(
+            from: store.projects,
+            factSnapshot: registeredFactSnapshot
+        )
         let treeElapsed = DispatchTime.now().uptimeNanoseconds - treeStarted
 
         // Remote Start is one durable row plus one project-local outline insertion. Keep the
@@ -1812,6 +2225,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
         var performanceLine =
             "THREADING_PERF project-sidebar "
                 + "order=\(stressOrder.rawValue) "
+                + "registered_fact=\(registeredFactMode) "
                 + "projects=\(projectCount) sessions=\(projectCount * sessionsPerProject) "
                 + "rows=\(controller.outlineRowCount) "
                 + "instantiated=\(controller.instantiatedRowCount) "

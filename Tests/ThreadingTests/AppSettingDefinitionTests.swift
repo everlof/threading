@@ -168,6 +168,14 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "sidebarSessionOrderIsReversed",
                 valueType: .boolean
             ),
+            .nativeSidebarGroupByFact: .init(
+                key: "nativeSidebarGroupByFact",
+                valueType: .string
+            ),
+            .nativeSidebarSortByFact: .init(
+                key: "nativeSidebarSortByFact",
+                valueType: .string
+            ),
             .promptReturnKey: .init(key: "promptReturnKey", valueType: .string),
             .discoversProjectIcons: .init(key: "discoversProjectIcons", valueType: .boolean),
             .discoversAccountAvatars: .init(key: "discoversAccountAvatars", valueType: .boolean),

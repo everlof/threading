@@ -4196,9 +4196,31 @@ expanded or addressable.
 `scripts/profile_threading.sh sidebar-stress` runs manual order at 500, 1,000, 2,000 and 5,000
 sessions, plus recent-activity, name and type order at 5,000, in fresh `xctest` processes.
 `THREADING_SIDEBAR_STRESS_ORDER`, `..._PROJECTS`, and `..._SESSIONS` narrow it to one point. The
-profiler's DerivedData lives inside that run's artifact directory: parallel developer builds cannot
-lock its build database, while the deterministic workloads in `full` reuse the same isolated
+optional `THREADING_SIDEBAR_STRESS_REGISTERED_FACT=sort` layer selects a registered integer fact as
+the primary sort; `group` uses 5,000 distinct date buckets to cover heading format and allocation.
+The compatibility spelling `1` means `sort`, and each run labels the mode in `registered_fact`.
+The profiler's DerivedData lives inside that run's artifact directory: parallel developer builds
+cannot lock its build database, while the deterministic workloads in `full` reuse the same isolated
 build. Results are `THREADING_PERF project-sidebar` lines in `project-sidebar-stress.log`.
+
+### Registered-fact arrangement envelope, 2026-09-07
+
+The hostile grouping point gives every one of 5,000 sessions a distinct date, so it measures the
+maximum extra heading count as well as date-label formatting. A current Debug bundle at 50 projects
+× 100 sessions produced:
+
+| Registered fact | Logical rows | Materialized cells | Cold reload | Tree | Shape | Indexes | Outline | Same-shape refresh |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Integer sort | 5,299 | 45 | 121.6 ms | 83.2 ms | 10.5 ms | 13.7 ms | 13.5 ms | 125.5 ms |
+| Unique-date group | 9,849 | 23 | 216.6 ms | 99.9 ms | 41.2 ms | 25.4 ms | 48.1 ms | 209.6 ms |
+
+Both runs passed the production selection, disclosure, mutation and exact-row assertions. The
+5,000-session Debug regression envelope is **150 ms** for registered sorting, **250 ms** for the
+deliberately maximum-cardinality grouping, and at most **64 materialized cells** for either. The
+group bound accepts one rare, explicit arrangement or provider-catalogue pause while keeping it
+below the retained whole-graph persistence comparison; exact value edges must instead patch the
+frozen fact snapshot and rebuild only the reached project's subtree. A result outside these bounds
+requires another measured repair or an explicit product decision before widening the envelope.
 
 At 5,000 sessions the outline contains 5,120 logical rows but materializes only 23 cells, so row-view
 virtualization is already doing its job. The measured fixes are above that layer:

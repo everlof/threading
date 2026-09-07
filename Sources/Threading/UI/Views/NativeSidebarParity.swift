@@ -6,6 +6,8 @@ enum NativeSidebarOptionDependency: String, CaseIterable, Sendable {
     case branchGrouping
     case loneBranchHeadings
     case compactTree
+    case groupByFact
+    case sortByFact
 }
 
 /// State Threading must keep host-owned when navigator content is customizable.
@@ -22,6 +24,7 @@ enum NativeSidebarHostDependency: String, CaseIterable, Sendable {
     case transientExclusion
     case customizationPresentation
     case identityPresentation
+    case registeredFactResolution
     /// Local filesystem and shared-git-directory context that cannot cross the extension boundary.
     case localRepositoryContext
 }
@@ -34,6 +37,7 @@ enum NativeSidebarHostProviderAlias: String, CaseIterable, Sendable {
     case accountIcon = "ExtensionIdentityResolverProviderSlot.accountIcon"
     case extensionImage = "ExtensionManager.imageResourceURL"
     case accountDiscovery = "AgentAccountDiscovery.account"
+    case registeredFactEligibility = "ExtensionFactRegistry.isRegisteredFactDefinitionEligible"
 }
 
 /// A host preference read that supplies one exact navigator option.
@@ -43,6 +47,8 @@ enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
     case branchGrouping = "AppSettings.groupsSessionsByBranch"
     case loneBranchHeadings = "AppSettings.groupsLoneBranches"
     case compactTree = "AppSettings.compactsSidebarTree"
+    case groupByFact = "AppSettings.nativeSidebarGroupByFact"
+    case sortByFact = "AppSettings.nativeSidebarSortByFact"
 }
 
 /// A scalar entry input or static host service that must remain host-owned.
@@ -55,6 +61,8 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case projectNodeIdentity = "SidebarTreeBuilder.projectNode.projectID"
     case projectNodeVisibility = "SidebarTreeBuilder.projectNode.visibility"
     case projectNodeExclusions = "SidebarTreeBuilder.projectNode.excludingSessionIDs"
+    case rootFactSnapshot = "SidebarTreeBuilder.rootNodes.factSnapshot"
+    case projectNodeFactSnapshot = "SidebarTreeBuilder.projectNode.factSnapshot"
     case repositoryIdentity = "GitInfo.repositoryIdentity"
     case repositoryName = "GitInfo.repositoryName"
     case worktreeLocation = "GitInfo.worktreeLocation"
@@ -67,8 +75,10 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
 /// lets the boundary checker derive accepted fact names from `HostFactCatalog`, with no parallel
 /// Python or JSON field allowlist.
 enum NativeSidebarParity {
-    /// Every native option dependency is the implementation of one public option declaration.
-    /// The parity lint checks both sides are total and one-to-one.
+    /// Every native option dependency has one public-shaped declaration and durable owner.
+    /// `NativeSidebarPipelineOptionsTests` checks this map is total and one-to-one; the source
+    /// parity lint separately enforces the reads below. Native still layers its host-only
+    /// interaction invariants — notably pin precedence — over those option values.
     static let publicOptionOwnership: [
         NativeSidebarOptionDependency: NativeSidebarPipelineOptionID
     ] = [
@@ -77,6 +87,8 @@ enum NativeSidebarParity {
         .branchGrouping: .branchGrouping,
         .loneBranchHeadings: .loneBranchHeadings,
         .compactTree: .compactTree,
+        .groupByFact: .groupByFact,
+        .sortByFact: .sortByFact,
     ]
 
     static let optionSourceOwnership: [
@@ -87,6 +99,8 @@ enum NativeSidebarParity {
         .branchGrouping: .branchGrouping,
         .loneBranchHeadings: .loneBranchHeadings,
         .compactTree: .compactTree,
+        .groupByFact: .groupByFact,
+        .sortByFact: .sortByFact,
     ]
 
     static let hostInputOwnership: [
@@ -100,6 +114,8 @@ enum NativeSidebarParity {
         .projectNodeIdentity: .entityIdentity,
         .projectNodeVisibility: .visibilityScope,
         .projectNodeExclusions: .transientExclusion,
+        .rootFactSnapshot: .registeredFactResolution,
+        .projectNodeFactSnapshot: .registeredFactResolution,
         .repositoryIdentity: .localRepositoryContext,
         .repositoryName: .localRepositoryContext,
         .worktreeLocation: .localRepositoryContext,
@@ -115,16 +131,17 @@ enum NativeSidebarParity {
         .accountIcon: .identityPresentation,
         .extensionImage: .identityPresentation,
         .accountDiscovery: .identityPresentation,
+        .registeredFactEligibility: .registeredFactResolution,
     ]
 
     @inline(__always)
-    static func fact<Value>(_ dependency: NativeSidebarFactDependency, _ value: Value) -> Value {
+    static func fact<Value>(_: NativeSidebarFactDependency, _ value: Value) -> Value {
         value
     }
 
     @inline(__always)
     static func facts<Value>(
-        _ dependencies: [NativeSidebarFactDependency],
+        _: [NativeSidebarFactDependency],
         _ value: Value
     ) -> Value {
         value
@@ -132,14 +149,14 @@ enum NativeSidebarParity {
 
     @inline(__always)
     static func option<Value>(
-        _ dependency: NativeSidebarOptionDependency,
+        _: NativeSidebarOptionDependency,
         _ value: Value
     ) -> Value {
         value
     }
 
     @inline(__always)
-    static func host<Value>(_ dependency: NativeSidebarHostDependency, _ value: Value) -> Value {
+    static func host<Value>(_: NativeSidebarHostDependency, _ value: Value) -> Value {
         value
     }
 }

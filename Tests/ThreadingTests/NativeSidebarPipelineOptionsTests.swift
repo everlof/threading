@@ -1,6 +1,6 @@
+@testable import Threading
 import ThreadingExtensionKit
 import XCTest
-@testable import Threading
 
 @MainActor
 final class NativeSidebarPipelineOptionsTests: XCTestCase {
@@ -33,12 +33,42 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
             ]
         )
 
-        guard case .choice(_, let orders) = declarations[0].control else {
+        guard case let .choice(_, orders) = declarations[0].control else {
             return XCTFail("session-order must be a bounded choice")
         }
         XCTAssertEqual(
             orders.map(\.id),
             ["order-added", "recent-activity", "name", "type"]
+        )
+
+        XCTAssertEqual(
+            NativeSidebarPipelineOptions.registeredFactDeclarations.map(\.id),
+            ["group-by-fact", "sort-by-fact"]
+        )
+        let title = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionTitle
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "native-contract-probe",
+            title: "Native",
+            root: .content(.status("Native", role: .neutral)),
+            options: declarations,
+            pipeline: .init(
+                consumes: [.init(key: title.key, requirement: .required)],
+                registeredFactOptions: NativeSidebarPipelineOptions.registeredFactDeclarations,
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(title, facet: .value, fallback: "Untitled"),
+                        role: .body
+                    )
+                )
+            )
+        )
+        XCTAssertTrue(
+            navigator.validationIssues(path: "navigator").filter {
+                $0.path.contains(".registeredFactOptions")
+            }.isEmpty
         )
     }
 
@@ -110,5 +140,17 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
             NativeSidebarPipelineOptions.current.jsonValues["session-order"],
             .string("recent-activity")
         )
+    }
+
+    func testRegisteredFactSelectionHasAValidatedStableRoundTrip() {
+        let valid = ExtensionFactKey(id: "gitlab.mr.state", version: 1)
+        XCTAssertEqual(NativeSidebarPipelineOptions.registeredFactWire(valid), "gitlab.mr.state@1")
+        XCTAssertEqual(
+            NativeSidebarPipelineOptions.selectedRegisteredFact(from: "gitlab.mr.state@1"),
+            valid
+        )
+        XCTAssertNil(NativeSidebarPipelineOptions.selectedRegisteredFact(from: "invalid"))
+        XCTAssertNil(NativeSidebarPipelineOptions.selectedRegisteredFact(from: "GitLab@1"))
+        XCTAssertNil(NativeSidebarPipelineOptions.selectedRegisteredFact(from: "gitlab.mr.state@0"))
     }
 }

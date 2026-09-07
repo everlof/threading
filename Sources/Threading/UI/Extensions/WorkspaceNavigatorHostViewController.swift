@@ -1,6 +1,71 @@
 import AppKit
 import ThreadingExtensionKit
 
+@MainActor
+func workspaceNavigatorRegisteredFactMenuEntry(
+    option: ExtensionWorkspaceNavigatorRegisteredFactOption,
+    selectedKey: ExtensionFactKey?,
+    choices: [WorkspaceNavigatorRegisteredFactChoice],
+    onSelect: @escaping (ExtensionFactKey?) -> Void
+) -> ThemedMenuEntry {
+    let selectedChoice = selectedKey.flatMap { key in
+        choices.first { $0.key == key }
+    }
+    let subtitle: String = switch selectedChoice {
+    case .available(let definition): definition.displayName
+    case .unavailable(let key): workspaceNavigatorUnavailableFactTitle(key)
+    case nil: L10n.string("None")
+    }
+    return .item(ThemedMenuItem(
+        title: option.title,
+        subtitle: subtitle,
+        submenu: workspaceNavigatorRegisteredFactChoiceEntries(
+            selectedKey: selectedKey,
+            choices: choices,
+            includesNone: true,
+            onSelect: onSelect
+        )
+    ))
+}
+
+@MainActor
+func workspaceNavigatorRegisteredFactChoiceEntries(
+    selectedKey: ExtensionFactKey?,
+    choices: [WorkspaceNavigatorRegisteredFactChoice],
+    includesNone: Bool,
+    onSelect: @escaping (ExtensionFactKey?) -> Void
+) -> [ThemedMenuEntry] {
+    var entries: [ThemedMenuEntry] = includesNone ? [
+        .item(ThemedMenuItem(
+            title: L10n.string("None"),
+            isSelected: selectedKey == nil,
+            onChoose: { onSelect(nil) }
+        )),
+    ] : []
+    entries.append(contentsOf: choices.map { choice in
+        switch choice {
+        case .available(let definition):
+            .item(ThemedMenuItem(
+                title: definition.displayName,
+                isSelected: definition.key == selectedKey,
+                onChoose: { onSelect(definition.key) }
+            ))
+        case .unavailable(let key):
+            .item(ThemedMenuItem(
+                title: workspaceNavigatorUnavailableFactTitle(key),
+                isSelected: key == selectedKey,
+                isEnabled: false
+            ))
+        }
+    })
+    return entries
+}
+
+@MainActor
+func workspaceNavigatorUnavailableFactTitle(_ key: ExtensionFactKey) -> String {
+    L10n.format("%@ (Unavailable)", "\(key.id)@\(key.version)")
+}
+
 enum WorkspaceNavigatorIntentDispatchResult: Equatable {
     case accepted
     case targetUnavailable
@@ -430,51 +495,14 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         case .sort: .sortable
         }
         let choices = registeredFactChoicesProvider(usage, selectedKey)
-        let selectedChoice = selectedKey.flatMap { key in
-            choices.first { $0.key == key }
-        }
-        let subtitle: String = switch selectedChoice {
-        case .available(let definition): definition.displayName
-        case .unavailable(let key): unavailableRegisteredFactTitle(key)
-        case nil: L10n.string("None")
-        }
-
-        var submenu: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: L10n.string("None"),
-                isSelected: selectedKey == nil,
-                onChoose: { [weak self] in
-                    self?.setRegisteredFactSelection(option, key: nil)
-                }
-            )),
-        ]
-        submenu.append(contentsOf: choices.map { choice in
-            switch choice {
-            case .available(let definition):
-                return .item(ThemedMenuItem(
-                    title: definition.displayName,
-                    isSelected: definition.key == selectedKey,
-                    onChoose: { [weak self] in
-                        self?.setRegisteredFactSelection(option, key: definition.key)
-                    }
-                ))
-            case .unavailable(let key):
-                return .item(ThemedMenuItem(
-                    title: unavailableRegisteredFactTitle(key),
-                    isSelected: key == selectedKey,
-                    isEnabled: false
-                ))
+        return workspaceNavigatorRegisteredFactMenuEntry(
+            option: option,
+            selectedKey: selectedKey,
+            choices: choices,
+            onSelect: { [weak self] key in
+                self?.setRegisteredFactSelection(option, key: key)
             }
-        })
-        return .item(ThemedMenuItem(
-            title: option.title,
-            subtitle: subtitle,
-            submenu: submenu
-        ))
-    }
-
-    private func unavailableRegisteredFactTitle(_ key: ExtensionFactKey) -> String {
-        L10n.format("%@ (Unavailable)", "\(key.id)@\(key.version)")
+        )
     }
 
     private func setPipelineOption(

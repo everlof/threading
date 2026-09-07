@@ -677,6 +677,39 @@ final class AppSettings {
         }
     }
 
+    /// Host-owned wires for Native's registered-fact controls. The extension fact key codec
+    /// lives with the native navigator adapter, keeping the settings layer independent of the
+    /// extension SDK while these descriptors remain the single durable persistence authority.
+    nonisolated static var nativeSidebarGroupByFact: String? {
+        AppSettingDefinitions.nativeSidebarGroupByFact.read(from: .standard)
+    }
+
+    var nativeSidebarGroupByFact: String? {
+        get { Self.nativeSidebarGroupByFact }
+        set {
+            if let newValue {
+                AppSettingDefinitions.nativeSidebarGroupByFact.write(newValue, to: defaults)
+            } else {
+                AppSettingDefinitions.nativeSidebarGroupByFact.remove(from: defaults)
+            }
+        }
+    }
+
+    nonisolated static var nativeSidebarSortByFact: String? {
+        AppSettingDefinitions.nativeSidebarSortByFact.read(from: .standard)
+    }
+
+    var nativeSidebarSortByFact: String? {
+        get { Self.nativeSidebarSortByFact }
+        set {
+            if let newValue {
+                AppSettingDefinitions.nativeSidebarSortByFact.write(newValue, to: defaults)
+            } else {
+                AppSettingDefinitions.nativeSidebarSortByFact.remove(from: defaults)
+            }
+        }
+    }
+
     // MARK: - Composer
 
     /// Read at the keystroke rather than at setup: the Settings window sits *beside* the

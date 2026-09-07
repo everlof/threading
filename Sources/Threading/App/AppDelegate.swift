@@ -2754,13 +2754,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // The arrangement toggles carry state, so their checks are stamped here — validation
         // runs on every menu open, which is the one moment the check has to be true.
         if menuItem.action == #selector(toggleBranchGrouping) {
-            menuItem.state = NativeSidebarPipelineOptions.branchGrouping ? .on : .off
+            let values = NativeSidebarPipelineOptions.current
+            menuItem.state = values.groupByFact == nil && values.branchGrouping ? .on : .off
             return true
         }
         if menuItem.action == #selector(toggleLoneBranchHeadings) {
-            menuItem.state = NativeSidebarPipelineOptions.loneBranchHeadings ? .on : .off
+            let values = NativeSidebarPipelineOptions.current
+            menuItem.state = values.loneBranchHeadings ? .on : .off
             // The refinement has nothing to refine while grouping is off.
-            return NativeSidebarPipelineOptions.branchGrouping
+            return values.groupByFact == nil && values.branchGrouping
         }
         if menuItem.action == #selector(toggleCompactTree) {
             menuItem.state = NativeSidebarPipelineOptions.compactTree ? .on : .off
@@ -2995,7 +2997,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return .unavailable(L10n.string("There is no next location."))
             }
         case AppCommands.ID.loneBranchHeadings:
-            guard NativeSidebarPipelineOptions.branchGrouping else {
+            let values = NativeSidebarPipelineOptions.current
+            guard values.groupByFact == nil, values.branchGrouping else {
                 return .unavailable(L10n.string("Turn on Group Sessions by Branch first."))
             }
         case AppCommands.ID.previousTab, AppCommands.ID.nextTab:
@@ -3182,8 +3185,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.openIn: mainWindowController?.openInPreferredApp()
         case AppCommands.ID.toggleSidebar: mainWindowController?.toggleSidebar()
         case AppCommands.ID.groupByBranch:
-            NativeSidebarPipelineOptions.toggleBranchGrouping()
-            NotificationCenter.default.post(ProjectsDidChange())
+            if NativeSidebarPipelineOptions.current.groupByFact != nil {
+                NativeSidebarPipelineOptions.setBranchGrouping(true)
+                NativeSidebarPipelineOptions.setRegisteredFactSelection(nil, for: .groupByFact)
+            } else {
+                NativeSidebarPipelineOptions.toggleBranchGrouping()
+                NotificationCenter.default.post(ProjectsDidChange())
+            }
         case AppCommands.ID.loneBranchHeadings:
             NativeSidebarPipelineOptions.toggleLoneBranchHeadings()
             NotificationCenter.default.post(ProjectsDidChange())

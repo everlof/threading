@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
@@ -228,6 +229,35 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertEqual(grouping.state, .on)
         XCTAssertTrue(delegate.validateMenuItem(lone))
         XCTAssertEqual(lone.state, .on)
+
+        // A registered grouping supersedes the latent branch preference. The legacy View item
+        // therefore reads off, and invoking it means "switch to Branch" rather than toggling
+        // that hidden preference off and accidentally landing on no grouping.
+        let factPreferenceKey = "nativeSidebarGroupByFact"
+        let previousFactPreference = UserDefaults.standard.object(forKey: factPreferenceKey)
+        UserDefaults.standard.set(
+            NativeSidebarPipelineOptions.registeredFactWire(
+                ExtensionFactKey(id: "example.group")
+            ),
+            forKey: factPreferenceKey
+        )
+        defer {
+            if let previousFactPreference {
+                UserDefaults.standard.set(previousFactPreference, forKey: factPreferenceKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: factPreferenceKey)
+            }
+        }
+        XCTAssertTrue(delegate.validateMenuItem(grouping))
+        XCTAssertEqual(grouping.state, .off)
+        XCTAssertFalse(delegate.validateMenuItem(lone))
+        XCTAssertTrue(NSApp.sendAction(
+            try XCTUnwrap(grouping.action),
+            to: grouping.target,
+            from: grouping
+        ))
+        XCTAssertNil(NativeSidebarPipelineOptions.current.groupByFact)
+        XCTAssertTrue(NativeSidebarPipelineOptions.current.branchGrouping)
 
         // With grouping off the refinement validates false — disabled, not hidden.
         UserDefaults.standard.set(false, forKey: "groupsSessionsByBranch")

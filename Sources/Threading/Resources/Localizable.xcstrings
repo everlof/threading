@@ -7314,6 +7314,17 @@
         }
       }
     },
+    "Ascending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stigande"
+          }
+        }
+      }
+    },
     "Ask" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15693,6 +15704,17 @@
         }
       }
     },
+    "Descending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fallande"
+          }
+        }
+      }
+    },
     "Describe a task or ask a question" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20284,6 +20306,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gruppera konversationer efter gren"
+          }
+        }
+      }
+    },
+    "Group by" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gruppera efter"
           }
         }
       }
@@ -40105,6 +40138,17 @@
         }
       }
     },
+    "Sort by" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sortera efter"
+          }
+        }
+      }
+    },
     "Sort by Name" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49948,6 +49992,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Universalsökningens omfattning ändrades till %@."
+          }
+        }
+      }
+    },
+    "Unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Okänt"
           }
         }
       }

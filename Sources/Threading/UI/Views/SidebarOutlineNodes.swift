@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingExtensionKit
 
 // MARK: - Node Identity
 
@@ -16,6 +17,7 @@ enum SidebarNodeKey: Hashable {
     case repository(String)
     case project(ProjectID)
     case branch(ProjectID, String)
+    case registeredFactGroup(ProjectID, ExtensionFactKey, ExtensionFactValue?)
     case session(SessionID)
     case terminal(TerminalID)
 
@@ -43,7 +45,7 @@ struct SidebarNodeSubstitution {
     }
 }
 
-/// The four node types' shared surface: which row a node stands for, what hangs under it, and
+/// The outline node types' shared surface: which row a node stands for, what hangs under it, and
 /// how it takes over from the node a rebuild produced in its place.
 protocol SidebarOutlineNode: NSObject {
     var sidebarKey: SidebarNodeKey { get }
@@ -80,8 +82,8 @@ final class ProjectNode: NSObject {
     /// Standalone terminals owned by this project.
     var terminalNodes: [TerminalNode] = []
 
-    /// What the outline actually shows under the project: a `BranchGroupNode` where a
-    /// branch gathered several sessions, a bare `SessionNode` everywhere else.
+    /// What the outline actually shows under the project: the selected branch/fact grouping,
+    /// bare session rows where that grouping permits them, and standalone terminals.
     var childNodes: [NSObject] = [] {
         didSet { outlineChildren = nil }
     }
@@ -323,6 +325,59 @@ extension BranchGroupNode: SidebarOutlineNode {
     }
 }
 
+/// Gathers a project's top-level sessions by one selected public fact.
+///
+/// Unlike a branch group, this heading has no branch mutation or grouping controls. Its identity
+/// is the typed scalar bucket rather than its presentation label, so a provider may relabel a
+/// value without replacing the row or losing expansion state.
+final class RegisteredFactGroupNode: NSObject {
+    let projectID: ProjectID
+    let factKey: ExtensionFactKey
+    let value: ExtensionFactValue?
+    var title: String
+    var sessionNodes: [SessionNode] = [] {
+        didSet { outlineChildren = nil }
+    }
+    private var outlineChildren: NSArray?
+
+    init(
+        projectID: ProjectID,
+        factKey: ExtensionFactKey,
+        value: ExtensionFactValue?,
+        title: String
+    ) {
+        self.projectID = projectID
+        self.factKey = factKey
+        self.value = value
+        self.title = title
+    }
+}
+
+extension RegisteredFactGroupNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .registeredFactGroup(projectID, factKey, value) }
+    var sidebarChildren: [NSObject] { sessionNodes }
+    var sidebarOutlineChildCount: Int { materializedOutlineChildren.count }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        materializedOutlineChildren.object(at: index) as! NSObject
+    }
+
+    private var materializedOutlineChildren: NSArray {
+        if let outlineChildren { return outlineChildren }
+        let projected = NSArray(array: sessionNodes)
+        outlineChildren = projected
+        return projected
+    }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? RegisteredFactGroupNode else { return }
+        title = rebuilt.title
+        sessionNodes = rebuilt.sessionNodes.map(substituting.callAsFunction)
+    }
+}
+
 // MARK: - Tree Builder
 
 /// Which attention layer the authoritative project hierarchy presents. This filters session
@@ -359,7 +414,8 @@ enum SidebarTreeBuilder {
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
         at date: Date = Date(),
-        optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current
+        optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current,
+        factSnapshot: ExtensionFactSnapshot? = nil
     ) -> [NSObject] {
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
         let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
@@ -368,6 +424,10 @@ enum SidebarTreeBuilder {
             excludingSessionIDs
         )
         let evaluationDate = NativeSidebarParity.host(.clock, date)
+        let registeredFactSnapshot = NativeSidebarParity.host(
+            .registeredFactResolution,
+            factSnapshot
+        )
         let arranged = pinningScratchpad(classifiedProjects)
         // The scratchpad answers "no repository" for grouping even though it is one, which is
         // what keeps it out of a repository heading — and, just as importantly, keeps it from
@@ -408,7 +468,8 @@ enum SidebarTreeBuilder {
                 visibility: visibilityScope,
                 excludingSessionIDs: transientExclusions,
                 date: evaluationDate,
-                checkoutBranch: identity == nil ? nil : checkoutBranch(of: project)
+                checkoutBranch: identity == nil ? nil : checkoutBranch(of: project),
+                factSnapshot: registeredFactSnapshot
             )
 
             guard let identity else {
@@ -485,7 +546,8 @@ enum SidebarTreeBuilder {
         from projects: [Project],
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
-        optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current
+        optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current,
+        factSnapshot: ExtensionFactSnapshot? = nil
     ) -> ProjectNode? {
         let classifiedProjectID = NativeSidebarParity.host(.entityIdentity, projectID)
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
@@ -493,6 +555,10 @@ enum SidebarTreeBuilder {
         let transientExclusions = NativeSidebarParity.host(
             .transientExclusion,
             excludingSessionIDs
+        )
+        let registeredFactSnapshot = NativeSidebarParity.host(
+            .registeredFactResolution,
+            factSnapshot
         )
         guard let project = classifiedProjects.first(where: {
             NativeSidebarParity.host(.entityIdentity, $0.id) == classifiedProjectID
@@ -507,7 +573,8 @@ enum SidebarTreeBuilder {
             optionValues: optionValues,
             visibility: visibilityScope,
             excludingSessionIDs: transientExclusions,
-            checkoutBranch: checkoutBranch(of: project)
+            checkoutBranch: checkoutBranch(of: project),
+            factSnapshot: registeredFactSnapshot
         )
     }
 
@@ -553,7 +620,8 @@ enum SidebarTreeBuilder {
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
         date: Date = Date(),
-        checkoutBranch: String? = nil
+        checkoutBranch: String? = nil,
+        factSnapshot: ExtensionFactSnapshot? = nil
     ) -> ProjectNode {
         let order = optionValues.sessionOrder
         let isReversed = optionValues.sessionOrderReversed
@@ -570,7 +638,9 @@ enum SidebarTreeBuilder {
             isReversed: isReversed,
             visibility: visibility,
             excludingSessionIDs: excludingSessionIDs,
-            date: date
+            date: date,
+            registeredSortKey: optionValues.sortByFact,
+            factSnapshot: factSnapshot
         )
         node.sessionNodes = activeSessions.map {
             SessionNode(sessionID: NativeSidebarParity.host(.entityIdentity, $0.id))
@@ -595,7 +665,8 @@ enum SidebarTreeBuilder {
             terminals: terminals,
             terminalNodes: node.terminalNodes,
             optionValues: optionValues,
-            checkoutBranch: checkoutBranch
+            checkoutBranch: checkoutBranch,
+            factSnapshot: factSnapshot
         )
         return node
     }
@@ -613,7 +684,9 @@ enum SidebarTreeBuilder {
         isReversed: Bool,
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
-        date: Date = Date()
+        date: Date = Date(),
+        registeredSortKey: ExtensionFactKey? = nil,
+        factSnapshot: ExtensionFactSnapshot? = nil
     ) -> [AgentSession] {
         let active = sessions.filter {
             let isArchived = NativeSidebarParity.fact(.sessionArchived, $0.isArchived)
@@ -633,7 +706,13 @@ enum SidebarTreeBuilder {
                 if NativeSidebarParity.fact(.sessionPinned, session.isPinned) { count += 1 }
             }
             guard pinnedCount > 0 else {
-                return reversesSessions ? Array(active.reversed()) : active
+                let staticallyOrdered = reversesSessions ? Array(active.reversed()) : active
+                return dynamicallySortedSessions(
+                    staticallyOrdered,
+                    by: registeredSortKey,
+                    isReversed: isReversed,
+                    snapshot: factSnapshot
+                )
             }
 
             var pinned: [AgentSession] = []
@@ -652,7 +731,12 @@ enum SidebarTreeBuilder {
                 unpinned.reverse()
             }
             pinned.append(contentsOf: unpinned)
-            return pinned
+            return dynamicallySortedSessions(
+                pinned,
+                by: registeredSortKey,
+                isReversed: isReversed,
+                snapshot: factSnapshot
+            )
         }
 
         // Sort lightweight offsets rather than repeatedly moving the comparatively large
@@ -705,7 +789,65 @@ enum SidebarTreeBuilder {
             // indistinguishable rows from jittering; it is not part of the selected sort.
             return lhsOffset < rhsOffset
         }
-        return orderedOffsets.map { active[$0] }
+        return dynamicallySortedSessions(
+            orderedOffsets.map { active[$0] },
+            by: registeredSortKey,
+            isReversed: isReversed,
+            snapshot: factSnapshot
+        )
+    }
+
+    /// Applies the selected public fact ahead of Native's standing order. The latter has already
+    /// been reduced to stable ranks, so it becomes the exact static tie-break promised by the
+    /// registered-fact contract without re-reading titles, timestamps, defaults, or providers
+    /// from inside the comparator.
+    private static func dynamicallySortedSessions(
+        _ staticallyOrdered: [AgentSession],
+        by key: ExtensionFactKey?,
+        isReversed: Bool,
+        snapshot: ExtensionFactSnapshot?
+    ) -> [AgentSession] {
+        guard let key,
+              let snapshot,
+              let definition = snapshot.definition(for: key),
+              NativeSidebarParity.host(
+                  .registeredFactResolution,
+                  ExtensionFactRegistry.isRegisteredFactDefinitionEligible(
+                      definition,
+                      for: .sortable
+                  )
+              ) else { return staticallyOrdered }
+
+        let values = staticallyOrdered.map { session in
+            snapshot.fact(
+                key,
+                for: .session(
+                    NativeSidebarParity.host(.entityIdentity, session.id)
+                        .uuidString.lowercased()
+                )
+            )?.fact.value
+        }
+        let pinned = staticallyOrdered.map {
+            NativeSidebarParity.fact(.sessionPinned, $0.isPinned)
+        }
+        let offsets = staticallyOrdered.indices.sorted { lhsOffset, rhsOffset in
+            if pinned[lhsOffset] != pinned[rhsOffset] {
+                return pinned[lhsOffset]
+            }
+            switch (values[lhsOffset], values[rhsOffset]) {
+            case (nil, nil):
+                return lhsOffset < rhsOffset
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            case let (.some(lhsValue), .some(rhsValue)):
+                let comparison = compareExtensionFactValues(lhsValue, rhsValue)
+                guard comparison != 0 else { return lhsOffset < rhsOffset }
+                return isReversed ? comparison > 0 : comparison < 0
+            }
+        }
+        return offsets.map { staticallyOrdered[$0] }
     }
 
     /// The rows that must be open for a session's row to exist at all, outermost first.
@@ -751,7 +893,7 @@ enum SidebarTreeBuilder {
         return []
     }
 
-    /// What the outline view shows under a node. The four node types' differing child
+    /// What the outline view shows under a node. The node types' differing child
     /// properties are reconciled by `SidebarOutlineNode`; anything else has no children.
     static func children(of node: NSObject) -> [NSObject] {
         (node as? any SidebarOutlineNode)?.sidebarChildren ?? []
@@ -848,11 +990,25 @@ enum SidebarTreeBuilder {
         terminals: [ProjectTerminal],
         terminalNodes: [TerminalNode],
         optionValues: NativeSidebarPipelineOptionValues,
-        checkoutBranch: String? = nil
+        checkoutBranch: String? = nil,
+        factSnapshot: ExtensionFactSnapshot? = nil
     ) -> [NSObject] {
         let order = optionValues.sessionOrder
         let isReversed = optionValues.sessionOrderReversed
         let terminalsFirst = order == .type && isReversed
+        if let key = optionValues.groupByFact {
+            let groups = registeredFactGroups(
+                projectID: projectID,
+                sessions: sessions,
+                sessionNodes: sessionNodes,
+                key: key,
+                snapshot: factSnapshot
+            )
+            if terminalsFirst {
+                return terminalNodes.map { $0 as NSObject } + groups.map { $0 as NSObject }
+            }
+            return groups.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
+        }
         let usesBranchGrouping = optionValues.branchGrouping
         guard usesBranchGrouping else {
             if terminalsFirst {
@@ -935,5 +1091,75 @@ enum SidebarTreeBuilder {
         }
 
         return children
+    }
+
+    /// Buckets only top-level sessions. Side chats are already attached to their source row and
+    /// therefore move with it; standalone terminals keep Native's host-owned placement because
+    /// format-1 registered choices deliberately admit only facts resolvable from session source.
+    private static func registeredFactGroups(
+        projectID: ProjectID,
+        sessions: [AgentSession],
+        sessionNodes: [SessionNode],
+        key: ExtensionFactKey,
+        snapshot: ExtensionFactSnapshot?
+    ) -> [RegisteredFactGroupNode] {
+        enum Bucket: Hashable {
+            case value(ExtensionFactValue)
+            case unknown
+        }
+
+        let isAvailable = snapshot?.definition(for: key).map { definition in
+            NativeSidebarParity.host(
+                .registeredFactResolution,
+                ExtensionFactRegistry.isRegisteredFactDefinitionEligible(
+                    definition,
+                    for: .groupable
+                )
+            )
+        } ?? false
+        var members: [Bucket: [(node: SessionNode, label: String?)]] = [:]
+        for (session, node) in zip(sessions, sessionNodes) {
+            let resolved = isAvailable ? snapshot?.fact(
+                key,
+                for: .session(
+                    NativeSidebarParity.host(.entityIdentity, session.id)
+                        .uuidString.lowercased()
+                )
+            ) : nil
+            let bucket = resolved.map { Bucket.value($0.fact.value) } ?? .unknown
+            members[bucket, default: []].append((node, resolved?.fact.label))
+        }
+
+        let ordered = members.keys.sorted { lhsBucket, rhsBucket in
+            switch (lhsBucket, rhsBucket) {
+            case (.unknown, .unknown): false
+            case (.unknown, _): false
+            case (_, .unknown): true
+            case let (.value(lhsValue), .value(rhsValue)):
+                compareExtensionFactValues(lhsValue, rhsValue) < 0
+            }
+        }
+        return ordered.compactMap { bucket in
+            guard let bucketMembers = members[bucket], !bucketMembers.isEmpty else { return nil }
+            let value: ExtensionFactValue?
+            let title: String
+            switch bucket {
+            case .unknown:
+                value = nil
+                title = L10n.string("Unknown")
+            case .value(let scalar):
+                value = scalar
+                title = bucketMembers.lazy.compactMap(\.label).first
+                    ?? extensionFactValueText(scalar)
+            }
+            let group = RegisteredFactGroupNode(
+                projectID: projectID,
+                factKey: key,
+                value: value,
+                title: title
+            )
+            group.sessionNodes = bucketMembers.map(\.node)
+            return group
+        }
     }
 }

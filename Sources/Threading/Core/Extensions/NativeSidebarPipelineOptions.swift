@@ -1,6 +1,10 @@
 import Foundation
 import ThreadingExtensionKit
 
+struct NativeSidebarArrangementDidChange: AppEvent {
+    static let name = Notification.Name("nativeSidebarArrangementDidChange")
+}
+
 /// Stable public option identifiers for the host's built-in navigator.
 ///
 /// Native stays a host surface rather than pretending to be an installed extension. These IDs
@@ -12,6 +16,8 @@ enum NativeSidebarPipelineOptionID: String, CaseIterable, Sendable {
     case branchGrouping = "branch-grouping"
     case loneBranchHeadings = "lone-branch-headings"
     case compactTree = "compact-tree"
+    case groupByFact = "group-by-fact"
+    case sortByFact = "sort-by-fact"
 }
 
 /// Contribution-safe values for Native's session-order choice.
@@ -26,18 +32,21 @@ enum NativeSidebarPipelineSessionOrderValue: String, CaseIterable, Sendable {
     case type
 }
 
-/// One immutable read of the five native navigator options.
+/// One immutable read of Native's static options and registered-fact selections.
 ///
 /// Tree construction and menu construction pass this value down rather than consulting defaults
 /// per row, per comparator, or once for every menu entry. `jsonValues` is the exact public
-/// projection a pipeline evaluator would receive; the typed properties preserve Native's
-/// existing implementation without decoding its own JSON.
+/// projection of the five static options; registered-fact selections remain typed and separate,
+/// just as they do in an extension pipeline. Native preserves its existing implementation
+/// without decoding its own JSON.
 struct NativeSidebarPipelineOptionValues: Equatable {
     let sessionOrder: SidebarSessionOrder
     let sessionOrderReversed: Bool
     let branchGrouping: Bool
     let loneBranchHeadings: Bool
     let compactTree: Bool
+    let groupByFact: ExtensionFactKey?
+    let sortByFact: ExtensionFactKey?
     let jsonValues: [String: ExtensionJSONValue]
 
     init(
@@ -45,13 +54,17 @@ struct NativeSidebarPipelineOptionValues: Equatable {
         sessionOrderReversed: Bool,
         branchGrouping: Bool,
         loneBranchHeadings: Bool,
-        compactTree: Bool
+        compactTree: Bool,
+        groupByFact: ExtensionFactKey? = nil,
+        sortByFact: ExtensionFactKey? = nil
     ) {
         self.sessionOrder = sessionOrder
         self.sessionOrderReversed = sessionOrderReversed
         self.branchGrouping = branchGrouping
         self.loneBranchHeadings = loneBranchHeadings
         self.compactTree = compactTree
+        self.groupByFact = groupByFact
+        self.sortByFact = sortByFact
         jsonValues = [
             NativeSidebarPipelineOptionID.sessionOrder.rawValue: .string(
                 NativeSidebarPipelineOptions.publicValue(for: sessionOrder).rawValue
@@ -68,7 +81,7 @@ struct NativeSidebarPipelineOptionValues: Equatable {
     }
 }
 
-/// The public declarations and legacy AppSettings adapter for Native's five pipeline options.
+/// The public declarations and legacy AppSettings adapter for Native's arrangement options.
 ///
 /// All production reads and writes of those settings pass through here. That gives the parity
 /// lint one exact ownership point while AppSettings remains the durable persistence authority.
@@ -122,13 +135,46 @@ enum NativeSidebarPipelineOptions {
         ),
     ]
 
+    /// Public-shaped defaults for Native's registry pickers.
+    ///
+    /// Native remains a host surface rather than an `ExtensionWorkspaceNavigatorPipeline`: its
+    /// standing pin partition outranks every order, and its existing direction option can reverse
+    /// a selected fact sort after the ascending default is chosen. The extension contract applies
+    /// the declaration literally; this vocabulary does not erase those documented Native rules.
+    static let registeredFactDeclarations: [
+        ExtensionWorkspaceNavigatorRegisteredFactOption
+    ] = [
+        .init(
+            id: NativeSidebarPipelineOptionID.groupByFact.rawValue,
+            title: L10n.string("Group by"),
+            application: .bucket(direction: .ascending, unknownTitle: L10n.string("Unknown"))
+        ),
+        .init(
+            id: NativeSidebarPipelineOptionID.sortByFact.rawValue,
+            title: L10n.string("Sort by"),
+            application: .sort(direction: .ascending)
+        ),
+    ]
+
     static var current: NativeSidebarPipelineOptionValues {
         NativeSidebarPipelineOptionValues(
             sessionOrder: sessionOrder,
             sessionOrderReversed: sessionOrderReversed,
             branchGrouping: branchGrouping,
             loneBranchHeadings: loneBranchHeadings,
-            compactTree: compactTree
+            compactTree: compactTree,
+            groupByFact: selectedRegisteredFact(
+                from: NativeSidebarParity.option(
+                    .groupByFact,
+                    AppSettings.nativeSidebarGroupByFact
+                )
+            ),
+            sortByFact: selectedRegisteredFact(
+                from: NativeSidebarParity.option(
+                    .sortByFact,
+                    AppSettings.nativeSidebarSortByFact
+                )
+            )
         )
     }
 
@@ -199,6 +245,43 @@ enum NativeSidebarPipelineOptions {
         )
     }
 
+    static func setRegisteredFactSelection(
+        _ key: ExtensionFactKey?,
+        for optionID: NativeSidebarPipelineOptionID
+    ) {
+        let values = current
+        guard selectedRegisteredFact(for: optionID, values: values) != key else { return }
+        let wire = key.map(registeredFactWire)
+        switch optionID {
+        case .groupByFact:
+            NativeSidebarParity.option(
+                .groupByFact,
+                AppSettings.shared.nativeSidebarGroupByFact = wire
+            )
+        case .sortByFact:
+            NativeSidebarParity.option(
+                .sortByFact,
+                AppSettings.shared.nativeSidebarSortByFact = wire
+            )
+        case .sessionOrder, .sessionOrderReversed, .branchGrouping,
+             .loneBranchHeadings, .compactTree:
+            preconditionFailure("A static native option cannot store a registered fact")
+        }
+        NotificationCenter.default.post(NativeSidebarArrangementDidChange())
+    }
+
+    static func selectedRegisteredFact(
+        for optionID: NativeSidebarPipelineOptionID,
+        values: NativeSidebarPipelineOptionValues
+    ) -> ExtensionFactKey? {
+        switch optionID {
+        case .groupByFact: values.groupByFact
+        case .sortByFact: values.sortByFact
+        case .sessionOrder, .sessionOrderReversed, .branchGrouping,
+             .loneBranchHeadings, .compactTree: nil
+        }
+    }
+
     static func toggleBranchGrouping() {
         setBranchGrouping(!branchGrouping)
     }
@@ -231,5 +314,20 @@ enum NativeSidebarPipelineOptions {
         case .name: .name
         case .type: .type
         }
+    }
+
+    /// Stable host-only scalar wire. Contribution identifiers cannot contain `@`, so the final
+    /// delimiter is unambiguous; validation on decode also rejects externally-written garbage.
+    nonisolated static func registeredFactWire(_ key: ExtensionFactKey) -> String {
+        "\(key.id)@\(key.version)"
+    }
+
+    nonisolated static func selectedRegisteredFact(from wire: String?) -> ExtensionFactKey? {
+        guard let wire,
+              let delimiter = wire.lastIndex(of: "@"),
+              delimiter != wire.startIndex,
+              let version = Int(wire[wire.index(after: delimiter)...]) else { return nil }
+        let key = ExtensionFactKey(id: String(wire[..<delimiter]), version: version)
+        return key.validationIssues().isEmpty ? key : nil
     }
 }

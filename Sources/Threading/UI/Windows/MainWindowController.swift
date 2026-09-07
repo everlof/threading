@@ -105,6 +105,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 agentRuntime: environment.agentRuntime
             )
         },
+        registeredFactChoicesProvider: { [weak self] usage, selectedKey in
+            self?.workspaceNavigatorFactRegistry?.registeredFactChoices(
+                for: usage,
+                selectedKey: selectedKey
+            ) ?? selectedKey.map { [.unavailable($0)] } ?? []
+        },
+        factSnapshotProvider: { [weak self] consumedKeys in
+            self?.workspaceNavigatorFactRegistry?.snapshot(consuming: consumedKeys)
+        },
+        factSnapshotPatchProvider: { [weak self] snapshot, cells, consumedKeys in
+            self?.workspaceNavigatorFactRegistry?.patch(
+                snapshot,
+                exactCells: cells,
+                consuming: consumedKeys
+            )
+        },
         defersInitialTreeMount: true
     )
     private weak var workspaceNavigatorFactRegistry: ExtensionFactRegistry?
@@ -3333,7 +3349,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             sidebarViewController.reveal(terminalID: terminalID)
         case let .project(projectID):
             sidebarViewController.reveal(projectID: projectID)
-        case .repository, .branch:
+        case .repository, .branch, .registeredFactGroup:
             return false
         }
 

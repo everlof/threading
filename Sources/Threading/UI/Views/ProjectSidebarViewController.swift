@@ -35,6 +35,16 @@ struct ProjectSidebarReloadPerformance {
 /// Source list of projects and the agent sessions inside them.
 final class ProjectSidebarViewController: NSViewController {
 
+    typealias RegisteredFactChoicesProvider = (
+        ExtensionFactUsage,
+        ExtensionFactKey?
+    ) -> [WorkspaceNavigatorRegisteredFactChoice]
+    typealias FactSnapshotPatchProvider = (
+        ExtensionFactSnapshot,
+        Set<ExtensionFactCell>,
+        Set<ExtensionFactKey>
+    ) -> ExtensionFactSnapshotPatch?
+
     // MARK: - Properties
 
     private lazy var outlineView: ThemedOutlineView = {
@@ -104,6 +114,9 @@ final class ProjectSidebarViewController: NSViewController {
     let scheduledMessageStore: ScheduledMessageStore
     let canAskAgentToRename: (SessionID) -> Bool
     let canAskForReportBack: (SessionID) -> Bool
+    private let registeredFactChoicesProvider: RegisteredFactChoicesProvider
+    private let factSnapshotProvider: (Set<ExtensionFactKey>) -> ExtensionFactSnapshot?
+    private let factSnapshotPatchProvider: FactSnapshotPatchProvider
 
     /// Whether the first tree waits for its host to finish establishing window geometry.
     ///
@@ -259,6 +272,7 @@ final class ProjectSidebarViewController: NSViewController {
     /// the rows rather than rebuild them — and one that does not can be told to the outline as
     /// the rows that arrived, left and moved. See `reload`.
     private var renderedShape = SidebarTreeShape()
+    private var presentedFactSnapshot: ExtensionFactSnapshot?
 
     /// Every presented node by identity, so a step naming a parent can find the object the
     /// outline was handed. Rebuilt with the other indexes.
@@ -268,6 +282,9 @@ final class ProjectSidebarViewController: NSViewController {
     /// `.effectFade` row at alpha zero; one batched callback per structural pass repairs only the
     /// identities whose fade has not since been superseded by another insertion.
     private var pendingInsertFadeFinalizations: [SidebarNodeKey: UUID] = [:]
+    private var pendingRegisteredFactCells: Set<ExtensionFactCell> = []
+    private var needsRegisteredFactFullReload = false
+    private var isRegisteredFactRefreshScheduled = false
 
     /// A reload arriving while one is in flight, held until it is over.
     ///
@@ -335,6 +352,7 @@ final class ProjectSidebarViewController: NSViewController {
     /// Branch groups are transient — they come and go as sessions move — so persisting
     /// their expansion the way projects persist theirs would outlive the thing it describes.
     private var collapsedBranchKeys: Set<String> = []
+    private var collapsedRegisteredFactGroupKeys: Set<SidebarNodeKey> = []
 
     /// Repository roots the user folded away, by repository identity, remembered across
     /// launches.
@@ -392,6 +410,13 @@ final class ProjectSidebarViewController: NSViewController {
         scheduledMessageStore: ScheduledMessageStore = .shared,
         canAskAgentToRename: @escaping (SessionID) -> Bool = { _ in false },
         canAskForReportBack: @escaping (SessionID) -> Bool = { _ in false },
+        registeredFactChoicesProvider: @escaping RegisteredFactChoicesProvider = { _, selected in
+            selected.map { [.unavailable($0)] } ?? []
+        },
+        factSnapshotProvider: @escaping (Set<ExtensionFactKey>) -> ExtensionFactSnapshot? = {
+            _ in nil
+        },
+        factSnapshotPatchProvider: @escaping FactSnapshotPatchProvider = { _, _, _ in nil },
         defersInitialTreeMount: Bool = false,
         decorateAccountUsage: @escaping AccountUsageMenu.Decorator = AccountUsageMenu.decorate
     ) {
@@ -399,6 +424,9 @@ final class ProjectSidebarViewController: NSViewController {
         self.scheduledMessageStore = scheduledMessageStore
         self.canAskAgentToRename = canAskAgentToRename
         self.canAskForReportBack = canAskForReportBack
+        self.registeredFactChoicesProvider = registeredFactChoicesProvider
+        self.factSnapshotProvider = factSnapshotProvider
+        self.factSnapshotPatchProvider = factSnapshotPatchProvider
         self.defersInitialTreeMount = defersInitialTreeMount
         self.decorateAccountUsage = decorateAccountUsage
         super.init(nibName: nil, bundle: nil)
@@ -623,6 +651,12 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
         }
+        appEvents.observe(NativeSidebarArrangementDidChange.self) { [weak self] _ in
+            self?.reload()
+        }
+        appEvents.observe(ExtensionFactsDidChange.self) { [weak self] event in
+            self?.registeredFactsDidChange(event.change)
+        }
         // Scheduling changes no tree geometry after the reservation is present. Only the
         // mounted row's durable state label and actions need to be restamped.
         appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
@@ -671,6 +705,87 @@ private extension ProjectSidebarViewController {
         appEvents.observe(SupervisionDidChange.self) { [weak self] event in
             self?.refreshRow(sessionID: event.managerID)
             self?.refreshRow(sessionID: event.childID)
+        }
+    }
+
+    private func registeredFactSnapshot(
+        for optionValues: NativeSidebarPipelineOptionValues
+    ) -> ExtensionFactSnapshot? {
+        let keys = Set([optionValues.groupByFact, optionValues.sortByFact].compactMap { $0 })
+        guard !keys.isEmpty else { return nil }
+        return factSnapshotProvider(keys)
+    }
+
+    /// Coalesces provider edges to one run-loop turn. Exact value changes rebuild only the
+    /// projects reached by the frozen snapshot's public subject joins; provider/definition and
+    /// join changes take the complete path because they can alter availability or membership.
+    private func registeredFactsDidChange(_ change: ExtensionFactChange) {
+        let optionValues = NativeSidebarPipelineOptions.current
+        let selectedKeys = Set([
+            optionValues.groupByFact,
+            optionValues.sortByFact,
+        ].compactMap { $0 })
+        guard !selectedKeys.isEmpty else { return }
+
+        switch change {
+        case .all:
+            needsRegisteredFactFullReload = true
+        case .exact(let cells):
+            let relevantKeys = selectedKeys.union(ExtensionFactRegistry.snapshotStructuralKeys)
+            let relevantCells = Set(cells.filter { relevantKeys.contains($0.key) })
+            guard !relevantCells.isEmpty else { return }
+            if relevantCells.contains(where: {
+                ExtensionFactRegistry.snapshotStructuralKeys.contains($0.key)
+            }) {
+                needsRegisteredFactFullReload = true
+            } else {
+                pendingRegisteredFactCells.formUnion(relevantCells)
+            }
+        }
+
+        guard !isRegisteredFactRefreshScheduled else { return }
+        isRegisteredFactRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isRegisteredFactRefreshScheduled = false
+            if self.needsRegisteredFactFullReload {
+                self.needsRegisteredFactFullReload = false
+                self.pendingRegisteredFactCells.removeAll(keepingCapacity: true)
+                self.reload()
+                return
+            }
+            let current = NativeSidebarPipelineOptions.current
+            let selectedKeys = Set([current.groupByFact, current.sortByFact].compactMap { $0 })
+            let cells = Set(self.pendingRegisteredFactCells.filter {
+                selectedKeys.contains($0.key)
+            })
+            self.pendingRegisteredFactCells.removeAll(keepingCapacity: true)
+            guard !cells.isEmpty,
+                  let presentedSnapshot = self.presentedFactSnapshot,
+                  let patch = self.factSnapshotPatchProvider(
+                      presentedSnapshot,
+                      cells,
+                      selectedKeys
+                  ) else {
+                if !cells.isEmpty { self.reload() }
+                return
+            }
+            self.presentedFactSnapshot = patch.snapshot
+            var sourceSessionIDs = patch.affectedSourceSessionIDs
+            for cell in cells {
+                if case .session(let id) = cell.subject { sourceSessionIDs.insert(id) }
+            }
+            let projectIDs = Set(sourceSessionIDs.compactMap { id -> ProjectID? in
+                guard let sessionID = SessionID(uuidString: id) else { return nil }
+                return self.projectStore.project(forSessionID: sessionID)?.id
+            })
+            for projectID in projectIDs {
+                self.applyProjectStructureChange(
+                    projectID,
+                    optionValues: current,
+                    factSnapshot: patch.snapshot
+                )
+            }
         }
     }
 
@@ -888,11 +1003,14 @@ extension ProjectSidebarViewController {
             metadata: ["projects": String(projects.count)]
         )
         let optionValues = NativeSidebarPipelineOptions.current
+        let factSnapshot = registeredFactSnapshot(for: optionValues)
+        presentedFactSnapshot = factSnapshot
         let rebuilt = SidebarTreeBuilder.rootNodes(
             from: projects,
             visibility: sessionVisibility,
             excludingSessionIDs: optimisticallyArchivedSessionIDs,
-            optionValues: optionValues
+            optionValues: optionValues,
+            factSnapshot: factSnapshot
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         #if DEBUG
@@ -907,7 +1025,12 @@ extension ProjectSidebarViewController {
         if shape == renderedShape, !rootNodes.isEmpty {
             // The presented nodes are kept deliberately: the outline identifies rows by
             // object identity, and replacing equivalent nodes would invalidate every row
-            // for nothing. Content is read from the store at configure time anyway.
+            // for nothing. A fact bucket's provider-owned label is the one exception to content
+            // read from stores at configure time, so adopt equal-shape content while preserving
+            // those same objects before repainting.
+            if optionValues.groupByFact != nil {
+                rootNodes = SidebarOutlineUpdate.adopt(rebuilt, reusing: rootNodes)
+            }
             reloadKind = "content"
             refreshRows()
             return
@@ -932,6 +1055,7 @@ extension ProjectSidebarViewController {
             - adoptionStarted
         #endif
         renderedShape = shape
+        collapsedRegisteredFactGroupKeys.formIntersection(shape.keys)
         #if DEBUG
         let indexingStarted = DispatchTime.now().uptimeNanoseconds
         #endif
@@ -1001,13 +1125,17 @@ extension ProjectSidebarViewController {
     /// Unexpected identity drift falls back to the complete path rather than leaving indexes
     /// that do not describe the tree.
     private func applySessionOrderChange(_ sessionID: SessionID) {
+        let optionValues = NativeSidebarPipelineOptions.current
+        let factSnapshot = registeredFactSnapshot(for: optionValues)
+        presentedFactSnapshot = factSnapshot
         guard let presentedProject = projectNodesBySessionID[sessionID],
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: presentedProject.projectID,
                   from: projectStore.projects,
                   visibility: sessionVisibility,
                   excludingSessionIDs: optimisticallyArchivedSessionIDs,
-                  optionValues: NativeSidebarPipelineOptions.current
+                  optionValues: optionValues,
+                  factSnapshot: factSnapshot
               )
         else {
             reload()
@@ -1050,6 +1178,23 @@ extension ProjectSidebarViewController {
     /// shape walk, adoption pass, and index rebuild made deletion scale with unrelated chats.
     /// The same outline diff remains authoritative; only its input is the affected subtree.
     private func applyProjectStructureChange(_ projectID: ProjectID) {
+        let optionValues = NativeSidebarPipelineOptions.current
+        let factSnapshot = registeredFactSnapshot(for: optionValues)
+        presentedFactSnapshot = factSnapshot
+        applyProjectStructureChange(
+            projectID,
+            optionValues: optionValues,
+            factSnapshot: factSnapshot
+        )
+    }
+
+    private func applyProjectStructureChange(
+        _ projectID: ProjectID,
+        optionValues: NativeSidebarPipelineOptionValues,
+        factSnapshot: ExtensionFactSnapshot?
+    ) {
+        let selectedSessionID = selectedNode()?.sessionID
+        let selectedTerminalID = selectedTerminalNode()?.terminalID
         #if DEBUG
         let updateStarted = DispatchTime.now().uptimeNanoseconds
         var measuredUpdate = ProjectSidebarReloadPerformance()
@@ -1066,7 +1211,8 @@ extension ProjectSidebarViewController {
                   from: projectStore.projects,
                   visibility: sessionVisibility,
                   excludingSessionIDs: optimisticallyArchivedSessionIDs,
-                  optionValues: NativeSidebarPipelineOptions.current
+                  optionValues: optionValues,
+                  factSnapshot: factSnapshot
               )
         else {
             reload()
@@ -1115,6 +1261,7 @@ extension ProjectSidebarViewController {
             reload()
             return
         }
+        collapsedRegisteredFactGroupKeys.formIntersection(renderedShape.keys)
         #if DEBUG
         let indexingStarted = DispatchTime.now().uptimeNanoseconds
         #endif
@@ -1128,8 +1275,21 @@ extension ProjectSidebarViewController {
         let outlineStarted = DispatchTime.now().uptimeNanoseconds
         #endif
         applyStructure(steps: steps, wholesale: false)
-        if let row = projectRow(for: projectID) {
-            outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: [0])
+        var refreshedRows = IndexSet()
+        if let row = projectRow(for: projectID) { refreshedRows.insert(row) }
+        if optionValues.groupByFact != nil {
+            for case let group as RegisteredFactGroupNode in adoptedProject.childNodes {
+                let row = outlineView.row(forItem: group)
+                if row >= 0 { refreshedRows.insert(row) }
+            }
+        }
+        if !refreshedRows.isEmpty {
+            outlineView.reloadData(forRowIndexes: refreshedRows, columnIndexes: [0])
+        }
+        if let selectedTerminalID {
+            select(terminalID: selectedTerminalID, notifyDelegate: false)
+        } else if let selectedSessionID {
+            select(sessionID: selectedSessionID, notifyDelegate: false)
         }
         #if DEBUG
         measuredUpdate.outlineNanoseconds = DispatchTime.now().uptimeNanoseconds - outlineStarted
@@ -1146,6 +1306,8 @@ extension ProjectSidebarViewController {
     private func applySessionAddition(_ sessionID: SessionID, to projectID: ProjectID) {
         let optionValues = NativeSidebarPipelineOptions.current
         guard sessionVisibility == .attention,
+              optionValues.groupByFact == nil,
+              optionValues.sortByFact == nil,
               optionValues.sessionOrder == .manual,
               !optionValues.sessionOrderReversed,
               let session = projectStore.session(withID: sessionID),
@@ -1278,7 +1440,9 @@ extension ProjectSidebarViewController {
         guard sessionVisibility == .attention else { return }
 
         let optionValues = NativeSidebarPipelineOptions.current
-        guard let terminal = projectStore.terminal(withID: terminalID),
+        guard optionValues.groupByFact == nil,
+              optionValues.sortByFact == nil,
+              let terminal = projectStore.terminal(withID: terminalID),
               let project = projectStore.project(withID: projectID),
               let projectNode = projectNodesByID[projectID],
               terminalNodesByID[terminalID] == nil else {
@@ -1410,6 +1574,11 @@ extension ProjectSidebarViewController {
     /// move several rows. The overwhelmingly common leaf under a stable project/branch/session
     /// parent changes one child array, one shape entry, three identity maps and one outline row.
     private func applySessionRemoval(_ sessionID: SessionID, from projectID: ProjectID) {
+        let optionValues = NativeSidebarPipelineOptions.current
+        guard optionValues.groupByFact == nil, optionValues.sortByFact == nil else {
+            applyProjectStructureChange(projectID)
+            return
+        }
         guard let sessionNode = sessionNodesByID[sessionID] else {
             // Archived or filtered into the other attention scope: no presented row changed.
             return
@@ -1530,7 +1699,7 @@ extension ProjectSidebarViewController {
                 terminalNodesByID.removeValue(forKey: terminalID)
                 projectNodesByTerminalID.removeValue(forKey: terminalID)
                 ancestorsByTerminalID.removeValue(forKey: terminalID)
-            case .repository, .project, .branch:
+            case .repository, .project, .branch, .registeredFactGroup:
                 break
             }
         }
@@ -1550,6 +1719,10 @@ extension ProjectSidebarViewController {
             case let branch as BranchGroupNode:
                 for child in branch.childNodes {
                     index(child, ancestors: ancestors + [branch])
+                }
+            case let group as RegisteredFactGroupNode:
+                for child in group.sessionNodes {
+                    index(child, ancestors: ancestors + [group])
                 }
             case let session as SessionNode:
                 sessionNodesByID[session.sessionID] = session
@@ -1697,6 +1870,7 @@ extension ProjectSidebarViewController {
                 // with a live viewport.
                 if recursively,
                    collapsedBranchKeys.isEmpty,
+                   collapsedRegisteredFactGroupKeys.isEmpty,
                    collapsedSideChatParents.isEmpty {
                     outline.expandItem(node, expandChildren: true)
                     continue
@@ -1726,6 +1900,10 @@ extension ProjectSidebarViewController {
         where !collapsedBranchKeys.contains(Self.branchKey(branchNode)) {
             outline.expandItem(branchNode)
         }
+        for case let group as RegisteredFactGroupNode in project.childNodes
+        where !collapsedRegisteredFactGroupKeys.contains(group.sidebarKey) {
+            outline.expandItem(group)
+        }
 
         // Side chats do the same beneath the session they were forked from. Walk the presented
         // tree rather than `sessionNodes`' flat sort order: recent/name ordering can put a
@@ -1735,6 +1913,11 @@ extension ProjectSidebarViewController {
             if let branch = child as? BranchGroupNode,
                !collapsedBranchKeys.contains(Self.branchKey(branch)) {
                 for session in branch.sessionNodes {
+                    expandSideChat(session)
+                }
+            } else if let group = child as? RegisteredFactGroupNode,
+                      !collapsedRegisteredFactGroupKeys.contains(group.sidebarKey) {
+                for session in group.sessionNodes {
                     expandSideChat(session)
                 }
             } else if let session = child as? SessionNode {
@@ -1878,6 +2061,11 @@ extension ProjectSidebarViewController {
             case let branch as BranchGroupNode:
                 for child in branch.childNodes {
                     walk(child, ancestors: ancestors + [branch], projectNode: projectNode)
+                }
+
+            case let group as RegisteredFactGroupNode:
+                for child in group.sessionNodes {
+                    walk(child, ancestors: ancestors + [group], projectNode: projectNode)
                 }
 
             case let session as SessionNode:
@@ -2979,6 +3167,9 @@ private extension ProjectSidebarViewController {
         if let node = outlineView.item(atRow: row) as? BranchGroupNode {
             return node.projectID
         }
+        if let node = outlineView.item(atRow: row) as? RegisteredFactGroupNode {
+            return node.projectID
+        }
         // A repository is not a place a chat can run — a checkout is — so a root row answers
         // with the checkout that stands for it. See `RepoGroupNode.representativeProjectID`.
         if let node = outlineView.item(atRow: row) as? RepoGroupNode {
@@ -3176,7 +3367,7 @@ private extension ProjectSidebarViewController {
         .item(ThemedMenuItem(
             title: L10n.string("Group Sessions by Branch"),
             shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.groupByBranch),
-            isSelected: optionValues.branchGrouping,
+            isSelected: optionValues.groupByFact == nil && optionValues.branchGrouping,
             onChoose: { [weak self] in self?.toggleBranchGroupingClicked() }
         ))
     }
@@ -3190,8 +3381,85 @@ private extension ProjectSidebarViewController {
             title: L10n.string("Headings for Lone Branches"),
             shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.loneBranchHeadings),
             isSelected: optionValues.loneBranchHeadings,
-            isEnabled: optionValues.branchGrouping,
+            isEnabled: optionValues.groupByFact == nil && optionValues.branchGrouping,
             onChoose: { [weak self] in self?.toggleLoneBranchHeadingsClicked() }
+        ))
+    }
+
+    private func groupByEntry(
+        _ option: ExtensionWorkspaceNavigatorRegisteredFactOption,
+        optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
+        let selectedKey = optionValues.groupByFact
+        let choices = registeredFactChoicesProvider(.groupable, selectedKey)
+        let selectedChoice = selectedKey.flatMap { key in
+            choices.first { $0.key == key }
+        }
+        let subtitle: String = switch selectedChoice {
+        case .available(let definition): definition.displayName
+        case .unavailable(let key): workspaceNavigatorUnavailableFactTitle(key)
+        case nil: optionValues.branchGrouping ? L10n.string("Branch") : L10n.string("None")
+        }
+
+        var submenu: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("None"),
+                isSelected: selectedKey == nil && !optionValues.branchGrouping,
+                onChoose: { [weak self] in self?.groupByNoneChosen() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Branch"),
+                isSelected: selectedKey == nil && optionValues.branchGrouping,
+                onChoose: { [weak self] in self?.groupByBranchChosen() }
+            )),
+        ]
+        if !choices.isEmpty {
+            submenu.append(.separator)
+            submenu.append(contentsOf: workspaceNavigatorRegisteredFactChoiceEntries(
+                selectedKey: selectedKey,
+                choices: choices,
+                includesNone: false,
+                onSelect: { [weak self] key in self?.registeredGroupFactChosen(key) }
+            ))
+        }
+        return .item(ThemedMenuItem(
+            title: option.title,
+            subtitle: subtitle,
+            submenu: submenu
+        ))
+    }
+
+    private func sortByEntry(
+        _ option: ExtensionWorkspaceNavigatorRegisteredFactOption,
+        optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
+        let selectedKey = optionValues.sortByFact
+        let choices = registeredFactChoicesProvider(.sortable, selectedKey)
+        let selectedChoice = selectedKey.flatMap { key in
+            choices.first { $0.key == key }
+        }
+        let subtitle: String = switch selectedChoice {
+        case .available(let definition): definition.displayName
+        case .unavailable(let key): workspaceNavigatorUnavailableFactTitle(key)
+        case nil: optionValues.sessionOrder.menuTitle
+        }
+
+        var submenu = SidebarSessionOrder.allCases.map { order in
+            orderEntry(order, optionValues: optionValues)
+        }
+        if !choices.isEmpty {
+            submenu.append(.separator)
+            submenu.append(contentsOf: workspaceNavigatorRegisteredFactChoiceEntries(
+                selectedKey: selectedKey,
+                choices: choices,
+                includesNone: false,
+                onSelect: { [weak self] key in self?.registeredSortFactChosen(key) }
+            ))
+        }
+        return .item(ThemedMenuItem(
+            title: option.title,
+            subtitle: subtitle,
+            submenu: submenu
         ))
     }
 
@@ -3216,7 +3484,7 @@ private extension ProjectSidebarViewController {
     ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: order.menuTitle,
-            isSelected: optionValues.sessionOrder == order,
+            isSelected: optionValues.sortByFact == nil && optionValues.sessionOrder == order,
             onChoose: { [weak self] in self?.sessionOrderChosen(order) }
         ))
     }
@@ -3230,17 +3498,28 @@ private extension ProjectSidebarViewController {
         optionValues: NativeSidebarPipelineOptionValues
     ) -> ThemedMenuEntry {
         let order = optionValues.sessionOrder
+        let title = if optionValues.sortByFact != nil {
+            isReversed ? L10n.string("Descending") : L10n.string("Ascending")
+        } else {
+            isReversed ? order.reversedDirectionTitle : order.naturalDirectionTitle
+        }
         return .item(ThemedMenuItem(
-            title: isReversed ? order.reversedDirectionTitle : order.naturalDirectionTitle,
+            title: title,
             isSelected: optionValues.sessionOrderReversed == isReversed,
             onChoose: { [weak self] in self?.sessionOrderDirectionChosen(isReversed) }
         ))
     }
 
     @objc private func toggleBranchGroupingClicked() {
-        NativeSidebarPipelineOptions.toggleBranchGrouping()
-        // The sidebar rebuilds its tree on this, which is what adds or removes the level.
-        NotificationCenter.default.post(ProjectsDidChange())
+        let hadRegisteredGroup = NativeSidebarPipelineOptions.current.groupByFact != nil
+        if hadRegisteredGroup {
+            NativeSidebarPipelineOptions.setBranchGrouping(true)
+            NativeSidebarPipelineOptions.setRegisteredFactSelection(nil, for: .groupByFact)
+        } else {
+            NativeSidebarPipelineOptions.toggleBranchGrouping()
+            // The sidebar rebuilds its tree on this, which is what adds or removes the level.
+            NotificationCenter.default.post(ProjectsDidChange())
+        }
     }
 
     @objc private func toggleSnoozedSessionsClicked() {
@@ -3261,8 +3540,41 @@ private extension ProjectSidebarViewController {
     }
 
     private func sessionOrderChosen(_ order: SidebarSessionOrder) {
+        let hadRegisteredSort = NativeSidebarPipelineOptions.current.sortByFact != nil
         NativeSidebarPipelineOptions.setSessionOrder(order)
-        NotificationCenter.default.post(ProjectsDidChange())
+        if hadRegisteredSort {
+            NativeSidebarPipelineOptions.setSessionOrderReversed(false)
+        }
+        NativeSidebarPipelineOptions.setRegisteredFactSelection(nil, for: .sortByFact)
+        if !hadRegisteredSort {
+            NotificationCenter.default.post(ProjectsDidChange())
+        }
+    }
+
+    private func groupByNoneChosen() {
+        let hadRegisteredGroup = NativeSidebarPipelineOptions.current.groupByFact != nil
+        NativeSidebarPipelineOptions.setBranchGrouping(false)
+        NativeSidebarPipelineOptions.setRegisteredFactSelection(nil, for: .groupByFact)
+        if !hadRegisteredGroup { NotificationCenter.default.post(ProjectsDidChange()) }
+    }
+
+    private func groupByBranchChosen() {
+        let hadRegisteredGroup = NativeSidebarPipelineOptions.current.groupByFact != nil
+        NativeSidebarPipelineOptions.setBranchGrouping(true)
+        NativeSidebarPipelineOptions.setRegisteredFactSelection(nil, for: .groupByFact)
+        if !hadRegisteredGroup { NotificationCenter.default.post(ProjectsDidChange()) }
+    }
+
+    private func registeredGroupFactChosen(_ key: ExtensionFactKey?) {
+        guard let key else { return }
+        NativeSidebarPipelineOptions.setRegisteredFactSelection(key, for: .groupByFact)
+    }
+
+    private func registeredSortFactChosen(_ key: ExtensionFactKey?) {
+        guard let key else { return }
+        guard NativeSidebarPipelineOptions.current.sortByFact != key else { return }
+        NativeSidebarPipelineOptions.setSessionOrderReversed(false)
+        NativeSidebarPipelineOptions.setRegisteredFactSelection(key, for: .sortByFact)
     }
 
     private func sessionOrderDirectionChosen(_ isReversed: Bool) {
@@ -3290,7 +3602,10 @@ extension ProjectSidebarViewController: NSOutlineViewDataSource {
     /// triangle appears on the few rows that have side chats rather than on every row.
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
         if let session = item as? SessionNode { return !session.childNodes.isEmpty }
-        return item is ProjectNode || item is RepoGroupNode || item is BranchGroupNode
+        return item is ProjectNode
+            || item is RepoGroupNode
+            || item is BranchGroupNode
+            || item is RegisteredFactGroupNode
     }
 
     // Drag and drop lives in `ProjectSidebarDragDrop.swift`, split purely for size.
@@ -3329,6 +3644,11 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         }
 
         if item is BranchGroupNode {
+            let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
+            return apply(item, to: cell) ? cell : nil
+        }
+
+        if item is RegisteredFactGroupNode {
             let cell = dequeueCell(SidebarIdentifiers.branchCell) { ProjectRowView() }
             return apply(item, to: cell) ? cell : nil
         }
@@ -3426,6 +3746,17 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             cell.onHoverAction = { [weak self] anchor in
                 self?.showBranchGroupingOptions(from: anchor)
             }
+            return true
+        }
+
+        if let group = item as? RegisteredFactGroupNode,
+           let cell = view as? ProjectRowView {
+            let hiddenItems = outlineView.isItemExpanded(group) ? 0 : group.sessionNodes.count
+            cell.configureAsFactGroup(
+                named: group.title,
+                collapsedSessionCount: hiddenItems
+            )
+            cell.onHoverAction = nil
             return true
         }
 
@@ -3542,7 +3873,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         // A branch heading sits inside a project, so it takes the compact height rather
         // than the between-groups one.
-        if item is BranchGroupNode {
+        if item is BranchGroupNode || item is RegisteredFactGroupNode {
             return SidebarDefaults.projectCompactRowHeight
         }
 
@@ -3595,6 +3926,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return
         }
 
+        if let group = notification.userInfo?["NSObject"] as? RegisteredFactGroupNode {
+            collapsedRegisteredFactGroupKeys.remove(group.sidebarKey)
+            reloadRow(for: group)
+            return
+        }
+
         if let sessionNode = notification.userInfo?["NSObject"] as? SessionNode {
             collapsedSideChatParents.remove(sessionNode.sessionID)
             return
@@ -3618,6 +3955,12 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
         if let branchNode = notification.userInfo?["NSObject"] as? BranchGroupNode {
             collapsedBranchKeys.insert(Self.branchKey(branchNode))
             reloadRow(for: branchNode)
+            return
+        }
+
+        if let group = notification.userInfo?["NSObject"] as? RegisteredFactGroupNode {
+            collapsedRegisteredFactGroupKeys.insert(group.sidebarKey)
+            reloadRow(for: group)
             return
         }
 
@@ -3670,6 +4013,8 @@ extension ProjectSidebarViewController {
                 branchGroupingEntry(optionValues),
                 loneBranchHeadingsEntry(optionValues),
             ]
+        } else if item is RegisteredFactGroupNode {
+            entries = arrangementMenuEntries()
         } else if let node = item as? SessionNode,
                   let session = projectStore.session(withID: node.sessionID) {
             // The right-click menu offers exactly what the row's `⋯` button does, built from
@@ -3791,7 +4136,7 @@ extension ProjectSidebarViewController {
         entries.append(branchGroupingEntry(optionValues))
         // Only while grouping is on: a refinement with nothing to refine would read as live
         // here. The arrangement control and the View menu carry the disabled-but-visible form.
-        if optionValues.branchGrouping {
+        if optionValues.groupByFact == nil && optionValues.branchGrouping {
             entries.append(loneBranchHeadingsEntry(optionValues))
         }
         entries.append(.separator)
@@ -4273,21 +4618,26 @@ extension ProjectSidebarViewController {
     /// no matter what they intend.
     func arrangementMenuEntries() -> [ThemedMenuEntry] {
         let optionValues = NativeSidebarPipelineOptions.current
-        var entries: [ThemedMenuEntry] = [
+        let registeredOptions = Dictionary(
+            uniqueKeysWithValues: NativeSidebarPipelineOptions.registeredFactDeclarations.map {
+                ($0.id, $0)
+            }
+        )
+        guard let groupBy = registeredOptions[NativeSidebarPipelineOptionID.groupByFact.rawValue],
+              let sortBy = registeredOptions[NativeSidebarPipelineOptionID.sortByFact.rawValue]
+        else { return [] }
+        return [
             snoozedSessionsEntry(),
             .separator,
-            branchGroupingEntry(optionValues),
+            groupByEntry(groupBy, optionValues: optionValues),
             loneBranchHeadingsEntry(optionValues),
             compactTreeEntry(optionValues),
-            .separator
+            .separator,
+            sortByEntry(sortBy, optionValues: optionValues),
+            .separator,
+            directionEntry(isReversed: false, optionValues: optionValues),
+            directionEntry(isReversed: true, optionValues: optionValues),
         ]
-        for order in SidebarSessionOrder.allCases {
-            entries.append(orderEntry(order, optionValues: optionValues))
-        }
-        entries.append(.separator)
-        entries.append(directionEntry(isReversed: false, optionValues: optionValues))
-        entries.append(directionEntry(isReversed: true, optionValues: optionValues))
-        return entries
     }
 }
 

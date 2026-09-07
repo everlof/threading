@@ -204,6 +204,14 @@ If it has no live eligible definition, one host-localized unavailable row contai
 reserves a fact-row slot, leaving at most 127 live rows. None therefore makes the complete submenu
 at most 129 rows and always gives the user a way to clear the retained selection.
 
+Native exposes the same registry pickers, eligibility rules, scalar ordering, missing-value policy
+and ascending default, but it is not evaluated as an extension pipeline. Two existing host
+invariants remain intentionally stronger: pinned chats form the leading partition before any
+selected fact sort, and Native's shared direction control can reverse that fact sort after the
+ascending default is selected. “Primary sort” above is therefore literal for extension pipelines
+and applies within Native's pinned or unpinned partition. Native's public-shaped declarations are
+its option vocabulary and defaults, not a claim that extensions inherit these host-only rules.
+
 The selected value is an `ExtensionFactKey`, persisted by Threading under the navigator and option
 IDs. Those IDs share the namespace with static navigator options, but registered-fact IDs cannot
 be referenced from a static `when` condition. Threading retains a selected key across provider

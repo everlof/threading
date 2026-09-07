@@ -515,7 +515,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
                 case (.none, .some):
                     return false
                 case (.none, .none):
-                    let order = compareValues(lhsValue, rhsValue)
+                    let order = compareExtensionFactValues(lhsValue, rhsValue)
                     return direction == .ascending ? order < 0 : order > 0
                 }
             }
@@ -532,7 +532,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             case let .value(value):
                 let title = members.lazy.compactMap {
                     resolvedFact(operand.fact, candidate: $0, snapshot: snapshot)?.fact.label
-                }.first ?? text(for: value)
+                }.first ?? extensionFactValueText(value)
                 return .init(
                     identity: .fact(key: operand.fact.key, value: value),
                     title: title,
@@ -621,7 +621,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             case (_, nil):
                 return true
             case let (.some(lhsValue), .some(rhsValue)):
-                let order = compareValues(lhsValue, rhsValue)
+                let order = compareExtensionFactValues(lhsValue, rhsValue)
                 guard order != 0 else { continue }
                 return clause.direction == .ascending ? order < 0 : order > 0
             }
@@ -642,7 +642,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
                 candidate: candidate,
                 snapshot: snapshot
             ) else { return .unknown }
-            let order = compareValues(value, expected)
+            let order = compareExtensionFactValues(value, expected)
             let matches = switch operation {
             case .equal: order == 0
             case .notEqual: order != 0
@@ -847,7 +847,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             }
             switch facet {
             case .value:
-                return text(for: fact.fact.value)
+                return extensionFactValueText(fact.fact.value)
             case .label:
                 return fact.fact.label ?? fallback
             }
@@ -945,7 +945,7 @@ private enum PredicateTruth {
     }
 }
 
-private func compareValues(_ lhs: ExtensionFactValue, _ rhs: ExtensionFactValue) -> Int {
+func compareExtensionFactValues(_ lhs: ExtensionFactValue, _ rhs: ExtensionFactValue) -> Int {
     switch (lhs, rhs) {
     case let (.string(lhs), .string(rhs)):
         compare(lhs, rhs)
@@ -968,12 +968,19 @@ private func compare<T: Comparable>(_ lhs: T, _ rhs: T) -> Int {
     return 0
 }
 
-private func text(for value: ExtensionFactValue) -> String {
+func extensionFactValueText(_ value: ExtensionFactValue) -> String {
     switch value {
     case let .string(value): value
     case let .boolean(value): value ? "true" : "false"
     case let .integer(value): String(value)
     case let .number(value): String(value)
-    case let .date(value): ISO8601DateFormatter().string(from: value)
+    case let .date(value): ExtensionFactValueFormatting.iso8601.format(value)
     }
+}
+
+private enum ExtensionFactValueFormatting {
+    /// A value format avoids constructing Foundation's heavyweight mutable formatter for every
+    /// distinct date bucket. The same immutable instance is safe on evaluator workers and on
+    /// Native's main-actor tree builder.
+    static let iso8601 = Date.ISO8601FormatStyle()
 }

@@ -26,6 +26,8 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case followsCheckoutBranch
     case sidebarSessionOrder
     case sidebarSessionOrderIsReversed
+    case nativeSidebarGroupByFact
+    case nativeSidebarSortByFact
     case promptReturnKey
     case discoversProjectIcons
     case discoversAccountAvatars
@@ -811,6 +813,20 @@ enum AppSettingDefinitions {
         persistenceKey: "sidebarSessionOrderIsReversed",
         absence: .falseValue
     )
+    static let nativeSidebarGroupByFact = AppSettingDescriptor<String>(
+        identity: .nativeSidebarGroupByFact,
+        persistenceKey: "nativeSidebarGroupByFact",
+        absence: .inherit,
+        validation: .maximumBytes(160),
+        notification: .none
+    )
+    static let nativeSidebarSortByFact = AppSettingDescriptor<String>(
+        identity: .nativeSidebarSortByFact,
+        persistenceKey: "nativeSidebarSortByFact",
+        absence: .inherit,
+        validation: .maximumBytes(160),
+        notification: .none
+    )
     static let promptReturnKey = AppSettingDescriptor<String>(
         identity: .promptReturnKey,
         persistenceKey: "promptReturnKey",
@@ -1381,7 +1397,8 @@ enum AppSettingDefinitions {
         .init(closingConfirmationMigration), .init(usesAgentTitleInSidebar),
         .init(groupsSessionsByBranch), .init(groupsLoneBranches), .init(compactsSidebarTree),
         .init(followsCheckoutBranch), .init(sidebarSessionOrder),
-        .init(sidebarSessionOrderIsReversed), .init(promptReturnKey),
+        .init(sidebarSessionOrderIsReversed), .init(nativeSidebarGroupByFact),
+        .init(nativeSidebarSortByFact), .init(promptReturnKey),
         .init(discoversProjectIcons), .init(discoversAccountAvatars),
         .init(harmonizesTerminalBackgrounds), .init(convertsDroppedImages),
         .init(copiesTerminalSelection), .init(notifiesOnAttention),

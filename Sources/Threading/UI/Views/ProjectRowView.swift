@@ -350,6 +350,25 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         customizationHost.deactivate()
     }
 
+    /// Shows a provider-defined fact bucket as a quiet, nonselectable heading. Unlike a branch
+    /// heading it owns no branch operation, so no hover control is reserved beside its label.
+    func configureAsFactGroup(named title: String, collapsedSessionCount: Int = 0) {
+        isHeading = true
+        popoverProject = nil
+        dismissPopover()
+        hideIcon()
+        setHoverControls(moreSymbol: nil, moreAccessibility: "", showsCreate: false)
+        nameLabel.applyFont(.caption)
+        nativeName = title
+        setCount(collapsedSessionCount)
+        setConductMark(nil)
+        nativeToolTip = title
+        animatesNextName = hasConfiguredSinceReuse && nameLabel.stringValue != nativeName
+        applyTextColors()
+        captureNativePresentation()
+        customizationHost.deactivate()
+    }
+
     /// Configures the trailing hover control for the row's role: a `nil` `moreSymbol` hides
     /// the `⋯`/gear. Hiding is done here at configure time, never on hover, so the stack
     /// collapses without re-laying out under the pointer.
