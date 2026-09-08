@@ -732,36 +732,61 @@ final class SimulatorPaneViewController: NSViewController {
     // MARK: - Continuous touch streaming
 
     private var touchStreamActive = false
+    /// The session captured at `began`, so moves stream straight to it without re-running the
+    /// consent/authorization path per move — that per-move machinery was the panning lag.
+    private var touchStreamSession: (any SimulatorLiveStreamSession)?
     private var touchMoveInFlight = false
     private var pendingTouchMove: CGPoint?
 
-    /// The `began` phase goes through `submitInput` so it asks for control and recovers a dropped
-    /// transport, exactly like a tap. Moves and the end are streamed directly to the authorized
-    /// session, coalesced to one in flight so a fast scroll cannot outrun the socket.
+    /// `began` authorizes once — asking for control and recovering a dropped transport, like a tap
+    /// — and captures the live session. Moves and the end are then streamed *directly* to that
+    /// session, ordered and coalesced to one in flight (which preserves order and gives
+    /// backpressure), but without the authorization round-trip that made each move slow.
     private func beginTouchStream(at point: CGPoint) {
+        guard let device = lease?.device else { return }
         touchStreamActive = true
+        touchStreamSession = nil
         pendingTouchMove = nil
         touchMoveInFlight = false
-        submitInput(.touch(phase: .began, x: Double(point.x), y: Double(point.y)))
+        runAgentCommand { [weak self] in
+            guard let self else { return }
+            do {
+                let session = try await self.authorizedInputSession(for: device)
+                try await session.sendInput(
+                    .touch(phase: .began, x: Double(point.x), y: Double(point.y))
+                )
+                guard self.touchStreamActive else {
+                    try? await session.sendInput(.touch(phase: .cancelled, x: 0.5, y: 0.5))
+                    return
+                }
+                self.touchStreamSession = session
+                self.flushPendingTouchMove()
+            } catch {
+                self.touchStreamActive = false
+            }
+        }
     }
 
     private func moveTouchStream(to point: CGPoint) {
         guard touchStreamActive else { return }
-        guard !touchMoveInFlight else {
-            pendingTouchMove = point
-            return
-        }
-        sendStreamedTouchMove(point)
+        pendingTouchMove = point
+        flushPendingTouchMove()
     }
 
-    private func sendStreamedTouchMove(_ point: CGPoint) {
+    private func flushPendingTouchMove() {
+        guard touchStreamActive,
+              !touchMoveInFlight,
+              let session = touchStreamSession,
+              let point = pendingTouchMove else { return }
+        pendingTouchMove = nil
         touchMoveInFlight = true
-        sendInput(.touch(phase: .moved, x: Double(point.x), y: Double(point.y))) { [weak self] _ in
+        runAgentCommand { [weak self] in
+            try? await session.sendInput(
+                .touch(phase: .moved, x: Double(point.x), y: Double(point.y))
+            )
             guard let self else { return }
             self.touchMoveInFlight = false
-            guard self.touchStreamActive, let next = self.pendingTouchMove else { return }
-            self.pendingTouchMove = nil
-            self.sendStreamedTouchMove(next)
+            self.flushPendingTouchMove()
         }
     }
 
@@ -769,7 +794,14 @@ final class SimulatorPaneViewController: NSViewController {
         guard touchStreamActive else { return }
         touchStreamActive = false
         pendingTouchMove = nil
-        submitInput(.touch(phase: .ended, x: Double(point.x), y: Double(point.y)))
+        let session = touchStreamSession
+        touchStreamSession = nil
+        guard let session else { return }
+        runAgentCommand {
+            try? await session.sendInput(
+                .touch(phase: .ended, x: Double(point.x), y: Double(point.y))
+            )
+        }
     }
 
     private func submitInput(_ input: SimulatorBridgeInput) {
