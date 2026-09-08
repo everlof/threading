@@ -1,10 +1,33 @@
 # Simulator pane: a real device-control surface
 
-**Status:** draft. Research complete; no implementation started. Extends
-[`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the in-panel iOS
-Simulator, its signed direct helper, and the Indigo HID input path) and the just-landed
-shared-memory frame transport. Prompted by the pane shipping with only tap / drag-swipe / typed
-text and no hardware buttons, and with trackpad panning that does nothing.
+**Status:** draft, partly implemented. Phase 1 has shipped: Home/Lock/Side/Volume hardware buttons,
+continuous-touch panning (click-drag and trackpad scroll), and the input-latency rework below.
+Extends [`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the in-panel iOS
+Simulator, its signed direct helper, and the Indigo HID input path) and the shared-memory frame
+transport. Prompted by the pane shipping with only tap / drag-swipe / typed text and no hardware
+buttons, and with trackpad panning that did nothing.
+
+## Input latency — why a pan lagged when the frame stream did not
+
+Observed: driving the device from Simulator.app looked perfectly smooth *in Threading's own view*
+(the shared-memory frame path handles rapid updates fine), but panning *through* the pane lagged.
+So the lag was entirely in input injection, and it had two round-trip bottlenecks, both removed:
+
+- **App side — a per-move authorization round-trip.** Each streamed move ran the full
+  `authorizedInputSession` path (a spawned task, a consent re-check, an `awaitInputSession` poll,
+  MainActor hops) and then *waited for its ack* before sending the next. Now `began` authorizes
+  once and captures the live session; moves go through a new `SimulatorLiveStreamSession.streamInput`
+  — **ordered** (the client's state queue serializes every send) and **fire-and-forget** (no pending
+  continuation, the ack is ignored). The reliable AF_UNIX stream guarantees delivery and order; a
+  dropped move is corrected by the next. `began` stays awaited (reliable start), `ended` is streamed
+  ordered after the last move (reliable release over the reliable socket).
+- **Helper side — a per-touch HID-completion wait.** `sendMessage` blocked the serial input queue on
+  a semaphore until the private HID `sendWithMessage:…completion:` callback fired, serializing moves
+  at the HID rate. Streamed **moves** now dispatch the HID send non-blocking (`sendTouch(…,wait:false)`);
+  `began`/`ended`/tap/button stay blocking for correctness.
+
+Together these make a pan a fast ordered stream with no per-event round-trip, matching the frame
+path's smoothness. Momentum on release (the arm64 inertia caveat below) is still open.
 
 ## The problem
 

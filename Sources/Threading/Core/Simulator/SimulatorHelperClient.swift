@@ -138,6 +138,15 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         }
     }
 
+    func streamInput(_ input: SimulatorBridgeInput) {
+        // Ordered (the state queue serializes every `send`) and fire-and-forget: no pending
+        // continuation is registered, so the helper's ack for this request id is simply ignored.
+        stateQueue.async { [weak self] in
+            guard let self, !self.didStop, self.didCompleteHandshake else { return }
+            self.send(.input(requestID: UUID(), command: input))
+        }
+    }
+
     func stop() {
         stateQueue.async { [weak self] in self?.stopLocked() }
     }

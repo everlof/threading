@@ -28,6 +28,12 @@ NS_ASSUME_NONNULL_BEGIN
                 down:(BOOL)down
                error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(sendTouch(x:y:down:));
+- (BOOL)sendTouchAtX:(double)x
+                   y:(double)y
+                down:(BOOL)down
+                wait:(BOOL)wait
+               error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(sendTouch(x:y:down:wait:));
 - (BOOL)sendKeyboardUsage:(uint32_t)usage
                      down:(BOOL)down
                     error:(NSError * _Nullable * _Nullable)error

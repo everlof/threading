@@ -69,10 +69,13 @@ final class SimulatorInputSender: @unchecked Sendable {
         case .touch(let phase, let x, let y):
             try validate(x, y)
             switch phase {
-            case .began, .moved:
-                // A digitizer "move" is another contact-down at the new point; the guest tracks
-                // the finger from the stream of these.
+            case .began:
                 try touch(x: x, y: y, down: true)
+            case .moved:
+                // A digitizer "move" is another contact-down at the new point. Moves are sent
+                // non-blocking: waiting on each one's HID completion serialized panning at the HID
+                // rate. A dropped move is harmless — the next one corrects the position.
+                try touch(x: x, y: y, down: true, wait: false)
             case .ended, .cancelled:
                 try touch(x: x, y: y, down: false)
             }
@@ -128,8 +131,8 @@ final class SimulatorInputSender: @unchecked Sendable {
         }
     }
 
-    private func touch(x: Double, y: Double, down: Bool) throws {
-        try bridge.sendTouch(x: x, y: y, down: down)
+    private func touch(x: Double, y: Double, down: Bool, wait: Bool = true) throws {
+        try bridge.sendTouch(x: x, y: y, down: down, wait: wait)
     }
 
     private func key(usage: UInt32, down: Bool) throws {

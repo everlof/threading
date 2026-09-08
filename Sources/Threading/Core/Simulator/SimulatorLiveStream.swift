@@ -63,7 +63,20 @@ protocol SimulatorLiveStreamSession: AnyObject, Sendable {
     var events: AsyncStream<SimulatorLiveStreamEvent> { get }
     func setVisible(_ visible: Bool)
     func sendInput(_ input: SimulatorBridgeInput) async throws
+    /// Send an input in order without waiting for its acknowledgement. This is the low-latency
+    /// path for streamed touch moves: a continuous pan is a fast stream of ordered moves, and
+    /// gating each one on a round-trip ack is what made panning lag. The ordered, reliable socket
+    /// guarantees delivery; a lost ack does not matter because the next move corrects the position.
+    func streamInput(_ input: SimulatorBridgeInput)
     func stop()
+}
+
+extension SimulatorLiveStreamSession {
+    // The default keeps test doubles simple; the real client overrides with a genuine
+    // fire-and-forget send.
+    func streamInput(_ input: SimulatorBridgeInput) {
+        Task { try? await sendInput(input) }
+    }
 }
 
 protocol SimulatorLiveStreamCoordinating: Sendable {

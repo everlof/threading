@@ -732,22 +732,22 @@ final class SimulatorPaneViewController: NSViewController {
     // MARK: - Continuous touch streaming
 
     private var touchStreamActive = false
-    /// The session captured at `began`, so moves stream straight to it without re-running the
-    /// consent/authorization path per move — that per-move machinery was the panning lag.
+    /// The session captured at `began`, so moves stream straight to it — no consent/authorization
+    /// path per move, and no per-move round-trip at all.
     private var touchStreamSession: (any SimulatorLiveStreamSession)?
-    private var touchMoveInFlight = false
-    private var pendingTouchMove: CGPoint?
+    /// A move that arrived while `began` was still authorizing; sent once the session is captured.
+    private var bufferedTouchMove: CGPoint?
 
     /// `began` authorizes once — asking for control and recovering a dropped transport, like a tap
-    /// — and captures the live session. Moves and the end are then streamed *directly* to that
-    /// session, ordered and coalesced to one in flight (which preserves order and gives
-    /// backpressure), but without the authorization round-trip that made each move slow.
+    /// — and captures the live session, sent reliably (awaited). Moves then go through the session's
+    /// ordered fire-and-forget `streamInput`: a pan is a fast stream of moves, and gating each on a
+    /// round-trip ack is what made it lag. The reliable ordered socket guarantees delivery, and a
+    /// dropped move is corrected by the next one. `ended` is likewise ordered after the last move.
     private func beginTouchStream(at point: CGPoint) {
         guard let device = lease?.device else { return }
         touchStreamActive = true
         touchStreamSession = nil
-        pendingTouchMove = nil
-        touchMoveInFlight = false
+        bufferedTouchMove = nil
         runAgentCommand { [weak self] in
             guard let self else { return }
             do {
@@ -756,11 +756,16 @@ final class SimulatorPaneViewController: NSViewController {
                     .touch(phase: .began, x: Double(point.x), y: Double(point.y))
                 )
                 guard self.touchStreamActive else {
-                    try? await session.sendInput(.touch(phase: .cancelled, x: 0.5, y: 0.5))
+                    session.streamInput(.touch(phase: .cancelled, x: Double(point.x), y: Double(point.y)))
                     return
                 }
                 self.touchStreamSession = session
-                self.flushPendingTouchMove()
+                if let buffered = self.bufferedTouchMove {
+                    self.bufferedTouchMove = nil
+                    session.streamInput(
+                        .touch(phase: .moved, x: Double(buffered.x), y: Double(buffered.y))
+                    )
+                }
             } catch {
                 self.touchStreamActive = false
             }
@@ -769,39 +774,20 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func moveTouchStream(to point: CGPoint) {
         guard touchStreamActive else { return }
-        pendingTouchMove = point
-        flushPendingTouchMove()
-    }
-
-    private func flushPendingTouchMove() {
-        guard touchStreamActive,
-              !touchMoveInFlight,
-              let session = touchStreamSession,
-              let point = pendingTouchMove else { return }
-        pendingTouchMove = nil
-        touchMoveInFlight = true
-        runAgentCommand { [weak self] in
-            try? await session.sendInput(
-                .touch(phase: .moved, x: Double(point.x), y: Double(point.y))
-            )
-            guard let self else { return }
-            self.touchMoveInFlight = false
-            self.flushPendingTouchMove()
+        guard let session = touchStreamSession else {
+            bufferedTouchMove = point // authorization still in flight; send the latest once ready
+            return
         }
+        session.streamInput(.touch(phase: .moved, x: Double(point.x), y: Double(point.y)))
     }
 
     private func endTouchStream(at point: CGPoint) {
         guard touchStreamActive else { return }
         touchStreamActive = false
-        pendingTouchMove = nil
+        bufferedTouchMove = nil
         let session = touchStreamSession
         touchStreamSession = nil
-        guard let session else { return }
-        runAgentCommand {
-            try? await session.sendInput(
-                .touch(phase: .ended, x: Double(point.x), y: Double(point.y))
-            )
-        }
+        session?.streamInput(.touch(phase: .ended, x: Double(point.x), y: Double(point.y)))
     }
 
     private func submitInput(_ input: SimulatorBridgeInput) {

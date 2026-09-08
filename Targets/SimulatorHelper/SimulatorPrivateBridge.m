@@ -267,6 +267,10 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
 }
 
 - (BOOL)sendTouchAtX:(double)x y:(double)y down:(BOOL)down error:(NSError **)error {
+    return [self sendTouchAtX:x y:y down:down wait:YES error:error];
+}
+
+- (BOOL)sendTouchAtX:(double)x y:(double)y down:(BOOL)down wait:(BOOL)wait error:(NSError **)error {
     if (!self.supportsInput || !isfinite(x) || !isfinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
         if (error != NULL) { *error = BridgeError(30, @"The touch is outside the adopted screen."); }
         return NO;
@@ -296,7 +300,7 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     memcpy(message + 0xB0, message + 0x20, SimulatorPayloadBytes);
     *(uint32_t *)(message + 0xC0) = 1;
     *(uint32_t *)(message + 0xC4) = 2;
-    return [self sendMessage:message error:error];
+    return [self sendMessage:message waitForCompletion:wait error:error];
 }
 
 - (BOOL)sendKeyboardUsage:(uint32_t)usage down:(BOOL)down error:(NSError **)error {
@@ -344,10 +348,33 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
 }
 
 - (BOOL)sendMessage:(void *)message error:(NSError **)error {
+    return [self sendMessage:message waitForCompletion:YES error:error];
+}
+
+- (BOOL)sendMessage:(void *)message waitForCompletion:(BOOL)wait error:(NSError **)error {
     if (_hidClient == nil) {
         free(message);
         if (error != NULL) { *error = BridgeError(37, @"Simulator input is unavailable in this Xcode."); }
         return NO;
+    }
+    if (!wait) {
+        // Fire-and-forget: dispatch the HID send and return without blocking on its completion.
+        // This is the streamed-move path — waiting on each move's HID completion serialized
+        // panning at the HID rate. `freeWhenDone:YES` still frees the message.
+        @try {
+            ((HIDSender)objc_msgSend)(
+                _hidClient,
+                NSSelectorFromString(@"sendWithMessage:freeWhenDone:completionQueue:completion:"),
+                message,
+                YES,
+                dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0),
+                ^(NSError *sendError) { (void)sendError; }
+            );
+        } @catch (NSException *exception) {
+            if (error != NULL) { *error = BridgeError(38, exception.reason ?: @"Simulator input failed."); }
+            return NO;
+        }
+        return YES;
     }
     dispatch_semaphore_t completion = dispatch_semaphore_create(0);
     __block NSError *completionError = nil;
@@ -370,12 +397,12 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
         dispatch_release(completion);
         return NO;
     }
-    long wait = dispatch_semaphore_wait(
+    long waitResult = dispatch_semaphore_wait(
         completion,
         dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)
     );
     dispatch_release(completion);
-    if (wait != 0) {
+    if (waitResult != 0) {
         if (error != NULL) { *error = BridgeError(39, @"Simulator input was not acknowledged."); }
         return NO;
     }
