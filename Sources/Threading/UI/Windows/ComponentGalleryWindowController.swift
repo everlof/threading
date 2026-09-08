@@ -3322,15 +3322,21 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             )
         }
-        screen.onDrag = { [weak self] from, to, milliseconds in
+        screen.onTouchBegan = { [weak self] point in
             self?.showReceipt(
                 L10n.format(
-                    "SimulatorScreenView dragged from %.2f, %.2f to %.2f, %.2f in %lld ms.",
-                    Double(from.x),
-                    Double(from.y),
-                    Double(to.x),
-                    Double(to.y),
-                    Int64(milliseconds)
+                    "SimulatorScreenView touch began at %.2f, %.2f.",
+                    Double(point.x),
+                    Double(point.y)
+                )
+            )
+        }
+        screen.onTouchEnded = { [weak self] point in
+            self?.showReceipt(
+                L10n.format(
+                    "SimulatorScreenView touch ended at %.2f, %.2f.",
+                    Double(point.x),
+                    Double(point.y)
                 )
             )
         }

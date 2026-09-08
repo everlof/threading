@@ -50,11 +50,20 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     var onTap: ((CGPoint) -> Void)?
-    var onDrag: ((CGPoint, CGPoint, Int) -> Void)?
+    /// Phases of a live, finger-following touch driven by a click-drag or a trackpad scroll. The
+    /// feature controller streams these to the device so panning follows the input in real time
+    /// instead of firing one discrete swipe.
+    var onTouchBegan: ((CGPoint) -> Void)?
+    var onTouchMoved: ((CGPoint) -> Void)?
+    var onTouchEnded: ((CGPoint) -> Void)?
     var onText: ((String) -> Void)?
 
     private var pointerStart: (location: CGPoint, time: TimeInterval)?
     private var pointerCurrent: CGPoint?
+    /// Whether the current mouse gesture has crossed the tap threshold and become a streamed touch.
+    private var isStreamingTouch = false
+    /// The synthetic contact point a trackpad scroll drives; nil when no scroll gesture is active.
+    private var scrollPoint: CGPoint?
 
     var imageRect: NSRect {
         guard let image else { return .zero }
@@ -131,12 +140,23 @@ final class SimulatorScreenView: ThemedControl {
         window?.makeFirstResponder(self)
         pointerStart = (location, event.timestamp)
         pointerCurrent = location
+        isStreamingTouch = false
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard pointerStart != nil else { return }
-        pointerCurrent = convert(event.locationInWindow, from: nil)
+        guard let start = pointerStart else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        pointerCurrent = location
+        // Cross the tap threshold once, then stream the touch so it follows the pointer live.
+        if !isStreamingTouch,
+           hypot(location.x - start.location.x, location.y - start.location.y) >= Self.tapThreshold {
+            isStreamingTouch = true
+            onTouchBegan?(clampedNormalizedPoint(start.location))
+        }
+        if isStreamingTouch {
+            onTouchMoved?(clampedNormalizedPoint(location))
+        }
         needsDisplay = true
     }
 
@@ -144,15 +164,42 @@ final class SimulatorScreenView: ThemedControl {
         guard let start = pointerStart else { return }
         let end = convert(event.locationInWindow, from: nil)
         defer { cancelPointerGesture() }
-        guard let from = normalizedPoint(start.location),
-              let to = normalizedPoint(end) else { return }
-
-        let distance = hypot(end.x - start.location.x, end.y - start.location.y)
-        if distance < 4 {
+        if isStreamingTouch {
+            onTouchEnded?(clampedNormalizedPoint(end))
+        } else if let from = normalizedPoint(start.location) {
             onTap?(from)
-        } else {
-            let milliseconds = Int(((event.timestamp - start.time) * 1_000).rounded())
-            onDrag?(from, to, min(2_000, max(100, milliseconds)))
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Only precise (trackpad) scrolling drives panning; a notched mouse wheel falls through.
+        guard isEnabled,
+              interactionState.acceptsPointerRequests,
+              event.hasPreciseScrollingDeltas else {
+            super.scrollWheel(with: event)
+            return
+        }
+        switch event.phase {
+        case .began:
+            let origin = clamp(convert(event.locationInWindow, from: nil), to: imageRect)
+            scrollPoint = origin
+            onTouchBegan?(clampedNormalizedPoint(origin))
+        case .changed:
+            guard var point = scrollPoint else { return }
+            // A trackpad scroll moves the content; the finger follows it. Screen y grows downward,
+            // so a positive scrolling delta pushes the contact down, matching a natural swipe.
+            point.x += event.scrollingDeltaX
+            point.y += event.scrollingDeltaY
+            point = clamp(point, to: imageRect)
+            scrollPoint = point
+            onTouchMoved?(clampedNormalizedPoint(point))
+        case .ended, .cancelled:
+            if let point = scrollPoint { onTouchEnded?(clampedNormalizedPoint(point)) }
+            scrollPoint = nil
+        default:
+            // Momentum phases are left to a later increment (see the controls draft's arm64
+            // momentum note); a scroll that never reported a begin phase is ignored.
+            break
         }
     }
 
@@ -191,6 +238,8 @@ final class SimulatorScreenView: ThemedControl {
 
     override var restingPointer: NSCursor? { .arrow }
 
+    private static let tapThreshold: CGFloat = 4
+
     private func normalizedPoint(_ point: CGPoint) -> CGPoint? {
         let target = imageRect
         guard !target.isEmpty, target.contains(point) else { return nil }
@@ -200,9 +249,29 @@ final class SimulatorScreenView: ThemedControl {
         )
     }
 
+    /// Normalizes a point into the device's 0…1 space, clamping rather than rejecting one outside
+    /// the image — a streamed touch that runs past the edge should land at the edge, not vanish.
+    private func clampedNormalizedPoint(_ point: CGPoint) -> CGPoint {
+        let target = imageRect
+        guard !target.isEmpty else { return CGPoint(x: 0.5, y: 0.5) }
+        return CGPoint(
+            x: min(1, max(0, (point.x - target.minX) / target.width)),
+            y: min(1, max(0, (target.maxY - point.y) / target.height))
+        )
+    }
+
+    private func clamp(_ point: CGPoint, to rect: NSRect) -> CGPoint {
+        guard !rect.isEmpty else { return point }
+        return CGPoint(
+            x: min(rect.maxX, max(rect.minX, point.x)),
+            y: min(rect.maxY, max(rect.minY, point.y))
+        )
+    }
+
     private func cancelPointerGesture() {
         pointerStart = nil
         pointerCurrent = nil
+        isStreamingTouch = false
         needsDisplay = true
     }
 

@@ -39742,6 +39742,28 @@
         }
       }
     },
+    "SimulatorScreenView touch began at %.2f, %.2f." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorScreenView-beröring började vid %.2f, %.2f."
+          }
+        }
+      }
+    },
+    "SimulatorScreenView touch ended at %.2f, %.2f." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorScreenView-beröring slutade vid %.2f, %.2f."
+          }
+        }
+      }
+    },
     "SimulatorScreenView typed %@." : {
       "extractionState" : "manual",
       "localizations" : {

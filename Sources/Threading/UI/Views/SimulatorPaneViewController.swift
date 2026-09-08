@@ -181,15 +181,9 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onTap = { [weak self] point in
             self?.submitInput(.tap(x: Double(point.x), y: Double(point.y)))
         }
-        preview.onDrag = { [weak self] from, to, duration in
-            self?.submitInput(.drag(
-                fromX: Double(from.x),
-                fromY: Double(from.y),
-                toX: Double(to.x),
-                toY: Double(to.y),
-                durationMilliseconds: duration
-            ))
-        }
+        preview.onTouchBegan = { [weak self] point in self?.beginTouchStream(at: point) }
+        preview.onTouchMoved = { [weak self] point in self?.moveTouchStream(to: point) }
+        preview.onTouchEnded = { [weak self] point in self?.endTouchStream(at: point) }
         preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
         return preview
     }()
@@ -721,6 +715,49 @@ final class SimulatorPaneViewController: NSViewController {
         liveCapabilities = nil
         lastStreamFailure = nil
         screenView.interactionState = .unavailable
+    }
+
+    // MARK: - Continuous touch streaming
+
+    private var touchStreamActive = false
+    private var touchMoveInFlight = false
+    private var pendingTouchMove: CGPoint?
+
+    /// The `began` phase goes through `submitInput` so it asks for control and recovers a dropped
+    /// transport, exactly like a tap. Moves and the end are streamed directly to the authorized
+    /// session, coalesced to one in flight so a fast scroll cannot outrun the socket.
+    private func beginTouchStream(at point: CGPoint) {
+        touchStreamActive = true
+        pendingTouchMove = nil
+        touchMoveInFlight = false
+        submitInput(.touch(phase: .began, x: Double(point.x), y: Double(point.y)))
+    }
+
+    private func moveTouchStream(to point: CGPoint) {
+        guard touchStreamActive else { return }
+        guard !touchMoveInFlight else {
+            pendingTouchMove = point
+            return
+        }
+        sendStreamedTouchMove(point)
+    }
+
+    private func sendStreamedTouchMove(_ point: CGPoint) {
+        touchMoveInFlight = true
+        sendInput(.touch(phase: .moved, x: Double(point.x), y: Double(point.y))) { [weak self] _ in
+            guard let self else { return }
+            self.touchMoveInFlight = false
+            guard self.touchStreamActive, let next = self.pendingTouchMove else { return }
+            self.pendingTouchMove = nil
+            self.sendStreamedTouchMove(next)
+        }
+    }
+
+    private func endTouchStream(at point: CGPoint) {
+        guard touchStreamActive else { return }
+        touchStreamActive = false
+        pendingTouchMove = nil
+        submitInput(.touch(phase: .ended, x: Double(point.x), y: Double(point.y)))
     }
 
     private func submitInput(_ input: SimulatorBridgeInput) {

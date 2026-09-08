@@ -66,6 +66,17 @@ final class SimulatorInputSender: @unchecked Sendable {
                 throw error
             }
 
+        case .touch(let phase, let x, let y):
+            try validate(x, y)
+            switch phase {
+            case .began, .moved:
+                // A digitizer "move" is another contact-down at the new point; the guest tracks
+                // the finger from the stream of these.
+                try touch(x: x, y: y, down: true)
+            case .ended, .cancelled:
+                try touch(x: x, y: y, down: false)
+            }
+
         case .text(let text):
             guard text.count <= SimulatorBridgeText.maximumCharacterCount else {
                 throw InputError.textTooLong

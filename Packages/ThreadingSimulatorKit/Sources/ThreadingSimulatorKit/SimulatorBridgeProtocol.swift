@@ -54,9 +54,21 @@ public enum SimulatorBridgeButton: String, Codable, CaseIterable, Equatable, Sen
     case side
 }
 
+/// One phase of a live, finger-following touch. Unlike `drag`, which is a self-contained
+/// down→interpolate→up swipe, these stream the contact so the pane can follow a trackpad scroll or
+/// a click-drag in real time and let the guest OS compute the fling from the last moves.
+public enum SimulatorBridgeTouchPhase: String, Codable, CaseIterable, Equatable, Sendable {
+    case began
+    case moved
+    case ended
+    case cancelled
+}
+
 public enum SimulatorBridgeInput: Codable, Equatable, Sendable {
     case tap(x: Double, y: Double)
     case drag(fromX: Double, fromY: Double, toX: Double, toY: Double, durationMilliseconds: Int)
+    /// A single phase of a continuous touch, keyed to the device's single digitizer contact.
+    case touch(phase: SimulatorBridgeTouchPhase, x: Double, y: Double)
     case text(String)
     case button(SimulatorBridgeButton)
 }

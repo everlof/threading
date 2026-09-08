@@ -88,6 +88,18 @@ final class SimulatorSharedSurfaceTests: XCTestCase {
         XCTAssertTrue(decoded.supportsSharedMemory)
     }
 
+    func testContinuousTouchInputRoundTrips() throws {
+        for phase in SimulatorBridgeTouchPhase.allCases {
+            let input = SimulatorBridgeInput.touch(phase: phase, x: 0.4, y: 0.6)
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    SimulatorBridgeInput.self, from: JSONEncoder().encode(input)
+                ),
+                input
+            )
+        }
+    }
+
     func testFrameRingClaimsFreeBuffersAndDropsWhenFull() {
         var ring = SimulatorSharedFrameRing(bufferCount: 3)
         XCTAssertEqual(ring.freeCount, 3)
