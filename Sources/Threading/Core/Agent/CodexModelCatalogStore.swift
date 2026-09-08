@@ -76,7 +76,8 @@ final class CodexModelCatalogStore: @unchecked Sendable {
                         continuation.resume(returning: false)
                         return
                     }
-                    entries.withLock { $0 = candidate }
+                    let committed = candidate
+                    entries.withLock { $0 = committed }
                     continuation.resume(returning: true)
                 } catch {
                     continuation.resume(returning: false)

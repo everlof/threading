@@ -12,8 +12,8 @@ enum AccountImageStore {
     private static var missing: Set<String> = []
     private static var automaticIDs: [AccountID: String] = [:]
     private static let worker = DispatchQueue(label: "codes.threading.account-images", qos: .utility)
-    private static let maximumBytes = 4 * 1024 * 1024
-    private static let maximumPNGBytes = 32 * 1024
+    nonisolated private static let maximumBytes = 4 * 1024 * 1024
+    nonisolated private static let maximumPNGBytes = 32 * 1024
 
     nonisolated private static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -90,7 +90,10 @@ enum AccountImageStore {
         return id.flatMap { bytes.object(forKey: $0 as NSString) as Data? }
     }
 
-    static func importImage(_ url: URL, completion: @escaping @MainActor (String?) -> Void) {
+    static func importImage(
+        _ url: URL,
+        completion: @escaping @MainActor @Sendable (String?) -> Void
+    ) {
         worker.async {
             let id = UUID().uuidString
             let result: String?

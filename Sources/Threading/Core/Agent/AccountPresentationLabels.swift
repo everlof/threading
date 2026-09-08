@@ -22,7 +22,8 @@ enum AccountPresentationLabels {
                     : (style.useShortName == true ? own.shortName ?? name : name)
             }
         }
-        names.withLock { $0[provider] = labels }
+        let publishedLabels = labels
+        names.withLock { $0[provider] = publishedLabels }
     }
 
     static func name(

@@ -517,7 +517,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
         defer { manager.closeDatabase() }
         XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
 
-        try withDefault(
+        withDefault(
             NativeSidebarPipelineOptions.registeredFactWire(key),
             forKey: "nativeSidebarGroupByFact"
         ) {

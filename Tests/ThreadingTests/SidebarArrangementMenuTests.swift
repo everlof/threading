@@ -30,8 +30,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
 
     /// Visibility first, grouping, presentation, sorting, then the chosen order's direction.
     func testMenuOffersGroupingThenEveryOrderThenBothDirections() throws {
-        try withCleanNativeFactSelections {
-            try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+        withCleanNativeFactSelections {
+            withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
                 let entries = ProjectSidebarViewController().arrangementMenuEntries()
 
                 let titles = entries.map { $0.item?.title ?? "—" }
@@ -54,8 +54,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
     /// The direction rows are worded for whichever order is chosen: "Descending" describes a
     /// comparator, where these have to describe a list of sessions.
     func testDirectionWordingFollowsTheChosenOrder() throws {
-        try withCleanNativeFactSelections {
-            try withDefault(SidebarSessionOrder.name.rawValue, forKey: "sidebarSessionOrder") {
+        withCleanNativeFactSelections {
+            withDefault(SidebarSessionOrder.name.rawValue, forKey: "sidebarSessionOrder") {
                 let titles = ProjectSidebarViewController().arrangementMenuEntries()
                     .compactMap(\.item?.title)
 
@@ -67,8 +67,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
     }
 
     func testTypeOrderOffersChatAndTerminalDirections() throws {
-        try withCleanNativeFactSelections {
-            try withDefault(SidebarSessionOrder.type.rawValue, forKey: "sidebarSessionOrder") {
+        withCleanNativeFactSelections {
+            withDefault(SidebarSessionOrder.type.rawValue, forKey: "sidebarSessionOrder") {
                 let titles = ProjectSidebarViewController().arrangementMenuEntries()
                     .compactMap(\.item?.title)
 
@@ -80,14 +80,14 @@ final class SidebarArrangementMenuTests: XCTestCase {
 
     /// The seeded defaults: both grouping toggles on, the store's own order chosen.
     func testDefaultsCarryTheirChecks() throws {
-        try withDefault(true, forKey: "groupsSessionsByBranch") {
-            try withDefault(true, forKey: "groupsLoneBranches") {
-                try withDefault(false, forKey: "compactsSidebarTree") {
-                    try withDefault(
+        withDefault(true, forKey: "groupsSessionsByBranch") {
+            withDefault(true, forKey: "groupsLoneBranches") {
+                withDefault(false, forKey: "compactsSidebarTree") {
+                    withDefault(
                         SidebarSessionOrder.manual.rawValue,
                         forKey: "sidebarSessionOrder"
                     ) {
-                        try withCleanNativeFactSelections {
+                        withCleanNativeFactSelections {
                             let entries = ProjectSidebarViewController()
                                 .arrangementMenuEntries()
 
@@ -278,8 +278,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
         let wire = NativeSidebarPipelineOptions.registeredFactWire(
             ExtensionFactKey(id: "gitlab.mr.state", version: 1)
         )
-        try withDefault(wire, forKey: "nativeSidebarGroupByFact") {
-            try withDefault(wire, forKey: "nativeSidebarSortByFact") {
+        withDefault(wire, forKey: "nativeSidebarGroupByFact") {
+            withDefault(wire, forKey: "nativeSidebarSortByFact") {
                 let sidebar = ProjectSidebarViewController()
                 let entries = sidebar.arrangementMenuEntries()
                 XCTAssertEqual(
@@ -305,9 +305,9 @@ final class SidebarArrangementMenuTests: XCTestCase {
 
     /// Each order ships in its natural direction, and exactly one of the pair carries the check.
     func testTheNaturalDirectionCarriesTheCheckByDefault() throws {
-        try withCleanNativeFactSelections {
-            try withDefault(SidebarSessionOrder.recentActivity.rawValue, forKey: "sidebarSessionOrder") {
-                try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+        withCleanNativeFactSelections {
+            withDefault(SidebarSessionOrder.recentActivity.rawValue, forKey: "sidebarSessionOrder") {
+                withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
                     let entries = ProjectSidebarViewController().arrangementMenuEntries()
 
                     XCTAssertEqual(item(in: entries, titled: "Most Recent First")?.isSelected, true)
