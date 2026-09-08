@@ -98,6 +98,9 @@ enum NativeSidebarHostProviderAlias: String, CaseIterable, Sendable {
     case componentCustomization = "ComponentCustomizationProviderSlot.customization"
     case extensionImage = "ExtensionManager.imageResourceURL"
     case accountDiscovery = "AgentAccountDiscovery.account"
+    case accountPresentation = "AccountPresentation.showsStandardBadge"
+    case accountBadgeSelection = "AccountPresentation.hasUserSelectedBadge"
+    case accountBadge = "AccountBadge.chip"
 }
 
 enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
@@ -146,6 +149,9 @@ enum NativeSidebarParity {
         .componentCustomization: .customizationPresentation,
         .extensionImage: .identityPresentation,
         .accountDiscovery: .identityPresentation,
+        .accountPresentation: .identityPresentation,
+        .accountBadgeSelection: .identityPresentation,
+        .accountBadge: .identityPresentation,
     ]
 
     static func fact<T>(_ dependency: NativeSidebarFactDependency, _ value: T) -> T { value }
@@ -195,6 +201,17 @@ final class ExtensionManager {
 enum AgentAccountDiscovery {
     static func account() -> Int { 0 }
 }
+
+enum AccountPresentation {
+    static func showsStandardBadge() -> Bool { false }
+    static func hasUserSelectedBadge() -> Bool { false }
+}
+
+final class AccountBadge {
+    static let shared = AccountBadge()
+    static func chip() -> Int { 0 }
+    func chip() -> Int { 0 }
+}
 """
 
 SESSION_ROW = """
@@ -206,6 +223,22 @@ final class SessionRowView {
     private let account = NativeSidebarParity.host(
         .identityPresentation,
         AgentAccountDiscovery.account()
+    )
+    private let showsStandardBadge = NativeSidebarParity.host(
+        .identityPresentation,
+        AccountPresentation.showsStandardBadge()
+    )
+    private let hasUserSelectedBadge = NativeSidebarParity.host(
+        .identityPresentation,
+        AccountPresentation.hasUserSelectedBadge()
+    )
+    private let accountBadge = NativeSidebarParity.host(
+        .identityPresentation,
+        AccountBadge.chip()
+    )
+    private let sharedAccountBadge = NativeSidebarParity.host(
+        .identityPresentation,
+        AccountBadge.shared.chip()
     )
 
     func configure(with session: AgentSession, isLoading: Bool) {
@@ -1647,6 +1680,70 @@ enum NativeSidebarPipelineOptions {
 
         self.assert_fails_with(
             "AgentAccountDiscovery.account must use its host-owned dependency "
+            "(.identityPresentation)"
+        )
+
+    def test_account_presentation_requires_identity_presentation(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/SessionRowView.swift",
+            ".identityPresentation,\n        AccountPresentation.showsStandardBadge()",
+            ".transientLoading,\n        AccountPresentation.showsStandardBadge()",
+        )
+
+        self.assert_fails_with(
+            "AccountPresentation.showsStandardBadge must use its host-owned dependency "
+            "(.identityPresentation)"
+        )
+
+    def test_account_badge_requires_identity_presentation(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/SessionRowView.swift",
+            ".identityPresentation,\n        AccountBadge.chip()",
+            ".transientLoading,\n        AccountBadge.chip()",
+        )
+
+        self.assert_fails_with(
+            "AccountBadge.chip must use its host-owned dependency "
+            "(.identityPresentation)"
+        )
+
+    def test_account_badge_selection_requires_identity_presentation(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/SessionRowView.swift",
+            ".identityPresentation,\n        AccountPresentation.hasUserSelectedBadge()",
+            ".transientLoading,\n        AccountPresentation.hasUserSelectedBadge()",
+        )
+
+        self.assert_fails_with(
+            "AccountPresentation.hasUserSelectedBadge must use its host-owned dependency "
+            "(.identityPresentation)"
+        )
+
+    def test_unwrapped_account_badge_selection_is_rejected(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/SessionRowView.swift",
+            "    private let hasUserSelectedBadge = NativeSidebarParity.host(\n"
+            "        .identityPresentation,\n"
+            "        AccountPresentation.hasUserSelectedBadge()\n"
+            "    )",
+            "    private let hasUserSelectedBadge = "
+            "AccountPresentation.hasUserSelectedBadge()",
+        )
+
+        self.assert_fails_with(
+            "SessionRowView reads provider root "
+            "AccountPresentation.hasUserSelectedBadge outside NativeSidebarParity"
+        )
+
+    def test_shared_account_badge_chain_uses_expanded_provider_vocabulary(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/SessionRowView.swift",
+            ".identityPresentation,\n        AccountBadge.shared.chip()",
+            ".transientLoading,\n        AccountBadge.shared.chip()",
+        )
+
+        self.assert_fails_with(
+            "AccountBadge.shared.chip must use its host-owned dependency "
             "(.identityPresentation)"
         )
 

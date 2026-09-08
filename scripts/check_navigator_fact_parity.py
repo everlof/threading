@@ -61,12 +61,11 @@ RECEIVER_MEMBER_READ = re.compile(
 )
 KEYPATH_MEMBER_READ = re.compile(r"\\\.\s*([A-Za-z_][A-Za-z0-9_]*)\b")
 MARKER_START = re.compile(r"\bNativeSidebarParity\.(fact|facts|option|host)\s*\(")
-SHARED_PROVIDER_READ = re.compile(
-    r"\b([A-Z][A-Za-z0-9_]*(?:Store|Runtime|Registry|Provider|ProviderSlot|Discovery|Service|Manager))"
-    r"\.shared\s*[?!]?\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b"
-)
 PROVIDER_TYPE = (
-    r"[A-Z][A-Za-z0-9_]*(?:Store|Runtime|Registry|Provider|ProviderSlot|Discovery|Service|Manager)"
+    r"[A-Z][A-Za-z0-9_]*(?:Store|Runtime|Registry|Provider|ProviderSlot|Discovery|Service|Manager|Presentation|Badge)"
+)
+SHARED_PROVIDER_READ = re.compile(
+    rf"\b({PROVIDER_TYPE})\.shared\s*[?!]?\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 SHARED_PROVIDER_ROOT = re.compile(rf"\b({PROVIDER_TYPE})\.shared\b")
 STATIC_PROVIDER_READ = re.compile(

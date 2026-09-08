@@ -27,6 +27,19 @@ struct AccountPresentation {
             .showDefaultBadge == true
     }
 
+    @MainActor
+    static func hasUserSelectedBadge(
+        for account: AgentAccount,
+        surface: AccountAppearanceSurface,
+        store: AccountPreferencesStore = .shared
+    ) -> Bool {
+        account.emoji != nil || resolve(
+            account,
+            surface: surface,
+            store: store
+        ).hasExplicitBadge
+    }
+
     var visibleName: String {
         guard style.showName != false else { return "" }
         return style.useShortName == true ? shortName : name

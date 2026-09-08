@@ -185,7 +185,10 @@
         "providerID": { "type": "string", "minLength": 1 },
         "displayName": { "type": "string" },
         "isDefault": { "type": "boolean" },
-        "hasUserSelectedImage": { "type": "boolean" },
+        "hasUserSelectedImage": {
+          "type": "boolean",
+          "description": "Legacy wire name: true for a legacy emoji or an effective explicit sidebar badge mode, background, foreground, or showBadge value. An extension resolver must not replace it; an image need not exist."
+        },
         "image": { "$ref": "#/$defs/imageReference" }
       }
     },

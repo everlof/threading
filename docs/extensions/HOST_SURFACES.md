@@ -106,8 +106,8 @@ boundary.
 Primitive images resolve in this order:
 
 - provider: selected provider resolver, then Threading's built-in provider mark;
-- account: the user's explicit per-account emoji/image, selected account resolver, discovered
-  avatar, generated initial;
+- account: the account's legacy emoji or effective explicit sidebar badge choice (shared/default
+  or per-account), selected account resolver, discovered avatar, generated initial;
 - project: the user's explicit project icon, Threading's current discovery, generated project
   tile.
 
@@ -169,8 +169,9 @@ discarded, `.git` is removed, and local remotes are omitted. A complete remote U
 the boundary.
 
 Provider snapshots contain ID, display name, and the built-in image as an opaque host asset.
-Account snapshots contain provider-qualified ID, display name, default/user-image flags, and an
-optional built-in image reference. Email, config path, avatar URL, and image bytes are absent.
+Account snapshots contain provider-qualified ID, display name, a default flag, the legacy-named
+`hasUserSelectedImage` explicit-badge-override flag, and an optional built-in image reference.
+Email, config path, avatar URL, and image bytes are absent.
 
 For a CI extension, repository identity and revision are enough. It should not need arbitrary
 project-file access merely to ask GitHub or another CI provider about a commit.

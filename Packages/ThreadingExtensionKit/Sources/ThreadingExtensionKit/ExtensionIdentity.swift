@@ -4,8 +4,8 @@ import Foundation
 ///
 /// These references are contextual: they resolve for the session targeted by the patch. The
 /// provider value already includes side-chat lineage and the selected primitive provider
-/// resolver. The account value already includes explicit user-image precedence and the selected
-/// primitive account resolver.
+/// resolver. The account value already includes effective explicit sidebar-badge precedence and
+/// the selected primitive account resolver.
 public enum ExtensionSessionIdentityAsset {
     public static let providerImage: ExtensionImageReference =
         .hostAsset("session.provider-image")
@@ -46,6 +46,9 @@ public struct ExtensionAccountSnapshot: Codable, Equatable, Sendable {
     public let providerID: String
     public let displayName: String
     public let isDefault: Bool
+    /// The format-1 wire name is retained for compatibility. `true` means the account has a
+    /// legacy emoji or an effective explicit sidebar badge mode, background, foreground, or
+    /// `showBadge` value. An extension resolver must not replace it; an image need not exist.
     public let hasUserSelectedImage: Bool
     public let image: ExtensionImageReference?
 

@@ -1169,9 +1169,12 @@ system symbol. Raw paths and `NSImage` never cross the process boundary. Publica
 the generation's previous primitive results atomically and are revoked with its token.
 
 Threading applies provider resolver → built-in provider mark. Account precedence is stricter:
-the user's explicit emoji, then the selected resolver, then the discovered/generated built-in
-chip. Side-chat lineage remains host-owned. Invalid, missing, or undecodable images fall back
-without leaving an empty icon.
+the account's legacy emoji or effective explicit sidebar badge choice (mode, background,
+foreground, or badge visibility), then the selected resolver, then the discovered/generated
+built-in chip. Shared/default appearance can supply that effective choice. The format-1
+`hasUserSelectedImage` name is retained for compatibility; treat it as this sidebar
+badge-override flag, not proof that an image exists. Side-chat lineage remains host-owned.
+Invalid, missing, or undecodable images fall back without leaving an empty icon.
 
 ### Composing the complete session identity
 
@@ -1212,8 +1215,9 @@ try await host.publishComponentPatches(patches)
 
 The contextual assets are already resolved. The provider image includes the selected primitive
 resolver or native fallback, and becomes Threading's fork mark for a side chat. The account image
-preserves explicit user-image precedence above primitive resolvers and native fallback. The
-identity contract accepts only a compact horizontal tree of images and fixed spacing. Threading
+preserves effective explicit sidebar-badge precedence above primitive resolvers and native
+fallback. The identity contract accepts only a compact horizontal tree of images and fixed
+spacing. Threading
 retains the title, status, actions, selection, accessibility shell, dormant opacity, conflict
 selection, and atomic native fallback.
 
@@ -1427,7 +1431,8 @@ Before reporting an extension complete:
     For a hook, verify exactly-one-proceed validation, deterministic composition with another
     hook, atomic fallback for a missing resource, and native restoration after disable.
 11. For primitive identity resolvers, test a host-asset echo, a package resource, an invalid
-    resource fallback, and preservation of an explicit user account image.
+    resource fallback, and preservation of a legacy emoji and effective explicit sidebar badge
+    choices.
 12. For `settings`, test defaults, launch environment values, every control, a live correlated
     update, process rejection rollback, disable/re-enable persistence, and host-page injection.
 13. For `services.provide`, test the exact registered version, verified caller ID, success and

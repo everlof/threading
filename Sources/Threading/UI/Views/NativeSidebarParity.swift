@@ -37,6 +37,9 @@ enum NativeSidebarHostProviderAlias: String, CaseIterable, Sendable {
     case accountIcon = "ExtensionIdentityResolverProviderSlot.accountIcon"
     case extensionImage = "ExtensionManager.imageResourceURL"
     case accountDiscovery = "AgentAccountDiscovery.account"
+    case accountPresentation = "AccountPresentation.showsStandardBadge"
+    case accountBadgeSelection = "AccountPresentation.hasUserSelectedBadge"
+    case accountBadge = "AccountBadge.chip"
     case registeredFactEligibility = "ExtensionFactRegistry.isRegisteredFactDefinitionEligible"
 }
 
@@ -131,6 +134,9 @@ enum NativeSidebarParity {
         .accountIcon: .identityPresentation,
         .extensionImage: .identityPresentation,
         .accountDiscovery: .identityPresentation,
+        .accountPresentation: .identityPresentation,
+        .accountBadgeSelection: .identityPresentation,
+        .accountBadge: .identityPresentation,
         .registeredFactEligibility: .registeredFactResolution,
     ]
 

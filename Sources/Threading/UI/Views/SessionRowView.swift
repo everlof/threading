@@ -1075,11 +1075,16 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
 
         // The hover popover carries the full title and account, so a tooltip would only
         // duplicate it more slowly.
-        // The standard login never has an account chip. Looking it up anyway makes the first
-        // visible row scan every account directory and parse shell aliases during cold launch.
+        // The standard login omits its account chip by default. Looking it up anyway makes the
+        // first visible row scan every account directory and parse shell aliases during cold
+        // launch; explicit sidebar appearance can opt that badge back in.
         // Alternate rows still resolve synchronously because their chip is visible content;
         // the hover card performs its own complete lookup only when requested.
-        let account = accountHandle.isStandard && !AccountPresentation.showsStandardBadge(provider: provider)
+        let showsStandardBadge = NativeSidebarParity.host(
+            .identityPresentation,
+            AccountPresentation.showsStandardBadge(provider: provider)
+        )
+        let account = accountHandle.isStandard && !showsStandardBadge
             ? nil
             : NativeSidebarParity.host(
                 .identityPresentation,
@@ -1236,10 +1241,18 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let dimsThroughAlpha = agentMark.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
 
-        let builtInChip = AccountBadge.chip(for: account)
+        let builtInChip = NativeSidebarParity.host(
+            .identityPresentation,
+            AccountBadge.chip(for: account)
+        )
+        let hasUserSelectedBadge = NativeSidebarParity.host(
+            .identityPresentation,
+            account.map {
+                AccountPresentation.hasUserSelectedBadge(for: $0, surface: .sidebar)
+            } ?? false
+        )
         let chip: NSImage?
-        if let account, account.emoji == nil,
-           !account.presentation(in: .sidebar).hasExplicitBadge,
+        if let account, !hasUserSelectedBadge,
            let resolution = NativeSidebarParity.host(
                .identityPresentation,
                ExtensionIdentityResolverProviderSlot.shared.accountIcon(
@@ -1251,7 +1264,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 extensionIdentifier: resolution.extensionIdentifier
             ) ?? builtInChip
         } else {
-            // An explicit user emoji remains above an extension resolver in precedence.
+            // Every effective explicit sidebar badge choice remains above an extension resolver.
             chip = builtInChip
         }
         if let chip {
@@ -1395,7 +1408,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                        handle: parsed.handle
                    )
                ) {
-                return AccountBadge.chip(for: account)
+                return NativeSidebarParity.host(
+                    .identityPresentation,
+                    AccountBadge.chip(for: account)
+                )
             }
             return nil
         }

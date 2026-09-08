@@ -106,6 +106,63 @@ final class AccountAppearanceTests: XCTestCase {
         XCTAssertTrue(result.showsBadge(isDefault: true, surface: .sidebar))
     }
 
+    func testResolverSuppressionTracksOnlyEffectiveSidebarBadgeChoices() {
+        XCTAssertFalse(AccountPresentation.hasUserSelectedBadge(
+            for: account,
+            surface: .sidebar,
+            store: store
+        ))
+
+        var defaultsAppearance = AccountAppearancePreferences()
+        var unrelatedStyle = AccountAppearance()
+        unrelatedStyle.showDefaultBadge = true
+        unrelatedStyle.showName = false
+        unrelatedStyle.showEmail = false
+        defaultsAppearance.shared = unrelatedStyle
+        store.setAppearance(defaultsAppearance, for: nil)
+        XCTAssertFalse(AccountPresentation.hasUserSelectedBadge(
+            for: account,
+            surface: .sidebar,
+            store: store
+        ))
+
+        var hiddenStyle = AccountAppearance()
+        hiddenStyle.showBadge = false
+        defaultsAppearance.shared = hiddenStyle
+        store.setAppearance(defaultsAppearance, for: nil)
+        XCTAssertTrue(AccountPresentation.hasUserSelectedBadge(
+            for: account,
+            surface: .sidebar,
+            store: store
+        ))
+
+        var sidebarStyle = AccountAppearance()
+        sidebarStyle.backgroundHex = "#123456"
+        defaultsAppearance.shared = unrelatedStyle
+        defaultsAppearance.surfaces = [AccountAppearanceSurface.sidebar.rawValue: sidebarStyle]
+        store.setAppearance(defaultsAppearance, for: nil)
+        XCTAssertTrue(AccountPresentation.hasUserSelectedBadge(
+            for: account,
+            surface: .sidebar,
+            store: store
+        ))
+
+        let legacyEmojiAccount = AgentAccount(
+            provider: .codex,
+            handle: .named("legacy-emoji"),
+            configPath: "/nonexistent/legacy-emoji",
+            displayName: "Legacy",
+            emoji: "🦊",
+            presentationNameIsResolved: true
+        )
+        store.setAppearance(AccountAppearancePreferences(), for: nil)
+        XCTAssertTrue(AccountPresentation.hasUserSelectedBadge(
+            for: legacyEmojiAccount,
+            surface: .sidebar,
+            store: store
+        ))
+    }
+
     func testPersistenceNormalizesBoundsAndIgnoresUnknownSurfaces() {
         var own = AccountAppearancePreferences()
         var style = AccountAppearance()

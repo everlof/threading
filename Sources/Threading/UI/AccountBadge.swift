@@ -20,8 +20,9 @@ import ThreadingRemoteKit
 /// the whole address, so two accounts sharing an initial still differ by colour, exactly as
 /// `GeneratedProjectIcon` separates two same-initial projects.
 ///
-/// The default account gets no chip: its agent's own mark already says everything the row
-/// knows, and a badge on every row would be chrome rather than a difference.
+/// The default account gets no chip unless its effective surface appearance explicitly enables
+/// one: its agent's own mark normally says everything the row knows, and a badge on every row
+/// would otherwise be chrome rather than a difference.
 @MainActor
 enum AccountBadge {
 
@@ -41,8 +42,8 @@ enum AccountBadge {
 
     // MARK: - Public Methods
 
-    /// The chip for an account, or nil when the row has nothing extra to say — no account
-    /// at all (a shell), or the CLI's default one.
+    /// The chip for an account, or nil when the row has nothing extra to say — no account at all
+    /// (a shell), an explicitly hidden badge, or a default account not opted into a badge.
     static func chip(
         for account: AgentAccount?,
         surface: AccountAppearanceSurface = .sidebar,
