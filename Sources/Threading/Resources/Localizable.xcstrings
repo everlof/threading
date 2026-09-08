@@ -20816,6 +20816,17 @@
         }
       }
     },
+    "Home" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hem"
+          }
+        }
+      }
+    },
     "Horizontal and vertical orientations use the theme’s divider and border weight." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24107,6 +24118,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Platser"
+          }
+        }
+      }
+    },
+    "Lock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lås"
           }
         }
       }
@@ -39254,6 +39276,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sidokonversation"
+          }
+        }
+      }
+    },
+    "Side button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidoknapp"
           }
         }
       }

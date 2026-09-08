@@ -132,6 +132,48 @@ final class SimulatorPaneViewController: NSViewController {
         trailing: [controlButton, retryButton]
     )
 
+    private func makeHardwareButton(
+        symbol: String,
+        title: String,
+        identifier: String,
+        button: SimulatorBridgeButton
+    ) -> ThemedIconButton {
+        let control = ThemedIconButton(
+            symbolName: symbol,
+            accessibility: title,
+            target: .toolbar,
+            inkSource: .chrome
+        )
+        control.toolTip = title
+        control.setAccessibilityIdentifier(identifier)
+        control.onPress = { [weak self] in self?.submitInput(.button(button)) }
+        return control
+    }
+
+    private lazy var homeButton = makeHardwareButton(
+        symbol: "house", title: L10n.string("Home"),
+        identifier: "simulator.button.home", button: .home
+    )
+    private lazy var lockButton = makeHardwareButton(
+        symbol: "lock", title: L10n.string("Lock"),
+        identifier: "simulator.button.lock", button: .lock
+    )
+    private lazy var sideButton = makeHardwareButton(
+        symbol: "power", title: L10n.string("Side button"),
+        identifier: "simulator.button.side", button: .side
+    )
+
+    /// The device's hardware buttons. A press converges on the same consented input path as a tap,
+    /// so it asks for control the first time and fails closed when the lease or consent is gone.
+    private lazy var hardwareButtonRow: NSStackView = {
+        let stack = NSStackView(views: [homeButton, lockButton, sideButton])
+        stack.orientation = .horizontal
+        stack.spacing = Design.Spacing.small
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setAccessibilityIdentifier("simulator.hardwareButtons")
+        return stack
+    }()
+
     private lazy var screenView: SimulatorScreenView = {
         let preview = SimulatorScreenView()
         preview.setAccessibilityLabel(L10n.string("Simulator screen"))
@@ -199,6 +241,7 @@ final class SimulatorPaneViewController: NSViewController {
     private func setupUI() {
         view.addSubview(controlRow)
         view.addSubview(screenView)
+        view.addSubview(hardwareButtonRow)
         view.addSubview(statusLabel)
 
         NSLayoutConstraint.activate([
@@ -228,6 +271,12 @@ final class SimulatorPaneViewController: NSViewController {
                 constant: -Design.Spacing.inset
             ),
             screenView.bottomAnchor.constraint(
+                equalTo: hardwareButtonRow.topAnchor,
+                constant: -Design.Spacing.medium
+            ),
+
+            hardwareButtonRow.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            hardwareButtonRow.bottomAnchor.constraint(
                 equalTo: statusLabel.topAnchor,
                 constant: -Design.Spacing.medium
             ),
@@ -892,6 +941,17 @@ final class SimulatorPaneViewController: NSViewController {
             && (liveCapabilities == nil || hasDirectHumanControl)
     }
 
+    /// Hardware buttons are live only when a direct session that supports buttons is up. On the
+    /// screenshot fallback (`liveCapabilities == nil`) they are disabled, exactly like the screen.
+    private func configureHardwareButtons() {
+        let enabled = isPresented
+            && !requiresLeaseRefresh
+            && (liveCapabilities?.supportsButtons ?? false)
+        for button in [homeButton, lockButton, sideButton] {
+            button.isEnabled = enabled
+        }
+    }
+
     private func renderState() {
         guard isViewLoaded else { return }
         switch presentationState {
@@ -939,6 +999,7 @@ final class SimulatorPaneViewController: NSViewController {
         // washing the device name out as though Simulator itself were unavailable.
         deviceChip.isEnabled = !devices.isEmpty
         configureControlButton(for: lease?.device)
+        configureHardwareButtons()
         if let lastStreamFailure,
            !lastStreamFailure.isEmpty,
            lastStreamFailure != statusLabel.stringValue {
