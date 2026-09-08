@@ -83,6 +83,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
         }
 
         installHelperTerminationHandlers()
+        // Reclaim shared buffers a previous helper leaked if it was killed before teardown.
+        SimulatorSharedMemoryProvider.sweepOrphans()
         // Every exit path from here — clean stop, a decode error return, an interrupted read — runs
         // teardown, so the shared-memory transport never leaks its mapped temp buffers. `stop()` is
         // idempotent.

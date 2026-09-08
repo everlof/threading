@@ -31,7 +31,10 @@ final class SimulatorSharedMemoryProvider {
         let bufferByteLength = bytesPerRow * height
 
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("threading-sim-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "threading-sim-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)",
+                isDirectory: true
+            )
         guard (try? FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true
         )) != nil else { return nil }
@@ -91,6 +94,29 @@ final class SimulatorSharedMemoryProvider {
     }
 
     func release(_ index: UInt32) { ring.release(index) }
+
+    /// Removes shared-buffer directories left by a helper that died without tearing down (a lost
+    /// SIGTERM race, a crash, a SIGKILL). Each directory is named `threading-sim-<pid>-<uuid>`, so
+    /// this only removes one whose owning pid is gone — a live stream's directory is left alone.
+    /// Called once at helper startup, it bounds temp accumulation regardless of the exit path.
+    static func sweepOrphans() {
+        let temporary = FileManager.default.temporaryDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: temporary, includingPropertiesForKeys: nil
+        ) else { return }
+        let prefix = "threading-sim-"
+        for url in entries {
+            let name = url.lastPathComponent
+            guard name.hasPrefix(prefix) else { continue }
+            let remainder = name.dropFirst(prefix.count)
+            guard let pidField = remainder.split(separator: "-", maxSplits: 1).first,
+                  let pid = pid_t(pidField) else { continue }
+            // kill(pid, 0) fails with ESRCH only when no such process exists.
+            if kill(pid, 0) != 0, errno == ESRCH {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
 
     func teardown() {
         Self.teardown(pointers: pointers, length: bufferByteLength, directory: directory)
