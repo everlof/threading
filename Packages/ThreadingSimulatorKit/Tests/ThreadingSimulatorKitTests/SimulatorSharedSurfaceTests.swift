@@ -88,6 +88,20 @@ final class SimulatorSharedSurfaceTests: XCTestCase {
         XCTAssertTrue(decoded.supportsSharedMemory)
     }
 
+    func testEveryHardwareButtonRoundTrips() throws {
+        XCTAssertTrue(SimulatorBridgeButton.allCases.contains(.volumeUp))
+        XCTAssertTrue(SimulatorBridgeButton.allCases.contains(.volumeDown))
+        for button in SimulatorBridgeButton.allCases {
+            let input = SimulatorBridgeInput.button(button)
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    SimulatorBridgeInput.self, from: JSONEncoder().encode(input)
+                ),
+                input
+            )
+        }
+    }
+
     func testContinuousTouchInputRoundTrips() throws {
         for phase in SimulatorBridgeTouchPhase.allCases {
             let input = SimulatorBridgeInput.touch(phase: phase, x: 0.4, y: 0.6)

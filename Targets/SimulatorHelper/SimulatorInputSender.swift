@@ -100,17 +100,23 @@ final class SimulatorInputSender: @unchecked Sendable {
             }
 
         case .button(let button):
-            let source: Int32
+            // Home/lock/side use the button-key builder; volume takes the consumer-usage HID path
+            // (page 12, usage 233/234) — see SimulatorPrivateBridge.
+            let press: (Bool) throws -> Void
             switch button {
-            case .home: source = 0
-            case .lock: source = 1
-            case .side: source = 3_000
+            case .home: press = { try self.bridge.sendButton(source: 0, down: $0) }
+            case .lock: press = { try self.bridge.sendButton(source: 1, down: $0) }
+            case .side: press = { try self.bridge.sendButton(source: 3_000, down: $0) }
+            case .volumeUp:
+                press = { try self.bridge.sendHIDUsage(page: 12, usage: 233, down: $0) }
+            case .volumeDown:
+                press = { try self.bridge.sendHIDUsage(page: 12, usage: 234, down: $0) }
             }
-            try bridge.sendButton(source: source, down: true)
+            try press(true)
             do {
-                try bridge.sendButton(source: source, down: false)
+                try press(false)
             } catch {
-                try? bridge.sendButton(source: source, down: false)
+                try? press(false)
                 throw error
             }
         }

@@ -21,6 +21,9 @@ typedef void (*HIDSender)(id, SEL, void *, BOOL, dispatch_queue_t, void (^)(NSEr
 typedef void *(*MouseMessageBuilder)(CGPoint *, CGPoint *, int32_t, int32_t, BOOL);
 typedef void *(*KeyboardMessageBuilder)(int32_t, int32_t);
 typedef void *(*ButtonMessageBuilder)(int32_t, int32_t, int32_t);
+// IndigoHIDMessageForHIDArbitrary(target, usagePage, usage, op) — the path volume and other
+// consumer-page buttons take, unlike home/lock which use the button-key builder above.
+typedef void *(*HIDArbitraryMessageBuilder)(int32_t, int32_t, int32_t, int32_t);
 
 static NSError *BridgeError(NSInteger code, NSString *detail) {
     return [NSError errorWithDomain:SimulatorBridgeErrorDomain
@@ -69,6 +72,7 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     MouseMessageBuilder _mouseMessageBuilder;
     KeyboardMessageBuilder _keyboardMessageBuilder;
     ButtonMessageBuilder _buttonMessageBuilder;
+    HIDArbitraryMessageBuilder _hidArbitraryMessageBuilder;
 }
 @property(nonatomic, readwrite, copy) NSString *coreSimulatorVersion;
 @property(nonatomic, readwrite, copy) NSString *simulatorKitVersion;
@@ -223,6 +227,7 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     _mouseMessageBuilder = (MouseMessageBuilder)dlsym(_simulatorKitHandle, "IndigoHIDMessageForMouseNSEvent");
     _keyboardMessageBuilder = (KeyboardMessageBuilder)dlsym(_simulatorKitHandle, "IndigoHIDMessageForKeyboardArbitrary");
     _buttonMessageBuilder = (ButtonMessageBuilder)dlsym(_simulatorKitHandle, "IndigoHIDMessageForButton");
+    _hidArbitraryMessageBuilder = (HIDArbitraryMessageBuilder)dlsym(_simulatorKitHandle, "IndigoHIDMessageForHIDArbitrary");
     if (hidClass != Nil &&
         [hidClass instancesRespondToSelector:NSSelectorFromString(@"initWithDevice:error:")] &&
         [hidClass instancesRespondToSelector:NSSelectorFromString(@"sendWithMessage:freeWhenDone:completionQueue:completion:")] &&
@@ -315,6 +320,24 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     void *message = _buttonMessageBuilder(source, down ? 1 : 2, 0x33);
     if (message == NULL) {
         if (error != NULL) { *error = BridgeError(36, @"SimulatorKit did not construct a button message."); }
+        return NO;
+    }
+    return [self sendMessage:message error:error];
+}
+
+- (BOOL)sendHIDUsagePage:(uint32_t)usagePage
+                   usage:(uint32_t)usage
+                    down:(BOOL)down
+                   error:(NSError * _Nullable * _Nullable)error {
+    if (!self.supportsInput || _hidArbitraryMessageBuilder == NULL) {
+        if (error != NULL) { *error = BridgeError(38, @"Arbitrary HID input is unavailable in this Xcode."); }
+        return NO;
+    }
+    // 0x32 is the digitizer routing target the mouse path uses; consumer-page usages (volume) go
+    // through here rather than the button-key builder.
+    void *message = _hidArbitraryMessageBuilder(0x32, (int32_t)usagePage, (int32_t)usage, down ? 1 : 2);
+    if (message == NULL) {
+        if (error != NULL) { *error = BridgeError(39, @"SimulatorKit did not construct an HID message."); }
         return NO;
     }
     return [self sendMessage:message error:error];

@@ -162,11 +162,23 @@ final class SimulatorPaneViewController: NSViewController {
         symbol: "power", title: L10n.string("Side button"),
         identifier: "simulator.button.side", button: .side
     )
+    private lazy var volumeDownButton = makeHardwareButton(
+        symbol: "speaker.wave.1.fill", title: L10n.string("Volume down"),
+        identifier: "simulator.button.volumeDown", button: .volumeDown
+    )
+    private lazy var volumeUpButton = makeHardwareButton(
+        symbol: "speaker.wave.3.fill", title: L10n.string("Volume up"),
+        identifier: "simulator.button.volumeUp", button: .volumeUp
+    )
+
+    private var hardwareButtons: [ThemedIconButton] {
+        [homeButton, lockButton, sideButton, volumeDownButton, volumeUpButton]
+    }
 
     /// The device's hardware buttons. A press converges on the same consented input path as a tap,
     /// so it asks for control the first time and fails closed when the lease or consent is gone.
     private lazy var hardwareButtonRow: NSStackView = {
-        let stack = NSStackView(views: [homeButton, lockButton, sideButton])
+        let stack = NSStackView(views: hardwareButtons)
         stack.orientation = .horizontal
         stack.spacing = Design.Spacing.small
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -984,7 +996,7 @@ final class SimulatorPaneViewController: NSViewController {
         let enabled = isPresented
             && !requiresLeaseRefresh
             && (liveCapabilities?.supportsButtons ?? false)
-        for button in [homeButton, lockButton, sideButton] {
+        for button in hardwareButtons {
             button.isEnabled = enabled
         }
     }

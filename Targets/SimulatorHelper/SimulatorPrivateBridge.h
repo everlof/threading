@@ -36,6 +36,11 @@ NS_ASSUME_NONNULL_BEGIN
                     down:(BOOL)down
                    error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(sendButton(source:down:));
+- (BOOL)sendHIDUsagePage:(uint32_t)usagePage
+                   usage:(uint32_t)usage
+                    down:(BOOL)down
+                   error:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(sendHIDUsage(page:usage:down:));
 
 @end
 

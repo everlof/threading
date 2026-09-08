@@ -52,6 +52,10 @@ public enum SimulatorBridgeButton: String, Codable, CaseIterable, Equatable, Sen
     case home
     case lock
     case side
+    // Volume reaches the guest through the arbitrary-HID consumer usage path, not the button-key
+    // path home/lock/side use; the helper routes it accordingly.
+    case volumeUp
+    case volumeDown
 }
 
 /// One phase of a live, finger-following touch. Unlike `drag`, which is a self-contained

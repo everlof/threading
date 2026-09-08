@@ -51367,6 +51367,28 @@
         }
       }
     },
+    "Volume down" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volym ner"
+          }
+        }
+      }
+    },
+    "Volume up" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volym upp"
+          }
+        }
+      }
+    },
     "Wait for Remote Access to say it is ready, then try again." : {
       "extractionState" : "manual",
       "localizations" : {
