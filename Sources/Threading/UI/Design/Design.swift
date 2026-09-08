@@ -275,6 +275,11 @@ public enum Design {
         public static let toolbarButtonWidth: CGFloat = 30
         public static let toolbarButtonHeight: CGFloat = 28
 
+        /// A hardware button on the in-panel Simulator's device control bar — larger than a toolbar
+        /// action because it is a primary way to drive a live device, not incidental chrome.
+        public static let deviceControlButtonSize: CGFloat = 40
+        public static let deviceControlButtonGlyph: CGFloat = 22
+
         /// A single navigation action floating over scrollable content.
         ///
         /// Larger than an inline or toolbar target because it has no row around it to extend

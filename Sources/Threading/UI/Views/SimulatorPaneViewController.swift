@@ -141,7 +141,7 @@ final class SimulatorPaneViewController: NSViewController {
         let control = ThemedIconButton(
             symbolName: symbol,
             accessibility: title,
-            target: .toolbar,
+            target: .device,
             inkSource: .chrome
         )
         control.toolTip = title
@@ -180,7 +180,7 @@ final class SimulatorPaneViewController: NSViewController {
     private lazy var hardwareButtonRow: NSStackView = {
         let stack = NSStackView(views: hardwareButtons)
         stack.orientation = .horizontal
-        stack.spacing = Design.Spacing.small
+        stack.spacing = Design.Spacing.large
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setAccessibilityIdentifier("simulator.hardwareButtons")
         return stack

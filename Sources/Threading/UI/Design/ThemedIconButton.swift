@@ -76,6 +76,11 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
         /// member's — the same mark in a larger box would be more padding, not more button.
         case besidePrimary
 
+        /// A hardware button on the in-panel Simulator's device control bar — deliberately larger
+        /// than a toolbar action so a person can comfortably hit Home / Lock / Volume on a live
+        /// device.
+        case device
+
         public var size: NSSize {
             switch self {
             case .toolbar:
@@ -105,6 +110,11 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
                 )
             case .besidePrimary:
                 NSSize(width: Design.Size.chipHeight, height: Design.Size.chipHeight)
+            case .device:
+                NSSize(
+                    width: Design.Size.deviceControlButtonSize,
+                    height: Design.Size.deviceControlButtonSize
+                )
             }
         }
 
@@ -116,6 +126,7 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
             case .inline: Design.Size.inlineButtonGlyph
             case .besidePrimary, .titledSplitMenu:
                 Design.Symbol.slot(inControlOfHeight: Design.Size.chipHeight)
+            case .device: Design.Size.deviceControlButtonGlyph
             }
         }
 
@@ -134,6 +145,7 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
             case .compactSplitMenu: .control
             case .inline: .control
             case .besidePrimary, .titledSplitMenu: Design.Symbol.role(forSlot: glyph)
+            case .device: Design.Symbol.role(forSlot: glyph)
             }
         }
 
@@ -146,7 +158,8 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
         /// nested button from being the one that did not.
         public var hoverFill: KeyPath<Design.Ink, NSColor> {
             switch self {
-            case .toolbar: \.surface
+            // A device button, like a toolbar one, sits on the bare pane, so `surface` is a lift.
+            case .toolbar, .device: \.surface
             // The rest sit on a surface something else already drew — another control's fill,
             // the plate a split control shares, or the pane a primary already lifted from —
             // so the resting lift is invisible there.
