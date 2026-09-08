@@ -25,8 +25,11 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         /// the trailing controls.
         static let surfaceSample = CGPoint(x: 195, y: 17)
         /// The rows without their hairlines: the top overlay and the divider between the rows.
-        static let actionRowBand: Range<CGFloat> = 2..<32
-        static let keyRowBand: Range<CGFloat> = 39..<73
+        static let actionRowBand: Range<CGFloat> = 2..<40
+        static let keyRowBand: Range<CGFloat> = 47..<81
+        /// Through the middle of the top cap, away from its rounded corners.
+        static let topCapColumn: CGFloat = 65
+        static let topCapBand: Range<CGFloat> = 4..<38
         /// A plate over the surface is eighteen levels apart; anti-aliased ink and the hairline
         /// dividers are further. Anything nearer than this is the surface.
         static let surfaceTolerance = 8
@@ -345,6 +348,18 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             keyboardGlyph, farMargin, accuracy: tolerance,
             "the keyboard toggle's glyph is not on the trailing margin"
         )
+
+        // Horizontal optical alignment alone missed a cap touching both separator lines.
+        // Read the filled cap's vertical extent, including its background rather than its ink.
+        let capColumn = Int(Fixture.topCapColumn * Fixture.scale)
+        let capRows = actionRow.filter { row in
+            bitmap.column(capColumn, differsFrom: surface, in: row..<(row + 1))
+        }
+        let expectedCap = scaled(Fixture.topCapBand)
+        XCTAssertEqual(try XCTUnwrap(capRows.first), expectedCap.lowerBound, accuracy: 1,
+                       "the top cap must keep four points above its plate")
+        XCTAssertEqual(try XCTUnwrap(capRows.last), expectedCap.upperBound - 1, accuracy: 1,
+                       "the top cap must keep four points below its plate")
     }
 
     /// A platform tripwire, not a behaviour of ours. `UIApplication.sendAction` broadcasting

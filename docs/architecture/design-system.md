@@ -1406,6 +1406,12 @@ The vocabulary these encode, which new work should follow:
   `TerminalKeyboardDismissalTests.testBothRowsStandTheirOutermostMarksOnOneMargin` reads the
   four positions off a drawn bar.
 
+  A cap moved into the terminal bar's top row keeps the same four-point vertical padding as
+  the bottom run. The 34-point cap height is its filled plate, not the row height: using it as
+  both left the plate touching the top overlay and middle divider. The top run pads before its
+  minimum-height frame, so the row grows to fit the plate and its clearance; the glyph utilities
+  remain centred beside it. The same rendered margin test checks the top plate's vertical extent.
+
   **Only visible controls earn width.** A session row rests with one inline target reserved for
   its 12pt status mark, then expands the trailing slot before the `...` and archive actions fade
   in. On exit it collapses only after they have faded out, so a visible target never overhangs the

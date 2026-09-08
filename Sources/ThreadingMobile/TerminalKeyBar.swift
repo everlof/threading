@@ -572,6 +572,7 @@ struct TerminalKeyBar: View {
                         }
                     }
                     .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
+                    .padding(.vertical, MobileDesign.Spacing.tight)
                     .frame(minHeight: TerminalKeyBarMetrics.actionHeight)
                 }
                 .disabled(!canSend)
