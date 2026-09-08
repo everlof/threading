@@ -558,7 +558,6 @@ final class BrowserViewController: NSViewController {
     private var isProbingAnnotationTarget = false
     private var probedAnnotationTargetIsPrecise = false
     private var annotationTargetRevision = 0
-    private weak var annotationScrollTarget: WKWebView?
     private(set) var agentViewportSize: CGSize?
     private(set) var agentColorScheme: BrowserColorScheme = .auto
     private(set) var agentUserAgent: BrowserUserAgentOverride = .automatic
@@ -760,22 +759,6 @@ final class BrowserViewController: NSViewController {
         }
         annotationOverlay.onTargetProbe = { [weak self] point in
             self?.updateAnnotationTarget(at: point)
-        }
-        annotationOverlay.onScroll = { [weak self] event in
-            guard let self else { return }
-            // Keep the native WebKit recipient through the gesture's momentum tail.
-            if event.phase.contains(.began)
-                || (event.phase.isEmpty && event.momentumPhase.isEmpty)
-                || self.annotationScrollTarget == nil {
-                // WKWebView owns native wheel dispatch and DOM hit testing. Its deepest
-                // AppKit child may be a compositing surface that does not dispatch input.
-                self.annotationScrollTarget = self.webView
-            }
-            self.annotationScrollTarget?.scrollWheel(with: event)
-            if event.momentumPhase.contains(.ended) || event.phase.contains(.cancelled) {
-                self.annotationScrollTarget = nil
-            }
-            self.refreshAnnotationTargetUnderPointer()
         }
         deviceToolbar.onChoosePreset = { [weak self] preset in
             guard let self else { return }
@@ -2550,7 +2533,6 @@ final class BrowserViewController: NSViewController {
         if active {
             view.window?.makeFirstResponder(annotationOverlay)
         } else {
-            annotationScrollTarget = nil
             updateAnnotationTarget(at: nil)
         }
         if !active, view.window?.firstResponder === annotationOverlay {

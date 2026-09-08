@@ -2207,22 +2207,73 @@ final class BrowserAgentBridgeTests: XCTestCase {
     }
 
     @MainActor
-    func testAnnotationOverlayForwardsScrollAndTracksPrecisionModifiers() throws {
-        let overlay = BrowserAnnotationOverlay(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
-        let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-            wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0))
-        wheel.flags = []
-        let event = try XCTUnwrap(NSEvent(cgEvent: wheel))
-        var forwarded = 0
-        overlay.onScroll = { received in
-            XCTAssertTrue(received === event, "The native event, including momentum, must survive")
-            forwarded += 1
-        }
-        overlay.scrollWheel(with: event)
-        XCTAssertEqual(forwarded, 0)
+    func testAnnotationOverlayPassesThroughNativeScrollDispatchAndTracksPrecisionModifiers() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let overlay = BrowserAnnotationOverlay(frame: window.contentView?.bounds ?? .zero)
+        window.contentView?.addSubview(overlay)
         overlay.isAnnotating = true
-        overlay.scrollWheel(with: event)
-        XCTAssertEqual(forwarded, 1)
+        let point = CGPoint(x: 120, y: 120)
+        XCTAssertTrue(overlay.hitTest(point) === overlay)
+
+        let detachedOverlay = BrowserAnnotationOverlay(frame: overlay.frame)
+        detachedOverlay.isAnnotating = true
+        ApplicationEventDispatchContext.withEvent(type: .scrollWheel, window: nil) {
+            XCTAssertTrue(
+                detachedOverlay.hitTest(point) === detachedOverlay,
+                "Missing windows are not a shared dispatch identity"
+            )
+        }
+
+        let otherWindow = NSWindow(
+            contentRect: window.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        otherWindow.isReleasedWhenClosed = false
+        ApplicationEventDispatchContext.withEvent(
+            type: .scrollWheel,
+            window: otherWindow
+        ) {
+            XCTAssertTrue(
+                overlay.hitTest(point) === overlay,
+                "A wheel in another window must not change this overlay's ownership"
+            )
+        }
+
+        ApplicationEventDispatchContext.withEvent(
+            type: .scrollWheel,
+            window: window
+        ) {
+            XCTAssertNil(
+                overlay.hitTest(point),
+                "AppKit must choose WebKit from the original native wheel event"
+            )
+            ApplicationEventDispatchContext.withEvent(
+                type: .leftMouseDown,
+                window: window
+            ) {
+                XCTAssertTrue(
+                    overlay.hitTest(point) === overlay,
+                    "A nested non-scroll dispatch must restore click ownership"
+                )
+            }
+            XCTAssertNil(
+                overlay.hitTest(point),
+                "Ending a nested dispatch must restore the outer wheel policy"
+            )
+        }
+        XCTAssertTrue(
+            overlay.hitTest(point) === overlay,
+            "Scroll pass-through must end with the dispatch, not the next dequeued event"
+        )
+
         var probes = 0
         overlay.onTargetProbe = { _ in probes += 1 }
         for flags: NSEvent.ModifierFlags in [[.option], []] {
@@ -3519,33 +3570,6 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         chrome.annotationButton.performClick()
         XCTAssertTrue(overlay.isAnnotating)
         XCTAssertTrue(window.firstResponder === overlay)
-        _ = try await browser.evaluate("document.body.style.height = '1400px'; window.annotationWheels = 0; window.addEventListener('wheel', () => window.annotationWheels++)")
-        _ = try await annotationPageImage(browser)
-        let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-            wheelCount: 1, wheel1: -120, wheel2: 0, wheel3: 0))
-        wheel.flags = []
-        // A directly delivered NSEvent has no window number. Give its locationInWindow the
-        // same coordinates as a real wheel over the production overlay.
-        let wheelPoint = overlay.convert(CGPoint(x: 300, y: 300), to: nil)
-        wheel.location = CGPoint(x: wheelPoint.x,
-            y: (NSScreen.screens.first?.frame.height ?? 0) - wheelPoint.y)
-        let nativeWheel = try XCTUnwrap(NSEvent(cgEvent: wheel))
-        let pagePoint = browser.webView.convert(nativeWheel.locationInWindow, from: nil)
-        XCTAssertEqual(pagePoint.x, 300, accuracy: 1)
-        XCTAssertEqual(pagePoint.y, 300, accuracy: 1)
-        overlay.scrollWheel(with: nativeWheel)
-        do {
-            try await waitUntilJavaScriptTrue(browser, script: "window.scrollY > 20",
-                description: "native scrolling through the annotation overlay")
-        } catch {
-            print("Annotation wheel diagnostic", try await browser.evaluate("JSON.stringify({viewport:innerHeight,height:document.documentElement.scrollHeight,y:scrollY,wheels:window.annotationWheels})") as Any)
-            chrome.annotationButton.performClick()
-            browser.webView.scrollWheel(with: nativeWheel)
-            try await Task.sleep(nanoseconds: 300_000_000)
-            print("Ordinary browser wheel diagnostic", try await browser.evaluate("JSON.stringify({y:scrollY,wheels:window.annotationWheels})") as Any)
-            throw error
-        }
-        _ = try await browser.evaluate("window.scrollTo(0, 0); document.body.style.height = ''")
         let capturedTarget = BrowserAnnotationTarget(
             rect: CGRect(x: onWord.x, y: onWord.y, width: onWord.width, height: onWord.height),
             label: onWord.label

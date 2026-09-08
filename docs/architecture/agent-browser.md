@@ -399,20 +399,24 @@ Labels inspect at most 128 DOM nodes per text source, eight ARIA label reference
 characters, and never read form values. This avoids a whole-subtree `innerText` layout/read on
 every movement. One probe runs at a time with only the newest pointer position queued, and a
 revision rejects outdated answers, including changes to precision at a stationary pointer.
-Scroll and resize in the main document, nested containers and child frames refresh the target. Native wheel events reach WebKit with a stable recipient
-through momentum; entering annotation mode takes keyboard focus so Option and Escape work before
-the first pin. The clicked document position is captured before the note-entry dialog runs, so movement while
-typing cannot relocate the new note. Notes still record document coordinates rather than durable DOM anchors; scrolling
-an inner container or reflowing a page can move content away from an existing pin.
+Scroll and resize in the main document, nested containers and child frames refresh the target.
+During the original application dispatch of a native wheel event, the overlay alone declines hit
+testing. AppKit therefore chooses WebKit once and keeps its stable recipient through momentum; no
+event is replayed and annotation mode keeps keyboard focus so Option and Escape work before the
+first pin. A dispatch-scoped context brackets only `NSApplication.sendEvent`, because AppKit's
+`currentEvent` remains the last dequeued event afterward and would make later pointer or
+accessibility hit tests pass through by mistake. The clicked document position is captured before
+the note-entry dialog runs, so movement while typing cannot relocate the new note. Notes still
+record document coordinates rather than durable DOM anchors; scrolling an inner container or
+reflowing a page can move content away from an existing pin.
 
 The overlay remains deliberately host-only: Threading owns picking, note provenance, focus,
-scroll routing and the origin boundary. The native-wheel fixture registers a page wheel listener
-and verifies the resulting document scroll; it does not stand in for a physical trackpad momentum
-check, and unwindowed synthetic events do not reliably exercise WebKit’s asynchronous compositor
-scrolling path. Theme roles supply its accent, with ink measured against
-that actual fill for every label and pin. A second contrasting stroke keeps the outline visible
-on arbitrary light/dark page pixels; the element interior is left unpainted so its content and
-contrast remain available for review.
+scroll routing and the origin boundary. Its routing fixture asserts the exact dispatch-scoped
+hit-test policy; an unwindowed synthetic `NSEvent` cannot exercise WebKit's native asynchronous
+compositor path, so real application input verifies that last boundary. Theme roles supply its
+accent, with ink measured against that actual fill for every label and pin. A second contrasting
+stroke keeps the outline visible on arbitrary light/dark page pixels; the element interior is left
+unpainted so its content and contrast remain available for review.
 
 Password fields refuse agent typing and reveal the browser for user takeover. Form submissions,
 including Enter on a focused form control, require an app-owned confirmation whose description

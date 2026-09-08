@@ -1,6 +1,47 @@
 import AppKit
 import Foundation
 
+/// The exact event AppKit is dispatching right now, rather than `NSApplication.currentEvent`'s
+/// last-dequeued event.
+///
+/// AppKit leaves `currentEvent` populated after `sendEvent` returns. Components that make a
+/// hit-testing decision from that value can therefore answer a later layout, pointer, or
+/// accessibility query as if the old event were still in flight. `ThreadingApplication` brackets
+/// only the call into AppKit with this context, and the stack preserves the outer event if AppKit
+/// enters a nested dispatch.
+@MainActor
+enum ApplicationEventDispatchContext {
+    struct Event {
+        let type: NSEvent.EventType
+        weak var window: NSWindow?
+    }
+
+    private static var events: [Event] = []
+
+    static var current: Event? { events.last }
+
+    static func begin(_ event: NSEvent) {
+        events.append(Event(type: event.type, window: event.window))
+    }
+
+    static func end() {
+        precondition(!events.isEmpty, "Unbalanced application event dispatch context")
+        events.removeLast()
+    }
+
+    /// Testable form of the application seam. Production always enters through `begin(_:)`,
+    /// where the window comes from the real event rather than from a synthetic fixture.
+    static func withEvent<T>(
+        type: NSEvent.EventType,
+        window: NSWindow?,
+        perform body: () throws -> T
+    ) rethrows -> T {
+        events.append(Event(type: type, window: window))
+        defer { events.removeLast() }
+        return try body()
+    }
+}
+
 /// Owns one application-local event monitor and removes it exactly once.
 ///
 /// AppKit exposes monitor tokens as `Any`, which is not Sendable. Storing that value directly on

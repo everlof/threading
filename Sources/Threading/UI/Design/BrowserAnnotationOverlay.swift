@@ -94,7 +94,6 @@ final class BrowserAnnotationOverlay: ThemedControl {
     }
 
     private(set) var selectsDeepestElement = false
-    var onScroll: ((NSEvent) -> Void)?
 
     var onAdd: ((CGPoint) -> Void)?
     var onSelect: ((Int) -> Void)?
@@ -117,6 +116,17 @@ final class BrowserAnnotationOverlay: ThemedControl {
     override var acceptsFirstResponder: Bool { isAnnotating }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // A real wheel must enter WebKit through AppKit exactly once. Returning nil during the
+        // original window dispatch lets AppKit choose and latch WebKit for the whole gesture,
+        // preserving precision and momentum while this overlay keeps keyboard focus for Option
+        // and Escape. The dispatch-scoped context matters: NSApplication.currentEvent remains
+        // the last dequeued event after dispatch and would make unrelated later hit tests stale.
+        if let dispatch = ApplicationEventDispatchContext.current,
+           let dispatchWindow = dispatch.window,
+           dispatch.type == .scrollWheel,
+           dispatchWindow === window {
+            return nil
+        }
         guard isAnnotating, bounds.contains(point) else { return nil }
         return self
     }
@@ -190,11 +200,6 @@ final class BrowserAnnotationOverlay: ThemedControl {
         guard isAnnotating else { super.flagsChanged(with: event); return }
         selectsDeepestElement = event.modifierFlags.contains(.option)
         onTargetProbe?(pointerLocation)
-    }
-
-    override func scrollWheel(with event: NSEvent) {
-        guard isAnnotating else { super.scrollWheel(with: event); return }
-        onScroll?(event)
     }
 
     override func mouseExited(with event: NSEvent) {
