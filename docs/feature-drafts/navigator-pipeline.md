@@ -206,7 +206,7 @@ The host-only fact foundation now ships as three bounded pieces:
 - `check_navigator_fact_parity.py`, run by the architecture boundary build phase, derives its
   accepted vocabulary from compiler-visible Swift inventories. Model members, provider methods,
   entry inputs and option/host sources all have exact owners. A new native read without an owner
-  fails; typed option, host and entry-input owners without an audited occurrence also fail. Its 82
+  fails; typed option, host and entry-input owners without an audited occurrence also fail. Its
   adversarial fixtures cover aliases, lexical shadowing, dependency injection, closures, key paths
   and local collection projections; generated SDK references, comments and strings cannot satisfy
   the audit.

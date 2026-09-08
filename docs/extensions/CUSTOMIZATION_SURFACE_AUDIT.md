@@ -30,8 +30,9 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
+| Workspace navigator | `ui.workspace-navigation` | complete semantic navigator, optionally augmented with a host-evaluated pipeline, bounded options and row intents | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, and intent availability, revalidation and execution | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
-| Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
+| Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
 | Chat checkout move controls (session menu, Tools policy, agent approval) | — | host-only | canonical checkout identity, durable ownership transaction, turn/input fence, authority audit and runtime resume | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
@@ -123,12 +124,23 @@ therefore keeps its identity, selection, foreground-command spinner and lifecycl
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
 
-The macOS sidebar and iOS dashboard organization controls remain host-only navigation chrome.
-They arrange existing public or host-only rows without changing those rows' presentation
+The built-in macOS sidebar and iOS dashboard organization controls remain host-only navigation
+chrome. They arrange existing public or host-only rows without changing those rows' presentation
 contracts. Threading owns persisted project membership, chat-versus-terminal classification,
-stable order inside each type, direction persistence and the navigation destination; allowing a
-replacement control to contradict any of those facts would make the same terminal appear to have
-different ownership across surfaces.
+stable order inside each type and direction persistence; allowing a replacement control to
+contradict any of those facts would make the same terminal appear to have different ownership
+across surfaces.
+
+That boundary does not make the leading macOS navigator host-only. `ui.workspace-navigation`
+lets an extension replace its interior with a complete semantic navigator, optionally augmented
+with a host-evaluated pipeline. For a pipeline, the extension declares presentation, fact
+consumption, bounded static and registered-fact Group/Sort controls, and eligible `pin`, `unpin`,
+and `archive` row intents.
+Threading still owns the surrounding shell and menu, the user's persisted navigator and option
+choices, the permanent Native and generation-failback route, declaration/fact validation,
+background evaluation and viewport realization, theme and accessibility, source-session
+activation, and availability, last-moment revalidation and execution of those named intents
+through native persistence and lifecycle paths.
 
 The Archived browser is the lifecycle side of that same host-only navigation boundary. Threading
 keeps the archive timestamp and ordering, search semantics, provider synchronization, and the

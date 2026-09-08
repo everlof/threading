@@ -169,7 +169,7 @@ capabilities, so a small extension can grow without changing package format:
 | Service extension | `services.provide` | Versioned JSON service contracts | Other declared extensions |
 | Fact provider | `facts.provide` | Typed scalar facts on repository domain keys | Host navigator fact registry |
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
-| Navigator extension | `ui.workspace-navigation` | Complete semantic navigator documents with virtualizable collections and bounded static option declarations | Leading workspace navigator |
+| Navigator extension | `ui.workspace-navigation` | Complete semantic navigators, optionally augmented with host-evaluated pipelines, virtualized collections, bounded static and registered-fact controls, and conditional host-owned row intents | Leading workspace navigator |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
 | Media extension | `ui.media-documents` | A `media` node — a document handle plus a playback intent, drawn by a host-owned player | Panels, and any surface whose vocabulary admits media |
 | Asset-browsing extension | `host.project.files.read` | Bounded, cursor-paged enumeration as opaque content handles | A project's own documents |
