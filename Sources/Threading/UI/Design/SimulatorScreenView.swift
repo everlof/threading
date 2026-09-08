@@ -59,7 +59,6 @@ final class SimulatorScreenView: ThemedControl {
     var onText: ((String) -> Void)?
 
     private var pointerStart: (location: CGPoint, time: TimeInterval)?
-    private var pointerCurrent: CGPoint?
     /// Whether the current mouse gesture has crossed the tap threshold and become a streamed touch.
     private var isStreamingTouch = false
     /// The synthetic contact point a trackpad scroll drives; nil when no scroll gesture is active.
@@ -118,14 +117,8 @@ final class SimulatorScreenView: ThemedControl {
         )
         NSGraphicsContext.restoreGraphicsState()
 
-        if interactionState.acceptsPointerRequests, isHovered || pointerStart != nil {
-            Design.Surface.imageHoverWash.setFill()
-            shape.path.fill()
-            Design.Surface.accent.setStroke()
-            let outline = shape.inset(by: Design.Radius.border / 2).path
-            outline.lineWidth = Design.Radius.border
-            outline.stroke()
-        }
+        // No hover wash over a live device — it read as an odd white overlay on the real screen.
+        // Keyboard focus is still indicated (subtle, and only while typing).
         drawKeyboardFocus(around: shape)
     }
 
@@ -139,15 +132,12 @@ final class SimulatorScreenView: ThemedControl {
         }
         window?.makeFirstResponder(self)
         pointerStart = (location, event.timestamp)
-        pointerCurrent = location
         isStreamingTouch = false
-        needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let start = pointerStart else { return }
         let location = convert(event.locationInWindow, from: nil)
-        pointerCurrent = location
         // Cross the tap threshold once, then stream the touch so it follows the pointer live.
         if !isStreamingTouch,
            hypot(location.x - start.location.x, location.y - start.location.y) >= Self.tapThreshold {
@@ -270,7 +260,6 @@ final class SimulatorScreenView: ThemedControl {
 
     private func cancelPointerGesture() {
         pointerStart = nil
-        pointerCurrent = nil
         isStreamingTouch = false
         needsDisplay = true
     }
