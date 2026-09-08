@@ -61,6 +61,9 @@ final class SimulatorScreenView: ThemedControl {
     private var pointerStart: (location: CGPoint, time: TimeInterval)?
     /// Whether the current mouse gesture has crossed the tap threshold and become a streamed touch.
     private var isStreamingTouch = false
+    /// Fires when the pointer has been held still past the long-press threshold, turning a stationary
+    /// hold into a held-down contact (press-and-hold: context menus, edit mode, icon jiggle).
+    private var holdTimer: Timer?
     /// The synthetic contact point a trackpad scroll drives; nil when no scroll gesture is active.
     private var scrollPoint: CGPoint?
 
@@ -133,6 +136,20 @@ final class SimulatorScreenView: ThemedControl {
         window?.makeFirstResponder(self)
         pointerStart = (location, event.timestamp)
         isStreamingTouch = false
+        // A held-still press becomes a held-down contact. The timer is added to `.common` modes so
+        // it fires during the mouse-tracking loop, and starting the touch here (rather than at
+        // mouse-up) is what lets the device recognise a long-press.
+        let origin = location
+        let timer = Timer(timeInterval: Self.longPressDuration, repeats: false) { [weak self] _ in
+            // The timer is scheduled on this view's (main) run loop, so it fires on the main actor.
+            MainActor.assumeIsolated {
+                guard let self, self.pointerStart != nil, !self.isStreamingTouch else { return }
+                self.isStreamingTouch = true
+                self.onTouchBegan?(self.clampedNormalizedPoint(origin))
+            }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        holdTimer = timer
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -141,6 +158,8 @@ final class SimulatorScreenView: ThemedControl {
         // Cross the tap threshold once, then stream the touch so it follows the pointer live.
         if !isStreamingTouch,
            hypot(location.x - start.location.x, location.y - start.location.y) >= Self.tapThreshold {
+            holdTimer?.invalidate() // it moved before the hold fired — this is a drag, not a press
+            holdTimer = nil
             isStreamingTouch = true
             onTouchBegan?(clampedNormalizedPoint(start.location))
         }
@@ -229,6 +248,7 @@ final class SimulatorScreenView: ThemedControl {
     override var restingPointer: NSCursor? { .arrow }
 
     private static let tapThreshold: CGFloat = 4
+    private static let longPressDuration: TimeInterval = 0.5
 
     private func normalizedPoint(_ point: CGPoint) -> CGPoint? {
         let target = imageRect
@@ -259,6 +279,8 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     private func cancelPointerGesture() {
+        holdTimer?.invalidate()
+        holdTimer = nil
         pointerStart = nil
         isStreamingTouch = false
         needsDisplay = true
