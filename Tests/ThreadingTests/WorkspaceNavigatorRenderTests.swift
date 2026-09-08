@@ -40,10 +40,19 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         )
         let previousTheme = AppThemePalette.current
         let previousSelection = AppSettings.shared.workspaceNavigatorSelection
+        let previousDefaultAgent = AppSettings.shared.defaultAgentKind
         defer {
+            AppSettings.shared.defaultAgentKind = previousDefaultAgent
             AppSettings.shared.workspaceNavigatorSelection = previousSelection
             AppThemePalette.set(previousTheme)
         }
+
+        // This evidence owns the navigator, not whichever account happens to be configured on
+        // the developer's machine. A live account can finish loading its avatar during this
+        // long capture and make the composer rebuild every chip, moving unrelated footer pixels
+        // between otherwise identical navigator states. OpenCode has no host-routed accounts,
+        // so it keeps the real shipping composer while removing that external asynchronous edge.
+        AppSettings.shared.defaultAgentKind = .openCode
 
         let router = try WorkspaceNavigatorEvidenceRouter()
         let factRegistry = try makePipelineFactRegistry()
@@ -90,6 +99,9 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            if fixture.name == "system-light" {
+                try assertDeterministicComposerIdentity(in: content)
+            }
 
             try write(content, named: "workspace-navigator-\(fixture.name)-focused.png")
 
@@ -122,6 +134,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         try suppressComposerUsage(in: content)
         content.layoutSubtreeIfNeeded()
         content.displayIfNeeded()
+        try assertDeterministicComposerIdentity(in: content)
         try write(content, named: "workspace-navigator-pipeline-system-light-focused.png")
 
         let pipelineMenuButton = try XCTUnwrap(
@@ -151,6 +164,9 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            if fixture.name == "system-light" {
+                try assertDeterministicComposerIdentity(in: content)
+            }
 
             let menuButton = try XCTUnwrap(
                 descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
@@ -198,6 +214,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         try suppressComposerUsage(in: content)
         content.layoutSubtreeIfNeeded()
         content.displayIfNeeded()
+        try assertDeterministicComposerIdentity(in: content)
         let unavailableMenuButton = try XCTUnwrap(
             descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
                 $0.accessibilityIdentifier() == "workspace.navigator.menu"
@@ -245,6 +262,9 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            if fixture.name == "system-light" {
+                try assertDeterministicComposerIdentity(in: content)
+            }
             try write(
                 content,
                 named: "workspace-navigator-pipeline-\(fixture.name)-intents.png"
@@ -290,6 +310,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         try suppressComposerUsage(in: content)
         content.layoutSubtreeIfNeeded()
         content.displayIfNeeded()
+        try assertDeterministicComposerIdentity(in: content)
         try write(content, named: "workspace-navigator-pipeline-system-light-empty.png")
         controller.selectWorkspaceNavigator(.native)
 
@@ -310,6 +331,9 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            if fixture.name == "system-light" {
+                try assertDeterministicComposerIdentity(in: content)
+            }
             try write(
                 content,
                 named: "workspace-navigator-activity-inbox-\(fixture.name).png"
@@ -370,6 +394,9 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            if fixture.name == "system-light" {
+                try assertDeterministicComposerIdentity(in: content)
+            }
             try write(
                 content,
                 named: "workspace-navigator-t3-sidebar-\(fixture.name)-intents.png"
@@ -594,6 +621,17 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         usage.readings = []
         usage.toolTip = nil
         usage.isHidden = true
+    }
+
+    /// Proves the fixture never falls back to the developer's live account-bearing runtime.
+    /// Theme round-trips legitimately recompute fractional chip widths, so cross-frame byte
+    /// stability is checked by the evidence runner rather than by equating those live frames.
+    private func assertDeterministicComposerIdentity(in root: NSView) throws {
+        let chips = descendants(of: root).compactMap { $0 as? ChipView }
+        let identity = try XCTUnwrap(chips.first {
+            $0.accessibilityIdentifier() == "composer.session-start.identity"
+        })
+        XCTAssertEqual(identity.accessibilityTitle(), AgentKind.openCode.displayName)
     }
 
     /// Evidence must show the working indicator without sampling a different animation frame on
