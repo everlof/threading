@@ -13,6 +13,11 @@ import ThreadingPluginKit
 @MainActor
 final class NativePluginPaneViewController: NSViewController {
 
+    typealias VerifyPlugin = @Sendable (URL) -> Result<
+        NativePluginCatalog.VerifiedCandidate,
+        PluginLoadFailure
+    >
+
     private enum Metrics {
         static let messageWidth: CGFloat = 320
     }
@@ -22,18 +27,36 @@ final class NativePluginPaneViewController: NSViewController {
     private(set) var loaded: ThreadingNativePlugin?
     private(set) var refusal: PluginLoadFailure?
     private let appEvents = AppEventObservations()
-    private let loadPlugin: (URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>
+    private let loadPlugin: ((URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>)?
+    private let verifyPlugin: VerifyPlugin
+    private var verifiedCandidate: NativePluginCatalog.VerifiedCandidate?
+    private var loadTask: Task<Void, Never>?
+    var onTitleChange: (() -> Void)?
 
     /// The plugin's own identity once it loads, so a crash-quarantine policy can name it rather
     /// than pointing at a path.
     var pluginIdentifier: String? { loaded?.pluginIdentifier }
 
-    /// What the tab calls it. Read from the bundle rather than from the loaded plugin, so a
-    /// refusal is still a named tab instead of an anonymous one.
-    var displayName: String? {
-        guard let bundle = Bundle(url: bundleURL) else { return nil }
-        return (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+    /// What the tab calls it. Verified bundle metadata replaces the filename once inspection
+    /// finishes, so a refusal is still named without rereading a mutable install path on main.
+    var displayName: String {
+        verifiedCandidate?.bundle.displayName ?? L10n.string("Plugin")
+    }
+
+    struct ApprovalRequest: Equatable {
+        let identity: PluginLoader.PluginIdentity
+        let displayName: String
+    }
+
+    /// The identity and name are a pair from one verified build. Keeping this derivation separate
+    /// also makes the replacement-between-verification-and-approval regression observable.
+    var approvalRequest: ApprovalRequest? {
+        guard let bundle = verifiedCandidate?.bundle,
+              let identity = bundle.identity else { return nil }
+        return ApprovalRequest(
+            identity: identity,
+            displayName: bundle.displayName
+        )
     }
 
     /// Injected so a test can place a pane in a project without reaching the shared store, and
@@ -45,14 +68,19 @@ final class NativePluginPaneViewController: NSViewController {
         bundleURL: URL,
         owningSessionID: SessionID?,
         resolveStore: @escaping () -> ProjectStore? = { ProjectStore.shared },
-        loadPlugin: @escaping (URL) -> Result<ThreadingNativePlugin, PluginLoadFailure> = {
-            NativePluginCatalog.load($0)
+        loadPlugin: ((URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>)? = nil,
+        verifyPlugin: @escaping VerifyPlugin = { url in
+            NativePluginCatalog.verify(
+                url,
+                isBundled: NativePluginCatalog.isBundled(url)
+            )
         }
     ) {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID
         self.resolveStore = resolveStore
         self.loadPlugin = loadPlugin
+        self.verifyPlugin = verifyPlugin
         super.init(nibName: nil, bundle: nil)
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             guard let plugin = self?.loaded else { return }
@@ -63,6 +91,7 @@ final class NativePluginPaneViewController: NSViewController {
     required init?(coder: NSCoder) { nil }
 
     deinit {
+        loadTask?.cancel()
         // The tools go with the pane: they act on a stream and a view that are about to be gone.
         MainActor.assumeIsolated { NativePluginRuntime.shared.deregister(self) }
     }
@@ -73,7 +102,63 @@ final class NativePluginPaneViewController: NSViewController {
     }
 
     private func loadViewContents() {
-        switch loadPlugin(bundleURL) {
+        if let loadPlugin {
+            finish(loadPlugin(bundleURL))
+            return
+        }
+        if let verifiedCandidate {
+            load(verifiedCandidate)
+            return
+        }
+
+        let bundleURL = bundleURL
+        let verifyPlugin = verifyPlugin
+        loadTask = Task { [weak self] in
+            let verification = await Task.detached(priority: .userInitiated) {
+                verifyPlugin(bundleURL)
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            switch verification {
+            case .failure(let failure):
+                finish(.failure(failure))
+            case .success(let candidate):
+                load(candidate)
+            }
+        }
+    }
+
+    private func load(_ candidate: NativePluginCatalog.VerifiedCandidate) {
+        let previousDisplayName = displayName
+        let result = NativePluginCatalog.load(candidate)
+
+        // Mapping reserves one canonical candidate for an installed identity. Reopened panes may
+        // have verified a redundant staging copy before finding it; retain the canonical object
+        // and let the redundant copy schedule its cleanup off-main. An unapproved candidate is
+        // deliberately retained because its exact identity and name back the approval prompt.
+        if !candidate.isBundled,
+           let identity = candidate.bundle.identity,
+           let canonical = NativePluginCatalog.cachedInstalledCandidate(identity: identity) {
+            verifiedCandidate = canonical
+        } else if candidate.isBundled || requiresApproval(result) {
+            verifiedCandidate = candidate
+        } else {
+            verifiedCandidate = nil
+        }
+        if displayName != previousDisplayName { onTitleChange?() }
+        finish(result)
+    }
+
+    private func requiresApproval(
+        _ result: Result<ThreadingNativePlugin, PluginLoadFailure>
+    ) -> Bool {
+        guard case .failure(let failure) = result,
+              case .notApproved = failure else { return false }
+        return true
+    }
+
+    private func finish(_ result: Result<ThreadingNativePlugin, PluginLoadFailure>) {
+        loadTask = nil
+        switch result {
         case .success(let plugin):
             guard let pane = plugin.makePaneView?(context: context()) else {
                 let failure = PluginLoadFailure.capabilityUnavailable(name: "pane")
@@ -97,6 +182,11 @@ final class NativePluginPaneViewController: NSViewController {
     /// Rebuilds through the full loader boundary. Used after an approval and kept internal so a
     /// regression test can prove a successful retry replaces both the refusal view and its state.
     func reloadPresentation() {
+        loadTask?.cancel()
+        loadTask = nil
+        NativePluginRuntime.shared.deregister(self)
+        loaded = nil
+        refusal = nil
         view.subviews.forEach { $0.removeFromSuperview() }
         loadViewContents()
     }
@@ -183,12 +273,12 @@ final class NativePluginPaneViewController: NSViewController {
     /// plugin has to mean the bytes that were described, or an update inherits an answer nobody
     /// gave it.
     @objc private func askAboutThisPlugin() {
-        guard let identity = try? PluginLoader.identity(of: bundleURL) else {
-            return
-        }
+        // The default loading path already read and signature-validated this identity on its
+        // worker. Never repeat Security-framework or bundle I/O from a button action on main.
+        guard let request = approvalRequest else { return }
         NativePluginApprovalPrompt.ask(
-            about: identity,
-            named: displayName ?? identity.bundleIdentifier,
+            about: request.identity,
+            named: request.displayName,
             in: view.window
         ) { [weak self] approved in
             guard let self, approved else { return }

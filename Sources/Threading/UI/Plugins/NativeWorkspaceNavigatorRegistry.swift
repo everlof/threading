@@ -257,9 +257,22 @@ struct NativeWorkspaceNavigatorsDidChange: AppEvent {
 final class NativeWorkspaceNavigatorRegistry {
     static let shared = NativeWorkspaceNavigatorRegistry()
 
+    typealias Discover = @Sendable (Bool) -> [NativeWorkspaceNavigatorDescriptor]
+
     private(set) var inventory: [NativeWorkspaceNavigatorDescriptor] = []
     private var refreshTask: Task<Void, Never>?
     private var generation: UInt64 = 0
+    private let discover: Discover
+
+    init(
+        inventory: [NativeWorkspaceNavigatorDescriptor] = [],
+        discover: @escaping Discover = {
+            NativeWorkspaceNavigatorRegistry.discoverInventory(includeInstalled: $0)
+        }
+    ) {
+        self.inventory = inventory
+        self.discover = discover
+    }
 
     func descriptor(
         pluginIdentifier: String,
@@ -273,18 +286,11 @@ final class NativeWorkspaceNavigatorRegistry {
     func refresh(includeInstalled: Bool = true) {
         generation &+= 1
         let requestedGeneration = generation
+        let discover = discover
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             let discovered = await Task.detached(priority: .utility) {
-                var candidates = NativePluginCatalog.bundledPlugins().map {
-                    NativeWorkspaceNavigatorDiscovery.Candidate(url: $0, isBundled: true)
-                }
-                if includeInstalled {
-                    candidates.append(contentsOf: NativePluginCatalog.installedBundles().map {
-                        NativeWorkspaceNavigatorDiscovery.Candidate(url: $0, isBundled: false)
-                    })
-                }
-                return NativeWorkspaceNavigatorDiscovery.inventory(candidates: candidates)
+                discover(includeInstalled)
             }.value
             guard let self,
                   !Task.isCancelled,
@@ -294,5 +300,19 @@ final class NativeWorkspaceNavigatorRegistry {
             self.inventory = discovered
             NotificationCenter.default.post(NativeWorkspaceNavigatorsDidChange())
         }
+    }
+
+    private nonisolated static func discoverInventory(
+        includeInstalled: Bool
+    ) -> [NativeWorkspaceNavigatorDescriptor] {
+        var candidates = NativePluginCatalog.bundledPlugins().map {
+            NativeWorkspaceNavigatorDiscovery.Candidate(url: $0, isBundled: true)
+        }
+        if includeInstalled {
+            candidates.append(contentsOf: NativePluginCatalog.installedBundles().map {
+                NativeWorkspaceNavigatorDiscovery.Candidate(url: $0, isBundled: false)
+            })
+        }
+        return NativeWorkspaceNavigatorDiscovery.inventory(candidates: candidates)
     }
 }

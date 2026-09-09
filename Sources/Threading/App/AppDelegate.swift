@@ -2,6 +2,7 @@
 import QuartzCore
 import SwiftTerm
 import ThreadingExtensionKit
+import ThreadingPluginKit
 import ThreadingRemoteKit
 
 /// Launch Services calls the application delegate before the Dock's drag-completion transaction
@@ -2554,10 +2555,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         native.state = effective == .native ? .on : .off
         menu.addItem(native)
 
-        let inventory = ExtensionManager.shared.extensionWorkspaceNavigatorInventory
-        guard !inventory.isEmpty else { return }
-        menu.addItem(.separator())
-        for item in inventory {
+        let nativePluginInventory = NativeWorkspaceNavigatorRegistry.shared.inventory
+        let extensionInventory = ExtensionManager.shared.extensionWorkspaceNavigatorInventory
+        guard !nativePluginInventory.isEmpty || !extensionInventory.isEmpty else { return }
+
+        if !nativePluginInventory.isEmpty {
+            menu.addItem(.separator())
+            for item in nativePluginInventory {
+                let selection = item.selection
+                let menuItem = NSMenuItem(
+                    title: L10n.format("%@ — %@", item.title, item.pluginName),
+                    action: #selector(selectWorkspaceNavigator(_:)),
+                    keyEquivalent: ""
+                )
+                menuItem.target = self
+                menuItem.representedObject = selection
+                menuItem.state = selection == effective ? .on : .off
+                menu.addItem(menuItem)
+            }
+        }
+
+        if !extensionInventory.isEmpty {
+            menu.addItem(.separator())
+        }
+        for item in extensionInventory {
             let selection = WorkspaceNavigatorSelection.extensionNavigator(
                 extensionIdentifier: item.extensionIdentifier,
                 navigatorID: item.navigator.id
@@ -3666,7 +3687,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         guard let selection = sender.representedObject as? WorkspaceNavigatorSelection else {
             return
         }
-        mainWindowController?.selectWorkspaceNavigator(selection)
+        guard case .nativePluginNavigator(let pluginIdentifier, let navigatorID) = selection else {
+            mainWindowController?.selectWorkspaceNavigator(selection)
+            return
+        }
+        guard let descriptor = NativeWorkspaceNavigatorRegistry.shared.descriptor(
+            pluginIdentifier: pluginIdentifier,
+            navigatorID: navigatorID
+        ) else {
+            NativeWorkspaceNavigatorRegistry.shared.refresh()
+            return
+        }
+        guard !descriptor.isBundled else {
+            mainWindowController?.selectWorkspaceNavigator(selection)
+            return
+        }
+        guard let discoveredIdentity = descriptor.verifiedInstalledIdentity else {
+            // Installed discovery never publishes this shape. Fail closed if an in-memory
+            // descriptor violates that invariant rather than treating it as host-sealed code.
+            NativeWorkspaceNavigatorRegistry.shared.refresh()
+            return
+        }
+        guard NativePluginApprovalStore.shared.decision(for: discoveredIdentity) != true else {
+            mainWindowController?.selectWorkspaceNavigator(selection)
+            return
+        }
+
+        // The menu is the installed plugin's explicit entry point. Re-read its signed identity on
+        // a worker before asking; an update between discovery and this click cannot inherit the
+        // old build's name or decision.
+        Task { [weak self] in
+            let currentIdentity = await Task.detached(priority: .userInitiated) {
+                try? PluginLoader.identity(of: descriptor.bundleURL)
+            }.value
+            guard let self,
+                  currentIdentity == discoveredIdentity,
+                  NativeWorkspaceNavigatorRegistry.shared.descriptor(
+                      pluginIdentifier: pluginIdentifier,
+                      navigatorID: navigatorID
+                  ) == descriptor else {
+                NativeWorkspaceNavigatorRegistry.shared.refresh()
+                return
+            }
+            NativePluginApprovalPrompt.ask(
+                about: discoveredIdentity,
+                named: descriptor.pluginName,
+                in: mainWindowController?.window
+            ) { [weak self] approved in
+                guard approved else { return }
+                self?.mainWindowController?.selectWorkspaceNavigator(selection)
+            }
+        }
     }
 
     // The two sidebar-arrangement toggles act on settings, not on the window, so they work

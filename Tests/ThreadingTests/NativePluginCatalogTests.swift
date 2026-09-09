@@ -33,14 +33,23 @@ final class NativePluginCatalogTests: XCTestCase {
 
     /// The pane shows the refusal instead of an empty rectangle, because "the plugin did not
     /// appear" is not a diagnosis and nothing else in the system will report one.
-    func testThePaneStatesWhyAPluginDidNotLoad() throws {
+    func testThePaneStatesWhyAPluginDidNotLoadWithoutVerifyingOnMain() async throws {
+        let probe = PluginVerificationThreadProbe()
         let controller = NativePluginPaneViewController(
             bundleURL: directory.appendingPathComponent("Absent.bundle"),
-            owningSessionID: SessionID()
+            owningSessionID: SessionID(),
+            verifyPlugin: { url in
+                probe.recordCurrentThread()
+                return .failure(.unreadableBundle(path: url.path))
+            }
         )
         controller.loadView()
+        for _ in 0..<100 where controller.refusal == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertNil(controller.loaded)
         XCTAssertEqual(controller.refusal?.code, "unreadable_bundle")
+        XCTAssertEqual(probe.ranOnMain, false)
         let labels = descendants(of: controller.view).compactMap { $0 as? NSTextField }
         XCTAssertTrue(
             labels.contains { !$0.stringValue.isEmpty },
@@ -109,6 +118,131 @@ final class NativePluginCatalogTests: XCTestCase {
         XCTAssertEqual(plugin.appliedThemes.count, 1)
     }
 
+    func testVerifiedInstalledCandidateRejectsAChangedExpectedBuildBeforeMapping() async throws {
+        let source = Bundle(for: NativePluginCatalogTests.self).bundleURL
+        let url = directory.appendingPathComponent("InstalledTests.bundle", isDirectory: true)
+        try FileManager.default.copyItem(at: source, to: url)
+        let verification = await Task.detached {
+            NativePluginCatalog.verify(url, isBundled: false)
+        }.value
+        let candidate: NativePluginCatalog.VerifiedCandidate
+        switch verification {
+        case .failure(let failure):
+            return XCTFail("test bundle should verify: \(failure)")
+        case .success(let value):
+            candidate = value
+        }
+        let identity = try XCTUnwrap(candidate.bundle.identity)
+        let changed = PluginLoader.PluginIdentity(
+            bundleIdentifier: identity.bundleIdentifier,
+            team: identity.team,
+            cdHash: identity.cdHash + "-replacement"
+        )
+
+        switch NativePluginCatalog.load(candidate, expectedInstalledIdentity: changed) {
+        case .success:
+            XCTFail("a different discovered build must never map")
+        case .failure(let failure):
+            XCTAssertEqual(failure.code, "build_changed")
+        }
+    }
+
+    func testRepeatedInstalledLoadReusesTheCandidateReservedForItsExactIdentity() async throws {
+        let url = try makeSignedBundleWithoutExecutable(named: "CachedTests")
+
+        func verify() async throws -> NativePluginCatalog.VerifiedCandidate {
+            let result = await Task.detached {
+                NativePluginCatalog.verify(url, isBundled: false)
+            }.value
+            switch result {
+            case .success(let candidate): return candidate
+            case .failure(let failure):
+                throw XCTSkip("test fixture did not verify as an installed bundle: \(failure)")
+            }
+        }
+
+        let first = try await verify()
+        let identity = try XCTUnwrap(first.bundle.identity)
+        NativePluginCatalog.approvals.remember(true, for: identity)
+        defer { NativePluginCatalog.approvals.revoke(identifier: identity.bundleIdentifier) }
+
+        // The XCTest bundle is not a plugin, so construction is expected to fail. The important
+        // property is that reaching the principal-class edge reserves this verified build.
+        if case .success = NativePluginCatalog.load(first) {
+            XCTFail("the XCTest bundle unexpectedly conformed to the native plugin contract")
+        }
+        let reserved = try XCTUnwrap(
+            NativePluginCatalog.cachedInstalledCandidate(identity: identity)
+        )
+        XCTAssertTrue(reserved.bundle === first.bundle)
+
+        let separatelyVerified = try await verify()
+        if case .success = NativePluginCatalog.load(separatelyVerified) {
+            XCTFail("the XCTest bundle unexpectedly conformed to the native plugin contract")
+        }
+        let reused = try XCTUnwrap(
+            NativePluginCatalog.cachedInstalledCandidate(identity: identity)
+        )
+        XCTAssertTrue(reused.bundle === first.bundle)
+        XCTAssertFalse(reused.bundle === separatelyVerified.bundle)
+    }
+
+    func testApprovalUsesTheVerifiedNameAfterTheInstallPathIsReplaced() async throws {
+        let url = try makeSignedBundleWithoutExecutable(
+            named: "ApprovalFixture",
+            displayName: "Verified build"
+        )
+        let verification = await Task.detached {
+            NativePluginCatalog.verify(url, isBundled: false)
+        }.value
+        let candidate: NativePluginCatalog.VerifiedCandidate
+        switch verification {
+        case .success(let value): candidate = value
+        case .failure(let failure):
+            return XCTFail("test fixture should verify: \(failure)")
+        }
+
+        let controller = NativePluginPaneViewController(
+            bundleURL: url,
+            owningSessionID: nil,
+            verifyPlugin: { _ in .success(candidate) }
+        )
+        controller.loadView()
+        for _ in 0..<100 where controller.refusal == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(controller.refusal?.code, "not_approved")
+
+        try FileManager.default.removeItem(at: url)
+        _ = try makeSignedBundleWithoutExecutable(
+            named: "ApprovalFixture",
+            displayName: "Replacement build"
+        )
+
+        let request = try XCTUnwrap(controller.approvalRequest)
+        XCTAssertEqual(request.identity, candidate.bundle.identity)
+        XCTAssertEqual(request.displayName, "Verified build")
+        XCTAssertEqual(controller.displayName, "Verified build")
+    }
+
+    func testBundledTrustIsRecomputedAtVerification() async {
+        let outsideHost = directory.appendingPathComponent("Moved.bundle")
+        try? FileManager.default.createDirectory(
+            at: outsideHost,
+            withIntermediateDirectories: true
+        )
+
+        let verification = await Task.detached {
+            NativePluginCatalog.verify(outsideHost, isBundled: true)
+        }.value
+        switch verification {
+        case .success:
+            XCTFail("an out-of-host path must not inherit bundled trust from discovery")
+        case .failure(let failure):
+            XCTAssertEqual(failure.code, "build_changed")
+        }
+    }
+
     func testTheDirectoryIsUnderThreadingsOwnApplicationSupport() {
         let path = NativePluginCatalog.directory.path
         XCTAssertTrue(path.hasSuffix("/Threading/Plugins"), "unexpected location: \(path)")
@@ -132,6 +266,51 @@ final class NativePluginCatalogTests: XCTestCase {
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private func makeSignedBundleWithoutExecutable(
+        named name: String,
+        displayName: String? = nil
+    ) throws -> URL {
+        let url = directory.appendingPathComponent("\(name).bundle", isDirectory: true)
+        let contents = url.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let identifier = "codes.threading.tests.\(UUID().uuidString.lowercased())"
+        let info: [String: Any] = [
+            "CFBundleIdentifier": identifier,
+            "CFBundleName": displayName ?? name,
+            "CFBundleDisplayName": displayName ?? name,
+            "CFBundlePackageType": "BNDL",
+        ]
+        let plist = try PropertyListSerialization.data(
+            fromPropertyList: info,
+            format: .xml,
+            options: 0
+        )
+        try plist.write(to: contents.appendingPathComponent("Info.plist"))
+
+        let signer = Process()
+        signer.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        signer.arguments = ["--force", "--sign", "-", url.path]
+        signer.standardOutput = FileHandle.nullDevice
+        signer.standardError = FileHandle.nullDevice
+        try signer.run()
+        signer.waitUntilExit()
+        XCTAssertEqual(signer.terminationStatus, 0, "fixture could not be ad-hoc signed")
+        return url
+    }
+}
+
+private final class PluginVerificationThreadProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool?
+
+    var ranOnMain: Bool? {
+        lock.withLock { value }
+    }
+
+    func recordCurrentThread() {
+        lock.withLock { value = Thread.isMainThread }
     }
 }
 

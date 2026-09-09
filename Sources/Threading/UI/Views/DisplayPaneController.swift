@@ -993,16 +993,28 @@ final class DisplayPaneController: NSViewController {
       return nil
     }
 
-    let controller = NativePluginPaneViewController(
-      bundleURL: bundleURL,
-      owningSessionID: sessionID
-    )
+    let controller = makeNativePluginPane(bundleURL: bundleURL, for: sessionID)
     let tab = DisplayTab(body: .nativePlugin(controller), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
     activeTabIDBySession[sessionID] = tab.id
     persist(sessionID)
     if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  private func makeNativePluginPane(
+    bundleURL: URL,
+    for sessionID: SessionID
+  ) -> NativePluginPaneViewController {
+    let controller = NativePluginPaneViewController(
+      bundleURL: bundleURL,
+      owningSessionID: sessionID
+    )
+    controller.onTitleChange = { [weak self] in
+      guard let self, sessionID == self.currentSessionID else { return }
+      self.render()
+    }
     return controller
   }
 
@@ -2770,9 +2782,7 @@ final class DisplayPaneController: NSViewController {
         guard let bundle = NativePluginCatalog.deviceLogsBundle else { continue }
         tabs.append(DisplayTab(
           id: id,
-          body: .nativePlugin(
-            NativePluginPaneViewController(bundleURL: bundle, owningSessionID: sessionID)
-          ),
+          body: .nativePlugin(makeNativePluginPane(bundleURL: bundle, for: sessionID)),
           owningSessionID: sessionID
         ))
 

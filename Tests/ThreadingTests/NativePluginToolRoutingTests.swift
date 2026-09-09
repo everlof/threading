@@ -23,20 +23,23 @@ final class NativePluginToolRoutingTests: XCTestCase {
     }
 
     /// Loads the bundled Device Logs plugin into a pane, exactly as opening the tab does.
-    private func openPane(for sessionID: SessionID) throws -> NativePluginPaneViewController {
+    private func openPane(for sessionID: SessionID) async throws -> NativePluginPaneViewController {
         let bundle = try XCTUnwrap(
             NativePluginCatalog.deviceLogsBundle,
             "Threading ships no Device Logs plugin — Contents/PlugIns is empty"
         )
         let pane = NativePluginPaneViewController(bundleURL: bundle, owningSessionID: sessionID)
         _ = pane.view                        // loadView is what loads and registers the plugin
+        for _ in 0..<200 where pane.loaded == nil && pane.refusal == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         controller = pane
         XCTAssertNil(pane.refusal, "the shipped plugin was refused: \(String(describing: pane.refusal))")
         return pane
     }
 
-    func testTheShippedPluginsToolsReachTheProvider() throws {
-        _ = try openPane(for: SessionID())
+    func testTheShippedPluginsToolsReachTheProvider() async throws {
+        _ = try await openPane(for: SessionID())
         let groups = NativePluginMCPToolProvider().groups
         let devicelogs = try XCTUnwrap(
             groups.first { $0.id == "codes.threading.plugin.devicelogs" },
@@ -57,9 +60,9 @@ final class NativePluginToolRoutingTests: XCTestCase {
         }
     }
 
-    func testACallReachesThePluginAndComesBack() throws {
+    func testACallReachesThePluginAndComesBack() async throws {
         let sessionID = SessionID()
-        _ = try openPane(for: sessionID)
+        _ = try await openPane(for: sessionID)
 
         let answered = expectation(description: "answered")
         var response: MCPExternalToolResponse?
@@ -72,7 +75,7 @@ final class NativePluginToolRoutingTests: XCTestCase {
             answered.fulfill()
         }
         XCTAssertTrue(owned, "the provider did not claim a name that is plainly its own")
-        wait(for: [answered], timeout: 10)
+        await fulfillment(of: [answered], timeout: 10)
         let answer = try XCTUnwrap(response)
         XCTAssertFalse(answer.isError, answer.text)
         XCTAssertTrue(answer.text.contains("rows are shown"), answer.text)
@@ -91,8 +94,8 @@ final class NativePluginToolRoutingTests: XCTestCase {
 
     /// The tools belong to a pane, so a call for a chat with no pane open is a reason the agent can
     /// act on rather than a missing tool that reads as the feature not existing.
-    func testACallForAChatWithNoPaneOpenExplainsItself() throws {
-        _ = try openPane(for: SessionID())          // a pane, but for a different chat
+    func testACallForAChatWithNoPaneOpenExplainsItself() async throws {
+        _ = try await openPane(for: SessionID())          // a pane, but for a different chat
 
         let answered = expectation(description: "answered")
         var response: MCPExternalToolResponse?
@@ -105,15 +108,15 @@ final class NativePluginToolRoutingTests: XCTestCase {
             answered.fulfill()
         }
         XCTAssertTrue(owned, "the name is ours, so answering it is ours too")
-        wait(for: [answered], timeout: 10)
+        await fulfillment(of: [answered], timeout: 10)
         let answer = try XCTUnwrap(response)
         XCTAssertTrue(answer.isError)
         XCTAssertTrue(answer.text.contains("pane is open"), answer.text)
     }
 
     /// Closing the pane takes its tools with it: they act on a stream and a view that are gone.
-    func testTheToolsGoAwayWithThePane() throws {
-        let pane = try openPane(for: SessionID())
+    func testTheToolsGoAwayWithThePane() async throws {
+        let pane = try await openPane(for: SessionID())
         XCTAssertFalse(NativePluginMCPToolProvider().groups.isEmpty)
         NativePluginRuntime.shared.deregister(pane)
         controller = nil

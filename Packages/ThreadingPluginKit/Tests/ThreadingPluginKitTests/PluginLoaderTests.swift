@@ -68,6 +68,74 @@ final class PluginLoaderTests: XCTestCase {
         XCTAssertFalse(asked, "an invalid signature must refuse before a decision is worth asking")
     }
 
+    func testSignedVerificationCanFinishOffMainBeforeDecisionAndMapping() async throws {
+        let bundle = try makeBundle(principalClass: nil)
+        try sign(bundle)
+        let loader = PluginLoader.signatureAndDecision()
+
+        let verified = try await Task.detached {
+            try loader.verify(bundleAt: bundle)
+        }.value
+
+        XCTAssertNotNil(verified.identity)
+        XCTAssertThrowsError(try verified.load { _ in false }) {
+            XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "not_approved")
+        }
+    }
+
+    func testVerifiedInstalledBundleMapsTheStagedBuildAfterSourceReplacement() async throws {
+        let bundle = try makeBundle(
+            principalClass: "LoaderFixturePrincipal",
+            executable: true,
+            displayName: "Verified fixture"
+        )
+        try sign(bundle)
+        let loader = PluginLoader.signatureAndDecision()
+        let verified = try await Task.detached {
+            try loader.verify(bundleAt: bundle)
+        }.value
+
+        try FileManager.default.removeItem(at: bundle)
+        _ = try makeBundle(principalClass: nil, displayName: "Replacement fixture")
+        try sign(bundle)
+
+        XCTAssertEqual(
+            verified.displayName,
+            "Verified fixture",
+            "approval presentation must come from the same staged build that will be mapped"
+        )
+        XCTAssertThrowsError(try verified.load { _ in true }) {
+            XCTAssertEqual(
+                ($0 as? PluginLoadFailure)?.code,
+                "wrong_protocol",
+                "mapping must use the verified staged copy, not the replaced install path"
+            )
+        }
+    }
+
+    func testVerifiedPresentationNameUniformlyBoundsHostileMetadataAndFallbacks() throws {
+        let hostile = "Bad\u{200D}format\u{2028}line\u{2029}paragraph\u{0007}control"
+        let hostileBundle = try makeBundle(
+            principalClass: nil,
+            displayName: hostile,
+            bundleIdentifier: hostile
+        )
+        let hostileVerified = try PluginLoader.uncheckedForProbesAndTests()
+            .verify(bundleAt: hostileBundle)
+        XCTAssertEqual(hostileVerified.displayName, "Plugin")
+
+        let longName = String(repeating: "A", count: 320)
+        let longBundle = try makeBundle(
+            principalClass: nil,
+            displayName: longName,
+            bundleFileName: "LongFixture"
+        )
+        let longVerified = try PluginLoader.uncheckedForProbesAndTests()
+            .verify(bundleAt: longBundle)
+        XCTAssertEqual(longVerified.displayName.unicodeScalars.count, 256)
+        XCTAssertTrue(longVerified.displayName.allSatisfy { $0 == "A" })
+    }
+
     /// Leaving the decision out must refuse rather than default to yes.
     ///
     /// The overload exists for the two policies that need no decision, and nothing stops it being
@@ -102,6 +170,7 @@ final class PluginLoaderTests: XCTestCase {
             .noPrincipalClass,
             .wrongProtocol,
             .apiVersionMismatch(found: 9, expected: 1),
+            .buildChanged(identifier: "codes.threading.plugin.example"),
             .notApproved(identifier: "codes.threading.plugin.example"),
         ]
         for failure in failures {
@@ -119,23 +188,90 @@ final class PluginLoaderTests: XCTestCase {
 
     // MARK: - Fixture
 
-    private func makeBundle(principalClass: String?) throws -> URL {
-        let bundle = directory.appendingPathComponent("Fixture.bundle")
+    private func makeBundle(
+        principalClass: String?,
+        executable: Bool = false,
+        displayName: String = "Fixture",
+        bundleIdentifier: String = "codes.threading.test.fixture",
+        bundleFileName: String = "Fixture"
+    ) throws -> URL {
+        let bundle = directory.appendingPathComponent("\(bundleFileName).bundle")
         let contents = bundle.appendingPathComponent("Contents")
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
         var plist: [String: Any] = [
-            "CFBundleIdentifier": "codes.threading.test.fixture",
-            "CFBundleName": "Fixture",
+            "CFBundleIdentifier": bundleIdentifier,
+            "CFBundleName": displayName,
+            "CFBundleDisplayName": displayName,
             "CFBundlePackageType": "BNDL",
         ]
         if let principalClass { plist["NSPrincipalClass"] = principalClass }
+        if executable { plist["CFBundleExecutable"] = "Fixture" }
         let data = try PropertyListSerialization.data(
             fromPropertyList: plist,
             format: .xml,
             options: 0
         )
         try data.write(to: contents.appendingPathComponent("Info.plist"))
+        if executable { try compileFixtureExecutable(in: contents) }
         return bundle
+    }
+
+    private func compileFixtureExecutable(in contents: URL) throws {
+        let source = directory.appendingPathComponent("Fixture.m")
+        try Data("""
+            #import <Foundation/Foundation.h>
+            @interface LoaderFixturePrincipal : NSObject
+            @end
+            @implementation LoaderFixturePrincipal
+            @end
+            """.utf8).write(to: source)
+        let macOS = contents.appendingPathComponent("MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/clang")
+        process.arguments = [
+            "-fobjc-arc",
+            "-framework", "Foundation",
+            "-bundle",
+            source.path,
+            "-o", macOS.appendingPathComponent("Fixture").path,
+        ]
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(
+                data: errors.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "clang failed"
+            throw NSError(
+                domain: "PluginLoaderTests",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
+    }
+
+    private func sign(_ bundle: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["--force", "--sign", "-", "--timestamp=none", bundle.path]
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(
+                data: errors.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "codesign failed"
+            throw NSError(
+                domain: "PluginLoaderTests",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
     }
 }
 

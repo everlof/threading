@@ -287,8 +287,25 @@ the app and copied into `Contents/PlugIns`.
 
 `NativePluginPaneViewController` owns placement, lifetime, trust and the theme; the plugin owns
 everything inside the rectangle it is given. That is the same split `.media` already uses for
-content whose pixels move on their own. The tab's name is read from the *bundle*, not from the
-loaded plugin, so a refusal is still a named tab.
+content whose pixels move on their own. The tab and approval prompt use the name read from the
+*verified bundle*, not from the loaded plugin or mutable install path, so a refusal is still a
+named tab and its name cannot drift away from the build being approved.
+
+Installed bundles cross a two-phase loading boundary. Copying, bundle inspection and signature
+validation run on a detached worker; only the already verified candidate reaches the main actor to
+map its principal class and construct UI. Verification uses a read-only process-private staging
+copy, so changing the ordinary install path after approval cannot change the bytes the host maps.
+That staging directory is deliberately **not** described as a sandbox: another malicious process
+already running as the same Unix user remains outside the native tier's protection. Code needing
+that threat boundary belongs in the isolated extension tier.
+
+A mapped installed build is pinned by its full signed identity for the process lifetime. Reopening
+it reuses the same verified bundle image; a replacement with the same plugin identifier is offered
+after restart rather than mapping a second set of process-global Objective-C classes. Threading
+also caps the process to 32 distinct installed native candidates. Their staging resources are
+removed on normal process exit; candidates refused before the mapping edge are removed when their
+verification object is released. Those recursive removals run through one serial utility queue,
+because the last reference is often released by a main-actor pane and bundle size is external.
 
 `NativePluginCatalog.installedBundles` caps both the bundles it returns **and the directory entries
 it inspects**. A plugins folder is externally writable, so a limit applied after

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import ThreadingPluginKit
 
 /// Where native plugins live, and who is allowed to be one.
@@ -19,6 +20,18 @@ import ThreadingPluginKit
 /// whole policy.
 @MainActor
 enum NativePluginCatalog {
+
+    private static let maximumMappedInstalledPlugins = 32
+    private static var mappedInstalledCandidates:
+        [PluginLoader.PluginIdentity: VerifiedCandidate] = [:]
+    private static var mappedIdentityByPluginIdentifier:
+        [String: PluginLoader.PluginIdentity] = [:]
+
+    struct VerifiedCandidate: @unchecked Sendable {
+        let bundle: PluginLoader.VerifiedBundle
+        let bundleURL: URL
+        let isBundled: Bool
+    }
 
     /// Whether an installed plugin may run, which is the user's decision rather than a list of
     /// teams we happen to trust.
@@ -98,7 +111,7 @@ enum NativePluginCatalog {
     static var deviceLogsBundle: URL? { bundledPlugin(identifier: deviceLogsIdentifier) }
 
     /// Whether a bundle is one of ours, and so already covered by the app's signature.
-    private static func isBundled(_ url: URL) -> Bool {
+    nonisolated static func isBundled(_ url: URL) -> Bool {
         url.resolvingSymlinksInPath().path
             .hasPrefix(Bundle.main.bundleURL.resolvingSymlinksInPath().path + "/")
     }
@@ -130,27 +143,98 @@ enum NativePluginCatalog {
 
     /// Load one bundle under the current policy. Every refusal is returned rather than thrown away,
     /// because "the plugin did not appear" is not a diagnosis.
-    static func load(_ bundle: URL) -> Result<ThreadingNativePlugin, PluginLoadFailure> {
+    static func load(
+        _ bundle: URL,
+        expectedInstalledIdentity: PluginLoader.PluginIdentity? = nil
+    ) -> Result<ThreadingNativePlugin, PluginLoadFailure> {
+        switch verify(bundle, isBundled: isBundled(bundle)) {
+        case .failure(let failure):
+            return .failure(failure)
+        case .success(let candidate):
+            return load(candidate, expectedInstalledIdentity: expectedInstalledIdentity)
+        }
+    }
+
+    /// The filesystem and Security-framework half of loading. It is nonisolated so callers can
+    /// run it on their bounded worker before any plugin code reaches the main actor.
+    nonisolated static func verify(
+        _ bundle: URL,
+        isBundled declaredBundledLocation: Bool
+    ) -> Result<VerifiedCandidate, PluginLoadFailure> {
+        // Discovery metadata is a hint, not a trust decision. Resolve containment again at the
+        // verification edge so a path replaced by an out-of-bundle symlink cannot retain the
+        // host-sealed policy it had when the menu was built.
+        let verifiedBundledLocation = isBundled(bundle)
+        guard verifiedBundledLocation == declaredBundledLocation else {
+            let identifier = Bundle(url: bundle)?.bundleIdentifier ?? bundle.lastPathComponent
+            return .failure(.buildChanged(identifier: identifier))
+        }
         do {
-            // A bundled plugin is part of the app: altering it invalidates the signature the
-            // operating system already checked, so there is nothing left for a decision to add.
-            guard !isBundled(bundle) else {
-                return .success(try PluginLoader.sealedByHostBundle().load(bundleAt: bundle))
-            }
-            // Anything else is somebody's code, and running it is the user's call. The loader
-            // owns the order — readable, then validly signed, then approved, then mapped — which
-            // it did not when this method sequenced those steps itself. Getting the first two the
-            // wrong way round reported every absent plugin as `signature_invalid`, which is the
-            // failure this tier's named refusals exist to prevent.
-            return .success(
-                try PluginLoader.signatureAndDecision().load(bundleAt: bundle) { identity in
-                    approvals.decision(for: identity) == true
-                }
-            )
+            let loader = verifiedBundledLocation
+                ? PluginLoader.sealedByHostBundle()
+                : PluginLoader.signatureAndDecision()
+            return .success(VerifiedCandidate(
+                bundle: try loader.verify(bundleAt: bundle),
+                bundleURL: bundle,
+                isBundled: verifiedBundledLocation
+            ))
         } catch let failure as PluginLoadFailure {
             return .failure(failure)
         } catch {
             return .failure(.unreadableBundle(path: bundle.path))
+        }
+    }
+
+    /// Reuses the one image already mapped for an exact installed build. Native bundles cannot be
+    /// unloaded safely and duplicate Objective-C class names are process-global, so an update to
+    /// a loaded plugin takes effect after restart rather than mapping a second image beside it.
+    static func cachedInstalledCandidate(
+        identity: PluginLoader.PluginIdentity
+    ) -> VerifiedCandidate? {
+        mappedInstalledCandidates[identity]
+    }
+
+    /// The main-actor half: compare the already verified build, consult approval, then map and
+    /// construct the plugin. It performs no repeat signature or file validation.
+    static func load(
+        _ candidate: VerifiedCandidate,
+        expectedInstalledIdentity: PluginLoader.PluginIdentity? = nil
+    ) -> Result<ThreadingNativePlugin, PluginLoadFailure> {
+        do {
+            if candidate.isBundled {
+                return .success(try candidate.bundle.load())
+            }
+            guard let identity = candidate.bundle.identity else {
+                return .failure(.signatureInvalid(status: errSecInvalidData))
+            }
+            if let expectedInstalledIdentity, identity != expectedInstalledIdentity {
+                return .failure(.buildChanged(identifier: identity.bundleIdentifier))
+            }
+            guard approvals.decision(for: identity) == true else {
+                return .failure(.notApproved(identifier: identity.bundleIdentifier))
+            }
+            if let mapped = mappedInstalledCandidates[identity] {
+                return .success(try mapped.bundle.load(approving: { _ in true }))
+            }
+            if let mappedIdentity = mappedIdentityByPluginIdentifier[identity.bundleIdentifier],
+               mappedIdentity != identity {
+                return .failure(.buildChanged(identifier: identity.bundleIdentifier))
+            }
+            guard mappedInstalledCandidates.count < maximumMappedInstalledPlugins else {
+                return .failure(.capabilityUnavailable(name: "native plugin process capacity"))
+            }
+            // Reserve the verified candidate before asking the bundle for its principal class.
+            // That lookup is the mapping edge, and a malformed or API-incompatible plugin must
+            // not be able to create a new staging copy and image on every retry. Native code is
+            // not unloadable, so the process owns this exact build until restart whether plugin
+            // construction succeeds or reports a named refusal.
+            mappedInstalledCandidates[identity] = candidate
+            mappedIdentityByPluginIdentifier[identity.bundleIdentifier] = identity
+            return .success(try candidate.bundle.load(approving: { _ in true }))
+        } catch let failure as PluginLoadFailure {
+            return .failure(failure)
+        } catch {
+            return .failure(.unreadableBundle(path: candidate.bundleURL.path))
         }
     }
 

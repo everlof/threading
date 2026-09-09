@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingExtensionKit
+import ThreadingPluginKit
 import ThreadingRemoteKit
 
 /// Coarse owners inside `MainWindowController` construction for the opt-in Release startup run.
@@ -77,6 +78,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private var isMeasuringStartupToolbarItems = false
     private let environment: AppEnvironment
     private let workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting
+    private let nativeWorkspaceNavigatorRegistry: NativeWorkspaceNavigatorRegistry
+    private let nativeWorkspaceNavigatorPluginLoader:
+        NativePluginWorkspaceNavigatorHostViewController.LoadPlugin?
 
     /// Installed by the application composition root. Sheets inject this further into their
     /// submission closures, so neither UI surface reaches into account or diagnostic state.
@@ -124,9 +128,25 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         defersInitialTreeMount: true
     )
     private weak var workspaceNavigatorFactRegistry: ExtensionFactRegistry?
+    private lazy var nativeWorkspaceNavigatorSnapshotSource =
+        NativeWorkspaceNavigatorSnapshotSource(
+            projectStore: environment.projectStore,
+            activity: { [weak self] sessionID in
+                self?.environment.agentRuntime.activity(sessionID: sessionID) ?? .dormant
+            }
+        )
     private lazy var workspaceSidebarViewController = WorkspaceSidebarContainerViewController(
         nativeController: sidebarViewController,
         routing: workspaceNavigatorRouting,
+        nativeRegistry: nativeWorkspaceNavigatorRegistry,
+        nativeSnapshotSource: nativeWorkspaceNavigatorSnapshotSource,
+        nativeActivationHandler: { [weak self] identity in
+            self?.activateNativeWorkspaceNavigatorIdentity(identity) ?? false
+        },
+        nativeActionHandler: { [weak self] action, identity in
+            self?.performNativeWorkspaceNavigatorAction(action, identity: identity) ?? false
+        },
+        nativePluginLoader: nativeWorkspaceNavigatorPluginLoader,
         contextProvider: { [weak self] in
             ExtensionCommandContext(
                 projectID: self?.currentProjectID?.uuidString.lowercased(),
@@ -566,10 +586,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private init(
         window: NSWindow?,
         environment: AppEnvironment,
-        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting
+        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting,
+        nativeWorkspaceNavigatorRegistry: NativeWorkspaceNavigatorRegistry,
+        nativeWorkspaceNavigatorPluginLoader:
+            NativePluginWorkspaceNavigatorHostViewController.LoadPlugin?
     ) {
         self.environment = environment
         self.workspaceNavigatorRouting = workspaceNavigatorRouting
+        self.nativeWorkspaceNavigatorRegistry = nativeWorkspaceNavigatorRegistry
+        self.nativeWorkspaceNavigatorPluginLoader = nativeWorkspaceNavigatorPluginLoader
         super.init(window: window)
         // Stated after `super.init` rather than in the window factory, which is static: the
         // strip is chrome and the report is the controller's, so the window holds a closure
@@ -591,7 +616,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     convenience init(
         environment: AppEnvironment,
         initialFramePlan: MainWindowInitialFramePlan,
-        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting = ExtensionManager.shared
+        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting = ExtensionManager.shared,
+        nativeWorkspaceNavigatorRegistry: NativeWorkspaceNavigatorRegistry = .shared,
+        nativeWorkspaceNavigatorPluginLoader:
+            NativePluginWorkspaceNavigatorHostViewController.LoadPlugin? = nil
     ) {
         let constructionStarted = DispatchTime.now().uptimeNanoseconds
         let createdWindow = Self.createWindow()
@@ -599,7 +627,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         self.init(
             window: createdWindow,
             environment: environment,
-            workspaceNavigatorRouting: workspaceNavigatorRouting
+            workspaceNavigatorRouting: workspaceNavigatorRouting,
+            nativeWorkspaceNavigatorRegistry: nativeWorkspaceNavigatorRegistry,
+            nativeWorkspaceNavigatorPluginLoader: nativeWorkspaceNavigatorPluginLoader
         )
         let baseInitialized = DispatchTime.now().uptimeNanoseconds
         startupPerformance.createWindowNanoseconds = windowCreated - constructionStarted
@@ -1188,7 +1218,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func configureWorkspaceNavigator() {
         workspaceSidebarViewController.activate(environment.settings.workspaceNavigatorSelection)
         workspaceSidebarViewController.synchronizeSelection(
-            with: currentWorkspaceNavigatorDestination
+            with: currentWorkspaceNavigatorDestination,
+            nativeIdentity: currentNativeWorkspaceNavigatorIdentity
         )
         // Install this after the initial activation. Launch restores the user's divider through
         // the startup geometry pass below; selection-time hints begin with later live changes.
@@ -1199,8 +1230,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self else { return }
             self.workspaceSidebarViewController.refreshAvailability()
             self.workspaceSidebarViewController.synchronizeSelection(
-                with: self.currentWorkspaceNavigatorDestination
+                with: self.currentWorkspaceNavigatorDestination,
+                nativeIdentity: self.currentNativeWorkspaceNavigatorIdentity
             )
+        }
+        appEvents.observe(NativeWorkspaceNavigatorsDidChange.self) { [weak self] _ in
+            guard let self else { return }
+            self.workspaceSidebarViewController.refreshAvailability()
+            self.workspaceSidebarViewController.synchronizeSelection(
+                with: self.currentWorkspaceNavigatorDestination,
+                nativeIdentity: self.currentNativeWorkspaceNavigatorIdentity
+            )
+            self.refreshNativeWorkspaceNavigatorWidthHint()
         }
         appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             guard let self else { return }
@@ -1208,7 +1249,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 environment.settings.workspaceNavigatorSelection
             )
             self.workspaceSidebarViewController.synchronizeSelection(
-                with: self.currentWorkspaceNavigatorDestination
+                with: self.currentWorkspaceNavigatorDestination,
+                nativeIdentity: self.currentNativeWorkspaceNavigatorIdentity
             )
         }
         appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
@@ -2479,7 +2521,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         environment.settings.workspaceNavigatorSelection = selection
         workspaceSidebarViewController.activate(selection)
         workspaceSidebarViewController.synchronizeSelection(
-            with: currentWorkspaceNavigatorDestination
+            with: currentWorkspaceNavigatorDestination,
+            nativeIdentity: currentNativeWorkspaceNavigatorIdentity
         )
         resolveWorkspaceNavigatorWidth()
     }
@@ -2510,6 +2553,22 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
 
+        if case let .nativePluginNavigator(pluginIdentifier, navigatorID) = effectiveSelection,
+           let preferredWidth = nativeWorkspaceNavigatorRegistry.descriptor(
+               pluginIdentifier: pluginIdentifier,
+               navigatorID: navigatorID
+           )?.preferredWidth {
+            requestWorkspaceNavigatorWidth(
+                min(
+                    CGFloat(NativeWorkspaceNavigatorDiscovery.maximumPreferredWidth),
+                    max(sidebarItem.minimumThickness, CGFloat(preferredWidth))
+                ),
+                configuredSelection: configuredSelection,
+                effectiveSelection: effectiveSelection
+            )
+            return
+        }
+
         guard let programmatic = programmaticWorkspaceNavigatorSidebarWidth else { return }
         let standingWidth = sidebarItem.viewController.view.bounds.width
         guard abs(standingWidth - programmatic) <= 0.5 else {
@@ -2523,6 +2582,24 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             configuredSelection: configuredSelection,
             effectiveSelection: effectiveSelection
         )
+    }
+
+    /// A replacement build can keep the same route while changing its hint, but an inventory
+    /// refresh is not a new user selection. Re-resolve only while the current width still belongs
+    /// to a programmatic hint (or one is queued); once the divider moved, that geometry wins over
+    /// this and every unrelated plugin refresh.
+    private func refreshNativeWorkspaceNavigatorWidthHint() {
+        if let programmatic = programmaticWorkspaceNavigatorSidebarWidth {
+            let standingWidth = sidebarItem.viewController.view.bounds.width
+            guard abs(standingWidth - programmatic) <= 0.5 else {
+                programmaticWorkspaceNavigatorSidebarWidth = nil
+                pendingWorkspaceNavigatorWidth = nil
+                return
+            }
+        } else if pendingWorkspaceNavigatorWidth == nil {
+            return
+        }
+        resolveWorkspaceNavigatorWidth()
     }
 
     /// Applies routed width through the split view while persistence is suppressed. Subsequent
@@ -2586,6 +2663,69 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return .project(id: projectID.uuidString.lowercased())
         }
         return nil
+    }
+
+    private var currentNativeWorkspaceNavigatorIdentity: PluginWorkspaceItemIdentity? {
+        if let sessionID = currentSessionID {
+            return PluginWorkspaceItemIdentity(
+                kind: .session,
+                identifier: sessionID.uuidString.lowercased()
+            )
+        }
+        if let terminalID = currentTerminalID {
+            return PluginWorkspaceItemIdentity(
+                kind: .terminal,
+                identifier: terminalID.uuidString.lowercased()
+            )
+        }
+        if let projectID = containerViewController.currentComposerProjectID {
+            return PluginWorkspaceItemIdentity(
+                kind: .project,
+                identifier: projectID.uuidString.lowercased()
+            )
+        }
+        return nil
+    }
+
+    private func activateNativeWorkspaceNavigatorIdentity(
+        _ identity: PluginWorkspaceItemIdentity
+    ) -> Bool {
+        switch identity.kind {
+        case .project:
+            return openWorkspaceNavigatorDestination(.project(id: identity.identifier)) == nil
+        case .session:
+            return openWorkspaceNavigatorDestination(.session(
+                id: identity.identifier,
+                projectID: nil
+            )) == nil
+        case .terminal:
+            guard let terminalID = TerminalID(uuidString: identity.identifier),
+                  environment.projectStore.terminal(withID: terminalID) != nil,
+                  environment.projectStore.homeProject(forTerminalID: terminalID) != nil else {
+                return false
+            }
+            exitSettingsForNavigation()
+            sidebarViewController.select(terminalID: terminalID)
+            return true
+        @unknown default:
+            return false
+        }
+    }
+
+    private func performNativeWorkspaceNavigatorAction(
+        _ action: PluginWorkspaceAction,
+        identity: PluginWorkspaceItemIdentity
+    ) -> Bool {
+        guard identity.kind == .session,
+              let sessionID = SessionID(uuidString: identity.identifier) else { return false }
+        let intent: ExtensionWorkspaceNavigatorIntent
+        switch action {
+        case .pin: intent = .pin
+        case .unpin: intent = .unpin
+        case .archive: intent = .archive
+        @unknown default: return false
+        }
+        return workspaceNavigatorIntentDispatcher.perform(intent, sessionID: sessionID) == .accepted
     }
 
     private func openWorkspaceNavigatorDestination(
@@ -4927,7 +5067,8 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         syncDisplayPane(to: sessionID)
         recordVisit(.session(sessionID))
         workspaceSidebarViewController.synchronizeSelection(
-            with: currentWorkspaceNavigatorDestination
+            with: currentWorkspaceNavigatorDestination,
+            nativeIdentity: currentNativeWorkspaceNavigatorIdentity
         )
 
         // Visibility can change the attention state of the row leaving and entering the pane.
@@ -4953,7 +5094,8 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         syncDisplayPane(to: nil)
         recordVisit(.terminal(terminalID))
         workspaceSidebarViewController.synchronizeSelection(
-            with: currentWorkspaceNavigatorDestination
+            with: currentWorkspaceNavigatorDestination,
+            nativeIdentity: currentNativeWorkspaceNavigatorIdentity
         )
         updateSessionTitleItem()
         updateWindowTitle()
@@ -4976,7 +5118,8 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         syncDisplayPane(to: nil)
         recordVisit(.composer(projectID))
         workspaceSidebarViewController.synchronizeSelection(
-            with: currentWorkspaceNavigatorDestination
+            with: currentWorkspaceNavigatorDestination,
+            nativeIdentity: currentNativeWorkspaceNavigatorIdentity
         )
         updateSessionTitleItem()
         updateWindowTitle()

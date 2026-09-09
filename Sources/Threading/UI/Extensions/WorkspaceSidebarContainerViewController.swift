@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingExtensionKit
+import ThreadingPluginKit
 
 /// Owns selection and generation-safe failback while the navigator renderer owns only one
 /// extension document. Keeping this shell separate makes the Native fallback an orchestration
@@ -16,6 +17,13 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let trackingView = HoverTrackingView()
     private let nativeController: ProjectSidebarViewController
     private let routing: ExtensionWorkspaceNavigatorRouting
+    private let nativeRegistry: NativeWorkspaceNavigatorRegistry
+    private let nativeSnapshotSource: NativeWorkspaceNavigatorSnapshotSource
+    private let nativeActivationHandler: (PluginWorkspaceItemIdentity) -> Bool
+    private let nativeActionHandler:
+        (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool
+    private let nativePluginLoader:
+        NativePluginWorkspaceNavigatorHostViewController.LoadPlugin?
     private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
     private let destinationHandler: WorkspaceNavigatorHostViewController.DestinationHandler
     private let factSnapshotProvider: WorkspaceNavigatorHostViewController.FactSnapshotProvider
@@ -27,6 +35,8 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let onSelectNative: () -> Void
     private var visibleController: NSViewController?
     private var extensionController: WorkspaceNavigatorHostViewController?
+    private var nativePluginController: NativePluginWorkspaceNavigatorHostViewController?
+    private var nativeSelectedIdentity: PluginWorkspaceItemIdentity?
     private var desiredSelection: WorkspaceNavigatorSelection = .native
     private var settingsOverride = false
     private var settingsPendingSessionIDs = Set<SessionID>()
@@ -43,6 +53,14 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     init(
         nativeController: ProjectSidebarViewController,
         routing: ExtensionWorkspaceNavigatorRouting,
+        nativeRegistry: NativeWorkspaceNavigatorRegistry = .shared,
+        nativeSnapshotSource: NativeWorkspaceNavigatorSnapshotSource = .init(),
+        nativeActivationHandler: @escaping (PluginWorkspaceItemIdentity) -> Bool = { _ in false },
+        nativeActionHandler:
+            @escaping (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool = { _, _ in
+                false
+            },
+        nativePluginLoader: NativePluginWorkspaceNavigatorHostViewController.LoadPlugin? = nil,
         contextProvider: @escaping WorkspaceNavigatorHostViewController.ContextProvider,
         destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler,
         factSnapshotProvider: @escaping WorkspaceNavigatorHostViewController.FactSnapshotProvider = {
@@ -63,6 +81,11 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     ) {
         self.nativeController = nativeController
         self.routing = routing
+        self.nativeRegistry = nativeRegistry
+        self.nativeSnapshotSource = nativeSnapshotSource
+        self.nativeActivationHandler = nativeActivationHandler
+        self.nativeActionHandler = nativeActionHandler
+        self.nativePluginLoader = nativePluginLoader
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
         self.factSnapshotProvider = factSnapshotProvider
@@ -106,13 +129,36 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
 
     func refreshAvailability() {
         guard !settingsOverride else {
+            extensionController?.setLiveEventDeliveryEnabled(false)
             effectiveSelection = .native
             show(nativeController)
             return
         }
-        guard case .extensionNavigator(let extensionIdentifier, let navigatorID) =
-            desiredSelection,
-              let inventory = routing.registeredWorkspaceNavigator(
+
+        switch desiredSelection {
+        case .native:
+            extensionController?.setLiveEventDeliveryEnabled(false)
+            extensionController = nil
+            nativePluginController = nil
+            effectiveSelection = .native
+            show(nativeController)
+
+        case .extensionNavigator(let extensionIdentifier, let navigatorID):
+            showExtensionNavigator(
+                extensionIdentifier: extensionIdentifier,
+                navigatorID: navigatorID
+            )
+
+        case .nativePluginNavigator(let pluginIdentifier, let navigatorID):
+            showNativePluginNavigator(
+                pluginIdentifier: pluginIdentifier,
+                navigatorID: navigatorID
+            )
+        }
+    }
+
+    private func showExtensionNavigator(extensionIdentifier: String, navigatorID: String) {
+        guard let inventory = routing.registeredWorkspaceNavigator(
                   extensionIdentifier: extensionIdentifier,
                   navigatorID: navigatorID
               ),
@@ -120,10 +166,12 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
             extensionController?.setLiveEventDeliveryEnabled(false)
             effectiveSelection = .native
             extensionController = nil
+            nativePluginController = nil
             show(nativeController)
             return
         }
         unavailableGeneration = nil
+        nativePluginController = nil
 
         let controller: WorkspaceNavigatorHostViewController
         let createdController: Bool
@@ -177,28 +225,114 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         controller.setLiveEventDeliveryEnabled(true)
     }
 
+    private func showNativePluginNavigator(pluginIdentifier: String, navigatorID: String) {
+        extensionController?.setLiveEventDeliveryEnabled(false)
+        extensionController = nil
+        unavailableGeneration = nil
+
+        guard let descriptor = nativeRegistry.descriptor(
+            pluginIdentifier: pluginIdentifier,
+            navigatorID: navigatorID
+        ) else {
+            nativePluginController = nil
+            effectiveSelection = .native
+            show(nativeController)
+            return
+        }
+
+        let controller: NativePluginWorkspaceNavigatorHostViewController
+        let createdController: Bool
+        if let current = nativePluginController, current.descriptor == descriptor {
+            controller = current
+            createdController = false
+        } else {
+            controller = NativePluginWorkspaceNavigatorHostViewController(
+                descriptor: descriptor,
+                initialSnapshot: nativeSnapshotSource.initialSnapshot(
+                    selectedItemIdentity: nativeSelectedIdentity
+                ),
+                activate: nativeActivationHandler,
+                perform: nativeActionHandler,
+                loadPlugin: nativePluginLoader,
+                onUnavailable: { [weak self] failure in
+                    self?.failBack(nativeDescriptor: descriptor, failure: failure)
+                }
+            )
+            nativePluginController = controller
+            createdController = true
+        }
+
+        let catchUpSessionIDs = settingsPendingSessionIDs
+        settingsPendingSessionIDs.removeAll(keepingCapacity: true)
+        effectiveSelection = desiredSelection
+        show(controller)
+        if createdController {
+            documentRefreshPending = false
+        } else if documentRefreshPending {
+            documentRefreshPending = false
+            controller.receive(nativeSnapshotSource.replacement(
+                selectedItemIdentity: nativeSelectedIdentity
+            ))
+        }
+        catchUpSessionIDs.forEach { sessionID in
+            if let update = nativeSnapshotSource.sessionUpdate(sessionID) {
+                controller.receive(update)
+            }
+        }
+    }
+
     func refreshDocument() {
-        guard !settingsOverride,
-              case .extensionNavigator = effectiveSelection else {
-            if case .extensionNavigator = desiredSelection {
+        guard !settingsOverride else {
+            switch desiredSelection {
+            case .extensionNavigator, .nativePluginNavigator:
                 documentRefreshPending = true
+            case .native:
+                break
             }
             return
         }
-        extensionController?.refresh()
+        switch effectiveSelection {
+        case .extensionNavigator:
+            extensionController?.refresh()
+        case .nativePluginNavigator:
+            nativePluginController?.receive(nativeSnapshotSource.replacement(
+                selectedItemIdentity: nativeSelectedIdentity
+            ))
+        case .native:
+            break
+        }
     }
 
     func sessionDidChange(_ sessionID: SessionID) {
-        guard case .extensionNavigator = desiredSelection else { return }
+        switch desiredSelection {
+        case .native:
+            return
+        case .extensionNavigator, .nativePluginNavigator:
+            break
+        }
         if settingsOverride {
             _ = retainForSettings([sessionID])
             return
         }
-        extensionController?.sessionDidChange(sessionID)
+        switch effectiveSelection {
+        case .extensionNavigator:
+            extensionController?.sessionDidChange(sessionID)
+        case .nativePluginNavigator:
+            guard let update = nativeSnapshotSource.sessionUpdate(sessionID) else { return }
+            nativePluginController?.receive(update)
+        case .native:
+            break
+        }
     }
 
-    func synchronizeSelection(with destination: ExtensionWorkspaceNavigatorDestination?) {
+    func synchronizeSelection(
+        with destination: ExtensionWorkspaceNavigatorDestination?,
+        nativeIdentity: PluginWorkspaceItemIdentity? = nil
+    ) {
         extensionController?.synchronizeSelection(with: destination)
+        nativeSelectedIdentity = nativeIdentity
+        guard let update = nativeSnapshotSource.selectionUpdate(nativeIdentity) else { return }
+        nativePluginController?.receive(update)
     }
 
     /// Routes a lifecycle receipt to whichever navigator shell is actually visible when the
@@ -207,6 +341,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     func presentToast(_ toast: ToastRequest) {
         if let extensionHost = visibleController as? WorkspaceNavigatorHostViewController {
             extensionHost.presentToast(toast)
+        } else if let nativePluginHost =
+                    visibleController as? NativePluginWorkspaceNavigatorHostViewController {
+            nativePluginHost.presentToast(toast)
         } else {
             nativeController.presentToast(toast)
         }
@@ -230,6 +367,19 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         show(nativeController)
     }
 
+    private func failBack(
+        nativeDescriptor: NativeWorkspaceNavigatorDescriptor,
+        failure: PluginLoadFailure
+    ) {
+        guard let current = nativePluginController,
+              current.descriptor == nativeDescriptor,
+              desiredSelection == nativeDescriptor.selection else { return }
+        nativePluginController = nil
+        effectiveSelection = .native
+        show(nativeController)
+        if case .buildChanged = failure { nativeRegistry.refresh() }
+    }
+
     @discardableResult
     private func retainForSettings<S: Sequence>(_ sessionIDs: S) -> Bool
     where S.Element == SessionID {
@@ -246,6 +396,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 )?.processGeneration ?? extensionController?.processGeneration
             }
             extensionController = nil
+            nativePluginController = nil
             effectiveSelection = .native
             show(nativeController)
             return false
@@ -268,6 +419,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         let transferredToasts: [ToastRequest]
         if let extensionHost = previous as? WorkspaceNavigatorHostViewController {
             transferredToasts = extensionHost.takePresentedToastsForTransfer()
+        } else if let nativePluginHost =
+                    previous as? NativePluginWorkspaceNavigatorHostViewController {
+            transferredToasts = nativePluginHost.takePresentedToastsForTransfer()
         } else if previous === nativeController {
             transferredToasts = nativeController.takePresentedToastsForTransfer()
         } else {

@@ -303,7 +303,7 @@ final class PaneTab {
     case .nativePlugin(let plugin):
       // The bundle's own display name, so Threading's Device Logs plugin still reads as
       // "Device logs" rather than as its identifier. A refusal is still a named tab.
-      return plugin.displayName ?? L10n.string("Plugin")
+      return plugin.displayName
     }
   }
 }

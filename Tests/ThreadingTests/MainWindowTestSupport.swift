@@ -44,6 +44,9 @@ extension HostedStoreTestCase {
     func makeMainWindowController(
         initialFramePlan: MainWindowInitialFramePlan = .restoreSavedFrame,
         workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting = ExtensionManager.shared,
+        nativeWorkspaceNavigatorRegistry: NativeWorkspaceNavigatorRegistry = .shared,
+        nativeWorkspaceNavigatorPluginLoader:
+            NativePluginWorkspaceNavigatorHostViewController.LoadPlugin? = nil,
         file _: StaticString = #filePath,
         line _: UInt = #line
     ) -> MainWindowController {
@@ -59,7 +62,9 @@ extension HostedStoreTestCase {
         let controller = MainWindowController(
             environment: environment,
             initialFramePlan: initialFramePlan,
-            workspaceNavigatorRouting: workspaceNavigatorRouting
+            workspaceNavigatorRouting: workspaceNavigatorRouting,
+            nativeWorkspaceNavigatorRegistry: nativeWorkspaceNavigatorRegistry,
+            nativeWorkspaceNavigatorPluginLoader: nativeWorkspaceNavigatorPluginLoader
         )
         retainMainWindowFixture(
             MainWindowTestFixtureOwner(controller: controller, directory: directory)
