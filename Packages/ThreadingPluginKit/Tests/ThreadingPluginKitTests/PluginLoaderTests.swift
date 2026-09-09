@@ -155,10 +155,15 @@ final class PluginContractTests: XCTestCase {
         XCTAssertTrue(theme.monospacedFont.isFixedPitch)
     }
 
-    /// The version is what the loader compares against. If it changes, every installed plugin
-    /// stops loading until it is rebuilt, so it should never move by accident.
-    func testTheAPIVersionIsTheOneTheLoaderEnforces() {
-        XCTAssertEqual(ThreadingPluginAPI.version, 3)
+    /// V4 makes the pane selector optional. A new host can still run a v3 pane plugin, while a v3
+    /// host's exact generation check refuses navigator-only v4 code before selector dispatch.
+    func testTheAPIVersionCompatibilityWindowPreservesV3PanePlugins() {
+        XCTAssertEqual(ThreadingPluginAPI.version, 4)
+        XCTAssertEqual(ThreadingPluginAPI.minimumSupportedVersion, 3)
+        XCTAssertFalse(ThreadingPluginAPI.supports(2))
+        XCTAssertTrue(ThreadingPluginAPI.supports(3))
+        XCTAssertTrue(ThreadingPluginAPI.supports(4))
+        XCTAssertFalse(ThreadingPluginAPI.supports(5))
     }
 
     /// Version 2 added `encodedTheme`, which is how a plugin linking `ThreadingDesignKit` gets the

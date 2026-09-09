@@ -161,12 +161,40 @@ final class NativePluginParityTests: XCTestCase {
         XCTAssertEqual((plugin.pluginTools ?? []).map(\.name), ["set_greeting"])
 
         // It draws, in the host's colours, through the same path the shipped plugin uses.
-        let pane = plugin.makePaneView(
+        let pane = try XCTUnwrap(plugin.makePaneView?(
             context: PluginContext(theme: NativePluginCatalog.theme(), arguments: [:])
-        )
+        ))
         pane.frame = NSRect(x: 0, y: 0, width: 200, height: 60)
         pane.layoutSubtreeIfNeeded()
         XCTAssertFalse(pane.subviews.isEmpty, "the example pane drew nothing")
+    }
+
+    /// Installed plugins resolve ThreadingPluginKit to the host's dynamic framework. If the
+    /// generated getter called `ThreadingPluginAPI.version`, a v4 navigator-only bundle loaded by
+    /// a v3 host would report 3 and pass the old host's exact check before its missing required
+    /// pane selector was dispatched. The separately compiled binary must carry no reference to
+    /// that runtime getter: its own `pluginAPIVersion` remains 4 regardless of the host framework.
+    func testV4PluginBinaryEmbedsItsGenerationInsteadOfReadingTheHostGeneration() throws {
+        let bundle = try buildTheExampleWithOnlyTheSDK()
+        let executable = try XCTUnwrap(Bundle(url: bundle)?.executableURL)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/nm")
+        process.arguments = ["-u", executable.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let symbols = String(
+            decoding: output.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        process.waitUntilExit()
+
+        XCTAssertEqual(process.terminationStatus, 0, symbols)
+        XCTAssertFalse(
+            symbols.contains("_$s18ThreadingPluginKit0aB3APIO7versionSivgZ"),
+            "the plugin's generation still depends on whichever framework the host supplies"
+        )
     }
 
     private static var builtExample: Result<URL, Error>?

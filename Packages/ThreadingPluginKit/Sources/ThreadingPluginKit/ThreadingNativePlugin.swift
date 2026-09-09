@@ -6,15 +6,17 @@ public enum ThreadingPluginAPI {
     /// The contract generation this build of the framework speaks.
     ///
     /// A plugin records the value it was compiled against in `pluginAPIVersion`; the host refuses
-    /// a mismatch rather than calling into a differently-shaped protocol.
+    /// a generation outside its compatibility window rather than calling into a differently-
+    /// shaped protocol.
     ///
-    /// **This number describes the binary call shape, and moves for a removal or a re-type.** A
-    /// mismatch stops every installed plugin from loading until its author rebuilds, so the rule
-    /// decides whether this is an SDK or a moving target — and the first draft said "bump whenever
-    /// a member is added", which would have broken every third-party plugin the next time we grew
-    /// a hook. `ThreadingNativePlugin` is an `@objc protocol`, so a new member declared
-    /// `@objc optional` breaks no existing conformer, and a new stored property on a payload class
-    /// below is additive under library evolution. Neither is a generation.
+    /// **This number describes the binary call shape, and moves for a removal, a re-type, or when a
+    /// formerly required selector becomes optional.** An ordinary optional addition and a new
+    /// stored property on a payload class remain additive under library evolution.
+    ///
+    /// Version 4 made the pane factory optional so a navigator-only plugin is valid. The new host
+    /// still accepts version 3 pane plugins, whose required selector remains present. An old v3
+    /// host rejects a v4 navigator-only plugin by generation before it can send that now-optional
+    /// selector unconditionally.
     ///
     /// A change that affects an author's *source* but not the selectors and signatures the host
     /// calls does not move it either. Adding `@MainActor` to the protocol was exactly that: an
@@ -26,7 +28,12 @@ public enum ThreadingPluginAPI {
     /// Host-side symbols are not the contract at all. `PluginLoader` and `PluginLoadFailure` live
     /// here because the host and its tests need them, but nothing a plugin compiles against
     /// depends on their shape.
-    public static let version = 3
+    public static let version = 4
+    public static let minimumSupportedVersion = 3
+
+    public static func supports(_ version: Int) -> Bool {
+        (minimumSupportedVersion...Self.version).contains(version)
+    }
 }
 
 // MARK: - Theme
@@ -157,7 +164,7 @@ public final class PluginTool: NSObject {
 
 // MARK: - The contract
 
-/// A natively rendered pane supplied by a loadable bundle.
+/// A natively rendered presentation supplied by a loadable bundle.
 ///
 /// The bundle's `NSPrincipalClass` conforms to this. The host owns placement, lifetime, trust and
 /// the theme; the plugin owns everything inside the rectangle it is given.
@@ -173,14 +180,18 @@ public protocol ThreadingNativePlugin: NSObjectProtocol {
 
     /// The contract generation this plugin was compiled against. Compare with
     /// `ThreadingPluginAPI.version`.
+    ///
+    /// Implement this as a numeric literal, never by returning `ThreadingPluginAPI.version`.
+    /// Installed plugins use the host's copy of this framework at runtime; forwarding the value
+    /// would therefore report the host generation rather than the plugin's compiled generation.
     @objc static var pluginAPIVersion: Int { get }
 
     /// Stable identity, recorded by the host so a plugin that crashes can be quarantined by name
     /// rather than by path.
     @objc var pluginIdentifier: String { get }
 
-    /// Build the pane. Called once per presentation.
-    @objc func makePaneView(context: PluginContext) -> NSView
+    /// Build a pane. Optional because a navigator-only plugin is complete on its own.
+    @objc optional func makePaneView(context: PluginContext) -> NSView
 
     /// Builds one complete leading workspace navigator declared in the bundle's static metadata.
     ///
@@ -193,7 +204,7 @@ public protocol ThreadingNativePlugin: NSObjectProtocol {
         context: PluginWorkspaceNavigatorContext
     ) -> NSView
 
-    /// Called after `makePaneView`, and again on every live theme change.
+    /// Called after a presentation view is constructed, and again on every live theme change.
     @objc func apply(theme: PluginTheme)
 
     /// Tools this plugin offers the agent, if any.

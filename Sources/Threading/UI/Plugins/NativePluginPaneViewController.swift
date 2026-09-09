@@ -21,6 +21,8 @@ final class NativePluginPaneViewController: NSViewController {
     let owningSessionID: SessionID?
     private(set) var loaded: ThreadingNativePlugin?
     private(set) var refusal: PluginLoadFailure?
+    private let appEvents = AppEventObservations()
+    private let loadPlugin: (URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>
 
     /// The plugin's own identity once it loads, so a crash-quarantine policy can name it rather
     /// than pointing at a path.
@@ -42,12 +44,20 @@ final class NativePluginPaneViewController: NSViewController {
     init(
         bundleURL: URL,
         owningSessionID: SessionID?,
-        resolveStore: @escaping () -> ProjectStore? = { ProjectStore.shared }
+        resolveStore: @escaping () -> ProjectStore? = { ProjectStore.shared },
+        loadPlugin: @escaping (URL) -> Result<ThreadingNativePlugin, PluginLoadFailure> = {
+            NativePluginCatalog.load($0)
+        }
     ) {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID
         self.resolveStore = resolveStore
+        self.loadPlugin = loadPlugin
         super.init(nibName: nil, bundle: nil)
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            guard let plugin = self?.loaded else { return }
+            plugin.apply(theme: NativePluginCatalog.theme())
+        }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -63,15 +73,32 @@ final class NativePluginPaneViewController: NSViewController {
     }
 
     private func loadViewContents() {
-        switch NativePluginCatalog.load(bundleURL) {
+        switch loadPlugin(bundleURL) {
         case .success(let plugin):
+            guard let pane = plugin.makePaneView?(context: context()) else {
+                let failure = PluginLoadFailure.capabilityUnavailable(name: "pane")
+                loaded = nil
+                refusal = failure
+                install(refusalView(failure))
+                return
+            }
             loaded = plugin
+            refusal = nil
             NativePluginRuntime.shared.register(plugin, controller: self, sessionID: owningSessionID)
-            install(plugin.makePaneView(context: context()))
+            install(pane)
+            plugin.apply(theme: NativePluginCatalog.theme())
         case .failure(let failure):
+            loaded = nil
             refusal = failure
             install(refusalView(failure))
         }
+    }
+
+    /// Rebuilds through the full loader boundary. Used after an approval and kept internal so a
+    /// regression test can prove a successful retry replaces both the refusal view and its state.
+    func reloadPresentation() {
+        view.subviews.forEach { $0.removeFromSuperview() }
+        loadViewContents()
     }
 
     /// What the plugin is told. Narrow and versioned on purpose: never a session, a project, a
@@ -167,8 +194,7 @@ final class NativePluginPaneViewController: NSViewController {
             guard let self, approved else { return }
             // Rebuild the pane the ordinary way rather than patching it: loading is what registers
             // the plugin's tools, and half-loading it would advertise tools nothing can run.
-            self.view.subviews.forEach { $0.removeFromSuperview() }
-            self.loadViewContents()
+            self.reloadPresentation()
         }
     }
 }

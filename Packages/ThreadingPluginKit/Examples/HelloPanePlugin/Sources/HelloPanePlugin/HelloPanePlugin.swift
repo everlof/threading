@@ -13,7 +13,9 @@ import ThreadingPluginKit
 @objc(HelloPanePlugin)
 public final class HelloPanePlugin: NSObject, ThreadingNativePlugin {
 
-    public static var pluginAPIVersion: Int { ThreadingPluginAPI.version }
+    // Keep this a literal. Installed plugins share the host's framework at runtime, so forwarding
+    // to ThreadingPluginAPI.version would report the host generation instead of this build's.
+    public static let pluginAPIVersion = 4
 
     public var pluginIdentifier: String { "com.example.hellopane" }
 
@@ -36,7 +38,6 @@ public final class HelloPanePlugin: NSObject, ThreadingNativePlugin {
         ])
         if let greeting = context.argument("greeting") { label.stringValue = greeting }
         pane = view
-        apply(theme: context.theme)
         return view
     }
 

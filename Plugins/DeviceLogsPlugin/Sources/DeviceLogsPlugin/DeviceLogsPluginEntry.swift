@@ -10,6 +10,7 @@ import ThreadingPluginKit
 public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
     private var pane: DeviceLogPaneViewController?
+    private(set) var appliedThemeCount = 0
 
     /// The pane a test drives. The tools act on it, so a test of the tools needs to see it.
     @MainActor
@@ -17,15 +18,16 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
     public override required init() { super.init() }
 
-    public static var pluginAPIVersion: Int { ThreadingPluginAPI.version }
+    // This must remain the generation embedded when the plugin is compiled. Do not forward to
+    // ThreadingPluginAPI.version: the installed bundle uses the host's framework at runtime.
+    public static let pluginAPIVersion = 4
 
     public var pluginIdentifier: String { "codes.threading.plugin.devicelogs" }
 
     public func makePaneView(context: PluginContext) -> NSView {
-        // The host builds panes on the main actor; the contract is `@objc` and so cannot say so.
+        // Construction and all callbacks are main-actor isolated by the plugin contract.
         MainActor.assumeIsolated {
-            let pane = DeviceLogPaneViewController(owningSessionID: context.argument("session"))
-            apply(theme: context.theme)
+            let pane = DeviceLogPaneViewController(owningSessionID: context.argument("sessionID"))
             self.pane = pane
             return pane.view
         }
@@ -246,6 +248,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
     }
 
     public func apply(theme: PluginTheme) {
+        appliedThemeCount += 1
         try? HostThemeHandoff.install(encoded: theme.encodedTheme)
         MainActor.assumeIsolated { pane?.view.needsDisplay = true }
     }

@@ -11,7 +11,9 @@ import ThreadingPluginKit
 @objc(MarketeerPanelPlugin)
 public final class MarketeerPanelPlugin: NSObject, ThreadingNativePlugin {
 
-    public static var pluginAPIVersion: Int { ThreadingPluginAPI.version }
+    // This is deliberately a literal so an older host cannot make a newer plugin report the
+    // older host framework's generation.
+    public static let pluginAPIVersion = 4
 
     public var pluginIdentifier: String { "codes.threading.marketeer.panel" }
 
@@ -35,7 +37,6 @@ public final class MarketeerPanelPlugin: NSObject, ThreadingNativePlugin {
         container.translatesAutoresizingMaskIntoConstraints = false
         self.container = container
         reload()
-        apply(theme: context.theme)
         return container
     }
 

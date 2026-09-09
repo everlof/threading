@@ -14,6 +14,8 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
     case noPrincipalClass
     case wrongProtocol
     case apiVersionMismatch(found: Int, expected: Int)
+    /// The bundle loaded correctly but does not vend the presentation the host asked for.
+    case capabilityUnavailable(name: String)
     /// Validly signed, but the user has not agreed to run this particular build of it.
     case notApproved(identifier: String)
 
@@ -27,6 +29,8 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
             return "bundle declares no NSPrincipalClass"
         case .wrongProtocol:
             return "principal class does not conform to ThreadingNativePlugin"
+        case .capabilityUnavailable(let name):
+            return "plugin does not provide its declared \(name) presentation"
         case .notApproved(let identifier):
             return "\(identifier) has not been approved to run inside Threading"
         case .apiVersionMismatch(let found, let expected):
@@ -43,6 +47,7 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
         case .wrongProtocol: return "wrong_protocol"
         case .apiVersionMismatch: return "api_version_mismatch"
         case .notApproved: return "not_approved"
+        case .capabilityUnavailable: return "capability_unavailable"
         }
     }
 }
@@ -163,7 +168,7 @@ public struct PluginLoader {
         guard let type = principal as? ThreadingNativePlugin.Type else {
             throw PluginLoadFailure.wrongProtocol
         }
-        guard type.pluginAPIVersion == ThreadingPluginAPI.version else {
+        guard ThreadingPluginAPI.supports(type.pluginAPIVersion) else {
             throw PluginLoadFailure.apiVersionMismatch(
                 found: type.pluginAPIVersion,
                 expected: ThreadingPluginAPI.version

@@ -37,10 +37,10 @@ final class NativePluginLoadingTests: XCTestCase {
         XCTAssertEqual(plugin.pluginIdentifier, "codes.threading.plugin.devicelogs")
         XCTAssertEqual(type(of: plugin).pluginAPIVersion, ThreadingPluginAPI.version)
 
-        let view = plugin.makePaneView(context: PluginContext(
+        let view = try XCTUnwrap(plugin.makePaneView?(context: PluginContext(
             theme: NativePluginCatalog.theme(),
             arguments: [:]
-        ))
+        )))
         view.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
         view.layoutSubtreeIfNeeded()
 

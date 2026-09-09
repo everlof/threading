@@ -30,6 +30,20 @@ final class DeviceLogToolsTests: XCTestCase {
         return answer.map { (text: $0.0, isError: $0.1) } ?? ("no answer", true)
     }
 
+    func testInitialThemeIsAppliedExactlyOnceByTheHostLifecycle() {
+        let plugin = DeviceLogsPlugin()
+        let theme = PluginTheme(
+            background: .black, surface: .darkGray, text: .white, secondaryText: .gray,
+            accent: .orange, monospacedFont: .monospacedSystemFont(ofSize: 10, weight: .regular),
+            rowHeight: 16, isDark: true
+        )
+
+        _ = plugin.makePaneView(context: PluginContext(theme: theme, arguments: [:]))
+        XCTAssertEqual(plugin.appliedThemeCount, 0, "the factory must not self-apply the theme")
+        plugin.apply(theme: theme)
+        XCTAssertEqual(plugin.appliedThemeCount, 1)
+    }
+
     /// Every declared schema has to be JSON an agent's client can read, or the tool is undiscoverable
     /// in a way nothing else would catch — the plugin still loads and the pane still draws.
     func testEveryToolDeclaresReadableJSONSchema() throws {

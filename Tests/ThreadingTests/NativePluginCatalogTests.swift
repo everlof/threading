@@ -58,6 +58,57 @@ final class NativePluginCatalogTests: XCTestCase {
         XCTAssertNil(context.argument("projectStore"), "there is no door to the model here")
     }
 
+    func testPaneHostAppliesThemeAfterConstructionAndOnLiveChanges() {
+        let plugin = PanePresentationProbe()
+        let controller = NativePluginPaneViewController(
+            bundleURL: directory.appendingPathComponent("Probe.bundle"),
+            owningSessionID: nil,
+            loadPlugin: { _ in .success(plugin) }
+        )
+
+        controller.loadView()
+        XCTAssertEqual(plugin.appliedThemes.count, 1)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: .system))
+        XCTAssertEqual(plugin.appliedThemes.count, 2)
+    }
+
+    func testNavigatorOnlyPluginProducesANamedPaneCapabilityRefusal() {
+        let plugin = NavigatorOnlyPresentationProbe()
+        let controller = NativePluginPaneViewController(
+            bundleURL: directory.appendingPathComponent("NavigatorOnly.bundle"),
+            owningSessionID: nil,
+            loadPlugin: { _ in .success(plugin) }
+        )
+
+        controller.loadView()
+        XCTAssertNil(controller.loaded)
+        XCTAssertEqual(controller.refusal?.code, "capability_unavailable")
+        XCTAssertTrue(descendants(of: controller.view).compactMap { $0 as? NSTextField }
+            .contains { $0.stringValue.contains("pane") })
+    }
+
+    func testSuccessfulReloadClearsThePreviousRefusal() {
+        let plugin = PanePresentationProbe()
+        var attempt = 0
+        let controller = NativePluginPaneViewController(
+            bundleURL: directory.appendingPathComponent("Retry.bundle"),
+            owningSessionID: nil,
+            loadPlugin: { _ in
+                attempt += 1
+                return attempt == 1
+                    ? .failure(.notApproved(identifier: plugin.pluginIdentifier))
+                    : .success(plugin)
+            }
+        )
+
+        controller.loadView()
+        XCTAssertEqual(controller.refusal?.code, "not_approved")
+        controller.reloadPresentation()
+        XCTAssertNil(controller.refusal)
+        XCTAssertTrue(controller.loaded === plugin)
+        XCTAssertEqual(plugin.appliedThemes.count, 1)
+    }
+
     func testTheDirectoryIsUnderThreadingsOwnApplicationSupport() {
         let path = NativePluginCatalog.directory.path
         XCTAssertTrue(path.hasSuffix("/Threading/Plugins"), "unexpected location: \(path)")
@@ -82,4 +133,27 @@ final class NativePluginCatalogTests: XCTestCase {
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
+}
+
+@MainActor
+private final class PanePresentationProbe: NSObject, ThreadingNativePlugin {
+    static let pluginAPIVersion = 4
+    let pluginIdentifier = "tests.pane-presentation"
+    private(set) var appliedThemes: [PluginTheme] = []
+
+    required override init() { super.init() }
+
+    func makePaneView(context _: PluginContext) -> NSView { NSView() }
+
+    func apply(theme: PluginTheme) { appliedThemes.append(theme) }
+}
+
+@MainActor
+private final class NavigatorOnlyPresentationProbe: NSObject, ThreadingNativePlugin {
+    static let pluginAPIVersion = 4
+    let pluginIdentifier = "tests.navigator-only-presentation"
+
+    required override init() { super.init() }
+
+    func apply(theme _: PluginTheme) {}
 }

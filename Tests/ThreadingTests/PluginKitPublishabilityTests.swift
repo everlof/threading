@@ -132,6 +132,10 @@ final class PluginKitPublishabilityTests: XCTestCase {
                        "pluginTools", "invokeTool"] {
             XCTAssertTrue(source.contains(member), "the example should demonstrate \(member)")
         }
+        XCTAssertTrue(source.contains("static let pluginAPIVersion = 4"),
+                      "the example must embed the generation it compiled against")
+        XCTAssertFalse(source.contains("{ ThreadingPluginAPI.version }"),
+                       "a plugin must not read its generation from the host's framework")
         XCTAssertTrue(source.contains("@objc(HelloPanePlugin)"),
                       "NSPrincipalClass is resolved through the Objective-C runtime")
     }
@@ -145,6 +149,8 @@ final class PluginKitPublishabilityTests: XCTestCase {
         XCTAssertTrue(readme.contains("Tools/build-plugin.sh"))
         XCTAssertTrue(readme.contains("disable-library-validation"),
                       "a reader has to be told the operating system enforces nothing here")
+        XCTAssertTrue(readme.contains("must be a numeric literal"),
+                      "authors must not accidentally report the host's API generation")
     }
 
     // MARK: - Helpers

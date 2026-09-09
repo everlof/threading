@@ -29,7 +29,7 @@ import ThreadingPluginKit
 
 @objc(MyPlugin)
 public final class MyPlugin: NSObject, ThreadingNativePlugin {
-    public static var pluginAPIVersion: Int { ThreadingPluginAPI.version }
+    public static let pluginAPIVersion = 4
     public var pluginIdentifier: String { "com.example.myplugin" }
 
     public override required init() { super.init() }
@@ -87,10 +87,21 @@ plugin did not appear" is not a diagnosis.
 
 ## Versioning
 
-`ThreadingPluginAPI.version` is the generation the host will load, and it describes the **binary
-call shape**. A mismatch is refused rather than called into, so it moves for a removal or a
-re-type and not for an addition: new protocol members are `@objc optional`, and new payload fields
-are additive under library evolution.
+`ThreadingPluginAPI.version` is the latest generation the host will load, and it describes the
+**binary call shape**. The host also publishes `minimumSupportedVersion`; anything outside that
+closed range is refused before selector dispatch. The generation moves for a removal, a re-type,
+or when a formerly required selector becomes optional. Ordinary new protocol members are
+`@objc optional`, and new payload fields are additive under library evolution.
+
+Version 4 makes `makePaneView` optional so a plugin may provide only a workspace navigator. A v4
+host still accepts v3 pane plugins; a v3 host rejects a v4 navigator-only plugin before attempting
+the pane selector.
+
+The plugin's `pluginAPIVersion` must be a numeric literal for the SDK generation it was compiled
+against. Do not implement it by returning `ThreadingPluginAPI.version`: installed plugins use the
+host's copy of the dynamic framework, so that implementation would report the host's generation
+instead of the plugin's and defeat the compatibility check. The literal is intentionally the one
+line an author updates when adopting a new contract generation.
 
 A change that affects your source but not the selectors the host calls does not move it either —
 your installed build keeps working, and rebuilding tells you in one compile error. Those are in
