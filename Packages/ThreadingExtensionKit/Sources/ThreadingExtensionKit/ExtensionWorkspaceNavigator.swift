@@ -468,6 +468,8 @@ public enum ExtensionWorkspaceNavigatorIntent: String, Codable, Equatable, Hasha
 /// Threading still owns resizing, collapse, focus routing, entity validation, and the always
 /// available command which restores the native navigator.
 public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
+    public static let minimumPreferredWidth = 180.0
+    public static let maximumPreferredWidth = 640.0
     public static let maximumStructureDepth = 24
     public static let maximumStructureNodes = 128
     public static let maximumCollections = 8
@@ -540,7 +542,8 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     /// The extension must also declare `host.events`. A response may carry bounded item-content
     /// patches so one activity edge never requires replacing the complete navigator document.
     public let eventActionID: String?
-    /// A bounded hint; the user's persisted split position and host limits remain authoritative.
+    /// A 180...640 point hint; the user's persisted split position and live host limits remain
+    /// authoritative.
     public let preferredWidth: Double?
 
     public init(
@@ -711,7 +714,9 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
             ))
         }
         if let preferredWidth,
-           !preferredWidth.isFinite || preferredWidth < 180 || preferredWidth > 640 {
+           !preferredWidth.isFinite
+            || preferredWidth < Self.minimumPreferredWidth
+            || preferredWidth > Self.maximumPreferredWidth {
             issues.append(.init(
                 path: "\(path).preferredWidth",
                 message: "must be finite and between 180 and 640"

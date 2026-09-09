@@ -521,8 +521,10 @@ Three extensions ship in `Packages/ThreadingExtensionKit/Examples/`, beside
 finished — which is a far better forcing function than a feature checklist.
 
 **1. [`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension)** —
-flat session list, project as subtitle, pinned block on top, hover pin and archive actions.
-Exercises: templates, intents, options, pinning facts.
+T3 Code-inspired Pinned, Active, Snoozed, and Archived sections, two-band
+title/status/project/branch rows, title-only search, and hover pin/archive actions. Archived stays
+named honestly because the public contract has no reversible T3 Settled state.
+Exercises: predicates, templates, intents, activity and lifecycle facts.
 
 **2. `ActivityInboxExtension`** — the ChatGPT-style inbox: *Priority* section for sessions blocked
 on the user, then *Today* / *Yesterday* / *Last 7 days*, live spinner on working sessions.
@@ -628,8 +630,8 @@ does. An install must never reorder somebody's sidebar on its own.
    `archive` are declared per navigator in the manifest, disclosed before enable/update, rendered
    inside the host's virtual row, and executed through native persistence/lifecycle paths without
    revealing the gesture, source session, or result to the extension. `T3SidebarExtension` proves
-   the public contract with project-scoped subtitles, pinned-first sections, conditional host
-   intents, a persisted sort option, and scheduled-row action omission.
+   the public contract with project-scoped metadata, lifecycle sections, conditional host
+   intents, and scheduled/archived-row action omission.
 7. **Registered-fact choices — implemented 2026-08-30.**
    A pipeline may declare one dynamic bucket picker and one dynamic sort picker. The contract pins
    host-owned None, selected-key retention, missing-last semantics, static composition, eligible

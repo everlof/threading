@@ -41,9 +41,15 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         let previousTheme = AppThemePalette.current
         let previousSelection = AppSettings.shared.workspaceNavigatorSelection
         let previousDefaultAgent = AppSettings.shared.defaultAgentKind
+        let previousSidebarWidth = SidebarWidth.stored
         defer {
             AppSettings.shared.defaultAgentKind = previousDefaultAgent
             AppSettings.shared.workspaceNavigatorSelection = previousSelection
+            if let previousSidebarWidth {
+                SidebarWidth.record(previousSidebarWidth)
+            } else {
+                SidebarWidth.reset()
+            }
             AppThemePalette.set(previousTheme)
         }
 
@@ -53,6 +59,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         // between otherwise identical navigator states. OpenCode has no host-routed accounts,
         // so it keeps the real shipping composer while removing that external asynchronous edge.
         AppSettings.shared.defaultAgentKind = .openCode
+        SidebarWidth.reset()
 
         let router = try WorkspaceNavigatorEvidenceRouter()
         let factRegistry = try makePipelineFactRegistry()
@@ -95,15 +102,27 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             AppThemePalette.set(fixture.theme)
             content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
             controller.selectWorkspaceNavigator(selection)
+            try settlePreferredWidth(for: router.inventory, in: controller)
             AppThemeRefresh.repaint(content)
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            try assertTextFits(
+                router.focusedReadableText,
+                in: controller.splitViewController.splitViewItems[0].viewController.view,
+                navigatorID: router.inventory.navigator.id
+            )
             if fixture.name == "system-light" {
                 try assertDeterministicComposerIdentity(in: content)
             }
 
             try write(content, named: "workspace-navigator-\(fixture.name)-focused.png")
+            if fixture.name == "swiss" {
+                try write(
+                    controller.splitViewController.splitViewItems[0].viewController.view,
+                    named: "workspace-navigator-swiss-sidebar-detail.png"
+                )
+            }
 
             let menuButton = try XCTUnwrap(
                 descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
@@ -129,6 +148,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             extensionIdentifier: router.pipelineInventory.extensionIdentifier,
             navigatorID: router.pipelineInventory.navigator.id
         ))
+        try settlePreferredWidth(for: router.pipelineInventory, in: controller)
         _ = try waitForPipelineTable(in: content, rowCount: 8)
         AppThemeRefresh.repaint(content)
         try suppressComposerUsage(in: content)
@@ -159,11 +179,17 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             AppThemePalette.set(fixture.theme)
             content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
             controller.selectWorkspaceNavigator(dynamicSelection)
+            try settlePreferredWidth(for: router.dynamicPipelineInventory, in: controller)
             _ = try waitForPipelineTable(in: content, rowCount: 11)
             AppThemeRefresh.repaint(content)
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            try assertTextFits(
+                router.dynamicPipelineReadableText,
+                in: controller.splitViewController.splitViewItems[0].viewController.view,
+                navigatorID: router.dynamicPipelineInventory.navigator.id
+            )
             if fixture.name == "system-light" {
                 try assertDeterministicComposerIdentity(in: content)
             }
@@ -209,6 +235,10 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             extensionIdentifier: router.unavailableDynamicPipelineInventory.extensionIdentifier,
             navigatorID: router.unavailableDynamicPipelineInventory.navigator.id
         ))
+        try settlePreferredWidth(
+            for: router.unavailableDynamicPipelineInventory,
+            in: controller
+        )
         _ = try waitForPipelineTable(in: content, rowCount: 9)
         AppThemeRefresh.repaint(content)
         try suppressComposerUsage(in: content)
@@ -250,6 +280,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
                 extensionIdentifier: router.pipelineInventory.extensionIdentifier,
                 navigatorID: router.pipelineInventory.navigator.id
             ))
+            try settlePreferredWidth(for: router.pipelineInventory, in: controller)
             let table = try waitForPipelineTable(in: content, rowCount: 8)
             _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
             let template = try XCTUnwrap(
@@ -262,6 +293,11 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            try assertTextFits(
+                router.pipelineReadableText,
+                in: controller.splitViewController.splitViewItems[0].viewController.view,
+                navigatorID: router.pipelineInventory.navigator.id
+            )
             if fixture.name == "system-light" {
                 try assertDeterministicComposerIdentity(in: content)
             }
@@ -294,6 +330,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             extensionIdentifier: router.pipelineInventory.extensionIdentifier,
             navigatorID: router.pipelineInventory.navigator.id
         ))
+        try settlePreferredWidth(for: router.pipelineInventory, in: controller)
         _ = try waitForPipelineTable(in: content, rowCount: 8)
         // The preceding intent matrix ends in Swiss. Setting the palette changes the model;
         // repainting is what returns every already-mounted composer control to System chrome.
@@ -325,6 +362,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             AppThemePalette.set(fixture.theme)
             content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
             controller.selectWorkspaceNavigator(activitySelection)
+            try settlePreferredWidth(for: router.activityInboxInventory, in: controller)
             _ = try waitForPipelineTable(in: content, rowCount: 9)
             freezePipelineSpinners(in: content)
             AppThemeRefresh.repaint(content)
@@ -371,14 +409,15 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             AppThemePalette.set(fixture.theme)
             content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
             controller.selectWorkspaceNavigator(t3Selection)
-            let table = try waitForPipelineTable(in: content, rowCount: 9)
+            try settlePreferredWidth(for: router.t3SidebarInventory, in: controller)
+            let table = try waitForPipelineTable(in: content, rowCount: 12)
             for row in 0 ..< table.numberOfRows {
                 _ = table.view(atColumn: 0, row: row, makeIfNecessary: true)
             }
             let templates = descendants(of: table).compactMap {
                 $0 as? WorkspaceNavigatorPipelineTemplateView
             }
-            XCTAssertGreaterThanOrEqual(templates.count, 7)
+            XCTAssertGreaterThanOrEqual(templates.count, 8)
             for template in templates {
                 template.setIntentControlsPresented(true)
             }
@@ -394,6 +433,11 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
+            try assertTextFits(
+                router.t3ReadableText,
+                in: controller.splitViewController.splitViewItems[0].viewController.view,
+                navigatorID: router.t3SidebarInventory.navigator.id
+            )
             if fixture.name == "system-light" {
                 try assertDeterministicComposerIdentity(in: content)
             }
@@ -401,10 +445,279 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
                 content,
                 named: "workspace-navigator-t3-sidebar-\(fixture.name)-intents.png"
             )
+            if fixture.name == "system-dark" {
+                try write(
+                    controller.splitViewController.splitViewItems[0].viewController.view,
+                    named: "workspace-navigator-t3-sidebar-system-dark-detail.png"
+                )
+            }
             controller.selectWorkspaceNavigator(.native)
         }
 
         print("Rendered the focused workspace navigator to \(Render.directory.path)")
+    }
+
+    /// A contribution may suggest its presentation width, but that suggestion is neither a
+    /// delayed command for a later selection nor a divider choice made on the user's behalf.
+    func testPreferredWidthStaysWithItsSelectionAndOutOfPersistedGeometry() throws {
+        let previousSelection = AppSettings.shared.workspaceNavigatorSelection
+        let previousSidebarWidth = SidebarWidth.stored
+        defer {
+            AppSettings.shared.workspaceNavigatorSelection = previousSelection
+            if let previousSidebarWidth {
+                SidebarWidth.record(previousSidebarWidth)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+
+        let savedWidth: CGFloat = 333
+        SidebarWidth.record(savedWidth)
+        let router = try WorkspaceNavigatorEvidenceRouter(focusedPreferredWidth: 640)
+        let controller = makeMainWindowController(
+            initialFramePlan: .useDefaultFrame,
+            workspaceNavigatorRouting: router
+        )
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_400, height: Render.windowSize.height))
+        try settleMainQueueGeometry(in: controller)
+
+        let splitView = controller.splitViewController.splitView
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        XCTAssertEqual(sidebar.viewController.view.bounds.width, savedWidth, accuracy: 1)
+
+        let selection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: router.inventory.navigator.id
+        )
+        controller.selectWorkspaceNavigator(selection)
+        controller.selectWorkspaceNavigator(.native)
+        try settleMainQueueGeometry(in: controller)
+        XCTAssertEqual(
+            sidebar.viewController.view.bounds.width,
+            savedWidth,
+            accuracy: 1,
+            "a queued width hint outlived the navigator that authored it"
+        )
+
+        controller.selectWorkspaceNavigator(selection)
+        try settlePreferredWidth(
+            for: router.inventory,
+            in: controller,
+            expectedStoredWidth: savedWidth
+        )
+
+        controller.selectWorkspaceNavigator(.native)
+        try settleMainQueueGeometry(in: controller)
+        XCTAssertEqual(sidebar.viewController.view.bounds.width, savedWidth, accuracy: 1)
+        XCTAssertEqual(SidebarWidth.stored ?? 0, savedWidth, accuracy: 1)
+
+        controller.selectWorkspaceNavigator(selection)
+        try settlePreferredWidth(
+            for: router.inventory,
+            in: controller,
+            expectedStoredWidth: savedWidth
+        )
+
+        // Every split resize reaches one shared notification. A display-pane or window resize
+        // must not misidentify the standing extension hint as a sidebar gesture.
+        NotificationCenter.default.post(
+            name: NSSplitView.didResizeSubviewsNotification,
+            object: splitView
+        )
+        XCTAssertEqual(SidebarWidth.stored ?? 0, savedWidth, accuracy: 1)
+
+        // Reopening flips `isCollapsed` to false before its geometry is stable. Exercise two
+        // transition-owned resize ticks explicitly: without the pre-state-change suppression,
+        // the first would clear the suggestion and the second would save it as a divider choice.
+        controller.splitViewController.setCollapsed(
+            true,
+            on: sidebar,
+            animated: false
+        )
+        try settleMainQueueGeometry(in: controller)
+        XCTAssertTrue(sidebar.isCollapsed)
+        controller.selectWorkspaceNavigator(.native)
+        controller.splitViewController.setCollapsed(
+            false,
+            on: sidebar,
+            animated: false,
+            geometryChanges: {
+                splitView.setPosition(360, ofDividerAt: 0)
+                splitView.setPosition(400, ofDividerAt: 0)
+            }
+        )
+        try settleMainQueueGeometry(in: controller)
+        XCTAssertFalse(sidebar.isCollapsed)
+        XCTAssertEqual(
+            sidebar.viewController.view.bounds.width,
+            savedWidth,
+            accuracy: 1,
+            "a Native restoration queued while collapsed did not win on reopen"
+        )
+        XCTAssertEqual(
+            SidebarWidth.stored ?? 0,
+            savedWidth,
+            accuracy: 1,
+            "programmatic collapse/reopen geometry persisted the extension hint"
+        )
+
+        controller.selectWorkspaceNavigator(selection)
+        try settlePreferredWidth(
+            for: router.inventory,
+            in: controller,
+            expectedStoredWidth: savedWidth
+        )
+        let chosenWidth: CGFloat = 350
+        let accessibilitySplitter = try XCTUnwrap(
+            splitView.accessibilityChildren()?.compactMap { $0 as? NSAccessibilityElement }
+                .first { $0.accessibilityRole() == .splitter }
+        )
+        accessibilitySplitter.setAccessibilityValue(NSNumber(value: Double(chosenWidth)))
+        window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            sidebar.viewController.view.bounds.width,
+            chosenWidth,
+            accuracy: 1,
+            "the accessibility splitter did not move the sidebar divider"
+        )
+        XCTAssertEqual(
+            SidebarWidth.stored ?? 0,
+            chosenWidth,
+            accuracy: 1,
+            "an accessibility divider adjustment did not become authoritative"
+        )
+        controller.selectWorkspaceNavigator(.native)
+        try settleMainQueueGeometry(in: controller)
+        XCTAssertEqual(sidebar.viewController.view.bounds.width, chosenWidth, accuracy: 1)
+        XCTAssertEqual(SidebarWidth.stored ?? 0, chosenWidth, accuracy: 1)
+    }
+
+    func testAppliedPreferredWidthRestoresDefaultWithoutManufacturingPersistence() throws {
+        let previousSelection = AppSettings.shared.workspaceNavigatorSelection
+        let previousSidebarWidth = SidebarWidth.stored
+        defer {
+            AppSettings.shared.workspaceNavigatorSelection = previousSelection
+            if let previousSidebarWidth {
+                SidebarWidth.record(previousSidebarWidth)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+
+        SidebarWidth.reset()
+        let router = try WorkspaceNavigatorEvidenceRouter(focusedPreferredWidth: 640)
+        let controller = makeMainWindowController(
+            initialFramePlan: .useDefaultFrame,
+            workspaceNavigatorRouting: router
+        )
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_400, height: Render.windowSize.height))
+        try settleMainQueueGeometry(in: controller)
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        XCTAssertEqual(
+            sidebar.viewController.view.bounds.width,
+            SidebarDefaults.defaultWidth,
+            accuracy: 1
+        )
+        XCTAssertNil(SidebarWidth.stored)
+
+        let selection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: router.inventory.navigator.id
+        )
+        controller.selectWorkspaceNavigator(selection)
+        try settlePreferredWidth(for: router.inventory, in: controller)
+        controller.selectWorkspaceNavigator(.native)
+        try settleMainQueueGeometry(in: controller)
+
+        XCTAssertEqual(
+            sidebar.viewController.view.bounds.width,
+            SidebarDefaults.defaultWidth,
+            accuracy: 1
+        )
+        XCTAssertNil(
+            SidebarWidth.stored,
+            "restoring the product default manufactured a user divider preference"
+        )
+    }
+
+    func testUnavailablePreferredNavigatorRestoresNativeWidthWithoutErasingSelection() throws {
+        let previousSelection = AppSettings.shared.workspaceNavigatorSelection
+        let previousSidebarWidth = SidebarWidth.stored
+        defer {
+            AppSettings.shared.workspaceNavigatorSelection = previousSelection
+            if let previousSidebarWidth {
+                SidebarWidth.record(previousSidebarWidth)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+
+        let savedWidth: CGFloat = 333
+        SidebarWidth.record(savedWidth)
+        let router = try WorkspaceNavigatorEvidenceRouter(focusedPreferredWidth: 640)
+        let controller = makeMainWindowController(
+            initialFramePlan: .useDefaultFrame,
+            workspaceNavigatorRouting: router
+        )
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_400, height: Render.windowSize.height))
+        try settleMainQueueGeometry(in: controller)
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let selection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: router.inventory.navigator.id
+        )
+        controller.selectWorkspaceNavigator(selection)
+        try settlePreferredWidth(
+            for: router.inventory,
+            in: controller,
+            expectedStoredWidth: savedWidth
+        )
+
+        router.focusedNavigatorIsAvailable = false
+        NotificationCenter.default.post(ExtensionsDidChange())
+        try settleMainQueueGeometry(in: controller)
+
+        XCTAssertEqual(controller.effectiveWorkspaceNavigatorSelection, .native)
+        XCTAssertEqual(AppSettings.shared.workspaceNavigatorSelection, selection)
+        XCTAssertEqual(sidebar.viewController.view.bounds.width, savedWidth, accuracy: 1)
+        XCTAssertEqual(SidebarWidth.stored ?? 0, savedWidth, accuracy: 1)
+    }
+
+    func testNavigatorWithoutPreferredWidthLeavesUserGeometryAlone() throws {
+        let previousSelection = AppSettings.shared.workspaceNavigatorSelection
+        let previousSidebarWidth = SidebarWidth.stored
+        defer {
+            AppSettings.shared.workspaceNavigatorSelection = previousSelection
+            if let previousSidebarWidth {
+                SidebarWidth.record(previousSidebarWidth)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+
+        let savedWidth: CGFloat = 333
+        SidebarWidth.record(savedWidth)
+        let router = try WorkspaceNavigatorEvidenceRouter(focusedPreferredWidth: nil)
+        let controller = makeMainWindowController(
+            initialFramePlan: .useDefaultFrame,
+            workspaceNavigatorRouting: router
+        )
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_400, height: Render.windowSize.height))
+        try settleMainQueueGeometry(in: controller)
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let selection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: router.inventory.navigator.id
+        )
+        controller.selectWorkspaceNavigator(selection)
+        try settleMainQueueGeometry(in: controller)
+
+        XCTAssertEqual(sidebar.viewController.view.bounds.width, savedWidth, accuracy: 1)
+        XCTAssertEqual(SidebarWidth.stored ?? 0, savedWidth, accuracy: 1)
     }
 
     private func makePipelineFactRegistry() throws -> ExtensionFactRegistry {
@@ -412,6 +725,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         let keys: Set<ExtensionFactKey> = [
             ExtensionHostFactKey.sessionTitle,
             ExtensionHostFactKey.sessionDetailedActivity,
+            ExtensionHostFactKey.sessionManualOrder,
             ExtensionHostFactKey.sessionBranch,
             ExtensionHostFactKey.sessionLastUsedAt,
             ExtensionHostFactKey.sessionIsArchived,
@@ -424,15 +738,15 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         try registry.replaceHostDefinitions(
             HostFactCatalog.definitions.filter { keys.contains($0.key) }
         )
-        let rows: [(String, String, String, String, ExtensionStatusRole)] = [
-            ("pipeline-1", "Review navigator permissions", ExtensionSessionDetailedActivity.awaitingUser.rawValue, "Waiting for you", .warning),
-            ("pipeline-2", "Prepare the 1.4 release", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive),
-            ("pipeline-3", "Design a focused project sidebar", ExtensionSessionDetailedActivity.idle.rawValue, "Idle", .neutral),
-            ("pipeline-4", "Keep lifecycle tests deterministic", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive),
-            ("pipeline-5", "Document host-owned recovery", ExtensionSessionDetailedActivity.idle.rawValue, "Idle", .neutral),
-            ("pipeline-6", "Join GitLab merge-request state", ExtensionSessionDetailedActivity.awaitingUser.rawValue, "Waiting", .warning),
-            ("pipeline-7", "Move search into the host transform", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive),
-            ("pipeline-8", "Define safe row intents", ExtensionSessionDetailedActivity.idle.rawValue, "Planned", .neutral),
+        let rows: [(String, String, String, String, ExtensionStatusRole, Int64)] = [
+            ("pipeline-1", "Review navigator permissions", ExtensionSessionDetailedActivity.awaitingUser.rawValue, "Waiting for you", .warning, 10),
+            ("pipeline-2", "Prepare the 1.4 release", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive, 20),
+            ("pipeline-3", "Design a focused project sidebar", ExtensionSessionDetailedActivity.idle.rawValue, "Idle", .neutral, 30),
+            ("pipeline-4", "Keep lifecycle tests deterministic", ExtensionSessionDetailedActivity.readyWithBackgroundWork.rawValue, "Ready", .positive, 40),
+            ("pipeline-5", "Document host-owned recovery", ExtensionSessionDetailedActivity.dormant.rawValue, "Dormant", .neutral, 50),
+            ("pipeline-6", "Join GitLab merge-request state", ExtensionSessionDetailedActivity.needsAttention.rawValue, "Attention", .warning, 60),
+            ("pipeline-7", "Move search into the host transform", ExtensionSessionDetailedActivity.limitReached.rawValue, "Limit", .negative, 70),
+            ("pipeline-8", "Define safe row intents", ExtensionSessionDetailedActivity.idle.rawValue, "Idle", .neutral, 80),
         ]
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -453,7 +767,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             "pipeline-8": todayAt(14),
         ]
         let observedAt = Date(timeIntervalSinceReferenceDate: 50)
-        let facts = rows.flatMap { id, title, activity, activityLabel, status in
+        let facts = rows.flatMap { id, title, activity, activityLabel, status, manualOrder in
             let subject = ExtensionFactSubject.session(id)
             return [
                 ExtensionFact(
@@ -468,6 +782,12 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
                     value: .string(activity),
                     label: activityLabel,
                     status: status,
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionManualOrder,
+                    subject: subject,
+                    value: .integer(manualOrder),
                     observedAt: observedAt
                 ),
                 ExtensionFact(
@@ -560,7 +880,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             "pipeline-8": "Planned",
         ]
         try registry.replaceFacts(
-            rows.map { id, _, _, _, _ in
+            rows.map { id, _, _, _, _, _ in
                 ExtensionFact(
                     key: WorkspaceNavigatorEvidenceFact.attentionLane,
                     subject: .session(id),
@@ -572,6 +892,93 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             from: source
         )
         return registry
+    }
+
+    /// `MainWindowController` applies an extension's width hint on the next main-queue turn so
+    /// the split shell, not a retained feature constraint, owns the standing divider geometry.
+    /// Evidence must settle behind that turn or it can capture the chrome floor while claiming
+    /// to show the selected navigator's authored presentation.
+    private func settlePreferredWidth(
+        for inventory: ExtensionWorkspaceNavigatorInventoryItem,
+        in controller: MainWindowController,
+        expectedStoredWidth: CGFloat? = nil
+    ) throws {
+        let requestedWidth = CGFloat(try XCTUnwrap(inventory.navigator.preferredWidth))
+        let widthTurnCompleted = expectation(
+            description: "preferred width for \(inventory.navigator.id)"
+        )
+        DispatchQueue.main.async { widthTurnCompleted.fulfill() }
+        wait(for: [widthTurnCompleted], timeout: 1)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        let expectedWidth = min(
+            CGFloat(ExtensionWorkspaceNavigator.maximumPreferredWidth),
+            max(sidebar.minimumThickness, requestedWidth)
+        )
+        XCTAssertEqual(
+            sidebar.viewController.view.bounds.width,
+            expectedWidth,
+            accuracy: 1,
+            "the selected navigator's preferred width did not become split geometry"
+        )
+        if let expectedStoredWidth {
+            XCTAssertEqual(
+                SidebarWidth.stored ?? 0,
+                expectedStoredWidth,
+                accuracy: 1,
+                "an extension width hint replaced the user's persisted divider choice"
+            )
+        } else {
+            XCTAssertNil(
+                SidebarWidth.stored,
+                "an extension width hint must not become the user's persisted divider choice"
+            )
+        }
+    }
+
+    private func settleMainQueueGeometry(in controller: MainWindowController) throws {
+        let turnCompleted = expectation(description: "main-window geometry settled")
+        DispatchQueue.main.async { turnCompleted.fulfill() }
+        wait(for: [turnCompleted], timeout: 1)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    /// The focused fixture intentionally uses long, prefix-colliding labels. Checking their
+    /// complete attributed-string advance against the live drawing bounds turns the visual
+    /// acceptance criterion into a regression gate: source text can remain intact while every
+    /// visible row still paints only an ambiguous fragment.
+    private func assertTextFits(
+        _ expectedText: [String],
+        in root: NSView,
+        navigatorID: String
+    ) throws {
+        let expected = Set(expectedText)
+        let labels = descendants(of: root).compactMap { $0 as? NSTextField }.filter {
+            expected.contains($0.stringValue)
+                && !$0.isHidden
+                && $0.window != nil
+                && $0.bounds.width > 0
+        }
+        let missing = expected.subtracting(labels.map(\.stringValue))
+        XCTAssertTrue(
+            missing.isEmpty,
+            "\(navigatorID) did not render expected labels: \(missing.sorted())"
+        )
+        for label in labels {
+            let drawingBounds = label.cell?.drawingRect(forBounds: label.bounds) ?? label.bounds
+            let renderedSize = label.attributedStringValue.size()
+            XCTAssertLessThanOrEqual(
+                ceil(renderedSize.width),
+                floor(drawingBounds.width),
+                "\(navigatorID) truncates \(label.stringValue.debugDescription)"
+            )
+            // Do not compare attributed height here. Borderless AppKit labels deliberately draw
+            // beyond their compact layout bounds, so that metric reports false clipping even
+            // when the captured glyphs are complete. The evidence images remain the vertical
+            // acceptance gate; this assertion guards the ambiguous horizontal truncation that
+            // motivated the wider navigator layouts.
+        }
     }
 
     private func waitForPipelineTable(
@@ -674,6 +1081,41 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
 
 @MainActor
 private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigatorRouting {
+    var focusedNavigatorIsAvailable = true
+    let focusedReadableText: [String]
+    let pipelineReadableText = [
+        "Focused work from shared session facts",
+        "navigator-pipeline",
+    ]
+    let dynamicPipelineReadableText = [
+        "Arrange work with any registered fact",
+        "navigator-pipeline",
+    ]
+    let t3ReadableText = [
+        "T3 Code Threads POC",
+        "Pinned",
+        "Active",
+        "Snoozed",
+        "Archived",
+        "Review navigator permissions",
+        "Prepare the 1.4 release",
+        "Design a focused project sidebar",
+        "Keep lifecycle tests deterministic",
+        "Document host-owned recovery",
+        "Join GitLab merge-request state",
+        "Move search into the host transform",
+        "Define safe row intents",
+        "Waiting",
+        "Working",
+        "Idle",
+        "Ready",
+        "Dormant",
+        "Attention",
+        "Limit",
+        "AnotherTerminal",
+        "Runtime Lab",
+        "navigator-pipeline",
+    ]
     let inventory: ExtensionWorkspaceNavigatorInventoryItem
     let pipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
     let dynamicPipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
@@ -681,7 +1123,7 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
     let activityInboxInventory: ExtensionWorkspaceNavigatorInventoryItem
     let t3SidebarInventory: ExtensionWorkspaceNavigatorInventoryItem
 
-    init() throws {
+    init(focusedPreferredWidth: Double? = 400) throws {
         let sections = [
             ExtensionWorkspaceNavigatorSection(
                 id: "priority",
@@ -702,6 +1144,8 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             ("search", "Move search into the host transform", "Planned · pipeline", .neutral),
             ("intents", "Define safe row intents", "Planned · pipeline", .neutral)
         ]
+        focusedReadableText = ["Priority work across every checkout"]
+            + rows.flatMap { [$0.1, $0.2] }
         let items = rows.enumerated().map { index, row in
             ExtensionWorkspaceNavigatorItem(
                 id: row.0,
@@ -736,7 +1180,8 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
                     title: "Group by project",
                     control: .toggle(defaultValue: true)
                 )
-            ]
+            ],
+            preferredWidth: focusedPreferredWidth
         )
         inventory = .init(
             extensionIdentifier: "com.example.focused-navigator",
@@ -827,7 +1272,8 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
                     ),
                     emptyState: .init(title: "No focused work")
                 )
-            )
+            ),
+            preferredWidth: 360
         )
         pipelineInventory = .init(
             extensionIdentifier: "com.example.pipeline-navigator",
@@ -896,7 +1342,8 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
                     ),
                     emptyState: .init(title: "No focused work")
                 )
-            )
+            ),
+            preferredWidth: 360
         )
         dynamicPipelineInventory = .init(
             extensionIdentifier: "com.example.dynamic-pipeline-navigator",
@@ -967,8 +1414,6 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
         try t3Manifest.validate()
         guard let t3Sidebar = t3Manifest.workspaceNavigators.first(where: {
             $0.id == "t3-sidebar"
-        }), let t3SortOption = t3Sidebar.options.first(where: {
-            $0.id == "sort-order"
         }) else {
             throw WorkspaceNavigatorEvidenceError.missingT3SidebarDeclaration
         }
@@ -977,14 +1422,13 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             extensionName: t3Manifest.name,
             processGeneration: "t3-sidebar-evidence-generation",
             navigator: t3Sidebar,
-            optionValues: [t3SortOption.id: .string("recent")],
+            optionValues: [:],
             optionPersistenceOutcome: .loaded
         )
     }
 
     var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] {
-        [
-            inventory,
+        (focusedNavigatorIsAvailable ? [inventory] : []) + [
             pipelineInventory,
             dynamicPipelineInventory,
             unavailableDynamicPipelineInventory,

@@ -11,6 +11,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     var onThemedPresentationChange: ((Bool) -> Void)? {
         didSet { trackingView.onThemedPresentationChange = onThemedPresentationChange }
     }
+    var onEffectiveSelectionChange: ((WorkspaceNavigatorSelection) -> Void)?
 
     private let trackingView = HoverTrackingView()
     private let nativeController: ProjectSidebarViewController
@@ -32,7 +33,12 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private var documentRefreshPending = false
     private var unavailableGeneration: String?
 
-    private(set) var effectiveSelection: WorkspaceNavigatorSelection = .native
+    private(set) var effectiveSelection: WorkspaceNavigatorSelection = .native {
+        didSet {
+            guard effectiveSelection != oldValue else { return }
+            onEffectiveSelectionChange?(effectiveSelection)
+        }
+    }
 
     init(
         nativeController: ProjectSidebarViewController,

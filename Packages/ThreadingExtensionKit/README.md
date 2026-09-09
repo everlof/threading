@@ -99,8 +99,9 @@ generation; materialized v1 navigators remain runtime-only. `Examples/ActivityIn
 the fact-and-calendar reference: it requests only `ui.workspace-navigation`, while Threading owns
 its search, Priority/relative-date sections, sorting, registered-fact controls, working indicator
 updates, row realization, and source-session activation. `Examples/T3SidebarExtension` is the
-host-intent reference: it declares conditional `pin`, `unpin`, and `archive` controls, while
-Threading decides availability and executes them through native persistence and lifecycle paths.
+host-intent reference and T3 Code-inspired proof of concept: it declares lifecycle sections,
+two-band row metadata, and conditional `pin`, `unpin`, and `archive` controls, while Threading
+decides availability and executes them through native persistence and lifecycle paths.
 
 Settings contributions are declared in the manifest under the `settings` capability. Threading
 renders complete pages and sections appended to stable built-in pages using toggle, bounded text,

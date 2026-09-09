@@ -341,6 +341,7 @@
         ],
         "source": "sessions"
       },
+      "preferredWidth": 280,
       "root": {
         "content": {
           "role": "neutral",

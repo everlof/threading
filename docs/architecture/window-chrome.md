@@ -190,9 +190,11 @@ for the other end of that trade).
 window nowhere near full, which reads as a broken drag rather than as a decision, and there is
 nothing at 400 that the column stops being useful past. What it may take is what the terminal
 can spare, and the terminal states that itself in `MainWindowDefaults.minContentWidth` — one
-rule instead of two. `SidebarDefaults.maxWidth` survives as the ceiling on widths the *app*
-proposes: a restored width, or an extension navigator's `preferredWidth`. How wide the user may
-drag is a different question from how wide the app may open it unasked.
+rule instead of two. `SidebarDefaults.maxWidth` survives as the ceiling on ordinary widths the
+*app* restores. An extension navigator's inspected `preferredWidth` uses its separate public
+180...640 contract, still yielding to the live content minimum and never becoming persisted
+divider geometry. How wide the user may drag is a different question from how wide either path
+may open it unasked.
 
 **And the width survives a relaunch.** The window's size is restored from its autosaved frame, so
 a restart used to bring the arranged window back with the column reset to 240. `SidebarWidth`

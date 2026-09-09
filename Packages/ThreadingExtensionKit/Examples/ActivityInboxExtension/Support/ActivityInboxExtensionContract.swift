@@ -164,7 +164,8 @@ public enum ActivityInboxExtensionContract {
                         detail: "Try changing the search or sort option."
                     )
                 )
-            )
+            ),
+            preferredWidth: 280
         )
     }()
 

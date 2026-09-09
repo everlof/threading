@@ -498,7 +498,9 @@ same native product paths as Threading's own sidebar. See
 [`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-owned-row-intents) for the full ownership
 and staleness contract. Use
 [`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension) as the
-complete static-pipeline example.
+complete static-pipeline intent example. It is a T3 Code-inspired proof of concept rather than a
+clone: the public schema can express lifecycle sections and two-band metadata, while Threading
+keeps chrome and behavior and labels its irreversible host state Archived rather than Settled.
 
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process

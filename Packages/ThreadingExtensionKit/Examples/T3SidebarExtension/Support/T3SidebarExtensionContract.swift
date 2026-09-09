@@ -1,11 +1,11 @@
 import Foundation
 import ThreadingExtensionKit
 
-/// A familiar session-first sidebar expressed entirely through the public navigator pipeline.
+/// A T3 Code-inspired thread navigator expressed entirely through the public pipeline.
 ///
-/// The extension receives no session snapshot and no action callback. Threading evaluates the
-/// declaration over host facts, realizes only visible rows, and performs pin, unpin, and archive
-/// through its native persistence and lifecycle paths.
+/// This proof of concept mirrors the source product's lifecycle-oriented information hierarchy,
+/// not its private chrome or behavior. Threading still owns search, selection, virtualization,
+/// resizing, and the available pin, unpin, and archive actions.
 public enum T3SidebarExtensionContract {
     public static let navigator: ExtensionWorkspaceNavigator = {
         let title = ExtensionWorkspaceNavigatorFactReference(
@@ -18,25 +18,26 @@ public enum T3SidebarExtensionContract {
             ExtensionHostFactKey.projectName,
             scope: .project
         )
+        let activity = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionDetailedActivity
+        )
+        let manualOrder = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionManualOrder
+        )
+        let branch = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionBranch
+        )
         let pinned = ExtensionWorkspaceNavigatorFactReference(
             ExtensionHostFactKey.sessionIsPinned
         )
         let archived = ExtensionWorkspaceNavigatorFactReference(
             ExtensionHostFactKey.sessionIsArchived
         )
-        let lastUsed = ExtensionWorkspaceNavigatorFactReference(
-            ExtensionHostFactKey.sessionLastUsedAt
+        let snoozed = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionIsSnoozed
         )
         let hasScheduledStart = ExtensionWorkspaceNavigatorFactReference(
             ExtensionHostFactKey.sessionHasScheduledStart
-        )
-        let recentSort = ExtensionWorkspaceNavigatorOptionCondition(
-            optionID: "sort-order",
-            equals: .string("recent")
-        )
-        let nameSort = ExtensionWorkspaceNavigatorOptionCondition(
-            optionID: "sort-order",
-            equals: .string("name")
         )
         let isPinned = ExtensionWorkspaceNavigatorPredicate.comparison(
             .init(pinned, fallback: .boolean(false)),
@@ -48,104 +49,143 @@ public enum T3SidebarExtensionContract {
             .equal,
             .boolean(false)
         )
-        let canAct = ExtensionWorkspaceNavigatorPredicate.comparison(
+        let isArchived = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(archived, fallback: .boolean(false)),
+            .equal,
+            .boolean(true)
+        )
+        let isNotArchived = ExtensionWorkspaceNavigatorPredicate.not(isArchived)
+        let isSnoozed = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(snoozed, fallback: .boolean(false)),
+            .equal,
+            .boolean(true)
+        )
+        let isNotSnoozed = ExtensionWorkspaceNavigatorPredicate.not(isSnoozed)
+        let hasNoScheduledStart = ExtensionWorkspaceNavigatorPredicate.comparison(
             .init(hasScheduledStart, fallback: .boolean(false)),
             .equal,
             .boolean(false)
         )
+        let canAct = ExtensionWorkspaceNavigatorPredicate.all([
+            hasNoScheduledStart,
+            isNotArchived,
+        ])
+        let awaitingUser = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.awaitingUser.rawValue)
+        )
+        let working = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.working.rawValue)
+        )
+        let idle = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.idle.rawValue)
+        )
+        let dormant = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.dormant.rawValue)
+        )
+        let readyWithBackgroundWork = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.readyWithBackgroundWork.rawValue)
+        )
+        let needsAttention = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.needsAttention.rawValue)
+        )
+        let limitReached = ExtensionWorkspaceNavigatorPredicate.comparison(
+            .init(activity),
+            .equal,
+            .string(ExtensionSessionDetailedActivity.limitReached.rawValue)
+        )
+        let knownActivity = ExtensionWorkspaceNavigatorPredicate.any([
+            dormant,
+            awaitingUser,
+            working,
+            idle,
+            readyWithBackgroundWork,
+            needsAttention,
+            limitReached,
+        ])
 
         return ExtensionWorkspaceNavigator(
             id: "t3-sidebar",
-            title: "T3 Sidebar",
+            title: "T3 Code Threads POC",
             root: .content(.status(
-                "T3 Sidebar requires a newer Threading host.",
+                "T3 Code Threads POC requires a newer Threading host.",
                 role: .neutral
             )),
-            options: [
-                .init(
-                    id: "sort-order",
-                    title: "Sort",
-                    control: .choice(
-                        defaultValue: "recent",
-                        options: [
-                            .init(id: "recent", title: "Recent activity"),
-                            .init(id: "name", title: "Name"),
-                        ]
-                    )
-                ),
-            ],
             intents: [.pin, .unpin, .archive],
             pipeline: .init(
                 consumes: [
                     .init(key: title.key, requirement: .required),
                     .init(key: projectID.key, requirement: .required),
                     .init(key: projectName.key, requirement: .required),
+                    .init(key: activity.key, requirement: .required),
+                    .init(key: manualOrder.key, requirement: .required),
+                    .init(key: branch.key, requirement: .required),
                     .init(key: pinned.key, requirement: .required),
                     .init(key: archived.key, requirement: .required),
-                    .init(key: lastUsed.key, requirement: .required),
+                    .init(key: snoozed.key, requirement: .required),
                     .init(key: hasScheduledStart.key, requirement: .required),
                 ],
-                registeredFactOptions: [
-                    .init(
-                        id: "group-by-fact",
-                        title: "Group by",
-                        application: .bucket(
-                            direction: .ascending,
-                            unknownTitle: "Unknown"
-                        )
-                    ),
-                    .init(
-                        id: "sort-by-fact",
-                        title: "Sort by",
-                        application: .sort(direction: .ascending)
-                    ),
-                ],
                 search: .init(
-                    placeholder: "Search sessions",
-                    accessibilityLabel: "Search T3 Sidebar sessions",
-                    fields: [title, projectName]
+                    placeholder: "Search",
+                    accessibilityLabel: "Search threads",
+                    fields: [title]
                 ),
-                filters: [
-                    .init(predicate: .comparison(
-                        .init(archived, fallback: .boolean(false)),
-                        .equal,
-                        .boolean(false)
-                    )),
-                ],
                 buckets: [
                     .init(strategy: .rules(
                         [
                             .init(
                                 id: "pinned",
                                 title: "Pinned",
-                                predicate: isPinned
+                                predicate: .all([
+                                    isPinned,
+                                    isNotSnoozed,
+                                    isNotArchived,
+                                ])
+                            ),
+                            .init(
+                                id: "active",
+                                title: "Active",
+                                predicate: .all([
+                                    isNotSnoozed,
+                                    isNotArchived,
+                                ])
+                            ),
+                            .init(
+                                id: "snoozed",
+                                title: "Snoozed",
+                                predicate: isSnoozed
                             ),
                         ],
-                        unmatched: .bucket(id: "sessions", title: "Sessions")
+                        unmatched: .bucket(id: "archived", title: "Archived")
                     )),
                 ],
-                sort: [
-                    .init(
-                        when: [recentSort],
-                        operand: .init(lastUsed),
-                        direction: .descending
-                    ),
-                    .init(
-                        when: [nameSort],
-                        operand: .init(title),
-                        direction: .ascending
-                    ),
-                ],
+                // T3 Code keeps a stable user-authored order; activity changes never reshuffle
+                // threads. Threading publishes that same semantic order as a sortable host fact.
+                sort: [.init(
+                    operand: .init(manualOrder),
+                    direction: .ascending
+                )],
                 output: .init(
                     collectionID: "t3-sessions",
                     windowing: .hostVirtualized,
                     rowTemplate: .stack(
-                        axis: .horizontal,
-                        spacing: .small,
+                        axis: .vertical,
+                        spacing: .tight,
                         children: [
                             .stack(
-                                axis: .vertical,
-                                spacing: .tight,
+                                axis: .horizontal,
+                                spacing: .small,
                                 children: [
                                     .text(
                                         .fact(
@@ -155,6 +195,79 @@ public enum T3SidebarExtensionContract {
                                         ),
                                         role: .compactBody
                                     ),
+                                    .flexibleSpacer,
+                                    .conditional(
+                                        .all([isNotPinned, canAct]),
+                                        content: .intent(.pin)
+                                    ),
+                                    .conditional(
+                                        .all([isPinned, canAct]),
+                                        content: .intent(.unpin)
+                                    ),
+                                    .conditional(canAct, content: .intent(.archive)),
+                                ]
+                            ),
+                            .stack(
+                                axis: .horizontal,
+                                spacing: .small,
+                                children: [
+                                    .conditional(
+                                        dormant,
+                                        content: .status(
+                                            .literal("Dormant"),
+                                            role: .literal(.neutral)
+                                        )
+                                    ),
+                                    .conditional(
+                                        awaitingUser,
+                                        content: .status(
+                                            .literal("Waiting"),
+                                            role: .literal(.warning)
+                                        )
+                                    ),
+                                    .conditional(
+                                        working,
+                                        content: .status(
+                                            .literal("Working"),
+                                            role: .literal(.positive)
+                                        )
+                                    ),
+                                    .conditional(
+                                        idle,
+                                        content: .status(
+                                            .literal("Idle"),
+                                            role: .literal(.neutral)
+                                        )
+                                    ),
+                                    .conditional(
+                                        readyWithBackgroundWork,
+                                        content: .status(
+                                            .literal("Ready"),
+                                            role: .literal(.positive)
+                                        )
+                                    ),
+                                    .conditional(
+                                        needsAttention,
+                                        content: .status(
+                                            .literal("Attention"),
+                                            role: .literal(.warning)
+                                        )
+                                    ),
+                                    .conditional(
+                                        limitReached,
+                                        content: .status(
+                                            .literal("Limit"),
+                                            role: .literal(.negative)
+                                        )
+                                    ),
+                                    .conditional(
+                                        .not(knownActivity),
+                                        content: .status(
+                                            .literal("Unknown"),
+                                            role: .literal(.neutral)
+                                        )
+                                    ),
+                                    .flexibleSpacer,
                                     .text(
                                         .fact(
                                             projectName,
@@ -163,26 +276,25 @@ public enum T3SidebarExtensionContract {
                                         ),
                                         role: .compactDetail
                                     ),
+                                    .text(
+                                        .fact(
+                                            branch,
+                                            facet: .value,
+                                            fallback: "No branch"
+                                        ),
+                                        role: .compactDetail
+                                    ),
                                 ]
                             ),
-                            .flexibleSpacer,
-                            .conditional(
-                                .all([isNotPinned, canAct]),
-                                content: .intent(.pin)
-                            ),
-                            .conditional(
-                                .all([isPinned, canAct]),
-                                content: .intent(.unpin)
-                            ),
-                            .conditional(canAct, content: .intent(.archive)),
                         ]
                     ),
                     emptyState: .init(
-                        title: "No sessions",
-                        detail: "Try changing the search or sort option."
+                        title: "No threads",
+                        detail: "Try another search."
                     )
                 )
-            )
+            ),
+            preferredWidth: 400
         )
     }()
 

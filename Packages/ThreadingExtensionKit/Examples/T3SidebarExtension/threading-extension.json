@@ -16,26 +16,7 @@
         "unpin",
         "archive"
       ],
-      "options": [
-        {
-          "control": {
-            "defaultValue": "recent",
-            "options": [
-              {
-                "id": "recent",
-                "title": "Recent activity"
-              },
-              {
-                "id": "name",
-                "title": "Name"
-              }
-            ],
-            "type": "choice"
-          },
-          "id": "sort-order",
-          "title": "Sort"
-        }
-      ],
+      "options": [],
       "pipeline": {
         "buckets": [
           {
@@ -44,10 +25,145 @@
                 {
                   "id": "pinned",
                   "predicate": {
+                    "predicates": [
+                      {
+                        "operand": {
+                          "fact": {
+                            "key": {
+                              "id": "session.is-pinned",
+                              "version": 1
+                            },
+                            "scope": "item"
+                          },
+                          "fallback": {
+                            "type": "boolean",
+                            "value": false
+                          }
+                        },
+                        "operation": "equal",
+                        "type": "comparison",
+                        "value": {
+                          "type": "boolean",
+                          "value": true
+                        }
+                      },
+                      {
+                        "predicate": {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.is-snoozed",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": true
+                          }
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.is-archived",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": true
+                          }
+                        },
+                        "type": "not"
+                      }
+                    ],
+                    "type": "all"
+                  },
+                  "title": "Pinned"
+                },
+                {
+                  "id": "active",
+                  "predicate": {
+                    "predicates": [
+                      {
+                        "predicate": {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.is-snoozed",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": true
+                          }
+                        },
+                        "type": "not"
+                      },
+                      {
+                        "predicate": {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.is-archived",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": true
+                          }
+                        },
+                        "type": "not"
+                      }
+                    ],
+                    "type": "all"
+                  },
+                  "title": "Active"
+                },
+                {
+                  "id": "snoozed",
+                  "predicate": {
                     "operand": {
                       "fact": {
                         "key": {
-                          "id": "session.is-pinned",
+                          "id": "session.is-snoozed",
                           "version": 1
                         },
                         "scope": "item"
@@ -64,13 +180,13 @@
                       "value": true
                     }
                   },
-                  "title": "Pinned"
+                  "title": "Snoozed"
                 }
               ],
               "type": "rules",
               "unmatched": {
-                "id": "sessions",
-                "title": "Sessions",
+                "id": "archived",
+                "title": "Archived",
                 "type": "bucket"
               }
             },
@@ -101,6 +217,27 @@
           },
           {
             "key": {
+              "id": "session.activity.detailed",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.manual-order",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.branch",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
               "id": "session.is-pinned",
               "version": 1
             },
@@ -115,7 +252,7 @@
           },
           {
             "key": {
-              "id": "session.last-used-at",
+              "id": "session.is-snoozed",
               "version": 1
             },
             "requirement": "required"
@@ -128,58 +265,14 @@
             "requirement": "required"
           }
         ],
-        "registeredFactOptions": [
-          {
-            "application": {
-              "direction": "ascending",
-              "type": "bucket",
-              "unknownTitle": "Unknown"
-            },
-            "id": "group-by-fact",
-            "title": "Group by"
-          },
-          {
-            "application": {
-              "direction": "ascending",
-              "type": "sort"
-            },
-            "id": "sort-by-fact",
-            "title": "Sort by"
-          }
-        ],
-        "filters": [
-          {
-            "predicate": {
-              "operand": {
-                "fact": {
-                  "key": {
-                    "id": "session.is-archived",
-                    "version": 1
-                  },
-                  "scope": "item"
-                },
-                "fallback": {
-                  "type": "boolean",
-                  "value": false
-                }
-              },
-              "operation": "equal",
-              "type": "comparison",
-              "value": {
-                "type": "boolean",
-                "value": false
-              }
-            },
-            "when": []
-          }
-        ],
+        "filters": [],
         "formatVersion": 1,
         "output": {
           "activation": "sourceSession",
           "collectionID": "t3-sessions",
           "emptyState": {
-            "detail": "Try changing the search or sort option.",
-            "title": "No sessions"
+            "detail": "Try another search.",
+            "title": "No threads"
           },
           "itemLimit": 1000,
           "layout": {
@@ -187,10 +280,10 @@
           },
           "overflow": "truncateWithNotice",
           "rowTemplate": {
-            "axis": "horizontal",
+            "axis": "vertical",
             "children": [
               {
-                "axis": "vertical",
+                "axis": "horizontal",
                 "children": [
                   {
                     "binding": {
@@ -209,6 +302,600 @@
                     "type": "text"
                   },
                   {
+                    "type": "flexibleSpacer"
+                  },
+                  {
+                    "content": {
+                      "intent": "pin",
+                      "type": "intent"
+                    },
+                    "predicate": {
+                      "predicates": [
+                        {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.is-pinned",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": false
+                          }
+                        },
+                        {
+                          "predicates": [
+                            {
+                              "operand": {
+                                "fact": {
+                                  "key": {
+                                    "id": "session.has-scheduled-start",
+                                    "version": 1
+                                  },
+                                  "scope": "item"
+                                },
+                                "fallback": {
+                                  "type": "boolean",
+                                  "value": false
+                                }
+                              },
+                              "operation": "equal",
+                              "type": "comparison",
+                              "value": {
+                                "type": "boolean",
+                                "value": false
+                              }
+                            },
+                            {
+                              "predicate": {
+                                "operand": {
+                                  "fact": {
+                                    "key": {
+                                      "id": "session.is-archived",
+                                      "version": 1
+                                    },
+                                    "scope": "item"
+                                  },
+                                  "fallback": {
+                                    "type": "boolean",
+                                    "value": false
+                                  }
+                                },
+                                "operation": "equal",
+                                "type": "comparison",
+                                "value": {
+                                  "type": "boolean",
+                                  "value": true
+                                }
+                              },
+                              "type": "not"
+                            }
+                          ],
+                          "type": "all"
+                        }
+                      ],
+                      "type": "all"
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "intent": "unpin",
+                      "type": "intent"
+                    },
+                    "predicate": {
+                      "predicates": [
+                        {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.is-pinned",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": true
+                          }
+                        },
+                        {
+                          "predicates": [
+                            {
+                              "operand": {
+                                "fact": {
+                                  "key": {
+                                    "id": "session.has-scheduled-start",
+                                    "version": 1
+                                  },
+                                  "scope": "item"
+                                },
+                                "fallback": {
+                                  "type": "boolean",
+                                  "value": false
+                                }
+                              },
+                              "operation": "equal",
+                              "type": "comparison",
+                              "value": {
+                                "type": "boolean",
+                                "value": false
+                              }
+                            },
+                            {
+                              "predicate": {
+                                "operand": {
+                                  "fact": {
+                                    "key": {
+                                      "id": "session.is-archived",
+                                      "version": 1
+                                    },
+                                    "scope": "item"
+                                  },
+                                  "fallback": {
+                                    "type": "boolean",
+                                    "value": false
+                                  }
+                                },
+                                "operation": "equal",
+                                "type": "comparison",
+                                "value": {
+                                  "type": "boolean",
+                                  "value": true
+                                }
+                              },
+                              "type": "not"
+                            }
+                          ],
+                          "type": "all"
+                        }
+                      ],
+                      "type": "all"
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "intent": "archive",
+                      "type": "intent"
+                    },
+                    "predicate": {
+                      "predicates": [
+                        {
+                          "operand": {
+                            "fact": {
+                              "key": {
+                                "id": "session.has-scheduled-start",
+                                "version": 1
+                              },
+                              "scope": "item"
+                            },
+                            "fallback": {
+                              "type": "boolean",
+                              "value": false
+                            }
+                          },
+                          "operation": "equal",
+                          "type": "comparison",
+                          "value": {
+                            "type": "boolean",
+                            "value": false
+                          }
+                        },
+                        {
+                          "predicate": {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.is-archived",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              },
+                              "fallback": {
+                                "type": "boolean",
+                                "value": false
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "boolean",
+                              "value": true
+                            }
+                          },
+                          "type": "not"
+                        }
+                      ],
+                      "type": "all"
+                    },
+                    "type": "conditional"
+                  }
+                ],
+                "spacing": "small",
+                "type": "stack"
+              },
+              {
+                "axis": "horizontal",
+                "children": [
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Dormant",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "neutral",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "dormant"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Waiting",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "warning",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "awaiting-user"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Working",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "positive",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "working"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Idle",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "neutral",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "idle"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Ready",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "positive",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "ready-with-background-work"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Attention",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "warning",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "needs-attention"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Limit",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "negative",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.activity.detailed",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "string",
+                        "value": "limit-reached"
+                      }
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "content": {
+                      "binding": {
+                        "text": "Unknown",
+                        "type": "literal"
+                      },
+                      "role": {
+                        "role": "neutral",
+                        "type": "literal"
+                      },
+                      "type": "status"
+                    },
+                    "predicate": {
+                      "predicate": {
+                        "predicates": [
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "dormant"
+                            }
+                          },
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "awaiting-user"
+                            }
+                          },
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "working"
+                            }
+                          },
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "idle"
+                            }
+                          },
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "ready-with-background-work"
+                            }
+                          },
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "needs-attention"
+                            }
+                          },
+                          {
+                            "operand": {
+                              "fact": {
+                                "key": {
+                                  "id": "session.activity.detailed",
+                                  "version": 1
+                                },
+                                "scope": "item"
+                              }
+                            },
+                            "operation": "equal",
+                            "type": "comparison",
+                            "value": {
+                              "type": "string",
+                              "value": "limit-reached"
+                            }
+                          }
+                        ],
+                        "type": "any"
+                      },
+                      "type": "not"
+                    },
+                    "type": "conditional"
+                  },
+                  {
+                    "type": "flexibleSpacer"
+                  },
+                  {
                     "binding": {
                       "facet": "value",
                       "fact": {
@@ -223,159 +910,36 @@
                     },
                     "role": "compactDetail",
                     "type": "text"
+                  },
+                  {
+                    "binding": {
+                      "facet": "value",
+                      "fact": {
+                        "key": {
+                          "id": "session.branch",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      },
+                      "fallback": "No branch",
+                      "type": "fact"
+                    },
+                    "role": "compactDetail",
+                    "type": "text"
                   }
                 ],
-                "spacing": "tight",
+                "spacing": "small",
                 "type": "stack"
-              },
-              {
-                "type": "flexibleSpacer"
-              },
-              {
-                "content": {
-                  "intent": "pin",
-                  "type": "intent"
-                },
-                "predicate": {
-                  "predicates": [
-                    {
-                      "operand": {
-                        "fact": {
-                          "key": {
-                            "id": "session.is-pinned",
-                            "version": 1
-                          },
-                          "scope": "item"
-                        },
-                        "fallback": {
-                          "type": "boolean",
-                          "value": false
-                        }
-                      },
-                      "operation": "equal",
-                      "type": "comparison",
-                      "value": {
-                        "type": "boolean",
-                        "value": false
-                      }
-                    },
-                    {
-                      "operand": {
-                        "fact": {
-                          "key": {
-                            "id": "session.has-scheduled-start",
-                            "version": 1
-                          },
-                          "scope": "item"
-                        },
-                        "fallback": {
-                          "type": "boolean",
-                          "value": false
-                        }
-                      },
-                      "operation": "equal",
-                      "type": "comparison",
-                      "value": {
-                        "type": "boolean",
-                        "value": false
-                      }
-                    }
-                  ],
-                  "type": "all"
-                },
-                "type": "conditional"
-              },
-              {
-                "content": {
-                  "intent": "unpin",
-                  "type": "intent"
-                },
-                "predicate": {
-                  "predicates": [
-                    {
-                      "operand": {
-                        "fact": {
-                          "key": {
-                            "id": "session.is-pinned",
-                            "version": 1
-                          },
-                          "scope": "item"
-                        },
-                        "fallback": {
-                          "type": "boolean",
-                          "value": false
-                        }
-                      },
-                      "operation": "equal",
-                      "type": "comparison",
-                      "value": {
-                        "type": "boolean",
-                        "value": true
-                      }
-                    },
-                    {
-                      "operand": {
-                        "fact": {
-                          "key": {
-                            "id": "session.has-scheduled-start",
-                            "version": 1
-                          },
-                          "scope": "item"
-                        },
-                        "fallback": {
-                          "type": "boolean",
-                          "value": false
-                        }
-                      },
-                      "operation": "equal",
-                      "type": "comparison",
-                      "value": {
-                        "type": "boolean",
-                        "value": false
-                      }
-                    }
-                  ],
-                  "type": "all"
-                },
-                "type": "conditional"
-              },
-              {
-                "content": {
-                  "intent": "archive",
-                  "type": "intent"
-                },
-                "predicate": {
-                  "operand": {
-                    "fact": {
-                      "key": {
-                        "id": "session.has-scheduled-start",
-                        "version": 1
-                      },
-                      "scope": "item"
-                    },
-                    "fallback": {
-                      "type": "boolean",
-                      "value": false
-                    }
-                  },
-                  "operation": "equal",
-                  "type": "comparison",
-                  "value": {
-                    "type": "boolean",
-                    "value": false
-                  }
-                },
-                "type": "conditional"
               }
             ],
-            "spacing": "small",
+            "spacing": "tight",
             "type": "stack"
           },
           "selectionMode": "single",
           "windowing": "hostVirtualized"
         },
         "search": {
-          "accessibilityLabel": "Search T3 Sidebar sessions",
+          "accessibilityLabel": "Search threads",
           "fields": [
             {
               "key": {
@@ -383,66 +947,37 @@
                 "version": 1
               },
               "scope": "item"
-            },
-            {
-              "key": {
-                "id": "project.name",
-                "version": 1
-              },
-              "scope": "project"
             }
           ],
-          "placeholder": "Search sessions"
+          "placeholder": "Search"
         },
         "sort": [
-          {
-            "direction": "descending",
-            "operand": {
-              "fact": {
-                "key": {
-                  "id": "session.last-used-at",
-                  "version": 1
-                },
-                "scope": "item"
-              }
-            },
-            "when": [
-              {
-                "equals": "recent",
-                "optionID": "sort-order"
-              }
-            ]
-          },
           {
             "direction": "ascending",
             "operand": {
               "fact": {
                 "key": {
-                  "id": "session.title",
+                  "id": "session.manual-order",
                   "version": 1
                 },
                 "scope": "item"
               }
             },
-            "when": [
-              {
-                "equals": "name",
-                "optionID": "sort-order"
-              }
-            ]
+            "when": []
           }
         ],
         "source": "sessions"
       },
+      "preferredWidth": 400,
       "root": {
         "content": {
           "role": "neutral",
-          "text": "T3 Sidebar requires a newer Threading host.",
+          "text": "T3 Code Threads POC requires a newer Threading host.",
           "type": "status"
         },
         "type": "content"
       },
-      "title": "T3 Sidebar"
+      "title": "T3 Code Threads POC"
     }
   ]
 }

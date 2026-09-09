@@ -325,10 +325,11 @@ public enum SidebarDefaults {
     /// `MainWindowController.updateSidebarMinimumThickness`, which can only ever raise this.
     public static let minWidth: CGFloat = 180
 
-    /// The widest the app opens the column *itself* — restoring a stored width, or honouring an
-    /// extension's preferred one. **Not a limit on the divider**: the split item sets no maximum,
-    /// so a drag runs until the terminal reaches its own floor. A number here stopped the divider
-    /// dead in open space, which reads as a broken drag rather than as a decision.
+    /// The legacy product-side width ceiling. **Not a limit on the divider, saved user geometry,
+    /// or extension hints**: the split item sets no maximum, the restore path trusts the saved
+    /// divider, and extensions publish their own public range. Keeping this value documents the
+    /// former product cap for callers which still need that scale; applying it to the split item
+    /// stopped the divider dead in open space, which read as a broken drag rather than a decision.
     public static let maxWidth: CGFloat = 400
     public static let defaultWidth: CGFloat = 240
 

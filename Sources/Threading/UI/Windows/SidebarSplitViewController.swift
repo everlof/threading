@@ -30,6 +30,13 @@ final class SidebarSplitViewController: NSSplitViewController {
     /// the split view has committed its final frames.
     var paneTransitionDidComplete: ((NSSplitViewItem, Bool) -> Void)?
 
+    /// Reports a requested pane transition before AppKit changes the item's collapsed state.
+    ///
+    /// `isCollapsed = false` can synchronously begin resize notifications, so an owner which
+    /// must distinguish transition geometry from a user's divider movement needs a seam before
+    /// that assignment rather than the model-state callback after it.
+    var paneTransitionWillBegin: ((NSSplitViewItem, Bool) -> Void)?
+
     /// Whether an otherwise-animated split-pane transition should actually move geometry.
     ///
     /// The main window supplies one answer for both edge panes. A live terminal makes every
@@ -197,6 +204,7 @@ final class SidebarSplitViewController: NSSplitViewController {
 #if DEBUG
         lastCollapseUsedAnimatedGeometry = animatesGeometry
 #endif
+        paneTransitionWillBegin?(item, collapsed)
         PaneTransition.run(
             in: splitView,
             animated: animatesGeometry,

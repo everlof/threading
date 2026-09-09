@@ -38,6 +38,12 @@ The extension owns the navigator document, grouping, labels, filters, and action
 the split-view column, resize/collapse behavior, theme and accessibility semantics, collection
 virtualization, focus, user selection, and the authority to navigate to live host entities.
 
+`preferredWidth` is an optional 180...640 point selection-time presentation hint. Threading tries
+the complete public range, subject to the live window's content minimum, without recording the
+result as a divider choice. Omitting it leaves the standing user width alone. Native startup and
+restore still use the ordinary 240-point default when no user width exists, and selecting another
+navigator never lets a delayed hint resize that later selection.
+
 Those host responsibilities are deliberately split in source. `WorkspaceSidebarContainerViewController`
 owns selection persistence, process-generation replacement and atomic Native failback;
 `WorkspaceNavigatorHostViewController` owns one validated document and its virtualized renderers.
@@ -302,14 +308,16 @@ an arrangement choice without Activity Inbox knowing it exists. There is no sess
 and no extension callback on a fact or calendar edge.
 
 [`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension) is the
-matching host-intent example. Its static pipeline presents a flat session list with project
-subtitles, a Pinned section, host search, and a persisted sort option. It declares `pin`, `unpin`,
-and `archive`, conditionally shows the applicable controls, and omits them for scheduled-start
-rows which Threading would refuse. Like Activity Inbox, its Group by and Sort by controls discover
-eligible registered facts entirely inside the host. The extension still receives no session
-snapshot or callback.
+matching host-intent and T3 Code-inspired proof of concept. Its static pipeline uses title-only
+host search, a two-band title/status/project/branch row, and Pinned, Active, Snoozed, and Archived
+sections. Rows retain the host's manual order instead of reordering when activity changes. It
+declares `pin`, `unpin`, and `archive`, conditionally shows the applicable controls,
+and omits them for scheduled-start and archived rows which Threading would refuse. `Archived` is
+intentional: Threading does not expose T3 Code's separate reversible Settled state or its
+snooze/settle actions. The extension receives no session snapshot or callback, and Threading owns
+all row controls, selection, virtualization, chrome, and routing.
 
-`session.activity.detailed@1` currently publishes six named raw values through
+`session.activity.detailed@1` currently publishes seven named raw values through
 `ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `ready-with-background-work`,
 `awaiting-user`, `needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host
 model strings. The raw-value type deliberately keeps unknown future values decodable.

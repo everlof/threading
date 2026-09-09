@@ -1491,6 +1491,40 @@ final class ExtensionContractTests: XCTestCase {
         )
     }
 
+    func testWorkspaceNavigatorPreferredWidthPublishesAndValidatesTheCompleteHintRange() {
+        func navigator(width: Double) -> ExtensionWorkspaceNavigator {
+            .init(
+                id: "width",
+                title: "Width",
+                root: .content(.status("Ready", role: .neutral)),
+                preferredWidth: width
+            )
+        }
+
+        XCTAssertEqual(ExtensionWorkspaceNavigator.minimumPreferredWidth, 180)
+        XCTAssertEqual(ExtensionWorkspaceNavigator.maximumPreferredWidth, 640)
+        XCTAssertEqual(
+            navigator(width: ExtensionWorkspaceNavigator.minimumPreferredWidth)
+                .validationIssues(path: "navigator"),
+            []
+        )
+        XCTAssertEqual(
+            navigator(width: ExtensionWorkspaceNavigator.maximumPreferredWidth)
+                .validationIssues(path: "navigator"),
+            []
+        )
+
+        for width in [179, 641, .nan, .infinity] {
+            XCTAssertEqual(
+                navigator(width: width).validationIssues(path: "navigator"),
+                [.init(
+                    path: "navigator.preferredWidth",
+                    message: "must be finite and between 180 and 640"
+                )]
+            )
+        }
+    }
+
     func testWorkspaceNavigatorOptionsRejectUnsupportedControlsDuplicatesAndMenuOverflow() {
         let unsupported = ExtensionWorkspaceNavigator(
             id: "unsupported",

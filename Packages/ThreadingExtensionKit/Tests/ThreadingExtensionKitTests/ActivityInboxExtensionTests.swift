@@ -34,6 +34,7 @@ final class ActivityInboxExtensionTests: XCTestCase {
         XCTAssertEqual(navigator.id, "activity-inbox")
         XCTAssertNil(navigator.loadActionID)
         XCTAssertNil(navigator.eventActionID)
+        XCTAssertEqual(navigator.preferredWidth, 280)
         XCTAssertEqual(navigator.validationIssues(path: "navigator"), [])
         XCTAssertEqual(pipeline.source, .sessions)
         XCTAssertEqual(pipeline.consumes, [

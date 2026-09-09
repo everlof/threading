@@ -1079,16 +1079,19 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         }
     }
 
-    func testShippedT3SidebarPinsSessionsAndOmitsUnavailableScheduledActions() throws {
+    func testShippedT3SidebarRealizesLifecycleBucketsMetadataAndAvailableActions() throws {
         let navigator = try t3SidebarNavigatorFromShippedManifest()
         let declaration = try XCTUnwrap(navigator.pipeline)
         let projectID = "project-1"
         let title = ExtensionHostFactKey.sessionTitle
         let sessionProjectID = ExtensionHostFactKey.sessionProjectID
         let projectName = ExtensionHostFactKey.projectName
+        let activity = ExtensionHostFactKey.sessionDetailedActivity
+        let manualOrder = ExtensionHostFactKey.sessionManualOrder
+        let branch = ExtensionHostFactKey.sessionBranch
         let pinned = ExtensionHostFactKey.sessionIsPinned
         let archived = ExtensionHostFactKey.sessionIsArchived
-        let lastUsed = ExtensionHostFactKey.sessionLastUsedAt
+        let snoozed = ExtensionHostFactKey.sessionIsSnoozed
         let scheduled = ExtensionHostFactKey.sessionHasScheduledStart
         let definitions = [
             titleDefinition,
@@ -1102,7 +1105,25 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
                 projectName,
                 type: .string,
                 kinds: [.project],
-                usages: [.searchable, .presentable]
+                usages: [.presentable]
+            ),
+            definition(
+                activity,
+                type: .string,
+                kinds: [.session],
+                usages: [.filterable, .presentable]
+            ),
+            definition(
+                manualOrder,
+                type: .integer,
+                kinds: [.session],
+                usages: [.sortable]
+            ),
+            definition(
+                branch,
+                type: .string,
+                kinds: [.session],
+                usages: [.presentable]
             ),
             definition(
                 pinned,
@@ -1114,13 +1135,13 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
                 archived,
                 type: .boolean,
                 kinds: [.session],
-                usages: [.filterable]
+                usages: [.filterable, .groupable]
             ),
             definition(
-                lastUsed,
-                type: .date,
+                snoozed,
+                type: .boolean,
                 kinds: [.session],
-                usages: [.sortable]
+                usages: [.filterable, .groupable]
             ),
             definition(
                 scheduled,
@@ -1134,22 +1155,41 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             name: String,
             isPinned: Bool,
             isArchived: Bool,
+            isSnoozed: Bool,
             isScheduled: Bool,
-            lastUsed: TimeInterval
+            activity: ExtensionSessionDetailedActivity,
+            manualOrder: Int64
         )] = [
-            ("pinned", "Pinned session", true, false, false, 100),
-            ("ordinary", "Ordinary session", false, false, false, 300),
-            ("scheduled", "Alpha scheduled session", false, false, true, 200),
-            ("archived", "Archived session", false, true, false, 400),
+            ("z-pinned", "Pinned thread", true, false, false, false, .dormant, 80),
+            ("y-ordinary", "Ordinary thread", false, false, false, false, .working, 70),
+            ("x-scheduled", "Scheduled thread", false, false, false, true, .awaitingUser, 20),
+            ("w-ready", "Ready thread", false, false, false, false, .readyWithBackgroundWork, 40),
+            ("v-attention", "Attention thread", false, false, false, false, .needsAttention, 30),
+            ("u-snoozed", "Snoozed pinned thread", true, false, true, false, .idle, 60),
+            ("t-snoozed-archived", "Snoozed archived thread", true, true, true, false, .limitReached, 10),
+            ("s-archived", "Archived pinned thread", true, true, false, false, .idle, 90),
+            (
+                "r-future",
+                "Future activity thread",
+                false,
+                false,
+                false,
+                false,
+                .init(rawValue: "future-activity"),
+                50
+            ),
         ]
         var facts = rows.flatMap { row in
             let subject = ExtensionFactSubject.session(row.id)
             return [
                 fact(title, subject, .string(row.name)),
                 fact(sessionProjectID, subject, .string(projectID)),
+                fact(activity, subject, .string(row.activity.rawValue)),
+                fact(manualOrder, subject, .integer(row.manualOrder)),
+                fact(branch, subject, .string("navigator-pipeline")),
                 fact(pinned, subject, .boolean(row.isPinned)),
                 fact(archived, subject, .boolean(row.isArchived)),
-                fact(lastUsed, subject, .date(.init(timeIntervalSinceReferenceDate: row.lastUsed))),
+                fact(snoozed, subject, .boolean(row.isSnoozed)),
                 fact(scheduled, subject, .boolean(row.isScheduled)),
             ]
         }
@@ -1160,18 +1200,20 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             facts: facts
         )
         let evaluator = WorkspaceNavigatorPipelineEvaluator()
-        let compiled = try ready(
-            declaration,
-            snapshot: snapshot,
-            optionValues: ["sort-order": .string("recent")]
-        )
+        let compiled = try ready(declaration, snapshot: snapshot)
         let evaluation = evaluator.evaluate(compiled)
 
         XCTAssertEqual(evaluation.sections.map(\.identity), [
-            .rule(id: "pinned"), .rule(id: "sessions"),
+            .rule(id: "pinned"),
+            .rule(id: "active"),
+            .rule(id: "snoozed"),
+            .rule(id: "archived"),
         ])
         XCTAssertEqual(evaluation.sections.map { $0.items.map(\.sourceSessionID) }, [
-            ["pinned"], ["ordinary", "scheduled"],
+            ["z-pinned"],
+            ["x-scheduled", "v-attention", "w-ready", "r-future", "y-ordinary"],
+            ["t-snoozed-archived", "u-snoozed"],
+            ["s-archived"],
         ])
         let realized = Dictionary(uniqueKeysWithValues: try evaluation.sections
             .flatMap(\.items)
@@ -1180,34 +1222,56 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
                     evaluator.realizeVisibleRow(item, in: compiled)
                 ))
             })
-        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["pinned"])), [
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["z-pinned"])), [
             .unpin, .archive,
         ])
-        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["ordinary"])), [
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["y-ordinary"])), [
             .pin, .archive,
         ])
-        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["scheduled"])), [])
-        XCTAssertEqual(templateText(in: try XCTUnwrap(realized["ordinary"])), [
-            "Ordinary session", "Navigator Project",
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["x-scheduled"])), [])
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["u-snoozed"])), [
+            .unpin, .archive,
         ])
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["t-snoozed-archived"])), [])
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["s-archived"])), [])
+        let expectedStatusByID = [
+            "z-pinned": "Dormant",
+            "y-ordinary": "Working",
+            "x-scheduled": "Waiting",
+            "w-ready": "Ready",
+            "v-attention": "Attention",
+            "u-snoozed": "Idle",
+            "t-snoozed-archived": "Limit",
+            "s-archived": "Idle",
+            "r-future": "Unknown",
+        ]
+        for row in rows {
+            XCTAssertEqual(
+                templateText(in: try XCTUnwrap(realized[row.id])),
+                [row.name, expectedStatusByID[row.id], "Navigator Project", "navigator-pipeline"]
+            )
+        }
 
-        let named = evaluator.evaluate(try ready(
-            declaration,
-            snapshot: snapshot,
-            optionValues: ["sort-order": .string("name")]
-        ))
-        XCTAssertEqual(named.sections[1].items.map(\.sourceSessionID), [
-            "scheduled", "ordinary",
-        ])
+        let titleSearch = evaluator.evaluate(compiled, query: "Ordinary")
+        XCTAssertEqual(titleSearch.sections.map(\.identity), [.rule(id: "active")])
+        XCTAssertEqual(titleSearch.sections.flatMap(\.items).map(\.sourceSessionID), ["y-ordinary"])
+        XCTAssertEqual(
+            evaluator.evaluate(compiled, query: "Navigator Project").itemCount,
+            0,
+            "T3-inspired search must remain title-only even though project metadata is visible"
+        )
 
         var repinnedFacts = rows.flatMap { row in
             let subject = ExtensionFactSubject.session(row.id)
             return [
                 fact(title, subject, .string(row.name)),
                 fact(sessionProjectID, subject, .string(projectID)),
-                fact(pinned, subject, .boolean(row.id == "ordinary" || row.isPinned)),
+                fact(activity, subject, .string(row.activity.rawValue)),
+                fact(manualOrder, subject, .integer(row.manualOrder)),
+                fact(branch, subject, .string("navigator-pipeline")),
+                fact(pinned, subject, .boolean(row.id == "y-ordinary" || row.isPinned)),
                 fact(archived, subject, .boolean(row.isArchived)),
-                fact(lastUsed, subject, .date(.init(timeIntervalSinceReferenceDate: row.lastUsed))),
+                fact(snoozed, subject, .boolean(row.isSnoozed)),
                 fact(scheduled, subject, .boolean(row.isScheduled)),
             ]
         }
@@ -1222,17 +1286,16 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             facts: repinnedFacts,
             revision: 2
         )
-        let repinnedProgram = try ready(
-            declaration,
-            snapshot: repinnedSnapshot,
-            optionValues: ["sort-order": .string("recent")]
-        )
+        let repinnedProgram = try ready(declaration, snapshot: repinnedSnapshot)
         let repinned = evaluator.evaluate(repinnedProgram)
-        XCTAssertEqual(repinned.sections.map { $0.items.map(\.sourceSessionID) }, [
-            ["ordinary", "pinned"], ["scheduled"],
+        XCTAssertEqual(repinned.sections[0].items.map(\.sourceSessionID), [
+            "y-ordinary", "z-pinned",
+        ])
+        XCTAssertEqual(repinned.sections[1].items.map(\.sourceSessionID), [
+            "x-scheduled", "v-attention", "w-ready", "r-future",
         ])
         let moved = try XCTUnwrap(
-            repinned.sections[0].items.first { $0.sourceSessionID == "ordinary" }
+            repinned.sections[0].items.first { $0.sourceSessionID == "y-ordinary" }
         )
         XCTAssertEqual(
             templateIntents(in: try XCTUnwrap(
@@ -1648,6 +1711,8 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
     private func templateText(in node: WorkspaceNavigatorRealizedTemplateNode) -> [String] {
         switch node {
         case let .text(text, _):
+            [text]
+        case let .status(text, _):
             [text]
         case let .stack(_, _, children):
             children.flatMap(templateText(in:))

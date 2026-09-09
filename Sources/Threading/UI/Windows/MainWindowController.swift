@@ -298,7 +298,30 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// produces would otherwise overwrite the width being restored — with the default, one turn
     /// of the run loop before it was going to be read.
     private var recordsSidebarWidth = false
-    private var pendingWorkspaceNavigatorWidth: CGFloat?
+    private struct PendingWorkspaceNavigatorWidth {
+        let configuredSelection: WorkspaceNavigatorSelection
+        let effectiveSelection: WorkspaceNavigatorSelection
+        let width: CGFloat
+    }
+    private var pendingWorkspaceNavigatorWidth: PendingWorkspaceNavigatorWidth?
+
+    /// The standing divider came from navigator routing, not from the user's hand.
+    ///
+    /// That includes both an extension presentation hint and the saved/default width restored
+    /// when the hint's navigator leaves. Resize notifications do not identify which divider
+    /// moved, so this remains set while the sidebar itself remains at the routed width. A pointer
+    /// drag and an accessibility splitter adjustment both become authoritative by moving that
+    /// width; unrelated divider and window notifications leave it untouched.
+    private var programmaticWorkspaceNavigatorSidebarWidth: CGFloat?
+
+    /// Collapses and reopens own every intermediate sidebar width until all complete.
+    ///
+    /// Set through `paneTransitionWillBegin`, before `isCollapsed` changes: reopening flips the
+    /// model to visible before AppKit emits its first animation tick, so the item state alone is
+    /// already too late to distinguish that tick from direct divider input. Count rather than
+    /// flag so a rapid toggle cannot let the first completion expose the second transition's
+    /// remaining animation ticks to persistence.
+    private var sidebarVisibilityTransitionsInFlight = 0
 
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
@@ -747,7 +770,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 isPresented: presented
             )
         }
-
         // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
         // sidebar's new silhouette.
         //
@@ -862,6 +884,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         splitViewController.allowsAnimatedPaneTransitions = { [weak self] in
             self?.containerViewController.activeTerminalSession == nil
         }
+        splitViewController.paneTransitionWillBegin = { [weak self] item, _ in
+            guard let self, item === self.sidebarItem else { return }
+            self.sidebarVisibilityTransitionsInFlight += 1
+        }
         splitViewController.paneCollapseStateDidChange = { [weak self] item, collapsed in
             guard let self else { return }
             if item === self.sidebarItem {
@@ -884,6 +910,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self.updateHeaderInset(sidebarIsCollapsed: collapsed)
             if !collapsed {
                 self.applyPendingWorkspaceNavigatorWidth()
+                // Reopening may settle at a different clamped width than the pane had before it
+                // closed. It is still the same programmatic suggestion, so rebase the marker to
+                // the stable split geometry before resize recording resumes.
+                if self.programmaticWorkspaceNavigatorSidebarWidth != nil {
+                    self.programmaticWorkspaceNavigatorSidebarWidth =
+                        self.sidebarItem.viewController.view.bounds.width
+                }
                 if self.sidebarEdgeRevealCoordinator.isTemporarilyRevealed {
                     self.sidebarEdgeRevealCoordinator.revealDidComplete(
                         pointerIsInsideSidebar:
@@ -891,6 +924,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                     )
                 }
             }
+            self.sidebarVisibilityTransitionsInFlight = max(
+                0,
+                self.sidebarVisibilityTransitionsInFlight - 1
+            )
         }
 
         if let window {
@@ -1153,6 +1190,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         workspaceSidebarViewController.synchronizeSelection(
             with: currentWorkspaceNavigatorDestination
         )
+        // Install this after the initial activation. Launch restores the user's divider through
+        // the startup geometry pass below; selection-time hints begin with later live changes.
+        workspaceSidebarViewController.onEffectiveSelectionChange = { [weak self] _ in
+            self?.resolveWorkspaceNavigatorWidth()
+        }
         appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
             guard let self else { return }
             self.workspaceSidebarViewController.refreshAvailability()
@@ -1679,8 +1721,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// through every width down to zero, and recording those would answer "how wide was it" with
     /// the last frame of it disappearing. The width a shut column reopens at is the one it had.
     private func recordSidebarWidth() {
-        guard recordsSidebarWidth, !sidebarItem.isCollapsed else { return }
-        SidebarWidth.record(sidebarItem.viewController.view.bounds.width)
+        guard recordsSidebarWidth,
+              sidebarVisibilityTransitionsInFlight == 0,
+              !sidebarItem.isCollapsed else { return }
+        let width = sidebarItem.viewController.view.bounds.width
+        if let programmatic = programmaticWorkspaceNavigatorSidebarWidth,
+           abs(width - programmatic) <= 0.5 {
+            return
+        }
+        programmaticWorkspaceNavigatorSidebarWidth = nil
+        SidebarWidth.record(width)
     }
 
     /// Opens the column at the width the user left it at, or at the product default before the
@@ -2422,31 +2472,75 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     func selectWorkspaceNavigator(_ selection: WorkspaceNavigatorSelection) {
+        // A queued hint belongs to the selection that authored it. Invalidate it before the
+        // visible source changes so an Extension -> Native (or Extension A -> Extension B)
+        // switch in the same run-loop turn cannot resize the replacement surface.
+        pendingWorkspaceNavigatorWidth = nil
         environment.settings.workspaceNavigatorSelection = selection
         workspaceSidebarViewController.activate(selection)
         workspaceSidebarViewController.synchronizeSelection(
             with: currentWorkspaceNavigatorDestination
         )
-        if case let .extensionNavigator(extensionIdentifier, navigatorID) = selection,
-           let width = workspaceNavigatorRouting.registeredWorkspaceNavigator(
+        resolveWorkspaceNavigatorWidth()
+    }
+
+    /// Resolves the width of the navigator that is actually visible, not only the saved choice.
+    /// An unavailable extension can fail back to Native without erasing that saved selection; its
+    /// width must fail back at the same time. Conversely, once a user moves the divider, the
+    /// programmatic marker has gone and a later Native selection must leave that choice alone.
+    private func resolveWorkspaceNavigatorWidth() {
+        pendingWorkspaceNavigatorWidth = nil
+        let configuredSelection = environment.settings.workspaceNavigatorSelection
+        let effectiveSelection = workspaceSidebarViewController.effectiveSelection
+
+        if case let .extensionNavigator(extensionIdentifier, navigatorID) = effectiveSelection,
+           let preferredWidth = workspaceNavigatorRouting.registeredWorkspaceNavigator(
                extensionIdentifier: extensionIdentifier,
                navigatorID: navigatorID
            )?.navigator.preferredWidth
         {
-            requestWorkspaceNavigatorWidth(CGFloat(width))
+            requestWorkspaceNavigatorWidth(
+                min(
+                    CGFloat(ExtensionWorkspaceNavigator.maximumPreferredWidth),
+                    max(sidebarItem.minimumThickness, CGFloat(preferredWidth))
+                ),
+                configuredSelection: configuredSelection,
+                effectiveSelection: effectiveSelection
+            )
+            return
         }
+
+        guard let programmatic = programmaticWorkspaceNavigatorSidebarWidth else { return }
+        let standingWidth = sidebarItem.viewController.view.bounds.width
+        guard abs(standingWidth - programmatic) <= 0.5 else {
+            // A divider move is authoritative even if its resize notification has not reached the
+            // shared recorder yet. Do not let a route change snap it back underneath the user.
+            programmaticWorkspaceNavigatorSidebarWidth = nil
+            return
+        }
+        requestWorkspaceNavigatorWidth(
+            SidebarWidth.stored ?? SidebarDefaults.defaultWidth,
+            configuredSelection: configuredSelection,
+            effectiveSelection: effectiveSelection
+        )
     }
 
-    /// Applies a contribution's width only when the user explicitly chooses it. The temporary
-    /// constraint is released immediately, so subsequent divider movement remains authoritative.
+    /// Applies routed width through the split view while persistence is suppressed. Subsequent
+    /// divider movement remains authoritative.
     ///
-    /// Bounded by `SidebarDefaults.maxWidth` rather than by the item's own maximum, which is
-    /// deliberately unset: how wide the user may *drag* the column is their business, and how
-    /// wide an extension may open it is not.
-    private func requestWorkspaceNavigatorWidth(_ proposedWidth: CGFloat) {
-        pendingWorkspaceNavigatorWidth = min(
-            SidebarDefaults.maxWidth,
-            max(sidebarItem.minimumThickness, proposedWidth)
+    /// Extension hints are bounded by the public contract in the resolver above. Saved user widths
+    /// are intentionally not: the split item's deliberately unset maximum lets the terminal's own
+    /// minimum width clamp both a large saved width and a large hint when the window cannot spare
+    /// it, exactly as it does for a user's divider drag.
+    private func requestWorkspaceNavigatorWidth(
+        _ width: CGFloat,
+        configuredSelection: WorkspaceNavigatorSelection,
+        effectiveSelection: WorkspaceNavigatorSelection
+    ) {
+        pendingWorkspaceNavigatorWidth = PendingWorkspaceNavigatorWidth(
+            configuredSelection: configuredSelection,
+            effectiveSelection: effectiveSelection,
+            width: width
         )
         guard !sidebarItem.isCollapsed else { return }
         DispatchQueue.main.async { [weak self] in
@@ -2455,16 +2549,24 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     private func applyPendingWorkspaceNavigatorWidth() {
-        guard !sidebarItem.isCollapsed, let width = pendingWorkspaceNavigatorWidth else {
+        guard !sidebarItem.isCollapsed, let request = pendingWorkspaceNavigatorWidth else {
+            return
+        }
+        guard environment.settings.workspaceNavigatorSelection == request.configuredSelection,
+              workspaceSidebarViewController.effectiveSelection == request.effectiveSelection else {
+            pendingWorkspaceNavigatorWidth = nil
             return
         }
         pendingWorkspaceNavigatorWidth = nil
-        let constraint = workspaceSidebarViewController.view.widthAnchor.constraint(
-            equalToConstant: width
-        )
-        constraint.isActive = true
-        workspaceSidebarViewController.view.layoutSubtreeIfNeeded()
-        constraint.isActive = false
+        let wasRecordingSidebarWidth = recordsSidebarWidth
+        recordsSidebarWidth = false
+        defer { recordsSidebarWidth = wasRecordingSidebarWidth }
+
+        splitView.layoutSubtreeIfNeeded()
+        splitView.setPosition(request.width, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        programmaticWorkspaceNavigatorSidebarWidth =
+            sidebarItem.viewController.view.bounds.width
     }
 
     private var currentWorkspaceNavigatorDestination:
