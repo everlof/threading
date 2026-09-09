@@ -534,6 +534,9 @@ the menu on hover or **→**, **←** steps back out with the parent still highl
 choice anywhere in the chain answers the whole menu. Only the menu bar at the top of the
 screen remains the system's own.
 
+In a new-session draft, one pill shows **model · reasoning effort** and opens the model × effort
+picker. Models without reasoning choices show only their name.
+
 The model chip names the model the session will **actually run on** — `Fable 5.1 · 1M`, not
 "Default". "Leave the choice to the agent" is not a row of its own: the model that choice
 resolves to is **marked in the list**, where it already stands, with where the name came from.

@@ -764,6 +764,12 @@ account move on the session — including the move away from an exhausted model-
 the next fresh chat's starting point. Merely looking away from an unfinished composer changes
 nothing about it.
 
+The draft footer has one model-and-effort chip, titled `model · effort` when the selected
+model advertises reasoning choices, and just the model otherwise. It is the sole anchor for
+`composerModelEffortPicker`; selection and launch validation remain host-owned under the existing
+composer customization hook. Refreshing this title adds only constant work to the existing
+catalog refresh and constructs no additional provider-sized views.
+
 The prompt below those chips also owns pre-launch slash completion. `refreshChips()` projects a
 bounded built-in expectation catalog for the selected runtime and resolved Terminal/Chat surface
 without spawning a CLI or walking project configuration. Terminal rows are handed to the

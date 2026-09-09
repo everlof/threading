@@ -56,7 +56,6 @@ final class SessionComposerViewController: NSViewController {
     private let roleChip = ChipView()
 
     private let modelChip = ChipView()
-    private let effortChip = ChipView()
     private let speedChip = ChipView()
     private let surfaceChip = ChipView()
     private let modeChip = ChipView()
@@ -724,7 +723,6 @@ final class SessionComposerViewController: NSViewController {
             (modelChip, ComposerDefaults.modelChipCompressionPriority),
             (surfaceChip, ComposerDefaults.surfaceChipCompressionPriority),
             (speedChip, ComposerDefaults.speedChipCompressionPriority),
-            (effortChip, ComposerDefaults.effortChipCompressionPriority),
             (modeChip, ComposerDefaults.modeChipCompressionPriority),
             (curfewChip, ComposerDefaults.curfewChipCompressionPriority)
         ] {
@@ -732,7 +730,6 @@ final class SessionComposerViewController: NSViewController {
         }
         modelChip.setAccessibilityIdentifier("composer.session-start.model")
         modeChip.setAccessibilityIdentifier("composer.session-start.mode")
-        effortChip.setAccessibilityIdentifier("composer.session-start.effort")
         speedChip.setAccessibilityIdentifier("composer.session-start.speed")
         surfaceChip.setAccessibilityIdentifier("composer.session-start.surface")
         curfewChip.setAccessibilityIdentifier("composer.session-start.curfew.chosen")
@@ -814,7 +811,7 @@ final class SessionComposerViewController: NSViewController {
     /// the row holds what it holds.
     private func setFooterControls() {
         promptView.setFooterControls(
-            leading: [modelChip, modeChip, effortChip, speedChip] + (
+            leading: [modelChip, modeChip, speedChip] + (
                 selectedCurfew == nil ? [] : [curfewChip]
             ),
             trailing: [usageLabel, surfaceChip]
@@ -936,16 +933,6 @@ final class SessionComposerViewController: NSViewController {
             self.discardUnsupportedEffort()
             self.discardUnsupportedFastMode()
             self.refreshChips()
-        }
-
-        effortChip.itemsProvider = { [weak self] in self?.effortItems() ?? [] }
-        effortChip.choicePresentationProvider = { [weak self] chip, didDismiss in
-            self?.presentModelEffortPicker(from: chip, didDismiss: didDismiss)
-        }
-        effortChip.onSelect = { [weak self] item in
-            // Nil is the explicit first row: let the account or model choose.
-            self?.selectedReasoningEffort = item.representedValue as? String
-            self?.refreshChips()
         }
 
         speedChip.itemsProvider = { [weak self] in self?.speedItems() ?? [] }
@@ -1316,13 +1303,8 @@ final class SessionComposerViewController: NSViewController {
 
         let models = AgentModels.available(for: selectedAgent, account: account)
         modelChip.isHidden = models.isEmpty
-        modelChip.configure(
-            symbolName: ComposerDefaults.modelSymbol,
-            title: modelChipTitle(for: account)
-        )
-
         // Effort is a property of the selected model's published catalog, not an assumption
-        // about the provider. No catalog means no chip and no value sent to the runtime.
+        // about the provider. No reasoning catalog means no effort suffix or launch value.
         discardUnsupportedEffort(account: account)
         let model = modelIdentifierToLaunch(on: account)
         let effortOption = ReasoningEffortPresentation.option(
@@ -1330,15 +1312,17 @@ final class SessionComposerViewController: NSViewController {
             model: model,
             account: account
         )
-        effortChip.isHidden = effortOption == nil
-        effortChip.configure(
-            symbolName: ReasoningEffortPresentation.symbol,
-            title: ReasoningEffortPresentation.title(
+        let effortTitle = effortOption.map { _ in
+            ReasoningEffortPresentation.title(
                 selected: selectedReasoningEffort,
                 kind: selectedAgent,
                 model: model,
                 account: account
             )
+        }
+        modelChip.configure(
+            symbolName: ComposerDefaults.modelSymbol,
+            title: [modelChipTitle(for: account), effortTitle].compactMap { $0 }.joined(separator: " · ")
         )
 
         // Speed is offered only where the selected model publishes a usable Fast mechanism.
@@ -2059,21 +2043,7 @@ final class SessionComposerViewController: NSViewController {
         return items
     }
 
-    private func effortItems() -> [ThemedMenuEntry] {
-        let account = selectedAgent.supportsAccounts
-            ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
-            : nil
-        return ReasoningEffortPresentation.rows(
-            selected: selectedReasoningEffort,
-            kind: selectedAgent,
-            model: modelIdentifierToLaunch(on: account),
-            account: account
-        )
-    }
-
-    /// The two existing chips are two views onto one launch choice, so either opens the same
-    /// matrix. Their titles, sizing, footer position and persistence remain exactly as before;
-    /// only the transient choice surface changes.
+    /// One chip names both launch values and owns the matrix's anchor and focus return.
     private func presentModelEffortPicker(
         from chip: ChipView,
         didDismiss: @escaping () -> Void
@@ -2628,7 +2598,6 @@ enum ComposerDefaults {
 
     static let surfaceChipCompressionPriority = NSLayoutConstraint.Priority(260)
     static let speedChipCompressionPriority = NSLayoutConstraint.Priority(261)
-    static let effortChipCompressionPriority = NSLayoutConstraint.Priority(262)
     static let modeChipCompressionPriority = NSLayoutConstraint.Priority(263)
 
     /// Below every control's own hugging, so a spacer is what stretches when a row has width to

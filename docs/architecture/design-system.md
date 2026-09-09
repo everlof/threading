@@ -10,6 +10,10 @@ this file is the vocabulary and the reasoning behind it.
 the default, not a preference: a screen assembled from `NSPopUpButton`, `NSBox` and bezelled
 buttons will not match anything else in the app.
 
+`ChipView` records its applied choice anatomy only after its content edge constraints exist.
+AppKit can request a redraw during construction; recording a classic style earlier skips its
+arrow reservation when setup finishes, letting a longer value draw through the arrow well.
+
 `Design.swift` holds every measurement, weight and surface colour. Reach for a token rather
 than a number — a literal in a view is how the language erodes. The scale is deliberately
 small (`Spacing` is 2/4/6/10/12/20/32); a value between two steps is nearly always a mistake.

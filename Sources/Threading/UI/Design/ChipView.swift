@@ -761,6 +761,7 @@ public final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPre
     /// it directly left the resting fill recorded forever, and a chip hovered while the theme
     /// changed was swept back to resting under the pointer until the mouse moved again.
     private func updateBackground(focused explicitFocus: Bool? = nil) {
+        guard contentLeadingConstraint != nil, contentTrailingConstraint != nil else { return }
         updateChoiceStyleIfNeeded()
         let focused = explicitFocus ?? (window?.firstResponder === self)
         switch choiceStyle {
@@ -856,6 +857,9 @@ public final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPre
     }
 
     private func updateChoiceStyleIfNeeded() {
+        // AppKit can request a redraw during setup. Do not record anatomy as applied until
+        // the constraints that reserve its arrow well exist.
+        guard contentLeadingConstraint != nil, contentTrailingConstraint != nil else { return }
         let style = choiceStyle
         let height = controlHeight
         guard style != appliedChoiceStyle || height != appliedChoiceHeight else { return }

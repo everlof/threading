@@ -168,14 +168,12 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         let prompt = try XCTUnwrap(promptView(in: composer.view))
         let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
         let mode = try XCTUnwrap(chip(named: "composer.session-start.mode", in: composer.view))
-        let effort = try XCTUnwrap(chip(named: "composer.session-start.effort", in: composer.view))
         let speed = try XCTUnwrap(chip(named: "composer.session-start.speed", in: composer.view))
         let surface = try XCTUnwrap(chip(named: "composer.session-start.surface", in: composer.view))
         let usage = try XCTUnwrap(usageLabel(in: composer.view))
 
-        model.configure(symbolName: "cpu", title: "Fable 5 · 1M")
+        model.configure(symbolName: "cpu", title: "Fable 5 · 1M · Extra High")
         mode.configure(symbolName: "hand.raised", title: "Ask")
-        effort.configure(symbolName: "brain", title: "Extra High")
         speed.configure(
             symbolName: ConversationSpeedPresentation.ordinarySymbol,
             title: ConversationSpeedPresentation.standardTitle
@@ -187,7 +185,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         host.layoutSubtreeIfNeeded()
 
         // Every one of them is drawn inside the box rather than on the pane beside it.
-        for control in [model, mode, effort, speed, surface, usage] as [NSView] {
+        for control in [model, mode, speed, surface, usage] as [NSView] {
             XCTAssertTrue(
                 control.isDescendant(of: prompt),
                 "\(Swift.type(of: control)) stayed outside the box it belongs to"
@@ -201,8 +199,8 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         let inBox = { (view: NSView) in view.convert(view.bounds, to: prompt) }
 
         XCTAssertLessThan(inBox(model).maxX, inBox(mode).minX, "model leads the row, then mode")
-        XCTAssertLessThan(inBox(mode).maxX, inBox(effort).minX, "mode leads effort")
-        XCTAssertLessThan(inBox(effort).maxX, inBox(speed).minX, "effort leads speed")
+        XCTAssertLessThan(inBox(mode).maxX, inBox(speed).minX, "mode leads speed")
+        XCTAssertNil(chip(named: "composer.session-start.effort", in: composer.view))
         XCTAssertLessThan(inBox(speed).maxX, inBox(usage).minX)
         XCTAssertLessThan(inBox(usage).maxX, inBox(surface).minX, "the reading precedes the surface")
 
@@ -236,16 +234,16 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             let mode = try XCTUnwrap(
                 chip(named: "composer.session-start.mode", in: composer.view)
             )
-            let effort = try XCTUnwrap(
-                chip(named: "composer.session-start.effort", in: composer.view)
+            let model = try XCTUnwrap(
+                chip(named: "composer.session-start.model", in: composer.view)
             )
             mode.configure(icon: nil, title: AgentPermissionMode.auto.displayName(for: .codex))
-            effort.configure(icon: nil, title: "Extra High")
+            model.configure(icon: nil, title: "Opus · Extra High")
             mode.isHidden = false
-            effort.isHidden = false
+            model.isHidden = false
             host.layoutSubtreeIfNeeded()
 
-            for chip in [mode, effort] {
+            for chip in [mode, model] {
                 let label = try XCTUnwrap(
                     descendants(of: chip).compactMap { $0 as? NSTextField }.first
                 )
@@ -376,7 +374,6 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             [
                 "composer.session-start.model",
                 "composer.session-start.mode",
-                "composer.session-start.effort",
                 "composer.session-start.speed",
                 "composer.session-start.surface"
             ],
@@ -877,25 +874,17 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
         choose(titled: "Opus", on: model)
 
-        let effort = try XCTUnwrap(
-            chip(named: "composer.session-start.effort", in: composer.view)
-        )
-        XCTAssertFalse(effort.isHidden)
-        XCTAssertEqual(
-            try XCTUnwrap(effort.preparedPresentation()).entries
-                .compactMap(\.item)
-                .compactMap { $0.representedValue as? String },
-            ["low", "medium", "high", "xhigh", "max"]
-        )
-
-        choose(titled: "Extra High", on: effort)
+        XCTAssertNil(chip(named: "composer.session-start.effort", in: composer.view))
+        composer.selectedReasoningEffort = "xhigh"
+        choose(titled: "Opus", on: model)
+        XCTAssertTrue(model.accessibilityTitle()?.contains("Extra High") == true)
         let prompt = try XCTUnwrap(promptView(in: composer.view))
         prompt.stringValue = "Think carefully"
         try startButton(in: composer.view).performClick()
         XCTAssertEqual(recorder.reasoningEfforts.last!, "xhigh")
 
         choose(titled: AgentKind.openCode.displayName, on: identity)
-        XCTAssertTrue(effort.isHidden, "a provider without a catalog exposed an invented value")
+        XCTAssertTrue(model.isHidden, "a provider without a catalog exposed an invented value")
         prompt.stringValue = "Use provider defaults"
         try startButton(in: composer.view).performClick()
         XCTAssertNil(recorder.reasoningEfforts.last!)
@@ -972,20 +961,18 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
 
         let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
         let mode = try XCTUnwrap(chip(named: "composer.session-start.mode", in: composer.view))
-        let effort = try XCTUnwrap(chip(named: "composer.session-start.effort", in: composer.view))
         let speed = try XCTUnwrap(chip(named: "composer.session-start.speed", in: composer.view))
         let surface = try XCTUnwrap(chip(named: "composer.session-start.surface", in: composer.view))
         let usage = try XCTUnwrap(usageLabel(in: composer.view))
 
-        model.configure(symbolName: "cpu", title: "Opus · 1M")
+        model.configure(symbolName: "cpu", title: "Opus · 1M · Extra High")
         mode.configure(symbolName: "hand.raised", title: "Manual")
-        effort.configure(symbolName: "brain", title: "Extra High")
         speed.configure(
             symbolName: ConversationSpeedPresentation.ordinarySymbol,
             title: ConversationSpeedPresentation.standardTitle
         )
         surface.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Native (Experimental)")
-        for chip in [model, mode, effort, speed, surface] { chip.isHidden = false }
+        for chip in [model, mode, speed, surface] { chip.isHidden = false }
         usage.readings = [reading("5h", "86%"), reading("7d", "41%")]
         usage.isHidden = false
         host.layoutSubtreeIfNeeded()
@@ -1373,11 +1360,9 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             let prompt = try XCTUnwrap(promptView(in: composer.view))
             prompt.stringValue = "Keep the migration audit going overnight with /loop."
             try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
-                .configure(symbolName: "cpu", title: "Fable 5 · 1M")
+                .configure(symbolName: "cpu", title: "Fable 5 · 1M · Extra High")
             try XCTUnwrap(chip(named: "composer.session-start.mode", in: composer.view))
                 .configure(symbolName: "hand.raised", title: "Ask")
-            try XCTUnwrap(chip(named: "composer.session-start.effort", in: composer.view))
-                .configure(symbolName: "brain", title: "Extra High")
             let usage = try XCTUnwrap(usageLabel(in: composer.view))
             usage.readings = [reading("5h", "43%"), reading("7d", "73%")]
             usage.isHidden = false
@@ -2015,6 +2000,13 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         }
         renderHost.layoutSubtreeIfNeeded()
 
+        guard let rep = renderHost.bitmapImageRepForCachingDisplay(in: renderHost.bounds) else {
+            return nil
+        }
+        renderHost.wantsLayer = true
+        renderHost.layer?.backgroundColor = theme.resolved(.ground, appearance: appearance).cgColor
+        renderHost.cacheDisplay(in: renderHost.bounds, to: rep)
+
         // Assert in the exact lifecycle that writes the catalogue image. A standalone chip and
         // even a normally hosted composer can both measure correctly while a scoped appearance
         // repaint leaves the saved PNG with a stale natural width. The rendered image is the
@@ -2022,7 +2014,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         if theme.id == AppThemeStyles.openStep.id || theme.id == AppThemeStyles.irix.id {
             for identifier in [
                 "composer.session-start.mode",
-                "composer.session-start.effort"
+                "composer.session-start.model"
             ] {
                 guard let chip = chip(named: identifier, in: composer.view), !chip.isHidden,
                       let label = descendants(of: chip).compactMap({ $0 as? NSTextField }).first,
@@ -2061,12 +2053,6 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             }
         }
 
-        guard let rep = renderHost.bitmapImageRepForCachingDisplay(in: renderHost.bounds) else {
-            return nil
-        }
-        renderHost.wantsLayer = true
-        renderHost.layer?.backgroundColor = theme.resolved(.ground, appearance: appearance).cgColor
-        renderHost.cacheDisplay(in: renderHost.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
 

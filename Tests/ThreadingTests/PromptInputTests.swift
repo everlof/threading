@@ -1581,7 +1581,6 @@ final class PromptInputTests: XCTestCase {
         for identifier in [
             "composer.session-start.model",
             "composer.session-start.mode",
-            "composer.session-start.effort",
             "composer.session-start.surface"
         ] {
             let chip = try XCTUnwrap(
