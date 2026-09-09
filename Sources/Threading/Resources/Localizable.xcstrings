@@ -49028,6 +49028,17 @@
         }
       }
     },
+    "Toggle appearance" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Växla utseende"
+          }
+        }
+      }
+    },
     "Toggle raw scrollback for copy-friendly selection" : {
       "extractionState" : "manual",
       "localizations" : {

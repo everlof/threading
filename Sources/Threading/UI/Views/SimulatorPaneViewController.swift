@@ -127,9 +127,26 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    private lazy var appearanceButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "circle.lefthalf.filled",
+            accessibility: L10n.string("Toggle appearance"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Toggle appearance")
+        button.onPress = { [weak self] in self?.toggleAppearance() }
+        button.setAccessibilityIdentifier("simulator.appearance")
+        return button
+    }()
+
+    /// Tracked locally because `simctl` does not report the device's current appearance; a press
+    /// flips this and applies it, so the toggle stays in step with what the person last did.
+    private var appearanceIsDark = false
+
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [controlButton, retryButton]
+        trailing: [appearanceButton, controlButton, retryButton]
     )
 
     private func makeHardwareButton(
@@ -1019,6 +1036,27 @@ final class SimulatorPaneViewController: NSViewController {
         }
     }
 
+    /// Appearance is a `simctl` device setting, not HID input, so it is live whenever a device is
+    /// adopted — even on the screenshot fallback — and needs no input consent.
+    private func configureAppearanceButton() {
+        appearanceButton.isEnabled = isPresented && lease != nil
+    }
+
+    private func toggleAppearance() {
+        guard let deviceID = lease?.device.id else { return }
+        let dark = !appearanceIsDark
+        appearanceIsDark = dark
+        let control = control
+        runAgentCommand { [weak self] in
+            do {
+                try await control.setAppearance(dark: dark, on: deviceID)
+            } catch {
+                // Keep the toggle honest if the command failed.
+                self?.appearanceIsDark = !dark
+            }
+        }
+    }
+
     private func renderState() {
         guard isViewLoaded else { return }
         switch presentationState {
@@ -1067,6 +1105,7 @@ final class SimulatorPaneViewController: NSViewController {
         deviceChip.isEnabled = !devices.isEmpty
         configureControlButton(for: lease?.device)
         configureHardwareButtons()
+        configureAppearanceButton()
         if let lastStreamFailure,
            !lastStreamFailure.isEmpty,
            lastStreamFailure != statusLabel.stringValue {

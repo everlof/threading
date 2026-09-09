@@ -12,7 +12,14 @@ protocol SimulatorControlling: Sendable {
         arguments: [String]
     ) async throws -> SimulatorLaunchReceipt
     func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data
+    func setAppearance(dark: Bool, on deviceID: SimulatorDeviceID) async throws
     func release(_ lease: SimulatorDeviceLease) async throws
+}
+
+extension SimulatorControlling {
+    // Default no-op keeps test doubles that only exercise the lease/stream paths simple; the real
+    // simctl control overrides it.
+    func setAppearance(dark: Bool, on deviceID: SimulatorDeviceID) async throws {}
 }
 
 enum SimulatorDeviceBootOwnership: String, Equatable, Codable, Sendable {
@@ -241,6 +248,20 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                 throw SimulatorControlError.invalidScreenshot
             }
             return data
+        }
+    }
+
+    func setAppearance(dark: Bool, on deviceID: SimulatorDeviceID) async throws {
+        try await perform { runner, cancellation in
+            _ = try Self.run(
+                ["ui", deviceID.rawValue, "appearance", dark ? "dark" : "light"],
+                operation: "appearance",
+                timeout: SimulatorControlDefaults.shutdownTimeout,
+                maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
+                capture: .combined,
+                using: runner,
+                cancellation: cancellation
+            )
         }
     }
 
