@@ -3,6 +3,13 @@
 The phone's half of [`THEME_BOUNDARY.md`](THEME_BOUNDARY.md). The filename is historical: the
 rules began with dialogs and now cover every application-owned surface in `ThreadingMobile`.
 
+The system-owned WidgetKit surface has its named containment in
+`Targets/ThreadingGlance/GlanceDesign.swift`. It uses adaptive semantic typography and foregrounds;
+WidgetKit retains background removal, margins, tinted Home Screen and vibrant Lock Screen ink.
+The widget does not import the app's UIKit settings chrome or fixed Mac palette. Identity,
+freshness and routing stay host-owned; see
+[iOS glanceable surfaces](architecture/ios-glanceable-surfaces.md).
+
 `scripts/check_mobile_theme_boundaries.py` enforces the two mechanical rules below and runs from
 `scripts/check_theme_boundaries.sh`, so an ordinary `xcodebuild` fails on a violation.
 

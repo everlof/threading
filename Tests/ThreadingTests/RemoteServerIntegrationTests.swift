@@ -57,7 +57,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             extensions: live.extensions,
             mobileDiagnosticsCaptures: live.mobileDiagnosticsCaptures,
             usageDashboard: live.usageDashboard,
-            usageLimit: live.usageLimit
+            usageLimit: live.usageLimit,
+            usageCapacity: {
+                RemoteUsageCapacityDTO(epoch: "A3C526A1-C6F2-49EE-A254-7542BB28E4D7", revision: 7,
+                    accounts: [.init(runtimeID: "codex", runtimeName: "Codex", accountID: "personal",
+                        accountName: "Personal", observedAt: 1_780_000_000, state: .current,
+                        windows: [.init(id: "weekly", name: "Week", fraction: 0.42)])])
+            }
         ), identityProvider: identity.store)
         server.authorizer = authority
         sessionCommands = RecordingRemoteSessionCommands()
@@ -2303,6 +2309,12 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             true,
             "The whole-host owner is the one principal that may be told the dashboard exists"
         )
+        XCTAssertEqual(me.features?.contains(RemoteRESTFeature.usageCapacity.rawValue), true)
+        let capacityProbe = try XCTUnwrap(get("/api/usage/capacity", bearer: "goodtoken"))
+        XCTAssertEqual(capacityProbe.status, 200)
+        let capacity = try RemoteUsageCapacityDTO.decode(capacityProbe.body)
+        XCTAssertEqual(capacity.accounts.first?.observedAt, 1_780_000_000)
+        XCTAssertEqual(capacity.revision, 7)
 
         let overviewProbe = try XCTUnwrap(get("/api/usage?limit=1", bearer: "goodtoken"))
         XCTAssertEqual(overviewProbe.status, 200)
@@ -2348,6 +2360,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             forToken: "interactguesttoken"
         )
         for token in ["viewguesttoken", "interactguesttoken"] {
+            XCTAssertEqual(try XCTUnwrap(get("/api/usage/capacity", bearer: token)).status, 403)
             XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: token)).status, 403)
             let guestMe = try JSONDecoder().decode(
                 RemoteMeDTO.self,
@@ -2357,8 +2370,10 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 guestMe.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) ?? false,
                 "A guest share must never be told the usage dashboard exists"
             )
+            XCTAssertFalse(guestMe.features?.contains(RemoteRESTFeature.usageCapacity.rawValue) ?? false)
         }
         XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: "revoked")).status, 401)
+        XCTAssertEqual(try XCTUnwrap(get("/api/usage/capacity", bearer: "revoked")).status, 401)
     }
 
     func testBankedUsageResetRequiresManagingOwnerAndReplaysOneMutation() throws {

@@ -1300,6 +1300,23 @@
         }
       }
     },
+    "Add a Threading widget from the Home Screen or Lock Screen, then edit it to choose an account. Usage updates while this Mac is open on your iPhone. Older readings are marked as cached." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a Threading widget from the Home Screen or Lock Screen, then edit it to choose an account. Usage updates while this Mac is open on your iPhone. Older readings are marked as cached."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till en Threading-widget på hemskärmen eller låsskärmen och redigera den för att välja ett konto. Användningen uppdateras medan denna Mac är öppen på din iPhone. Äldre avläsningar markeras som cachade."
+          }
+        }
+      }
+    },
     "Add a connection" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2836,6 +2853,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut till din Mac för att söka i projekt och konversationer."
+          }
+        }
+      }
+    },
+    "Connect your Mac to see usage." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect your Mac to see usage."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut din Mac för att se användningen."
           }
         }
       }
@@ -10804,6 +10838,23 @@
         }
       }
     },
+    "The widget cache could not be reset. Update Threading or try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The widget cache could not be reset. Update Threading or try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgetcachen kunde inte återställas. Uppdatera Threading eller försök igen."
+          }
+        }
+      }
+    },
     "Themed dialogs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11871,6 +11922,23 @@
         }
       }
     },
+    "Update Threading on your Mac to share usage with widgets." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update Threading on your Mac to share usage with widgets."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera Threading på din Mac för att dela användning med widgetar."
+          }
+        }
+      }
+    },
     "Update this app to reconnect" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12058,6 +12126,23 @@
         }
       }
     },
+    "Use this Mac for widgets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use this Mac for widgets"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd denna Mac för widgetar"
+          }
+        }
+      }
+    },
     "Used" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12241,6 +12326,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Wi-Fi"
+          }
+        }
+      }
+    },
+    "Widget access was removed. Connect your Mac to enable it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widget access was removed. Connect your Mac to enable it again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgetåtkomsten har tagits bort. Anslut din Mac för att aktivera den igen."
+          }
+        }
+      }
+    },
+    "Widgets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgets"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgetar"
+          }
+        }
+      }
+    },
+    "Widgets could not update. The last reading keeps its original time." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgets could not update. The last reading keeps its original time."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgetarna kunde inte uppdateras. Den senaste avläsningen behåller sin ursprungliga tid."
           }
         }
       }

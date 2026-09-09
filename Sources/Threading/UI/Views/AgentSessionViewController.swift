@@ -495,6 +495,12 @@ final class AgentSessionViewController: NSViewController {
             return
         }
         pendingLaunchPlan = plan
+        // Opening an existing prompt is presentation, even when this is the selected session.
+        // A restart can select it and then switch away before boot output goes quiet. Apply
+        // the same grace as background restoration when this launch submits no new work.
+        if initialPrompt?.isEmpty != false {
+            activityTracker.noteUnattendedLaunch()
+        }
 
         DispatchQueue.main.async { [weak self] in
             self?.startIfTerminalIsSized()

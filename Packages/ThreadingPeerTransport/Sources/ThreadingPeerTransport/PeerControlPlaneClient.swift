@@ -496,6 +496,29 @@ public struct PeerControlPlaneClient: Sendable {
         )
     }
 
+    /// The notification schema version this service advertises, or `0` where it publishes none.
+    ///
+    /// Unauthenticated, because it is the one question a client must be able to ask *before* it
+    /// has anything to send: the broker validates a notification against an exact key list and
+    /// refuses the whole request over one field it has not heard of. A service too old to
+    /// publish the number is exactly the service that cannot take the newest schema, so its
+    /// silence answers the question.
+    public func notificationProtocolVersion() async throws -> Int {
+        let health: ServiceHealth = try await get(url: endpoint.route("health"))
+        return health.notificationProtocol ?? 0
+    }
+
+    private func get<Response: Decodable>(url: URL) async throws -> Response {
+        let request = try makeRequest(method: "GET", url: url, bearer: nil)
+        let (data, response) = try await BoundedHTTP.perform(request)
+        try validateHTTP(response, data: data, expectedStatuses: 200..<300)
+        do {
+            return try JSONDecoder().decode(Response.self, from: data)
+        } catch {
+            throw PeerControlPlaneError.invalidResponse
+        }
+    }
+
     private func request<Body: Encodable, Response: Decodable>(
         method: String,
         url: URL,
@@ -573,6 +596,12 @@ public struct PeerControlPlaneClient: Sendable {
         }
         return request
     }
+}
+
+/// Only the field the client acts on. `/health` is a public document that may grow, so decoding
+/// it exactly would make an ordinary addition on the service look like an unreachable service.
+private struct ServiceHealth: Decodable {
+    let notificationProtocol: Int?
 }
 
 private struct AppleSignInRequest: Encodable {

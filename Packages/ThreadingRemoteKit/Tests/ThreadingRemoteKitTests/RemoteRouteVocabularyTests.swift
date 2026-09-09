@@ -24,6 +24,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .me: expected = "api/me"
             case .search: expected = "api/search"
             case .usage: expected = "api/usage"
+            case .usageCapacity: expected = "api/usage/capacity"
             case .usageLimit: expected = "api/usage/limit"
             case .usageReset: expected = "api/usage/reset"
             case .session: expected = "api/session"
@@ -42,7 +43,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             XCTAssertEqual(route.absolutePath, "/" + expected)
             XCTAssertEqual(route.prefix, "/" + expected + "/")
         }
-        XCTAssertEqual(RemoteRoute.allCases.count, 14)
+        XCTAssertEqual(RemoteRoute.allCases.count, 15)
     }
 
     func testEverySocketRouteKeepsItsWireSpelling() {
@@ -116,6 +117,9 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .usage:
                 built = link.usageURL
                 expected = "\(origin)/api/usage"
+            case .usageCapacity:
+                built = link.usageCapacityURL
+                expected = "\(origin)/api/usage/capacity"
             case .usageLimit:
                 built = link.usageLimitURL(seriesID: "codex|personal|weekly", days: 30)
                 expected = "\(origin)/api/usage/limit?series=codex%7Cpersonal%7Cweekly&days=30"

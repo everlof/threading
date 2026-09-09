@@ -16,6 +16,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         static let windowFrame = CGRect(x: 0, y: 0, width: 390, height: 844)
         static let fontSize: CGFloat = 12
         static let scale: CGFloat = 3
+        static let paperclipAdditionalInset: CGFloat = 4
         /// A user-authored emoji cap on the top row, so the paperclip's pull is measured with
         /// the scrolling cap run beside it rather than a spacer.
         static let topRowEmoji = "🍕"
@@ -244,11 +245,10 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
 
     // MARK: - Margins
 
-    /// Both rows stand their outermost mark on the bar's one margin: the paperclip's ink where
-    /// the bottom row's first plate starts, and each row's last glyph the same distance in from
-    /// the other edge. Read off a drawn, hosted bar, because equal frames are not equal ink:
-    /// placed by its frame the paperclip stood eleven points inboard of the cap under it.
-    func testBothRowsStandTheirOutermostMarksOnOneMargin() throws {
+    /// Both trailing glyphs share the cap run's margin; the paperclip's angled outline keeps
+    /// four extra points at the leading edge. Read off a drawn, hosted bar, because equal
+    /// frames are not equal ink.
+    func testBothRowsKeepTheirOpticalMargins() throws {
         let store = MobileTerminalKeyboardStore(defaults: try XCTUnwrap(
             UserDefaults(suiteName: "TerminalKeyBarMargins-\(UUID().uuidString)")
         ))
@@ -333,8 +333,8 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         let farMargin = bitmap.width - 1 - margin
         let tolerance = Int(Fixture.scale)
         XCTAssertEqual(
-            paperclip, margin, accuracy: tolerance,
-            "the paperclip's ink is not on the cap run's margin"
+            paperclip, margin + Int(Fixture.paperclipAdditionalInset * Fixture.scale), accuracy: tolerance,
+            "the paperclip must stand four points inboard of the cap run's margin"
         )
         XCTAssertEqual(
             firstPlate, margin, accuracy: tolerance,

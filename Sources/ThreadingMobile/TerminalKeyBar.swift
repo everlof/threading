@@ -329,8 +329,8 @@ enum TerminalKeyBarMetrics {
     /// The air inside a cap around its label, and the air the cap run keeps between itself and
     /// whatever fixed thing bounds it: the bar's edge, the divider before the keyboard toggle,
     /// the paperclip's target. It is also the line both rows stand their outermost mark on —
-    /// the bottom row a cap's plate, the action row a glyph's ink — so the two rows read as
-    /// one bar rather than as a strip under a toolbar.
+    /// the bottom row a cap's plate, the action row a glyph's ink. The paperclip keeps one
+    /// additional tight inset so its angled outline has room beside the screen edge.
     static let keyPadding: CGFloat = 8
     /// The tight ink padding would let a lone arrow collapse to a sliver; a cap never gets
     /// narrower than a comfortable square.
@@ -541,8 +541,8 @@ struct TerminalKeyBar: View {
 
     /// The bar's full-height utilities and the optional top key run. Fixed controls keep their
     /// slots while the person's keys scroll through whatever width remains between them. The
-    /// outermost glyph at each end stands on the bar's margin by its ink, the line the bottom
-    /// row's caps stand on by their plates; see `TerminalKeyBarMetrics.edgeInset(for:weight:edge:)`.
+    /// trailing glyph stands on the bar's margin by its ink; the paperclip keeps one extra
+    /// tight inset. See `TerminalKeyBarMetrics.edgeInset(for:weight:edge:)`.
     private var actionRow: some View {
         let actionControls = TerminalKeyBarActionControls(
             customize: customize,
@@ -560,7 +560,7 @@ struct TerminalKeyBar: View {
                         for: TerminalKeyBarSymbols.attachments,
                         weight: .medium,
                         edge: .leading
-                    ))
+                    ) + MobileDesign.Spacing.tight)
             }
             if layout.keys(in: .top).isEmpty {
                 Spacer(minLength: 0)

@@ -650,6 +650,7 @@ public enum RemoteRoute: String, CaseIterable, Sendable {
     case me = "api/me"
     case search = "api/search"
     case usage = "api/usage"
+    case usageCapacity = "api/usage/capacity"
     case usageLimit = "api/usage/limit"
     case usageReset = "api/usage/reset"
     case session = "api/session"

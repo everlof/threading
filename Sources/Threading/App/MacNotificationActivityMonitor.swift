@@ -21,23 +21,35 @@ final class MacNotificationActivityMonitor {
     private let workspaceEvents = AppEventObservations(
         center: NSWorkspace.shared.notificationCenter
     )
+    private let visibleSessionID: @MainActor @Sendable () -> SessionID?
     private var isStarted = false
+
+    /// `visibleSessionID` is injected so the activation rule can be tested without a window:
+    /// coming to the front acknowledges the chat on screen and no other.
+    init(
+        visibleSessionID: @escaping @MainActor @Sendable () -> SessionID? = {
+            AgentRuntime.shared.visibleSessionID
+        }
+    ) {
+        self.visibleSessionID = visibleSessionID
+    }
 
     func start() {
         guard !isStarted else { return }
         isStarted = true
 
         let notifications = RemoteNotificationService.shared
+        let visibleSessionID = visibleSessionID
         if NSApp.isActive {
             // Installation happens after the main window exists, so an already-active app is a
             // real foreground use even if AppKit posted didBecomeActive before this observer.
-            notifications.recordMacInteraction()
+            notifications.macApplicationBecameActive(viewing: visibleSessionID())
         } else {
             notifications.setMacApplicationActive(false)
         }
 
         applicationEvents.observe(NSApplication.didBecomeActiveNotification) {
-            notifications.recordMacInteraction()
+            notifications.macApplicationBecameActive(viewing: visibleSessionID())
         }
         applicationEvents.observe(NSApplication.didResignActiveNotification) {
             notifications.setMacApplicationActive(false)

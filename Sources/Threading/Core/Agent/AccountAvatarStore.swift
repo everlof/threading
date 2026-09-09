@@ -104,6 +104,18 @@ enum AccountAvatarStore {
         return resolved
     }
 
+    /// Bounded callers can warm the name cache without introducing file reads on the main actor.
+    @MainActor
+    static func primeEmails(for accounts: [AgentAccount]) async {
+        let missing = accounts.filter { emailCache[$0.id] == nil }
+        let resolved = await Task.detached(priority: .utility) {
+            missing.map { ($0.id, email(for: $0)) }
+        }.value
+        for (id, email) in resolved where emailCache[id] == nil {
+            emailCache[id] = .some(email)
+        }
+    }
+
     /// A JWT's payload claims, decoded locally. No verification and no use of the token —
     /// the claims are the only thing read.
     static func jwtClaims(_ token: String) -> [String: Any]? {

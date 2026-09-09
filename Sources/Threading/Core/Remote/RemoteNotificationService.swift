@@ -325,6 +325,19 @@ final class RemoteNotificationService {
         turnDeliveryCoordinator.macInteracted(at: uptime)
     }
 
+    /// The application came to the front, with `sessionID` on screen if any chat is.
+    ///
+    /// Deliberately not `recordMacInteraction`: activation is presence, not an answer for every
+    /// chat this Mac holds. Only the visible one has been seen. See
+    /// `RemoteTurnNotificationDeliveryCoordinator.macBecameActive(at:viewing:)`.
+    func macApplicationBecameActive(
+        viewing sessionID: SessionID?,
+        at uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        turnDeliveryCoordinator.macBecameActive(at: uptime, viewing: sessionID)
+        responseDeliveryCoordinator.presenceChanged()
+    }
+
     func recordInteraction(
         sessionID: SessionID,
         authorization: RemoteAuthorization
@@ -733,24 +746,26 @@ final class RemoteNotificationService {
             deviceID: target.deviceID
         )
         guard let sessionID = SessionID(uuidString: event.sessionID) else {
-            completion(.init(accepted: false, statusCode: nil, providerTrace: nil))
+            completion(.refusedLocally("sessionIdentity"))
             return
         }
         Task { @MainActor [weak self] in
-            guard let self,
-                  let subscription = self.subscriptions[key],
-                  !subscription.authorization.isExpired,
-                  subscription.enabledKinds.contains(event.kind),
-                  subscription.authorization.scope.covers(sessionID),
-                  Self.participantID(for: subscription.authorization)
-                    == target.participantID,
-                  (event.kind != .turnCompleted
-                    || previewConsent == subscription.includesResponsePreviews),
-                  event.kind == .turnCompleted || self.responseDeliveryCoordinator.canSend(event, to: .init(
-                      shareID: target.shareID, deviceID: target.deviceID, participantID: target.participantID
-                  ))
-            else {
-                completion(.init(accepted: false, statusCode: nil, providerTrace: nil))
+            guard let self else {
+                completion(.refusedLocally("hostGone"))
+                return
+            }
+            if let refusal = self.pushRefusal(
+                event,
+                to: target,
+                key: key,
+                sessionID: sessionID,
+                previewConsent: previewConsent
+            ) {
+                completion(.refusedLocally(refusal))
+                return
+            }
+            guard let subscription = self.subscriptions[key] else {
+                completion(.refusedLocally("unregistered"))
                 return
             }
             let hostedURL = RemoteNotificationSubscriptionDefaults.normalizedHostedServiceURL(
@@ -776,11 +791,18 @@ final class RemoteNotificationService {
                     subscription.soundEnabledKinds.contains(event.kind)
                 )
             } else {
-                result = RemoteAPNSDeliveryResult(
-                    statusCode: nil,
-                    reason: "Push provider unavailable.",
-                    apnsID: nil
-                )
+                // Named rather than reported as a transport failure: no request was made, and
+                // which of the three reasons applies is the difference between "configure a
+                // provider", "this phone has not registered" and "that registration belongs to
+                // a service this Mac no longer talks to".
+                completion(.refusedLocally(
+                    self.hostedPushSender == nil
+                        ? "providerUnavailable"
+                        : subscription.hostedRegistrationID == nil
+                            ? "unregisteredDevice"
+                            : "registrationRetired"
+                ))
+                return
             }
             completion(.init(
                 accepted: result.accepted,
@@ -789,6 +811,34 @@ final class RemoteNotificationService {
                 failureCode: result.failureCode
             ))
         }
+    }
+
+    /// Why this push must not be attempted, by name, or `nil` where it may go ahead.
+    ///
+    /// This is the revalidation immediately before network I/O that authorization and consent
+    /// both depend on. It answers by cause because "refused" with no HTTP status and no code
+    /// is unattributable afterwards: 835 completion refusals in the week to 8 September 2026
+    /// arrived that way and could not be told apart from a network fault.
+    private func pushRefusal(
+        _ event: RemoteNotificationEventDTO,
+        to target: RemoteNotificationTargetIdentity,
+        key: RemoteNotificationSubscriptionKey,
+        sessionID: SessionID,
+        previewConsent: Bool?
+    ) -> String? {
+        guard let subscription = subscriptions[key] else { return "unregistered" }
+        if subscription.authorization.isExpired { return "authorizationExpired" }
+        if !subscription.enabledKinds.contains(event.kind) { return "kindDisabled" }
+        if !subscription.authorization.scope.covers(sessionID) { return "outOfScope" }
+        if Self.participantID(for: subscription.authorization) != target.participantID {
+            return "participantChanged"
+        }
+        if event.kind == .turnCompleted {
+            return previewConsent == subscription.includesResponsePreviews
+                ? nil
+                : "previewConsentChanged"
+        }
+        return responseDeliveryCoordinator.canSend(event, to: target) ? nil : "answered"
     }
 
     private func sendRetraction(
@@ -863,7 +913,10 @@ final class RemoteNotificationService {
             level: phase == "refused" ? .warning : .info,
             fields: safeFields
         )
-        EventLog.shared.record(.remote, "Remote notification delivery", [
+        // Why, not only what. The durable journal is the only record a support report carries,
+        // and a `refused` line without its status and cause left a week of failures readable as
+        // a count and nothing else. Every field here is an enum token, a status or a number.
+        var record = [
             "notification": context.eventID,
             "kind": RemoteNotificationKind.turnCompleted.rawValue,
             "phase": phase,
@@ -871,7 +924,13 @@ final class RemoteNotificationService {
             "queue": fields[.queueSize] ?? "0",
             "preview": fields[.previewPresent] ?? "false",
             "previewBytes": fields[.previewBytes] ?? "0",
-        ])
+        ]
+        record["reason"] = fields[.reason]
+        record["status"] = fields[.status]
+        record["code"] = fields[.code]
+        record["transport"] = fields[.transport]
+        record["activity"] = fields[.activitySource]
+        EventLog.shared.record(.remote, "Remote notification delivery", record)
     }
 
     private static func participantID(

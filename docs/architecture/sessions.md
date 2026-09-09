@@ -1263,8 +1263,10 @@ The rules, each of which is the answer to a way this goes wrong:
 - **Boot noise raises no flags.** Every launch before this one was made by selecting the
   session, so the activity tracker could assume boot output happens on screen. Unattended,
   the resume's repaint would read as a turn, go quiet, and land every restored session on
-  `needsAttention` — one silent notification each. `noteUnattendedLaunch` grants a grace
-  that ends at the first look or the first reported turn; see
+  `needsAttention` — one silent notification each. A selected terminal launch with no opening
+  prompt grants the same grace, because switching away during boot does not submit work.
+  `noteUnattendedLaunch` grants a grace that ends at actual input or a reported turn boundary;
+  looking at the session does not end it. See
   [`session-activity.md`](session-activity.md).
 
 - **Closing the window is a quit, and takes the quit's path** (`MainWindowController`

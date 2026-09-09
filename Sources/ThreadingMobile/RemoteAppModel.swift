@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingGlanceKit
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
@@ -391,6 +392,12 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var routeWalkStatus: RouteWalkStatus?
     @Published private(set) var activeHostID: String?
     @Published private(set) var storageIssue: String? = nil
+    @Published private(set) var widgetHostID: String?
+    @Published private(set) var widgetIssue: MobileUsageGlanceIssue?
+    @Published var widgetUsageRoute: UsageGlanceRoute?
+    @Published private(set) var widgetUsageFocus: MobileUsageAccountFocus?
+    @Published private(set) var widgetUsageFocusReady = false
+    var usageGlance: MobileUsageGlancePublisher?
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
     @Published var isPairing = false
     /// An invitation the operating system delivered, held until the pairing screen takes it.
@@ -931,6 +938,36 @@ final class RemoteAppModel: ObservableObject {
         me?.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) == true
     }
 
+    func installUsageGlancePublisher(_ publisher: MobileUsageGlancePublisher) {
+        usageGlance = publisher
+        widgetHostID = publisher.pairingID
+        publisher.reportIssue = { [weak self, weak publisher] issue in
+            self?.widgetIssue = issue
+            self?.widgetHostID = publisher?.pairingID
+        }
+        if storageIssue == nil, let pinned = publisher.pairingID, !hosts.contains(where: { $0.id == pinned }) {
+            publisher.choose(nil)
+            widgetHostID = nil
+        }
+    }
+
+    func setWidgetsEnabled(_ enabled: Bool) {
+        usageGlance?.choose(enabled ? activeHostID : nil)
+        widgetHostID = usageGlance?.pairingID
+        if enabled { refreshUsageGlance(features: me?.features) }
+    }
+
+    private func refreshUsageGlance(features: [String]?) {
+        guard !isDemo, !isEphemeralTerminalWireFixture,
+              let host = activeHost, host.id == usageGlance?.pairingID,
+              let client else { return }
+        guard features?.contains(RemoteRESTFeature.usageCapacity.rawValue) == true else {
+            widgetIssue = .hostUpdateNeeded
+            return
+        }
+        usageGlance?.refresh(pairingID: host.id, hostName: host.name, client: client)
+    }
+
     /// Whether the Mac answers the continuation route at all. An older one does not, and the
     /// phone then offers no such control rather than asking and reporting the 404 as a failure.
     var canContinueChatsElsewhere: Bool {
@@ -950,6 +987,27 @@ final class RemoteAppModel: ObservableObject {
     /// somebody else's Mac, which is not something a tap should do without showing its work.
     @discardableResult
     func open(_ url: URL) -> Bool {
+        if let route = UsageGlanceRoute(url: url) {
+            guard hosts.contains(where: { $0.id == route.pairingID }) else { return true }
+            selectHost(route.pairingID)
+            navigationPath.removeAll()
+            widgetUsageRoute = route
+            widgetUsageFocus = nil
+            widgetUsageFocusReady = false
+            Task { [weak self] in
+                let snapshot = try? await UsageGlanceStore.shared.read()
+                guard let self, widgetUsageRoute == route else { return }
+                if snapshot?.pairingID == route.pairingID,
+                   let account = snapshot?.account(id: route.accountID) {
+                    widgetUsageFocus = MobileUsageAccountFocus(runtimeName: account.runtimeName,
+                        accountName: account.accountName,
+                        accountID: "\(account.runtimeID):\(account.accountID)")
+                }
+                widgetUsageFocusReady = true
+                await refresh(reason: .userCheck)
+            }
+            return true
+        }
         guard MobileInvitationRoute(url: url) != nil else { return false }
         pendingInvitation = url.absoluteString
         isPairing = true
@@ -1261,6 +1319,7 @@ final class RemoteAppModel: ObservableObject {
 
     func selectHost(_ id: String) {
         guard hosts.contains(where: { $0.id == id }), activeHostID != id else { return }
+        usageGlance?.suspend()
         disconnectThemeEvents()
         discardHostedConnection()
         invalidateRefreshes()
@@ -1284,6 +1343,10 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         discardDashboardSnapshot(for: host.id)
+        if usageGlance?.pairingID == host.id {
+            usageGlance?.choose(nil)
+            widgetHostID = nil
+        }
         RemoteHostTrust.forget(host, remaining: hosts)
         invalidateRefreshes()
         if activeHostID == host.id {
@@ -1553,6 +1616,10 @@ final class RemoteAppModel: ObservableObject {
                 return
             }
             if MobileDashboardCachePolicy.discardsSnapshot(after: error) {
+                if usageGlance?.pairingID == hostID {
+                    usageGlance?.choose(nil)
+                    widgetHostID = nil
+                }
                 // A revoked or expired membership invalidates both the list and its live-looking
                 // predecessor. Ordinary transport failures keep the last-good presentation.
                 me = nil
@@ -1679,6 +1746,7 @@ final class RemoteAppModel: ObservableObject {
             // couch use the tailnet address from the train with no further ceremony.
             RemoteHostTrust.register([updated])
             ensureThemeEvents(for: updated)
+            refreshUsageGlance(features: response.features)
         }
         if !isEphemeralTerminalWireFixture {
             await reconcileHostedCredential(
@@ -1721,6 +1789,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     func suspendHostedConnections() {
+        usageGlance?.suspend()
         invalidateRefreshes()
         disconnectThemeEvents()
         discardHostedConnection()
@@ -2381,6 +2450,7 @@ final class RemoteAppModel: ObservableObject {
 
     func restoreRouteIfPossible(hostID: String, response: RemoteMeDTO) {
         guard pendingNotificationOpen == nil,
+              widgetUsageRoute == nil,
               navigationPath.isEmpty,
               let route = continuity.lastRoute,
               route.hostID == hostID,
@@ -3720,6 +3790,7 @@ final class RemoteAppModel: ObservableObject {
                 }
                 switch envelope.type {
                 case "catalogueHello":
+                    refreshUsageGlance(features: me?.features)
                     guard let streamID = envelope.streamID, !streamID.isEmpty,
                           let revision = envelope.revision else {
                         throw RemoteClientError.invalidResponse
@@ -3740,6 +3811,8 @@ final class RemoteAppModel: ObservableObject {
                     ) {
                         me = me?.replacing(theme: update.theme)
                     }
+                case "usageCapacityChanged":
+                    refreshUsageGlance(features: me?.features)
                 case "sessionsChanged":
                     let update = RemoteSessionsChangedDTO(
                         session: envelope.session,

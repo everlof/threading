@@ -98,6 +98,20 @@ struct MobileSettingsView: View {
                         }
                     }
 
+                    settingsSection("Widgets", footer: widgetFooter) {
+                        SettingsToggleRow(
+                            symbol: "chart.pie",
+                            title: "Use this Mac for widgets",
+                            detail: model.activeHost.map { LocalizedStringKey($0.name) },
+                            isOn: Binding(
+                                get: { model.widgetHostID != nil && model.widgetHostID == model.activeHostID },
+                                set: { model.setWidgetsEnabled($0) }
+                            )
+                        )
+                        .disabled(model.isDemo || model.activeHost == nil
+                            || (model.widgetHostID != model.activeHostID && !model.canReadUsage))
+                    }
+
                     settingsSection("Support") {
                         SettingsNavigationRow(
                             symbol: "stethoscope",
@@ -147,6 +161,14 @@ struct MobileSettingsView: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private var widgetFooter: String {
+        if let issue = model.widgetIssue { return issue.message }
+        return MobileL10n.string(
+            "Add a Threading widget from the Home Screen or Lock Screen, then edit it to choose an account. "
+                + "Usage updates while this Mac is open on your iPhone. Older readings are marked as cached."
+        )
     }
 
     /// A titled group of rows, with an optional line under it saying what they are.

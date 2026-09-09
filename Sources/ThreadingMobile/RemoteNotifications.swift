@@ -260,6 +260,9 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         model = RemoteAppModel(continuity: continuity)
         notifications = RemoteNotificationManager()
         super.init()
+        if NSClassFromString("XCTestCase") == nil, !model.isDemo, !model.isEphemeralTerminalWireFixture {
+            model.installUsageGlancePublisher(MobileUsageGlancePublisher())
+        }
         notifications.routePlanner = { [weak model] host in
             await model?.registrationRoutes(for: host) ?? host.candidates
         }
@@ -573,6 +576,7 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
             // on top, constructing two detail controllers for one scene connection.
             appDelegate.openNotification(from: response, origin: .connectingScene)
         }
+        open(connectionOptions.urlContexts)
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = appDelegate.makeRootViewController()
         self.window = window
@@ -580,7 +584,6 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 #if DEBUG
         MobileUIEvidenceCapture.startIfRequested(in: window)
 #endif
-        open(connectionOptions.urlContexts)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {

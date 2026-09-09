@@ -156,6 +156,19 @@ final class PTYHostSessionTests: XCTestCase {
 
     // MARK: - Query replies
 
+    func testACutReplayBellIsSilentButANewLiveBellStillArrives() throws {
+        let hosted = try makeHostedTerminalView()
+        var bells = 0
+        hosted.view.onBell = { bells += 1 }
+        hosted.view.feedFromHost([0x07], answersQueries: false)
+        settle()
+        XCTAssertEqual(bells, 0, "history cannot ring or raise a fresh attention episode")
+
+        hosted.view.feedFromHost([0x07], answersQueries: true)
+        settle()
+        XCTAssertEqual(bells, 1, "a new bell must survive the end of replay suppression")
+    }
+
     /// A live `DA2` is answered; a replayed one is not.
     ///
     /// P1's rule, asserted the only way it can be: by counting what left towards the child. The

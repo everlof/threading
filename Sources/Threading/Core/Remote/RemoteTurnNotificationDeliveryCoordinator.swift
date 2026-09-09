@@ -381,6 +381,32 @@ final class RemoteTurnNotificationDeliveryCoordinator {
         }
     }
 
+    /// Threading came to the front.
+    ///
+    /// Presence resumes for the whole participant, so later completions defer again. Only the
+    /// chat on screen has been *seen*: being in the app is not the same as having looked at
+    /// every one of them, which is the rule `AttentionAlertCenter` already applies to its own
+    /// banners — it withdraws the visible session's and leaves the rest standing. Activation
+    /// used to route through `macInteracted`, so a one-second glance at Threading retracted
+    /// every accepted completion push on the phone, for chats the user never opened.
+    ///
+    /// A push still in flight when this arrives is a separate question, and its answer has not
+    /// moved: `pushFinished` retracts it because the participant is active again, whichever
+    /// session it belonged to. What that rule cannot reach is a push already delivered.
+    func macBecameActive(at uptime: TimeInterval, viewing sessionID: SessionID?) {
+        pruneAcceptedDeliveries()
+        activity.recordMacInteraction(at: uptime)
+        guard let sessionID else { return }
+        invalidate(
+            where: { $0.participantID == .owner && $0.sessionID == sessionID },
+            reason: "viewed"
+        )
+        retract(
+            where: { $0.context.participantID == .owner && $0.context.sessionID == sessionID },
+            reason: "macViewed"
+        )
+    }
+
     func setMacApplicationActive(_ isActive: Bool) {
         activity.setMacApplicationActive(isActive)
         guard !isActive else { return }
@@ -527,7 +553,7 @@ final class RemoteTurnNotificationDeliveryCoordinator {
             .transport: "apns",
             .attempt: "1",
             .result: result.accepted ? "accepted" : "refused",
-            .status: result.statusCode.map(String.init) ?? "transport",
+            .status: result.diagnosticStatus,
         ]
         if let providerTrace = result.providerTrace { fields[.providerTrace] = providerTrace }
         if let failureCode = result.failureCode { fields[.code] = failureCode }

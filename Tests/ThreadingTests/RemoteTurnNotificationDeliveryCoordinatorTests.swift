@@ -358,6 +358,69 @@ final class RemoteTurnNotificationDeliveryCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.retractions.map(\.value.eventID), ["event-1"])
     }
 
+    /// Coming to the front is presence, not an answer for every chat this Mac holds. It used to
+    /// route through `macInteracted`, so a one-second glance at Threading retracted every
+    /// accepted completion push on the phone — including chats the user never opened, while the
+    /// Mac's own banners for those same chats deliberately stayed up.
+    func testActivationAcknowledgesOnlyTheChatOnScreen() {
+        let viewed = SessionID()
+        let other = SessionID()
+        let harness = Harness(window: 120, sessionID: viewed)
+        harness.activity.setMacApplicationActive(false)
+
+        harness.coordinator.completed(harness.completion(eventID: "viewed", sessionID: viewed))
+        harness.coordinator.completed(harness.completion(eventID: "other", sessionID: other))
+        XCTAssertEqual(harness.pushes.count, 2)
+
+        harness.clock.uptime = 20
+        harness.coordinator.macBecameActive(at: 20, viewing: viewed)
+
+        XCTAssertEqual(harness.retractions.map(\.value.eventID), ["viewed"])
+        // Presence still resumed, so the next completion defers rather than pushing.
+        harness.generation = 2
+        harness.coordinator.completed(
+            harness.completion(eventID: "later", sessionID: other)
+        )
+        XCTAssertEqual(harness.pushes.count, 2)
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+    }
+
+    /// The pending queue follows the same rule: the chat on screen has been seen, the rest are
+    /// merely deferred behind a Mac that is in use again.
+    func testActivationInvalidatesOnlyTheViewedSessionsDeferredWork() {
+        let viewed = SessionID()
+        let other = SessionID()
+        let harness = Harness(window: 120, sessionID: viewed)
+        harness.activity.setMacApplicationActive(true)
+        harness.activity.recordMacInteraction(at: 10)
+
+        harness.coordinator.completed(harness.completion(eventID: "viewed", sessionID: viewed))
+        harness.coordinator.completed(harness.completion(eventID: "other", sessionID: other))
+        XCTAssertEqual(harness.coordinator.pendingCount, 2)
+
+        harness.coordinator.macBecameActive(at: 20, viewing: viewed)
+
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+        XCTAssertTrue(harness.pushes.isEmpty)
+        harness.clock.uptime = 200
+        harness.scheduler.fireDue(now: 200)
+        XCTAssertEqual(harness.pushes.map(\.event.id), ["other"])
+    }
+
+    /// A refusal decided on this Mac never reached a server, so reporting it as `transport`
+    /// makes it indistinguishable from a network fault afterwards. It says which one it was.
+    func testLocallyRefusedPushIsNotReportedAsATransportFailure() {
+        let harness = Harness(window: 0)
+        harness.pushResult = .refusedLocally("providerUnavailable")
+
+        harness.coordinator.completed(harness.completion())
+
+        let refusal = harness.diagnostics.last { $0.fields[.phase] == "refused" }
+        XCTAssertEqual(refusal?.fields[.status], "local")
+        XCTAssertEqual(refusal?.fields[.code], "providerUnavailable")
+        XCTAssertEqual(refusal?.fields[.result], "refused")
+    }
+
     func testBrokerRejectionKeepsHTTPStatusAndMachineCodeInDiagnostics() {
         let harness = Harness(window: 0)
         harness.completesPushesImmediately = false
@@ -412,6 +475,11 @@ private final class Harness {
     var retractions: [Retraction] = []
     var diagnostics: [Diagnostic] = []
     var completesPushesImmediately = true
+    var pushResult = RemoteNotificationPushResult(
+        accepted: true,
+        statusCode: 200,
+        providerTrace: "apns-1"
+    )
     var pendingPushCompletions: [@MainActor (RemoteNotificationPushResult) -> Void] = []
     lazy var coordinator = RemoteTurnNotificationDeliveryCoordinator(
         clock: clock,
@@ -429,11 +497,7 @@ private final class Harness {
         },
         pushSink: { [unowned self] event, target, completion in
             self.pushes.append(Push(event: event, target: target))
-            let result = RemoteNotificationPushResult(
-                accepted: true,
-                statusCode: 200,
-                providerTrace: "apns-1"
-            )
+            let result = self.pushResult
             if self.completesPushesImmediately {
                 completion(result)
             } else {

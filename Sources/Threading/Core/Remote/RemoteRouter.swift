@@ -131,6 +131,7 @@ struct RemoteRouter {
     static let apiSessionsPath = RemoteRoute.me.absolutePath
     static let searchPath = RemoteRoute.search.absolutePath
     static let searchResolvePath = RemoteRoute.search.prefix + "resolve"
+    static let usageCapacityPath = RemoteRoute.usageCapacity.absolutePath
     static let usagePath = RemoteRoute.usage.absolutePath
     static let usageLimitPath = RemoteRoute.usageLimit.absolutePath
     static let usageResetPath = RemoteRoute.usageReset.absolutePath

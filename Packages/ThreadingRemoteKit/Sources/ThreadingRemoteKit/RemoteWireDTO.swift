@@ -1312,6 +1312,7 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
 /// Optional REST surfaces advertised by `GET /api/me`. Raw strings keep discovery additive:
 /// older clients ignore the field and newer clients can ignore feature names they do not know.
 public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
+    case usageCapacity = "usage-capacity"
     /// Owner-device search across the Mac's bounded structured and indexed providers. Results
     /// carry short-lived opaque resolution tokens rather than host-side locator identities.
     case universalSearch = "universal-search"
@@ -3604,6 +3605,29 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
         self.destination = destination
         self.createdAt = createdAt
         self.turnGeneration = turnGeneration
+    }
+
+    /// The same event without the field a hosted broker older than its sender will refuse.
+    ///
+    /// The generation is a sender-side delivery fact: it decides which pending or accepted work
+    /// an arriving completion supersedes, and every one of those decisions is taken on the Mac
+    /// before the push leaves. No receiver reads it, so omitting it costs a recipient nothing —
+    /// while sending it to a service whose key list predates it costs the entire notification.
+    public func omittingTurnGeneration() -> RemoteNotificationEventDTO {
+        guard turnGeneration != nil else { return self }
+        return RemoteNotificationEventDTO(
+            id: id,
+            kind: kind,
+            hostID: hostID,
+            sessionID: sessionID,
+            title: title,
+            body: body,
+            titleLocalization: titleLocalization,
+            bodyLocalization: bodyLocalization,
+            destination: destination,
+            createdAt: createdAt,
+            turnGeneration: nil
+        )
     }
 
     private enum CodingKeys: String, CodingKey {

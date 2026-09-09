@@ -36,7 +36,9 @@ Five guards and one interaction boundary keep it honest:
 - An **unattended-launch grace** (`noteUnattendedLaunch`). The startup relaunch (see
   [`sessions.md`](sessions.md)) boots sessions with nobody looking, where every earlier
   launch was a selection — so the tracker could assume boot output happens on screen, where
-  it opens no flag. Unattended, the resume's repaint would read as a turn, go quiet, and
+  it opens no flag. A terminal launch with no opening prompt now grants the same grace even
+  when selected: switching away during boot cannot turn its repaint into completed work.
+  Unattended, the resume's repaint would read as a turn, go quiet, and
   land every restored session on `needsAttention` with a notification apiece. While the
   grace holds, nothing the process emits on its own raises a flag: output opens no inferred
   turn, a bell does not flag, and Claude's idle-prompt `Notification` — which a relaunched
@@ -702,7 +704,7 @@ app is inactive posts too — that case exists because the visible session settl
 precisely so it needs no in-app flag, and a native conversation reports `idle` off screen as
 well. `AttentionAlertPolicy` is the pure judgement, tested as a matrix; `AttentionAlertCenter`
 owns delivery. Three rules keep it honest: the `.finished` alert is gated on
-`AgentRuntime.reportsOwnTurns` (a shell's working→idle is a quiet timer expiring, and
+the runtime snapshot's `reportsOwnTurns` (a shell's working→idle is a quiet timer expiring, and
 notifying on each `ls` would bury the rest); banners are suppressed while the app is frontmost
 (`willPresent` returns nothing — in-app, the sidebar mark and the permission card are the
 cues); and every alert is withdrawn the moment it stops being true — the edge out of an
@@ -710,6 +712,26 @@ attention state, the session coming on screen (`setVisibleSession` →
 `sessionWasViewed`), or the app coming back to the front over the visible session. Hygiene is
 half the feature. `start()` runs only from the real app startup, which is what keeps
 `UNUserNotificationCenter` and its permission prompt out of the test host.
+
+A repeated alert is quieted for 30 minutes and no longer for ever. The announcement that makes a
+repeat legible is otherwise cleared by one thing, looking at the session, so a question answered
+on the phone or one the agent moved past by itself left the next alert on this Mac passive until
+that chat was opened here. Two different events were sharing one rule: 1,158 repeats over 1–8
+September 2026 had a median gap of one second and a maximum of an hour and 41 minutes. The first
+is the burst the rule exists for; the second is news.
+
+`AttentionAlertDeliveryLedger` owns what is on screen, what each session was last told, and a
+claim for each post still waiting on the system's authorization answer. That answer arrives on
+its own queue, so a post is not a delivery: every withdrawal invalidates the claims standing
+against its session, and only a spent claim records anything. Before that, an alert the system
+refused was still counted as delivered and still quieted the next real one, and a question asked
+and answered a few milliseconds apart could remove the banner and then add it.
+
+The input to that policy is the captured `SessionRuntimeDidChange` transition, through
+`AttentionAlertRuntimeObserver`, never a later read of the owner's badge projection. The
+`SessionActivityDidChange` presentation channel also fires when persistent unread receipts are
+restored and cannot authorize a new banner. Deferred posts check that their runtime snapshot
+still holds, so a prompt already answered does not get re-announced.
 
 ### The alert journal
 

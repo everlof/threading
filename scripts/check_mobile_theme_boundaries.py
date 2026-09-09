@@ -192,6 +192,8 @@ def main(repository: str) -> int:
     failures: list = []
     for path in sorted(root.rglob("*.swift")):
         check_file(path, str(path.relative_to(repository)), failures)
+    for path in sorted((pathlib.Path(repository) / "Targets/ThreadingGlance").rglob("*.swift")):
+        check_file(path, str(path.relative_to(repository)), failures)
 
     for failure in failures:
         print(failure, file=sys.stderr)

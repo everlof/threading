@@ -35,11 +35,12 @@ CATALOG_PATH = "Sources/Threading/Resources/Localizable.xcstrings"
 MOBILE_SOURCE_ROOT = "Sources/ThreadingMobile"
 MOBILE_CATALOG_PATH = "Sources/ThreadingMobile/Localizable.xcstrings"
 MOBILE_INFO_CATALOG_PATH = "Sources/ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings"
+WIDGET_CATALOG_PATH = "Targets/ThreadingGlance/Localizable.xcstrings"
 # Every catalogue Xcode may rewrite is kept in xcstringstool's layout. The two Localizable
 # catalogues additionally declare every entry manual; the Info.plist one keeps Xcode's own
 # extracted states because its values genuinely come from Info.plist.
-CANONICAL_CATALOG_PATHS = (CATALOG_PATH, MOBILE_CATALOG_PATH, MOBILE_INFO_CATALOG_PATH)
-MANUAL_CATALOG_PATHS = (CATALOG_PATH, MOBILE_CATALOG_PATH)
+CANONICAL_CATALOG_PATHS = (CATALOG_PATH, MOBILE_CATALOG_PATH, MOBILE_INFO_CATALOG_PATH, WIDGET_CATALOG_PATH)
+MANUAL_CATALOG_PATHS = (CATALOG_PATH, MOBILE_CATALOG_PATH, WIDGET_CATALOG_PATH)
 FORMAT_COMMAND = "python3 scripts/localization_boundary_lint.py . --format"
 REMOTE_CLIENT_ROOT = "Sources/Threading/Resources/RemoteClient"
 REMOTE_LOCALIZATION_SOURCES = (
@@ -1033,6 +1034,8 @@ def main() -> int:
             f'missing source key "{key}"',
         ))
     findings.extend(audit_mobile(root))
+    _, widget_findings = load_translated_catalog(root, WIDGET_CATALOG_PATH)
+    findings.extend(widget_findings)
     findings.extend(audit_remote_client(root))
     findings.extend(canonical_findings(root))
 

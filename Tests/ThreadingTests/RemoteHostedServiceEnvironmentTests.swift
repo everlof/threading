@@ -99,4 +99,85 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
         XCTAssertEqual(result.reason, "Hosted retraction broker was unavailable.")
         XCTAssertFalse(result.accepted)
     }
+
+    // MARK: - What A Deployed Broker Will Accept
+
+    /// The broker validates a notification against an exact key list, so one field it has not
+    /// heard of costs the whole push. A service too old to publish a version answers 0, which is
+    /// the same decision as a version below the one that introduced the field.
+    func testTurnGenerationIsSentOnlyToABrokerThatPublishesItsVersion() {
+        let event = RemoteNotificationEventDTO(
+            id: "event-1",
+            kind: .turnCompleted,
+            hostID: "host",
+            sessionID: "session",
+            title: "Chat",
+            body: "Finished its turn.",
+            turnGeneration: 7
+        )
+
+        for version in [0, 1] {
+            XCTAssertNil(
+                RemoteNotificationBrokerCompatibility
+                    .payload(event, forBrokerVersion: version).turnGeneration,
+                "a broker publishing \(version) refuses the field"
+            )
+        }
+        XCTAssertEqual(
+            RemoteNotificationBrokerCompatibility
+                .payload(event, forBrokerVersion: RemoteNotificationBrokerCompatibility
+                    .turnGenerationVersion).turnGeneration,
+            7
+        )
+    }
+
+    /// Only that field goes. A completion whose body is a consented preview must still arrive as
+    /// one, and the identity every retraction matches on cannot move.
+    func testOmittingTheGenerationChangesNothingElseAboutTheEvent() {
+        let event = RemoteNotificationEventDTO(
+            id: "event-1",
+            kind: .turnCompleted,
+            hostID: "host",
+            sessionID: "session",
+            title: "Chat",
+            body: "Renamed the two callers.",
+            destination: .session,
+            createdAt: 1_757_000_000,
+            turnGeneration: 7
+        )
+
+        let reduced = RemoteNotificationBrokerCompatibility.payload(event, forBrokerVersion: 1)
+
+        XCTAssertEqual(reduced.id, event.id)
+        XCTAssertEqual(reduced.kind, event.kind)
+        XCTAssertEqual(reduced.hostID, event.hostID)
+        XCTAssertEqual(reduced.sessionID, event.sessionID)
+        XCTAssertEqual(reduced.title, event.title)
+        XCTAssertEqual(reduced.body, event.body)
+        XCTAssertNil(reduced.bodyLocalization)
+        XCTAssertEqual(reduced.destination, event.destination)
+        XCTAssertEqual(reduced.createdAt, event.createdAt)
+        XCTAssertEqual(
+            RemoteAPNSPushSender.collapseIdentifier(for: reduced),
+            RemoteAPNSPushSender.collapseIdentifier(for: event)
+        )
+    }
+
+    /// An event that never carried a generation is returned untouched, so the reduction cannot
+    /// re-encode a question or a person-to-person request on its way to an older service.
+    func testAnEventWithoutAGenerationIsUnchanged() {
+        let event = RemoteNotificationEventDTO(
+            kind: .agentQuestion,
+            hostID: "host",
+            sessionID: "session",
+            title: "Chat",
+            body: "Open the chat to answer."
+        )
+
+        XCTAssertEqual(
+            RemoteNotificationBrokerCompatibility.payload(event, forBrokerVersion: 0),
+            event
+        )
+    }
+
 }

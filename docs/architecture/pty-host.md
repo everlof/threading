@@ -1076,6 +1076,9 @@ admitted.
   answered, once, late. `ringOffset` is what proves they are new.
 - `.cut` — the replay is fed with the emulator's replies suppressed. History is not a live query,
   and a stale `DA` reply reaching a program that already had one is worse than silence.
+  The same feed scope suppresses delivered BEL callbacks: a historical bell must not ring or
+  create a new attention episode. This scope outlives the feed until queued emulator callbacks
+  drain; the tracker-level replay grace alone ends too early for a coalesced bell.
 
 The boundary between the replay and the live output behind it is the one thing the wire does not
 carry. The daemon queues the whole replay from its serial queue before it binds the connection, so

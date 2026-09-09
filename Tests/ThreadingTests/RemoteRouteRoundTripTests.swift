@@ -97,6 +97,8 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                     try wirePath(link.usageURL(cursor: "cursor-1", limit: 25)),
                     RemoteRouter.usagePath
                 )
+            case .usageCapacity:
+                XCTAssertEqual(try wirePath(link.usageCapacityURL), RemoteRouter.usageCapacityPath)
             case .usageLimit:
                 XCTAssertEqual(
                     try wirePath(link.usageLimitURL(seriesID: "series-1", days: 7)),
@@ -524,7 +526,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             case .session, .terminal:
                 // Composed from segments rather than spelled whole — pinned by the test below.
                 spelledWhole = false
-            case .search, .usage, .usageLimit, .usageReset, .theme, .notifications, .localDiagnosticsCapture,
+            case .search, .usage, .usageCapacity, .usageLimit, .usageReset, .theme, .notifications, .localDiagnosticsCapture,
                  .hostedDeviceCredential, .settings:
                 // Native-client surfaces the browser page does not offer. If one of these gains
                 // a browser affordance, move it into the first arm rather than leaving it here.

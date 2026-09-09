@@ -402,7 +402,8 @@ final class SessionActivityTracker {
     /// stale result; restarting the count as well would let one collide with a live turn.
     private(set) var turnGeneration = 0
 
-    /// Whether the session is asking for something and cannot continue until it is answered.
+    /// The inferred attention flag: a possible response request inside an open turn, or an
+    /// unread result after the turn ends. Only the first is an operational blocker.
     ///
     /// Held apart from the turn because the two are independent — the flag can be raised and
     /// lowered several times inside one turn.
@@ -484,7 +485,10 @@ final class SessionActivityTracker {
         case .delegated: .delegated
         case .standing: .standing
         }
-        let blocker: SessionRuntimeBlocker = if !openAsks.isEmpty || awaitsUser {
+        // After a turn ends, `awaitsUser` is an unread result, not an unanswered question.
+        // Keep the same distinction as settle(): only an open turn can be inferred blocked;
+        // an explicit ask owns its lifetime independently of the reported turn boundaries.
+        let blocker: SessionRuntimeBlocker = if !openAsks.isEmpty || (turnInFlight && awaitsUser) {
             .awaitingUser
         } else if limitPark == .flagged {
             .usageLimit

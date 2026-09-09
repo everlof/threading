@@ -10,6 +10,12 @@ import XCTest
 /// session (`AppSettings` and `AttentionAlertScope`). Only delivery needs the center. The
 /// icon attachment — the banner carrying the project's face — is pure for the same reason,
 /// and checked here too.
+private extension AttentionAlertAnnouncement {
+    static func unread(at date: Date) -> AttentionAlertAnnouncement {
+        AttentionAlertAnnouncement(alert: .unread, at: date)
+    }
+}
+
 @MainActor
 final class AttentionAlertPolicyTests: XCTestCase {
 
@@ -236,19 +242,61 @@ final class AttentionAlertPolicyTests: XCTestCase {
     /// 25 August 2026: four `needsAttention` edges inside six seconds, each of which posted a
     /// full banner. Only the first is news.
     func testARepeatedAlertIsQuietAndOnlyTheFirstInterrupts() {
-        var lastAnnounced: AttentionAlert?
+        let start = Date()
+        var lastAnnounced: AttentionAlertAnnouncement?
         var presentations: [AttentionAlertPolicy.Presentation] = []
 
-        for _ in 0..<4 {
+        for second in 0..<4 {
+            let now = start.addingTimeInterval(Double(second) * 1.5)
             let presentation = AttentionAlertPolicy.presentation(
                 of: .unread,
-                lastAnnounced: lastAnnounced
+                lastAnnounced: lastAnnounced,
+                now: now
             )
             presentations.append(presentation)
-            lastAnnounced = .unread
+            lastAnnounced = AttentionAlertAnnouncement(alert: .unread, at: now)
         }
 
         XCTAssertEqual(presentations, [.interrupt, .quiet, .quiet, .quiet])
+    }
+
+    /// The burst this rule exists for and a session that wants the user again an hour later are
+    /// two different events. Only viewing the session used to tell them apart, so a question
+    /// answered on the phone left the next one silent on this Mac.
+    func testTheEpisodeExpiresSoALaterRepeatIsNewsAgain() {
+        let announced = AttentionAlertAnnouncement(alert: .unread, at: Date())
+
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(
+                of: .unread,
+                lastAnnounced: announced,
+                now: announced.at.addingTimeInterval(AttentionAlertPolicy.repeatWindow - 1)
+            ),
+            .quiet
+        )
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(
+                of: .unread,
+                lastAnnounced: announced,
+                now: announced.at.addingTimeInterval(AttentionAlertPolicy.repeatWindow)
+            ),
+            .interrupt
+        )
+    }
+
+    /// A clock correction is not evidence that the user was told anything. The error direction
+    /// is one interruption too many, never a session that wanted the user in silence.
+    func testAnAnnouncementFromTheFutureIsNotBelieved() {
+        let announced = AttentionAlertAnnouncement(alert: .unread, at: Date())
+
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(
+                of: .unread,
+                lastAnnounced: announced,
+                now: announced.at.addingTimeInterval(-30)
+            ),
+            .interrupt
+        )
     }
 
     /// Looking at the session ends the episode, so the next one is news again. This is the
@@ -256,7 +304,7 @@ final class AttentionAlertPolicyTests: XCTestCase {
     /// `viewed` withdrawal and on that alone.
     func testViewingTheSessionMakesTheNextAlertInterruptAgain() {
         XCTAssertEqual(
-            AttentionAlertPolicy.presentation(of: .unread, lastAnnounced: .unread),
+            AttentionAlertPolicy.presentation(of: .unread, lastAnnounced: .unread(at: Date())),
             .quiet
         )
         // `viewed` is what clears the announcement, which arrives here as nil.
@@ -270,16 +318,25 @@ final class AttentionAlertPolicyTests: XCTestCase {
     /// is now holding a turn up on a question has said something new, and quieting that would
     /// be the failure this rule must not introduce.
     func testAnEscalationToADifferentAlertStillInterrupts() {
+        let now = Date()
         XCTAssertEqual(
-            AttentionAlertPolicy.presentation(of: .blocked, lastAnnounced: .unread),
+            AttentionAlertPolicy.presentation(
+                of: .blocked, lastAnnounced: .unread(at: now), now: now
+            ),
             .interrupt
         )
         XCTAssertEqual(
-            AttentionAlertPolicy.presentation(of: .unread, lastAnnounced: .blocked),
+            AttentionAlertPolicy.presentation(
+                of: .unread,
+                lastAnnounced: AttentionAlertAnnouncement(alert: .blocked, at: now),
+                now: now
+            ),
             .interrupt
         )
         XCTAssertEqual(
-            AttentionAlertPolicy.presentation(of: .finished, lastAnnounced: .unread),
+            AttentionAlertPolicy.presentation(
+                of: .finished, lastAnnounced: .unread(at: now), now: now
+            ),
             .interrupt
         )
     }
@@ -289,7 +346,10 @@ final class AttentionAlertPolicyTests: XCTestCase {
     /// something and failing, so a second one is news however recently the first arrived.
     func testTheCurfewGiveUpIsNeverQuietedAsARepeat() {
         XCTAssertEqual(
-            AttentionAlertPolicy.presentation(of: .curfew, lastAnnounced: .curfew),
+            AttentionAlertPolicy.presentation(
+                of: .curfew,
+                lastAnnounced: AttentionAlertAnnouncement(alert: .curfew, at: Date())
+            ),
             .interrupt
         )
     }
@@ -297,19 +357,115 @@ final class AttentionAlertPolicyTests: XCTestCase {
     /// Every alert kind is covered by the rule, so a case added later cannot quietly inherit
     /// whichever branch happens to be first.
     func testEveryAlertKindHasAnAnswerForBothFirstAndRepeat() {
+        let now = Date()
         for alert in AttentionAlert.allCases {
             XCTAssertEqual(
-                AttentionAlertPolicy.presentation(of: alert, lastAnnounced: nil),
+                AttentionAlertPolicy.presentation(of: alert, lastAnnounced: nil, now: now),
                 .interrupt,
                 "\(alert.rawValue) should interrupt when it is the first of its episode"
             )
-            let repeated = AttentionAlertPolicy.presentation(of: alert, lastAnnounced: alert)
+            let repeated = AttentionAlertPolicy.presentation(
+                of: alert,
+                lastAnnounced: AttentionAlertAnnouncement(alert: alert, at: now),
+                now: now
+            )
             XCTAssertEqual(
                 repeated,
                 alert == .curfew ? .interrupt : .quiet,
                 "\(alert.rawValue) repeated"
             )
         }
+    }
+
+    // MARK: - What Is On Screen, And What Is Still On Its Way
+
+    /// A post is not delivery. The system's authorization answer arrives on its own queue, and
+    /// an edge can land in between: a question asked and then answered a few milliseconds later
+    /// used to remove the banner and *then* add it, leaving one on screen for a state that had
+    /// already gone.
+    func testAWithdrawalInvalidatesAPostStillWaitingOnAuthorization() {
+        var ledger = AttentionAlertDeliveryLedger()
+        let sessionID = SessionID()
+
+        let token = ledger.beginPost(for: sessionID)
+        XCTAssertTrue(ledger.isCurrent(token))
+
+        ledger.withdraw(sessionID, reason: .stateMoved)
+
+        XCTAssertFalse(ledger.isCurrent(token))
+        XCTAssertNil(ledger.delivered(for: sessionID))
+    }
+
+    /// The master switch is the same case at every session at once.
+    func testSwitchingEverythingOffInvalidatesEveryPostInFlight() {
+        var ledger = AttentionAlertDeliveryLedger()
+        let first = SessionID()
+        let second = SessionID()
+
+        let firstToken = ledger.beginPost(for: first)
+        let secondToken = ledger.beginPost(for: second)
+        ledger.withdrawAll()
+
+        XCTAssertFalse(ledger.isCurrent(firstToken))
+        XCTAssertFalse(ledger.isCurrent(secondToken))
+    }
+
+    /// Only a spent claim counts as delivered, so an alert the system refused leaves nothing
+    /// behind claiming a banner exists — and nothing to quiet the next real one.
+    func testOnlyASpentClaimIsRecordedAsDelivered() {
+        var ledger = AttentionAlertDeliveryLedger()
+        let sessionID = SessionID()
+        let now = Date()
+
+        _ = ledger.beginPost(for: sessionID)
+        XCTAssertNil(ledger.delivered(for: sessionID))
+        XCTAssertNil(ledger.announcement(for: sessionID))
+
+        let token = ledger.beginPost(for: sessionID)
+        XCTAssertTrue(ledger.isCurrent(token))
+        ledger.recordDelivery(of: .blocked, for: sessionID, at: now)
+
+        XCTAssertEqual(ledger.delivered(for: sessionID), .blocked)
+        XCTAssertEqual(ledger.announcement(for: sessionID)?.alert, .blocked)
+    }
+
+    /// `viewed` is the withdrawal that means the user dealt with the session, and it is the one
+    /// that forgets what the session was last told. A stale banner leaves the announcement.
+    func testOnlyViewingAndEndingForgetWhatTheSessionWasTold() {
+        let now = Date()
+        for reason in [AttentionAlertWithdrawal.viewed, .sessionEnded] {
+            var ledger = AttentionAlertDeliveryLedger()
+            let sessionID = SessionID()
+            ledger.recordDelivery(of: .unread, for: sessionID, at: now)
+            ledger.withdraw(sessionID, reason: reason)
+            XCTAssertNil(ledger.announcement(for: sessionID), "\(reason.rawValue)")
+        }
+        for reason in [AttentionAlertWithdrawal.stateMoved, .preferenceOff] {
+            var ledger = AttentionAlertDeliveryLedger()
+            let sessionID = SessionID()
+            ledger.recordDelivery(of: .unread, for: sessionID, at: now)
+            XCTAssertEqual(ledger.withdraw(sessionID, reason: reason), .unread)
+            XCTAssertEqual(ledger.announcement(for: sessionID)?.alert, .unread, "\(reason.rawValue)")
+        }
+    }
+
+    /// An announcement that can no longer quiet anything is dropped, so the map is bounded by
+    /// the sessions still alerting rather than by every session that ever did.
+    func testExpiredAnnouncementsAreDropped() {
+        var ledger = AttentionAlertDeliveryLedger()
+        let stale = SessionID()
+        let fresh = SessionID()
+        let start = Date()
+
+        ledger.recordDelivery(of: .unread, for: stale, at: start)
+        ledger.recordDelivery(
+            of: .unread,
+            for: fresh,
+            at: start.addingTimeInterval(3 * AttentionAlertPolicy.repeatWindow)
+        )
+
+        XCTAssertNil(ledger.announcement(for: stale))
+        XCTAssertNotNil(ledger.announcement(for: fresh))
     }
 
     private func samplePNG() throws -> Data {

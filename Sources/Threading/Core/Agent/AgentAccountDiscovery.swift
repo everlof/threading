@@ -206,6 +206,12 @@ enum AgentAccountDiscovery {
     /// The standard `~/.claude` directory plus any `~/.claude-*` directory holding a config
     /// file, excluding Claude Science data roots.
     private static func claudeAccounts() -> [AgentAccount] {
+        discoverClaudeAccounts(records: AgentAccountLocationRegistry.shared.records(for: .claude))
+    }
+
+    nonisolated private static func discoverClaudeAccounts(
+        records: [AgentAccountLocationRecord], directories: [URL]? = nil
+    ) -> [AgentAccount] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let aliases = ShellAliasReader.accountAliasesByConfigPath()
         var accounts: [AgentAccount] = []
@@ -220,7 +226,7 @@ enum AgentAccountDiscovery {
             ))
         }
 
-        for directory in alternateDirectories(prefix: AgentAccountDefaults.claudeDirectoryPrefix) {
+        for directory in directories ?? alternateDirectories(prefix: AgentAccountDefaults.claudeDirectoryPrefix) {
             guard !isClaudeScienceDataDirectory(directory) else { continue }
             guard AgentAccountDefaults.claudeConfigMarkers.contains(where: {
                 isFile(directory.appendingPathComponent($0))
@@ -236,7 +242,7 @@ enum AgentAccountDiscovery {
 
         appendRegisteredAccounts(
             for: .claude,
-            records: AgentAccountLocationRegistry.shared.records(for: .claude),
+            records: records,
             aliases: aliases,
             to: &accounts
         )
@@ -283,7 +289,7 @@ enum AgentAccountDiscovery {
     }
 
     nonisolated private static func discoverCodexAccounts(
-        records: [AgentAccountLocationRecord]
+        records: [AgentAccountLocationRecord], directories: [URL]? = nil
     ) -> [AgentAccount] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let aliases = ShellAliasReader.accountAliasesByConfigPath()
@@ -317,7 +323,7 @@ enum AgentAccountDiscovery {
             )
         }
 
-        for directory in alternateDirectories(prefix: AgentAccountDefaults.codexDirectoryPrefix) {
+        for directory in directories ?? alternateDirectories(prefix: AgentAccountDefaults.codexDirectoryPrefix) {
             admit(handle: handle(for: directory), directory: directory)
         }
 
@@ -330,6 +336,60 @@ enum AgentAccountDiscovery {
 
         return accounts
     }
+
+    /// One utility worker scans at most 4,096 home entries. Capacity never discovers accounts
+    /// from a socket callback or from WidgetKit, and excessive discovery reports unavailable.
+    static func accountsForCapacity() async throws -> (accounts: [AgentAccount], omitted: Int) {
+        let claudeRecords = AgentAccountLocationRegistry.shared.records(for: .claude)
+        let codexRecords = AgentAccountLocationRegistry.shared.records(for: .codex)
+        let discovered = try await Task.detached(priority: .utility) {
+            try capacityCandidates(claudeRecords: claudeRecords, codexRecords: codexRecords)
+        }.value
+        // Preference reads are scalar and actor-owned. File-based email discovery is primed
+        // separately before the existing name resolver reads its cache.
+        let candidates = discovered.prefix(128)
+        let admitted = candidates.map(applyingPreferences).filter(\.isEnabled)
+        await AccountAvatarStore.primeEmails(for: admitted)
+        let names = AccountName.names(for: admitted)
+        let resolved = admitted.map { account in
+            AgentAccount(
+                provider: account.provider, handle: account.handle, configPath: account.configPath,
+                displayName: names[account.id] ?? account.displayName,
+                discoveredName: account.discoveredName,
+                displayNameOverride: account.displayNameOverride, emoji: account.emoji,
+                isEnabled: account.isEnabled, presentationNameIsResolved: true
+            )
+        }
+        return (resolved, max(0, discovered.count - candidates.count))
+    }
+
+    nonisolated private static func capacityCandidates(
+        claudeRecords: [AgentAccountLocationRecord], codexRecords: [AgentAccountLocationRecord]
+    ) throws -> [AgentAccount] {
+        var enumerationFailed = false
+        guard let enumeration = FileManager.default.enumerator(
+            at: FileManager.default.homeDirectoryForCurrentUser,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsSubdirectoryDescendants],
+            errorHandler: { _, _ in enumerationFailed = true; return false }
+        ) else { throw CapacityDiscoveryError.unavailable }
+        var entries: [URL] = []
+        for case let entry as URL in enumeration {
+            guard entries.count < 4_096 else { throw CapacityDiscoveryError.tooManyEntries }
+            entries.append(entry)
+        }
+        guard !enumerationFailed else { throw CapacityDiscoveryError.unavailable }
+        let claude = entries.filter {
+            $0.lastPathComponent.hasPrefix(AgentAccountDefaults.claudeDirectoryPrefix)
+        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let codex = entries.filter {
+            $0.lastPathComponent.hasPrefix(AgentAccountDefaults.codexDirectoryPrefix)
+        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return discoverClaudeAccounts(records: claudeRecords, directories: claude)
+            + discoverCodexAccounts(records: codexRecords, directories: codex)
+    }
+
+    private enum CapacityDiscoveryError: Error { case unavailable, tooManyEntries }
 
     // MARK: - Private Methods
 

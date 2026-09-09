@@ -842,6 +842,9 @@ is.
 
 ### Notifications
 
+Restarting Threading restores unread badges without announcing them again. Replayed terminal
+bells and startup paint are silent. A completed chat does not count as a request for your answer.
+
 The same states can reach you outside the app. When a session stops to ask for an approval,
 finishes off screen, or finishes its turn while Threading is behind another app, a macOS
 notification is posted — with sound only for the blocked case, matching the filled dot's

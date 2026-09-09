@@ -192,7 +192,7 @@ final class RemoteResponseNotificationCoordinator {
         key: Key
     ) {
         var fields: [RemoteDiagnosticField: String] = [
-            .transport: "apns", .status: result.statusCode.map(String.init) ?? "transport",
+            .transport: "apns", .status: result.diagnosticStatus,
         ]
         if let code = result.failureCode { fields[.code] = code }
         if let trace = result.providerTrace { fields[.providerTrace] = trace }
@@ -218,8 +218,13 @@ final class RemoteResponseNotificationCoordinator {
             evaluate(key, eventID: event.id)
             return
         }
-        let retryable = result.statusCode == nil || result.statusCode == 429
-            || (result.statusCode.map { $0 >= 500 } ?? false)
+        // A refusal this Mac decided before any network I/O is not a transient network fault:
+        // nothing about waiting one second makes a missing provider or a withdrawn consent
+        // succeed. Those wait for `transportChanged`, which is the registration/provider edge
+        // they actually depend on, and which restores a fresh retry budget when it arrives.
+        let retryable = result.attempted
+            && (result.statusCode == nil || result.statusCode == 429
+                || (result.statusCode.map { $0 >= 500 } ?? false))
         guard retryable, entry.retryCount < Self.retryDelays.count else {
             entry.state = .refused
             entries[key] = entry

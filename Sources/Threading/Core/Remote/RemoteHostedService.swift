@@ -37,6 +37,32 @@ private enum RemoteHostedServiceDefaults {
     static let sessionRenewalLeadTime: TimeInterval = 7 * 24 * 60 * 60
     static let maintenanceRetryDelay: TimeInterval = 60
     static let maximumReconnectDelay: TimeInterval = 60
+    /// How long one answer about a broker's notification schema is reused. Short enough that a
+    /// deployment is picked up while the app stays open, long enough that a push costs one
+    /// request rather than two.
+    static let brokerCapabilityLifetime: TimeInterval = 10 * 60
+}
+
+/// What a deployed hosted broker will accept.
+///
+/// It validates a notification against an exact key list and answers HTTP 400 `invalidRequest`
+/// for anything else, so a field added on this Mac before its service was deployed does not
+/// degrade gracefully: it refuses every push carrying it. Between 6 and 8 September 2026 that
+/// silently cost every turn-completion push on this Mac, while questions and permission
+/// requests — which carry no such field — went on arriving, so the phone looked healthy.
+enum RemoteNotificationBrokerCompatibility {
+
+    /// The first published notification protocol that accepts `turnGeneration`.
+    ///
+    /// A service too old to publish a version at all answers `0`, which is the same decision.
+    static let turnGenerationVersion = 2
+
+    static func payload(
+        _ event: RemoteNotificationEventDTO,
+        forBrokerVersion version: Int
+    ) -> RemoteNotificationEventDTO {
+        version >= turnGenerationVersion ? event : event.omittingTurnGeneration()
+    }
 }
 
 struct RemoteHostedServiceRecord: Codable, Equatable {
@@ -163,6 +189,12 @@ final class RemoteHostedServiceController {
     private let developmentBrowserAuthentication: Bool
     private var record: RemoteHostedServiceRecord?
     private var persistenceError: String?
+    /// See `notificationProtocolVersion(of:)`.
+    private struct BrokerNotificationProtocol {
+        let version: Int
+        let checkedAtUptime: TimeInterval
+    }
+    private var brokerNotificationProtocols: [URL: BrokerNotificationProtocol] = [:]
     private var listener: PeerHostedHostListener?
     private var listenerEventsTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
@@ -507,7 +539,10 @@ final class RemoteHostedServiceController {
                 payload: RemoteHostedPushEnvelope(
                     registrationID: registrationID,
                     playsSound: playsSound,
-                    event: event
+                    event: RemoteNotificationBrokerCompatibility.payload(
+                        event,
+                        forBrokerVersion: await notificationProtocolVersion(of: endpoint)
+                    )
                 )
             )
             return RemoteAPNSDeliveryResult(
@@ -679,6 +714,30 @@ final class RemoteHostedServiceController {
             state = reason == .unauthorized ? .signInRequired : .unavailable("service")
             if reason != .unauthorized { scheduleReconnect(generation: generation) }
         }
+    }
+
+    /// What notification schema the bound broker admits, cached per service.
+    ///
+    /// A failed probe is cached as `0` deliberately. That is the conservative answer — send the
+    /// older, universally accepted shape — so an unreachable `/health` costs a field nothing
+    /// reads rather than a probe on every push, and it corrects itself within the lifetime.
+    /// Two services exist, so the map is bounded by the environment switch.
+    private func notificationProtocolVersion(
+        of endpoint: PeerControlPlaneServiceEndpoint
+    ) async -> Int {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let known = brokerNotificationProtocols[endpoint.baseURL],
+           now - known.checkedAtUptime < RemoteHostedServiceDefaults.brokerCapabilityLifetime,
+           now >= known.checkedAtUptime {
+            return known.version
+        }
+        let version = (try? await PeerControlPlaneClient(endpoint: endpoint)
+            .notificationProtocolVersion()) ?? 0
+        brokerNotificationProtocols[endpoint.baseURL] = BrokerNotificationProtocol(
+            version: version,
+            checkedAtUptime: now
+        )
+        return version
     }
 
     private func validRecord(client: PeerControlPlaneClient) async throws

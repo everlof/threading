@@ -723,6 +723,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// makes this `TerminalViewDelegate` delivery an open method specifically so host work begins
     /// only after the event-queue crossing.
     override func bell(source: TerminalView) {
+        // A cut replay can contain yesterday's BEL. Like query replies, the coalesced bell
+        // arrives after feedFromHost returns, so its suppression must survive that feed.
+        guard suppressedQueryReplyScopes == 0 else { return }
         onBell?()
     }
 

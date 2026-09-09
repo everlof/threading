@@ -39,6 +39,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile session usage/action disc | — | host-only | provider/account identity, usage truth, session action, menu and accessibility; device-local account-badge preference changes only the overlay | Host-only |
+| iOS usage widgets | — | host-only | pinned pairing/account identity, owner authorization, snapshot freshness, reset meaning and validated deep links; account selection is user-configurable and WidgetKit owns system chrome | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
 | Mobile connection details panel | — | host-only | active-route and address truth, endpoint ordering, certificate verdict, bounded network inspection, refresh authority and device-local clipboard policy | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |

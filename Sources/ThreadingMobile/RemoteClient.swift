@@ -970,6 +970,22 @@ struct RemoteClient {
         return .catalogue(try decodeMe(data: data, response: response))
     }
 
+    func fetchUsageCapacity() async throws -> RemoteUsageCapacityDTO {
+        var request = request(url: link.usageCapacityURL)
+        request.timeoutInterval = 10
+        let (stream, response) = try await Self.session.bytes(for: request)
+        var bytes = Data()
+        for try await byte in stream {
+            guard bytes.count < RemoteUsageCapacityLimits.bytes else {
+                stream.task.cancel()
+                throw RemoteUsageCapacityError.oversized
+            }
+            bytes.append(byte)
+        }
+        _ = try validate(data: bytes, response: response, accepted: 200 ... 299)
+        return try RemoteUsageCapacityDTO.decode(bytes)
+    }
+
     func fetchUsage(
         cursor: String? = nil,
         limit: Int? = nil

@@ -27,6 +27,11 @@ activity timestamp. The hot input path remains O(1). At most 256 request/device 
 
 Only `SessionRuntimeDidChange` creates or resolves terminal questions from semantic blocker
 transitions. Read-receipt and badge presentation events cannot authorize delivery.
+The tracker's `awaitsUser` flag also represents a completed unread result: it is an operational
+blocker only while a turn remains open. Explicit ask-tool calls retain their own lifetime even
+when a turn-start report was missed. A completion or later idle-prompt notice must never create
+an `agentQuestion`, and finishing off screen must resolve the previous question despite leaving
+an unread badge. Shipping-service tests exercise those transitions through `AgentRuntime`.
 The semantic transition out of `awaitingUser` resolves a terminal question. Native permission
 cards resolve their exact permission notification before promoting the next card; process exit
 clears both. Editing bytes and viewing a session do not claim to answer a request. Resolution
@@ -51,6 +56,15 @@ invalidates older pending work. A timer also carries its own token: after waking
 match the pending entry and then revalidate generation, authorization, current targets and
 activity before any push sink is called. Foreground live delivery does not imply APNs delivery;
 the two decisions are deliberately separate.
+
+Activating Threading is presence, not an answer for every chat this Mac holds.
+`macBecameActive(at:viewing:)` resumes the owner's activity window and acknowledges only the
+session on screen, which is the rule `AttentionAlertCenter` already applies to its own banners.
+Routing activation through the deliberate-input path instead meant a one-second glance retracted
+every accepted completion push on the phone, for chats the user never opened, while the Mac's
+banners for those same chats stayed up. A push still in flight at that moment is a separate
+question with an unchanged answer: the post-send activity check retracts it whichever session it
+belonged to.
 
 A target has a stable identity (share, device and participant) and mutable delivery facts
 (enabled kinds, preview consent and retraction capability). The coordinator never uses equality
@@ -139,6 +153,15 @@ if the target no longer exists, ordinary continuity restoration is allowed again
 
 ## Ownership and diagnostics
 
+Mac automatic alerts use `AttentionAlertRuntimeObserver` on the same typed runtime channel.
+The observer captures the transition instead of sampling participant-specific sidebar activity
+later, and revalidates it before posting. Restoring an unread receipt is presentation, not a new
+alert: on 8 September 2026, 15 of 20 restart alerts had `cause=running` because the old observer
+read restored badges as fresh completions. The regression drives the real runtime/read-receipt
+projection, submits 1,000 presentation invalidations (normal startup: dozens of sessions), and
+then proves one real completion still posts. Handling is O(1) per runtime edge with no session
+scan or per-session transition cache; presentation invalidations schedule no notification work.
+
 The activity window, automatic suppression, consent enforcement, preview bounds, authorization,
 generation and deep-link validation are host-owned. The customization-surface gate classifies
 these settings as deliberately host-only: extensions keep the brokered notification capability
@@ -153,7 +176,35 @@ suppression reason, and preview-present/byte-count metadata. Only a request that
 response is recorded as `status=transport`; service rejections must not be flattened into it.
 Prompts, responses, tokens, device tokens and notification bodies are forbidden.
 
+`status=transport` is reserved for a request that received no HTTP response, so a refusal decided
+on this Mac — no provider configured, a device that never registered, a registration retired with
+its service, consent withdrawn or a question answered while the send was queued — carries
+`status=local` and its own `failureCode` instead. `RemoteNotificationPushResult.attempted` is what
+separates the two, and it also keeps the response coordinator's bounded backoff for genuine
+network faults: a local refusal waits for the registration or provider change it depends on
+rather than spending three retries. Flattening these into `transport` left 835 completion
+refusals in the week to 8 September 2026 that could not afterwards be told from a network fault.
+The durable journal line carries the same reason, status, code, transport and activity source as
+the diagnostic record; before that it carried only the phase, generation, queue depth and preview
+metadata, which is a count of failures rather than an account of them.
+
 The hosted service publishes a notification protocol version beside the rendezvous protocol in
 `/health` and `/ready`. Both guarded deploy verifiers require that version and prove that the push
 and retraction routes exist behind host authentication. A green dependency probe from an older
 Worker is therefore not sufficient to release a client with a newer notification contract.
+
+**The number has to move with the schema, and the client has to read it.** Neither was true when
+`turnGeneration` was added to the event on 4 September 2026. The broker validates a notification
+against an exact key list and answers HTTP 400 `invalidRequest` for one field it has not heard
+of, so every completion push to a Worker deployed before that day was refused while questions and
+permission requests, which carry no such field, went on arriving: the phone looked healthy and
+completions had simply stopped. The version stayed at 1 across the change, so it could not have
+expressed the difference, and the Mac read neither `/health` nor `/ready`, so it could not have
+asked. The version is now 2, `PeerControlPlaneClient.notificationProtocolVersion()` reads it, and
+`RemoteNotificationBrokerCompatibility` reduces an outgoing event to the shape the bound broker
+admits. The generation is a sender-side delivery fact that no receiver reads, so omitting it
+costs a recipient nothing; the alternative cost the entire notification. An unreachable or silent
+`/health` answers 0, which sends the older shape, and the answer is cached per service for ten
+minutes so a push costs one request rather than two. **Adding a field to the wire event means
+bumping this version in the same change**, teaching the compatibility rule which version
+introduced it, and deploying every service before a client that can send it.

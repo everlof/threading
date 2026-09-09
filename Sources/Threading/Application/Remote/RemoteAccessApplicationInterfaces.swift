@@ -206,6 +206,7 @@ struct RemoteAccessServerServices {
     let attachments: SessionAttachmentStore
     let extensions: ExtensionManager
     let mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore
+    let usageCapacity: @MainActor @Sendable () async throws -> RemoteUsageCapacityDTO
     let usageDashboard: RemoteUsageDashboardLoader
     let usageLimit: RemoteUsageLimitLoader
     let usageResetOffer: RemoteUsageResetOfferLoader
@@ -226,6 +227,9 @@ struct RemoteAccessServerServices {
         mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore,
         usageDashboard: @escaping RemoteUsageDashboardLoader,
         usageLimit: @escaping RemoteUsageLimitLoader,
+        usageCapacity: @escaping @MainActor @Sendable () async throws -> RemoteUsageCapacityDTO = {
+            throw RemoteUsageCapacityError.invalidSnapshot
+        },
         usageResetOffer: @escaping RemoteUsageResetOfferLoader = { _ in nil },
         usageResetConsumer: @escaping RemoteUsageResetConsumer = { _, _ in
             throw BankedUsageResetError.unsupportedAccount
@@ -243,6 +247,7 @@ struct RemoteAccessServerServices {
         self.attachments = attachments
         self.extensions = extensions
         self.mobileDiagnosticsCaptures = mobileDiagnosticsCaptures
+        self.usageCapacity = usageCapacity
         self.usageDashboard = usageDashboard
         self.usageLimit = usageLimit
         self.usageResetOffer = usageResetOffer

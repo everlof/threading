@@ -89,7 +89,7 @@ else
     say "Skipping the unshipped ThreadingMobile lane for the Mac release"
 fi
 
-for package in ThreadingExtensionKit ThreadingPluginKit ThreadingRemoteKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit; do
+for package in ThreadingExtensionKit ThreadingPluginKit ThreadingRemoteKit ThreadingGlanceKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit; do
     say "Testing ${package}"
     swift test --package-path "${repository_directory}/Packages/${package}"
 done

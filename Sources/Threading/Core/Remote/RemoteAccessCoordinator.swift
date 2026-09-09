@@ -260,6 +260,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         let eventLog = EventLog.shared
         let transcriptUsage = TranscriptUsageService.shared
         let usageHistory = UsageHistoryStore.shared
+        let capacity = RemoteUsageCapacityService(usage: .shared)
+        capacity.didChange = { [weak mirrors = RemoteSessionMirrorRegistry.shared] change in
+            mirrors?.broadcastUsageCapacityChanged(change)
+        }
 
         return RemoteAccessServerServices(
             sessionQueries: sessionStore,
@@ -314,6 +318,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 }
                 return await preparation.value
             },
+            usageCapacity: { try await capacity.snapshot() },
             usageResetOffer: { seriesID in
                 guard let (account, _) = await bankedResetTarget(
                     seriesID: seriesID,

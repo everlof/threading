@@ -67,14 +67,15 @@ reshuffling it is a line move.
 - [Browser Focus](browser-focus.md) — let the live browser fill the main window while retaining a
   compact, live conversation dock. Implementation-ready and self-contained.
 - [Glanceable iOS surfaces](ios-glanceable-surfaces.md) — put Usage and a running session on the
-  Lock Screen, the Home Screen and the Dynamic Island, through one widget extension reading a
-  bounded app-group snapshot the phone writes. The Usage widget is the shippable first slice: the
-  projection already exists, it needs no new push type and no hosted service, and it carries all
-  the structural work (the target, the app group, the theme crossing into a second process). The
-  Live Activity is a later slice on the same target. Whether a permission may be allowed inline
-  from the Dynamic Island is a product call left deliberately open: the design carries both
-  configurations from the start, ships Deny plus Open to review as the default, and reserves the
-  one content-state field an inline Allow would need rather than populating it.
+  Lock Screen, the Home Screen and the Dynamic Island. The 2026-09-08 review prioritizes Usage
+  widgets, then one followed agent's Live Activity with status and an optional completion preview.
+  One extension shares a bounded app-group usage snapshot; ActivityKit uses a separate push path.
+  The capacity feed preserves observation time and settled-reading updates outside the Usage
+  sheet. The plan covers independent widget
+  configuration, Live Activity freshness and ordering, and the data-acquisition requirement behind
+  iOS 26 push reloads. The first usage extension, capacity endpoint and shared cache are implemented;
+  visual acceptance and ActivityKit remain pending. Design spikes use the installed extension. Sessions
+  widgets and inline permission decisions remain independent follow-ups.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
   The account-profile slice is ready once its persistence downgrade guard lands; the API/GLM

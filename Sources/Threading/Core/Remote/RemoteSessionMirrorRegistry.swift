@@ -665,6 +665,7 @@ final class RemoteSessionMirrorRegistry {
         }
         if authorization.canReadHostUsage {
             features.append(RemoteRESTFeature.usageDashboard.rawValue)
+            features.append(RemoteRESTFeature.usageCapacity.rawValue)
         }
         if authorization.canManageHost,
            RemoteAccessCoordinator.shared.canIssueHostedDeviceCredentials
@@ -1270,6 +1271,14 @@ final class RemoteSessionMirrorRegistry {
             count += 1
         }
         return count
+    }
+
+    func broadcastUsageCapacityChanged(_ change: RemoteUsageCapacityChangedDTO) {
+        let message = encode(change)
+        for connection in themeEventSubscribers.values {
+            guard connection.authenticatedPeer?.authorization.canReadHostUsage == true else { continue }
+            connection.sendText(message)
+        }
     }
 
     /// Retractions are a separate typed frame so an older client safely ignores them and a new

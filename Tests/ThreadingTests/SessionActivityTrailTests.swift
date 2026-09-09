@@ -12,6 +12,19 @@ final class SessionActivityTrailTests: XCTestCase {
 
     // MARK: - The Three Ways Into The Unread Mark
 
+    func testExplicitAskRemainsABlockerWithoutAnObservedTurnStart() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.noteUnattendedLaunch()
+        tracker.noteBlockingAskOpened(id: "real-question")
+        XCTAssertFalse(tracker.runtimeSnapshot.hasOpenTurn)
+        XCTAssertEqual(tracker.runtimeSnapshot.blocker, .awaitingUser)
+        tracker.isVisible = true
+        XCTAssertEqual(tracker.runtimeSnapshot.blocker, .awaitingUser)
+        tracker.noteBlockingAskClosed(id: "real-question")
+        XCTAssertEqual(tracker.runtimeSnapshot.blocker, .none)
+    }
+
     /// A turn ending off screen. The ordinary one: the agent finished, nobody watched.
     func testATurnThatEndsOffScreenNamesTheTurnAsTheCause() {
         let tracker = SessionActivityTracker()

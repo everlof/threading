@@ -536,6 +536,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "GET", path == RemoteRouter.usageCapacityPath {
+            handleUsageCapacity(request, respond: respond)
+            return
+        }
+
         if request.method == "GET", path == RemoteRouter.usagePath {
             handleUsage(request, respond: respond)
             return
@@ -1108,6 +1113,32 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 }
             } catch {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
+            }
+        }
+    }
+
+    private func handleUsageCapacity(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canReadHostUsage else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        let loader = services.usageCapacity
+        Task {
+            do {
+                let payload = try await loader()
+                // Encoding happens on this transport task, after bounded main-actor projection.
+                let response = RemoteRouter.json(payload, maximumBytes: RemoteUsageCapacityLimits.bytes)
+                guard authorizer?.isCurrent(authorization) == true else {
+                    respond(.respond(RemoteRouter.error(401, "Unauthorized")))
+                    return
+                }
+                respond(.respond(response))
+            } catch {
+                respond(.respond(RemoteRouter.error(503, "Capacity Unavailable")))
             }
         }
     }

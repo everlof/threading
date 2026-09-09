@@ -3005,6 +3005,26 @@ struct SessionDashboard: View {
 
     private var dashboardSheets: some View {
         dashboardNavigation
+            .sheet(item: $model.widgetUsageRoute) { _ in
+                if model.widgetUsageFocusReady, model.canReadUsage, let link = model.client?.link {
+                    RemoteUsageDashboardView(link: link, isDemo: model.isDemo, focus: model.widgetUsageFocus)
+                        .mobileTheme(theme)
+                } else {
+                    NavigationStack {
+                        Text("Connect your Mac to see usage.")
+                            .foregroundStyle(theme.secondaryLabel)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(theme.ground)
+                            .navigationTitle("Usage")
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { model.widgetUsageRoute = nil }
+                                }
+                            }
+                    }
+                    .mobileTheme(theme)
+                }
+            }
             .sheet(item: $shareRequest) { request in
                 ShareChatSheet(
                     chatTitle: request.session.title,

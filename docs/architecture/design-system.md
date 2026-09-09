@@ -1404,11 +1404,13 @@ The vocabulary these encode, which new work should follow:
   frame, because nothing shorter was exact: `keyboard.badge.ellipsis` hangs its badge nearly two
   points past the box SwiftUI lays out, a render of the bare image cuts that overhang off, UIKit
   lays the same symbol out 2.7pt wider still, and each of those stood the glyph one to three
-  points over the line. Its paperclip, `⌨︎…`, Direct/Compose and keyboard-toggle glyphs stand on
-  the same 8pt line the bottom row's cap plates start on; by frame, the paperclip had been eleven
-  points inboard of the cap under it.
-  `TerminalKeyboardDismissalTests.testBothRowsStandTheirOutermostMarksOnOneMargin` reads the
-  four positions off a drawn bar.
+  points over the line. Its `⌨︎…`, Direct/Compose and keyboard-toggle glyphs stand on the same
+  8pt line the bottom row's cap plates start on. The paperclip adds one tight inset to that
+  optical placement: its angled outline reads crowded at 8pt, so it stands at 12pt while the
+  bottom caps retain their 8pt margin. Placed by frame alone, it had been eleven points inboard
+  of the cap under it.
+  `TerminalKeyboardDismissalTests.testBothRowsKeepTheirOpticalMargins` reads the four positions
+  off a drawn bar.
 
   A cap moved into the terminal bar's top row keeps the same four-point vertical padding as
   the bottom run. The 34-point cap height is its filled plate, not the row height: using it as

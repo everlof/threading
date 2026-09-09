@@ -4,6 +4,160 @@ import ThreadingRemoteKit
 
 @MainActor
 final class RemoteResponseNotificationServiceTests: HostedStoreTestCase {
+    func testMacObserverDoesNotReannounceRestoredUnreadReceipts() async throws {
+        let sessionID = try makeSession()
+        let runtime = AgentRuntime.shared
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markDormant()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        runtime.noteSessionAttention(sessionID)
+
+        var posts: [AttentionAlert] = []
+        var callbacks = 0
+        let observer = AttentionAlertRuntimeObserver(
+            appIsActive: { false }, isSnoozed: { _ in false }
+        ) { event, action in
+            guard event.sessionID == sessionID else { return }
+            callbacks += 1
+            if case .post(let alert) = action { posts.append(alert) }
+        }
+        terminal.activityTracker.markRunning()
+        terminal.activityTracker.noteUnattendedLaunch()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        XCTAssertEqual(runtime.activity(sessionID: sessionID), .needsAttention,
+                       "the prior unread badge must still be restored")
+        XCTAssertEqual(runtime.runtimeSnapshot(sessionID: sessionID).activity, .idle)
+        // Normal startup has dozens of sessions; stress the presentation callback with 1,000
+        // invalidations. The notification observer should do no work for any of them.
+        for _ in 0..<1_000 {
+            NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+        }
+        let restored = expectation(description: "Restore events drained")
+        Task { @MainActor in restored.fulfill() }
+        await fulfillment(of: [restored], timeout: 2)
+        XCTAssertTrue(posts.isEmpty)
+        XCTAssertEqual(callbacks, 1, "only the actual runtime transition reaches alert policy")
+
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteTurnFinished()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        let finished = expectation(description: "Fresh completion drained")
+        Task { @MainActor in finished.fulfill() }
+        await fulfillment(of: [finished], timeout: 2)
+        XCTAssertEqual(posts, [.unread], "real new work still deserves its alert")
+        withExtendedLifetime(observer) {}
+    }
+
+    func testMacObserverDropsAQuestionAnsweredBeforeItsDeliveryJob() async throws {
+        let sessionID = try makeSession()
+        let runtime = AgentRuntime.shared
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markRunning()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        var posts: [AttentionAlert] = []
+        let observer = AttentionAlertRuntimeObserver(
+            appIsActive: { false }, isSnoozed: { _ in false }
+        ) { event, action in
+            guard event.sessionID == sessionID else { return }
+            if case .post(let alert) = action { posts.append(alert) }
+        }
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteAwaitingUser()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteUserInput(submitsLine: true)
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        let drained = expectation(description: "Answered question job drained")
+        Task { @MainActor in drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 2)
+        XCTAssertTrue(posts.isEmpty)
+        withExtendedLifetime(observer) {}
+    }
+
+    func testCompletedTurnAndLaterIdleNoticesNeverSendAQuestion() async throws {
+        let sessionID = try makeSession()
+        let runtime = AgentRuntime.shared
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markRunning()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
+        defer { service.reset() }
+        let completed = expectation(description: "Completion delivered")
+        var kinds: [RemoteNotificationKind] = []
+        service.configureHostedPushSender(
+            serviceURL: { URL(string: "https://example.test")! }, isAvailable: { true }
+        ) { event, _, _ in
+            kinds.append(event.kind)
+            if event.kind == .turnCompleted { completed.fulfill() }
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        register(service, enabledKinds: [.agentQuestion, .turnCompleted])
+        service.setMacApplicationActive(false)
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteTurnFinished()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        XCTAssertEqual(terminal.activityTracker.activity, .needsAttention)
+        XCTAssertEqual(terminal.activityTracker.runtimeSnapshot.blocker, .none)
+        await fulfillment(of: [completed], timeout: 2)
+
+        // Reading and then leaving the chat lets a later idle notice raise the unread flag
+        // again. Neither that notice nor a BEL is a question when no turn is open.
+        terminal.activityTracker.isVisible = true
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.isVisible = false
+        terminal.activityTracker.noteAwaitingUser(.idlePrompt)
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.recordBell()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        let drained = expectation(description: "Notification queue drained")
+        Task { @MainActor in drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 2)
+        XCTAssertEqual(kinds, [.turnCompleted])
+    }
+
+    func testFinishingOffScreenResolvesAnAcceptedQuestion() async throws {
+        let sessionID = try makeSession()
+        let runtime = AgentRuntime.shared
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markRunning()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
+        defer { service.reset() }
+        let pushed = expectation(description: "Question delivered")
+        let cleared = expectation(description: "Finished turn retracts question")
+        var eventID: String?
+        service.configureHostedPushSender(
+            serviceURL: { URL(string: "https://example.test")! }, isAvailable: { true }
+        ) { event, _, _ in
+            eventID = event.id
+            pushed.fulfill()
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        service.configureHostedRetractionSender { event, _ in
+            XCTAssertEqual(event.eventID, eventID)
+            cleared.fulfill()
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        register(service)
+        service.setMacApplicationActive(false)
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteAwaitingUser()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        await fulfillment(of: [pushed], timeout: 2)
+        terminal.activityTracker.noteTurnFinished()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        XCTAssertEqual(terminal.activityTracker.activity, .needsAttention)
+        XCTAssertEqual(terminal.activityTracker.runtimeSnapshot.blocker, .none)
+        await fulfillment(of: [cleared], timeout: 2)
+    }
+
     func testPermissionShippingSenderRetractsExactAcceptedRequestAfterMacAnswer() async throws {
         let sessionID = try makeSession()
         let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
@@ -110,12 +264,15 @@ final class RemoteResponseNotificationServiceTests: HostedStoreTestCase {
         return try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .claude)).id
     }
 
-    private func register(_ service: RemoteNotificationService) {
+    private func register(
+        _ service: RemoteNotificationService,
+        enabledKinds: [RemoteNotificationKind] = [.permissionRequest, .agentQuestion]
+    ) {
         let result = service.register(.init(
             deviceToken: String(repeating: "ab", count: 32),
             hostedRegistrationID: "th_push_" + String(repeating: "a", count: 43),
             environment: .sandbox,
-            enabledKinds: [.permissionRequest, .agentQuestion],
+            enabledKinds: enabledKinds,
             capabilities: [.notificationRetraction]
         ), deviceID: "phone", authorization: .init(
             shareID: "owner", capability: .interact, scope: .allSessions, boundDeviceID: "phone"
