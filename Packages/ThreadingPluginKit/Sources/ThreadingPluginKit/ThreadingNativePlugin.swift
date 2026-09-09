@@ -182,6 +182,17 @@ public protocol ThreadingNativePlugin: NSObjectProtocol {
     /// Build the pane. Called once per presentation.
     @objc func makePaneView(context: PluginContext) -> NSView
 
+    /// Builds one complete leading workspace navigator declared in the bundle's static metadata.
+    ///
+    /// Optional so every existing pane-only plugin remains loadable. The host discovers the
+    /// declaration without touching `principalClass`, then calls this selector only after the
+    /// bundle has crossed the ordinary signature and approval boundary. A SwiftUI implementation
+    /// returns its `NSHostingView`; the contract deliberately stays at AppKit's common view edge.
+    @objc optional func makeWorkspaceNavigatorView(
+        identifier: String,
+        context: PluginWorkspaceNavigatorContext
+    ) -> NSView
+
     /// Called after `makePaneView`, and again on every live theme change.
     @objc func apply(theme: PluginTheme)
 
