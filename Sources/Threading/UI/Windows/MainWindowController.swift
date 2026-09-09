@@ -1683,7 +1683,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         SidebarWidth.record(sidebarItem.viewController.view.bounds.width)
     }
 
-    /// Opens the column at the width the user left it at.
+    /// Opens the column at the width the user left it at, or at the product default before the
+    /// divider has ever been moved.
     ///
     /// Moved through the divider rather than a width constraint, for the reason
     /// `applyDisplayPaneWidth` records: the split view goes on positioning its items from its own
@@ -1691,9 +1692,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// `setPosition` clamps against the other items' minimums itself, which is also the whole of
     /// the sidebar's ceiling — a width wider than the terminal can spare arrives as the widest
     /// the terminal can spare.
-    private func restoreSidebarWidth(_ width: CGFloat?) {
+    private func restoreSidebarWidth(_ storedWidth: CGFloat?) {
         defer { recordsSidebarWidth = true }
-        guard let width, !sidebarItem.isCollapsed else { return }
+        guard !sidebarItem.isCollapsed else { return }
+        let width = storedWidth ?? SidebarDefaults.defaultWidth
 
         splitView.layoutSubtreeIfNeeded()
         splitView.setPosition(width, ofDividerAt: 0)

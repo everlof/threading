@@ -93,6 +93,54 @@ final class MainWindowSizingTests: HostedStoreTestCase {
         )
     }
 
+    /// With no divider choice to restore, the declared product default must still reach the
+    /// split view. Otherwise AppKit settles the column at its dynamic window-controls floor,
+    /// which is safe chrome geometry but not the readable first-launch width.
+    func testTheInitialSidebarUsesTheDefaultBeforeTheDividerHasBeenMoved() throws {
+        let previousWidth = SidebarWidth.stored
+        defer {
+            if let previousWidth {
+                SidebarWidth.record(previousWidth)
+            } else {
+                SidebarWidth.reset()
+            }
+        }
+        SidebarWidth.reset()
+        XCTAssertNil(SidebarWidth.stored)
+
+        let controller = makeMainWindowController()
+        self.controller = controller
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1_200, height: 700))
+
+        // Put the split at a known non-default width before the controller's queued launch turn.
+        // The old nil path returned without moving this divider, so this setup makes the test
+        // distinguish an applied default from a coincidental initial AppKit width.
+        let sidebar = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        controller.splitViewController.splitView.layoutSubtreeIfNeeded()
+        controller.splitViewController.splitView.setPosition(320, ofDividerAt: 0)
+        controller.splitViewController.splitView.layoutSubtreeIfNeeded()
+        XCTAssertEqual(sidebar.viewController.view.frame.width, 320, accuracy: 1)
+        XCTAssertNil(SidebarWidth.stored)
+
+        let geometryTurnCompleted = expectation(description: "default sidebar geometry turn")
+        DispatchQueue.main.async { geometryTurnCompleted.fulfill() }
+        wait(for: [geometryTurnCompleted], timeout: 1)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.initialSidebarTreeIsMounted)
+        XCTAssertEqual(
+            sidebar.viewController.view.frame.width,
+            max(SidebarDefaults.defaultWidth, sidebar.minimumThickness),
+            accuracy: 1,
+            "the sidebar ignored its readable first-launch default"
+        )
+        XCTAssertNil(
+            SidebarWidth.stored,
+            "applying the product default must not manufacture a saved user choice"
+        )
+    }
+
     /// Nothing in the content may hold the window taller than `WindowDefaults.minHeight`.
     ///
     /// AppKit derives a window's minimum content size from the constraints it finds at
