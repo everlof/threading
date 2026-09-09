@@ -498,6 +498,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         AppIconPresenter.install()
         startupProfile?.appearanceReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
 
+        // Discovery reads only bounded plist/signature metadata on a worker. Starting it before
+        // the menu is built gives the first Navigator open a warm immutable inventory without
+        // ever mapping unapproved plugin code.
+        NativeWorkspaceNavigatorRegistry.shared.refresh(includeInstalled: plan.startsExtensions)
+
         setupMenuBar()
         startupProfile?.menuReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
 

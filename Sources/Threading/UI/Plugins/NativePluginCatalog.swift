@@ -37,7 +37,7 @@ enum NativePluginCatalog {
 
     /// `~/Library/Application Support/Threading/Plugins`. Bundles are dropped in by hand today;
     /// an install flow is a later slice and needs its own review copy.
-    static var directory: URL {
+    nonisolated static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Threading", isDirectory: true)
             .appendingPathComponent("Plugins", isDirectory: true)
@@ -51,15 +51,27 @@ enum NativePluginCatalog {
     /// a first-party pane can ship as a plugin without the user installing anything. It is not a
     /// privilege either: it is what any app gets for the plugins inside its own bundle, and a
     /// plugin of ours installed the ordinary way is refused until approved.
-    static func bundledPlugins() -> [URL] {
+    nonisolated static func bundledPlugins(limit: Int = 32) -> [URL] {
         guard let plugIns = Bundle.main.builtInPlugInsURL else { return [] }
-        let contents = (try? FileManager.default.contentsOfDirectory(
+        let requestedLimit = min(max(0, limit), 32)
+        guard requestedLimit > 0,
+              let enumerator = FileManager.default.enumerator(
             at: plugIns,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        )) ?? []
-        return contents.filter { $0.pathExtension == "bundle" }
+        ) else { return [] }
+
+        var contents: [URL] = []
+        contents.reserveCapacity(requestedLimit)
+        var inspected = 0
+        while inspected < 256, let entry = enumerator.nextObject() as? URL {
+            inspected += 1
+            if entry.pathExtension == "bundle" { contents.append(entry) }
+        }
+        return contents
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .prefix(requestedLimit)
+            .map { $0 }
     }
 
     /// A bundled plugin by its own identifier.
@@ -94,7 +106,7 @@ enum NativePluginCatalog {
     /// Every bundle in the directory, in a stable order. Both returned bundles and inspected
     /// directory entries are capped: a plugins folder is externally writable, so `limit` alone
     /// is not a bound when it is applied after `contentsOfDirectory` has materialized everything.
-    static func installedBundles(limit: Int = 32) -> [URL] {
+    nonisolated static func installedBundles(limit: Int = 32) -> [URL] {
         let requestedLimit = min(max(0, limit), 32)
         guard requestedLimit > 0,
               let enumerator = FileManager.default.enumerator(

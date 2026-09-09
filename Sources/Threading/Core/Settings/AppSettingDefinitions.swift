@@ -1559,13 +1559,44 @@ enum AppSettingDefinitions {
     static func accepts(_ selection: WorkspaceNavigatorSelection) -> Bool {
         guard case .workspaceNavigatorIdentity(let maximumIdentityBytes, _) =
             workspaceNavigatorSelection.validation.erased else { return false }
-        guard case .extensionNavigator(let extensionIdentifier, let navigatorID) = selection else {
+        let providerIdentifier: String
+        let navigatorID: String
+        switch selection {
+        case .native:
             return true
+        case .extensionNavigator(let extensionIdentifier, let selectedNavigatorID):
+            providerIdentifier = extensionIdentifier
+            navigatorID = selectedNavigatorID
+        case .nativePluginNavigator(let pluginIdentifier, let selectedNavigatorID):
+            providerIdentifier = pluginIdentifier
+            navigatorID = selectedNavigatorID
         }
-        return !extensionIdentifier.isEmpty
-            && extensionIdentifier.utf8.count <= maximumIdentityBytes
-            && !navigatorID.isEmpty
-            && navigatorID.utf8.count <= maximumIdentityBytes
+        return isValidWorkspaceNavigatorIdentity(
+            providerIdentifier,
+            maximumBytes: maximumIdentityBytes
+        ) && isValidWorkspaceNavigatorIdentity(
+            navigatorID,
+            maximumBytes: maximumIdentityBytes
+        )
+    }
+
+    private static func isValidWorkspaceNavigatorIdentity(
+        _ value: String,
+        maximumBytes: Int
+    ) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed == value,
+              trimmed.utf8.count <= maximumBytes
+        else { return false }
+        return trimmed.unicodeScalars.allSatisfy { scalar in
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator:
+                return false
+            default:
+                return true
+            }
+        }
     }
 
     private static func surfaced(

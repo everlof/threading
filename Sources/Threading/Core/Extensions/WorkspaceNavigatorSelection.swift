@@ -8,16 +8,19 @@ import Foundation
 enum WorkspaceNavigatorSelection: Codable, Equatable, Sendable {
     case native
     case extensionNavigator(extensionIdentifier: String, navigatorID: String)
+    case nativePluginNavigator(pluginIdentifier: String, navigatorID: String)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case extensionIdentifier
+        case pluginIdentifier
         case navigatorID
     }
 
     private enum Kind: String, Codable {
         case native
         case extensionNavigator
+        case nativePluginNavigator
     }
 
     init(from decoder: Decoder) throws {
@@ -33,6 +36,11 @@ enum WorkspaceNavigatorSelection: Codable, Equatable, Sendable {
                 ),
                 navigatorID: try container.decode(String.self, forKey: .navigatorID)
             )
+        case .nativePluginNavigator:
+            self = .nativePluginNavigator(
+                pluginIdentifier: try container.decode(String.self, forKey: .pluginIdentifier),
+                navigatorID: try container.decode(String.self, forKey: .navigatorID)
+            )
         }
     }
 
@@ -44,6 +52,10 @@ enum WorkspaceNavigatorSelection: Codable, Equatable, Sendable {
         case .extensionNavigator(let extensionIdentifier, let navigatorID):
             try container.encode(Kind.extensionNavigator, forKey: .type)
             try container.encode(extensionIdentifier, forKey: .extensionIdentifier)
+            try container.encode(navigatorID, forKey: .navigatorID)
+        case .nativePluginNavigator(let pluginIdentifier, let navigatorID):
+            try container.encode(Kind.nativePluginNavigator, forKey: .type)
+            try container.encode(pluginIdentifier, forKey: .pluginIdentifier)
             try container.encode(navigatorID, forKey: .navigatorID)
         }
     }
