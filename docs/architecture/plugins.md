@@ -1,12 +1,11 @@
 # The native plugin tier
 
-Status: **it runs, and it carries a real feature.** Threading `dlopen`s a code bundle whose
-principal class conforms to a protocol vended by `Packages/ThreadingPluginKit`, hosts the `NSView`
-it returns in a pane of its own, and hands it the host's whole theme so the pane draws with the
-same components the application does. `Packages/ThreadingDesignKit` compiles the application's own
-design system a second time for that purpose. `Plugins/DeviceLogsPlugin` is the first tenant: it
-shipped 2026-09-02, it is built with the app into `Contents/PlugIns`, and the Device Logs pane it
-replaced left the application entirely.
+Status: **it runs, and it carries real features.** Threading `dlopen`s a code bundle whose
+principal class conforms to a protocol vended by `Packages/ThreadingPluginKit`. A plugin may fill
+a pane, the leading workspace navigator, or both. The host owns placement and hands over its live
+theme; the plugin owns the native view inside that rectangle. `Plugins/DeviceLogsPlugin` is the
+first pane tenant. `Plugins/T3NavigatorPlugin` is the first navigator-only tenant and proves that a
+bundle can supply a complete SwiftUI thread hierarchy without changing the default navigator.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -312,6 +311,29 @@ it inspects**. A plugins folder is externally writable, so a limit applied after
 `contentsOfDirectory` has materialized everything bounds the result and not the scan — the
 distinction the [Scaling Gate](../../CLAUDE.md#scaling-gate) names.
 
+### Native workspace navigators
+
+A navigator is declared in static `ThreadingWorkspaceNavigators` bundle metadata. Discovery reads
+that bounded plist without touching `principalClass`; only selection crosses the ordinary
+signature, approval and mapping boundary. The declaration names a plugin-local navigator ID, its
+menu title and an optional preferred width. The persisted route is the pair of the verified bundle
+identifier and navigator ID, so a mutable path or display label is never identity.
+
+After loading, the plugin receives `PluginWorkspaceNavigatorContext`: an initial bounded snapshot,
+one-row content updates, structural replacements, typed project/session/terminal identities, and
+host-validated activation, pin, unpin and archive intents. It receives no `ProjectStore`, window,
+paths or model objects. The default `WorkspaceNavigatorSelection.native` remains the default; a
+plugin navigator is an explicit View → Navigator choice and falls back to Native if its build is
+removed, replaced or refused.
+
+`T3NavigatorPlugin` deliberately uses only the small `PluginTheme` token floor rather than linking
+`ThreadingDesignKit`. Its SwiftUI store retains row objects across title and activity deltas,
+publishes section arrays only for structural changes, and renders through `ScrollView` plus
+`LazyVStack`. The proof of concept offers title search, a project filter, stable Pinned/Active/
+Archived sections, two-band activity/project/branch rows, always-reachable actions that emphasize
+on hover or keyboard focus, and context menus. It does not invent T3's snooze or new-thread
+behavior: those intents are not in the native contract yet.
+
 Throughput is settled for this tier. Replaying a real 24,546-row device capture through the pane:
 
 | asked | sustained | dropped | worst tick | CPU | RSS |
@@ -411,6 +433,8 @@ accept them. A licence still has to be chosen.
 | A plugin-built view paints the host's ground | `PluginViewThemingTests` |
 | Identity and material exactly, colour to 1/255 | `HostThemeHandoffTests` |
 | The plugin's own decode, render and reclaim contracts | `DeviceLogsPluginTests` |
+| Native T3 grouping, filtering, stable row identity and host-owned actions | `T3NavigatorPluginTests` |
+| The shipped native navigator metadata and principal-class conformance | `NativeWorkspaceNavigatorDiscoveryTests` |
 
 `NativePluginLoadingTests` skips when no plugin is installed, so a green run on a machine without
 one is not mistaken for coverage.

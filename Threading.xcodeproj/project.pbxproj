@@ -50,6 +50,8 @@
 		7C000009000000000000A001 /* ThreadingDesignKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000009000000000000C001 /* ThreadingDesignKit */; };
 		7C00000A000000000000A000 /* TimberLineParser in Frameworks */ = {isa = PBXBuildFile; productRef = 7C00000A000000000000C000 /* TimberLineParser */; };
 		7C000009000000000000E007 /* DeviceLogsPlugin.bundle in Embed Plug-ins */ = {isa = PBXBuildFile; fileRef = 7C000009000000000000E000 /* DeviceLogsPlugin.bundle */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7C00000B000000000000A000 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C00000B000000000000C000 /* ThreadingPluginKit */; };
+		7C00000B000000000000E007 /* T3NavigatorPlugin.bundle in Embed Plug-ins */ = {isa = PBXBuildFile; fileRef = 7C00000B000000000000E000 /* T3NavigatorPlugin.bundle */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		7C000007000000000000A0F2 /* ThreadingPluginKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F0 /* ThreadingPluginKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F1 /* ThreadingPluginKit */; };
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
@@ -153,6 +155,13 @@
 			remoteGlobalIDString = 7C000009000000000000E001;
 			remoteInfo = DeviceLogsPlugin;
 		};
+		7C00000B000000000000E008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7C00000B000000000000E001;
+			remoteInfo = T3NavigatorPlugin;
+		};
 		04945DA7B3517A8184BC0A01 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
@@ -233,6 +242,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				7C000009000000000000E007 /* DeviceLogsPlugin.bundle in Embed Plug-ins */,
+				7C00000B000000000000E007 /* T3NavigatorPlugin.bundle in Embed Plug-ins */,
 			);
 			name = "Embed Plug-ins";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -281,6 +291,7 @@
 
 /* Begin PBXFileReference section */
 		7C000009000000000000E000 /* DeviceLogsPlugin.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DeviceLogsPlugin.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C00000B000000000000E000 /* T3NavigatorPlugin.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = T3NavigatorPlugin.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionRunnerRequest.swift; sourceTree = "<group>"; };
 		161EB5CC2018AEE0E4E9F95F /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
 		19157F0EEE4BA2AFB5105E44 /* Info-network.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Info-network.plist"; sourceTree = "<group>"; };
@@ -505,6 +516,7 @@
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7C000009000000000000B000 /* Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin; sourceTree = "<group>"; };
+		7C00000B000000000000B000 /* Plugins/T3NavigatorPlugin/Sources/T3NavigatorPlugin */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Plugins/T3NavigatorPlugin/Sources/T3NavigatorPlugin; sourceTree = "<group>"; };
 		63D8F4952EE47C9A007F49BD /* Sources */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (63D8F4BA2EE47C9A007F49BD /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (Threading/Resources/BrowserAutomation, Threading/Resources/Icons, Threading/Resources/RemoteClient, ); path = Sources; sourceTree = "<group>"; };
 		A20000010000000000000014 /* Sources/ThreadingMobile */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Sources/ThreadingMobile; sourceTree = "<group>"; };
 		B1792448FB880E01F5D9086C /* Tests/ThreadingTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/ThreadingTests; sourceTree = "<group>"; };
@@ -520,6 +532,14 @@
 				7C000009000000000000A000 /* ThreadingPluginKit in Frameworks */,
 				7C000009000000000000A001 /* ThreadingDesignKit in Frameworks */,
 				7C00000A000000000000A000 /* TimberLineParser in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7C00000B000000000000D001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C00000B000000000000A000 /* ThreadingPluginKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -841,6 +861,7 @@
 				7A0000010000000000000014 /* threading-wasm-extension-runner */,
 				7C000003000000000000B011 /* threading-mcp-bridge */,
 				7C000009000000000000E000 /* DeviceLogsPlugin.bundle */,
+				7C00000B000000000000E000 /* T3NavigatorPlugin.bundle */,
 				7C000005000000000000B011 /* threading-ptyd */,
 				7C000007000000000000B011 /* threading-simulator-helper */,
 			);
@@ -872,6 +893,28 @@
 			);
 			productName = DeviceLogsPlugin;
 			productReference = 7C000009000000000000E000 /* DeviceLogsPlugin.bundle */;
+			productType = "com.apple.product-type.bundle";
+		};
+		7C00000B000000000000E001 /* T3NavigatorPlugin */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7C00000B000000000000E002 /* Build configuration list for PBXNativeTarget "T3NavigatorPlugin" */;
+			buildPhases = (
+				7C00000B000000000000D000 /* Sources */,
+				7C00000B000000000000D001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7C00000B000000000000B000 /* Plugins/T3NavigatorPlugin/Sources/T3NavigatorPlugin */,
+			);
+			name = T3NavigatorPlugin;
+			packageProductDependencies = (
+				7C00000B000000000000C000 /* ThreadingPluginKit */,
+			);
+			productName = T3NavigatorPlugin;
+			productReference = 7C00000B000000000000E000 /* T3NavigatorPlugin.bundle */;
 			productType = "com.apple.product-type.bundle";
 		};
 		1459DEBF5B7709D7DCD407A2 /* ThreadingExtensionHelperNetwork */ = {
@@ -1121,6 +1164,7 @@
 			);
 			dependencies = (
 				7C000009000000000000E005 /* PBXTargetDependency */,
+				7C00000B000000000000E005 /* PBXTargetDependency */,
 				A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */,
 				0B537AA731F40F54768A22BD /* PBXTargetDependency */,
 				7A0000010000000000000022 /* PBXTargetDependency */,
@@ -1235,6 +1279,7 @@
 				61A0CE01000000000000000C /* ThreadingGlance */,
 				F6000001000000000000001 /* Threading */,
 				7C000009000000000000E001 /* DeviceLogsPlugin */,
+				7C00000B000000000000E001 /* T3NavigatorPlugin */,
 				A20000010000000000000001 /* ThreadingMobile */,
 				B2000001000000000000000B /* ThreadingMobileTests */,
 				20A00C033DC1347FA758CD10 /* ThreadingTests */,
@@ -1433,6 +1478,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C00000B000000000000D000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0EEAE3A785B7D334D6F7DBB7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1611,6 +1663,11 @@
 			target = 7C000009000000000000E001 /* DeviceLogsPlugin */;
 			targetProxy = 7C000009000000000000E008 /* PBXContainerItemProxy */;
 		};
+		7C00000B000000000000E005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7C00000B000000000000E001 /* T3NavigatorPlugin */;
+			targetProxy = 7C00000B000000000000E008 /* PBXContainerItemProxy */;
+		};
 		0B537AA731F40F54768A22BD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = ThreadingExtensionHelperNetwork;
@@ -1716,6 +1773,54 @@
 				MACH_O_TYPE = mh_bundle;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.plugin.devicelogs;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
+		7C00000B000000000000E003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Plugins/T3NavigatorPlugin/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../../../../Frameworks",
+				);
+				MACH_O_TYPE = mh_bundle;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.plugin.t3navigator;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		7C00000B000000000000E004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Plugins/T3NavigatorPlugin/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../../../../Frameworks",
+				);
+				MACH_O_TYPE = mh_bundle;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.plugin.t3navigator;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -2536,6 +2641,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		7C00000B000000000000E002 /* Build configuration list for PBXNativeTarget "T3NavigatorPlugin" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C00000B000000000000E003 /* Debug */,
+				7C00000B000000000000E004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		091BD013A1E26748129E077F /* Build configuration list for PBXNativeTarget "ThreadingExtensionHelper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -2774,6 +2888,10 @@
 			productName = ThreadingPluginKit;
 		};
 		7C000009000000000000C000 /* ThreadingPluginKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPluginKit;
+		};
+		7C00000B000000000000C000 /* ThreadingPluginKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingPluginKit;
 		};

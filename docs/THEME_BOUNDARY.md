@@ -19,6 +19,14 @@ the invisible `NSColorWell` inside `ThemeSwatchView`, the private field editor i
 disclosure buttons, the application menu bar, toolbars, and open/save panels. The system object
 must not leak out as the component callers build against.
 
+Native plugin presentations are a separate named containment boundary. Plugin code cannot link
+Threading's private `UI/Design/` module; it receives the public `PluginTheme` value and owns the
+AppKit or SwiftUI view tree it returns. `NativePluginPresentationBoundaryView` permits only that
+returned presentation and its framework-created descendants (including SwiftUI's private AppKit
+text and scroll controls). Host-owned siblings remain fully audited. This is not a blanket native
+plugin exemption: discovery, loading, placement, theme delivery, workspace truth, and mutations
+stay outside the boundary under host ownership.
+
 **A save panel's `accessoryView` is inside that boundary, not beside it.** AppKit does not put an
 accessory into the panel's content: it hangs the view off the panel in an `NSAccessoryViewWindow`
 of its own, exactly as tall as the accessory and clipping at its frame view. An app-owned

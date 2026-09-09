@@ -4,6 +4,28 @@ import XCTest
 @testable import Threading
 
 final class NativeWorkspaceNavigatorDiscoveryTests: XCTestCase {
+    @MainActor
+    func testShippedT3NavigatorIsARealDiscoverableNativePlugin() throws {
+        let bundleURL = try XCTUnwrap(NativePluginCatalog.bundledPlugin(
+            identifier: "codes.threading.plugin.t3navigator"
+        ))
+        let descriptor = try XCTUnwrap(NativeWorkspaceNavigatorDiscovery.descriptors(
+            at: bundleURL,
+            isBundled: true
+        ).first)
+
+        XCTAssertEqual(descriptor.navigatorID, "t3-native")
+        XCTAssertEqual(descriptor.title, "T3 Native Threads POC")
+        XCTAssertEqual(descriptor.preferredWidth, 400)
+
+        switch NativePluginCatalog.load(bundleURL) {
+        case .success(let plugin):
+            XCTAssertEqual(plugin.pluginIdentifier, "codes.threading.plugin.t3navigator")
+        case .failure(let failure):
+            XCTFail("the shipped navigator plugin did not load: \(failure)")
+        }
+    }
+
     func testValidStaticMetadataProducesBoundedDescriptorWithoutLoadingExecutable() throws {
         let bundle = try makeBundle(
             identifier: "com.example.navigator",

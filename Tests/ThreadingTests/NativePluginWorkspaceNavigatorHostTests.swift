@@ -49,6 +49,28 @@ final class NativePluginWorkspaceNavigatorHostTests: XCTestCase {
         XCTAssertEqual(plugin.appliedThemes.count, 2)
     }
 
+    func testHostAuditsOnlyItsOwnChromeAroundAPluginPresentation() {
+        let plugin = NavigatorPresentationProbe()
+        plugin.presentation.addSubview(NSScrollView())
+        let controller = NativePluginWorkspaceNavigatorHostViewController(
+            descriptor: descriptor(),
+            initialSnapshot: .init(revision: 1, items: [], selectedItemIdentity: nil),
+            activate: { _ in false },
+            perform: { _, _ in false },
+            loadPlugin: { _ in .success(plugin) },
+            onUnavailable: { _ in XCTFail("valid navigator fell back") }
+        )
+
+        controller.loadView()
+
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+        controller.view.addSubview(NSScrollView())
+        XCTAssertEqual(
+            ThemeBoundaryAudit.violations(in: controller.view).map(\.className),
+            ["NSScrollView", "NSClipView"]
+        )
+    }
+
     func testHostRejectsAPluginThatClaimsAnotherIdentityAndFallsBack() async {
         let plugin = NavigatorPresentationProbe()
         plugin.pluginIdentifier = "tests.someone-else"

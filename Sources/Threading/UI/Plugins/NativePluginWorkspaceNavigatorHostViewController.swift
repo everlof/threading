@@ -57,7 +57,7 @@ final class NativePluginWorkspaceNavigatorHostViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        view = NativePluginPresentationBoundaryView()
         beginLoading()
     }
 
@@ -146,13 +146,10 @@ final class NativePluginWorkspaceNavigatorHostViewController: NSViewController {
     }
 
     private func install(_ content: NSView) {
-        content.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            content.topAnchor.constraint(equalTo: view.topAnchor),
-            content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
+        guard let boundary = view as? NativePluginPresentationBoundaryView else {
+            assertionFailure("native plugin host lost its presentation boundary")
+            return
+        }
+        boundary.install(content)
     }
 }

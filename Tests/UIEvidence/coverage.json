@@ -196,6 +196,27 @@
       }
     },
     {
+      "id": "native-plugin-navigator-shell",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Native plugin workspace navigator",
+      "description": "The bundled T3-inspired SwiftUI navigator loaded through native plugin discovery and hosted in the real main-window split shell. The evidence covers selected and lifecycle-grouped rows, always-reachable row actions, project and branch metadata, and theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
+      "states": ["Selected row", "Pinned, Active, and Archived sections", "Visible Pin and Archive actions", "Project and branch metadata", "Search and project-filter controls"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["400-point leading navigator in a 1120×720-point main window", "400×720-point sidebar detail"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/NativePluginNavigatorRenderTests.swift",
+        "test": "ThreadingTests/NativePluginNavigatorRenderTests/testRendersBundledNativeNavigatorInTheShippingWindow"
+      },
+      "capture": {
+        "glob": "native-plugin-navigator-*.png"
+      }
+    },
+    {
       "id": "sidebar-toast-receipts",
       "kind": "component",
       "status": "implemented",
