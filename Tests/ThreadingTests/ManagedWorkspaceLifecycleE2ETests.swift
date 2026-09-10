@@ -27,6 +27,11 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
             usesNativeUI: true,
             title: "Native fixture boundary"
         ))
+        XCTAssertTrue(store.update(sessionID: session.id) {
+            // This test proves the injected executable reaches native composition. Hosting it
+            // would change the boundary under test and make the developer's preference an input.
+            $0.backgroundHost = false
+        }.succeeded)
         defer {
             AgentRuntime.shared.discard(sessionID: session.id)
             store.removeProject(id: project.id)
@@ -70,6 +75,11 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
             managedWorkspace: workspace,
             id: sessionID
         ))
+        XCTAssertTrue(store.update(sessionID: session.id) {
+            // The fixture deliberately exercises the app-owned terminal and its loopback MCP
+            // server. Keep that ownership explicit when the background host is enabled locally.
+            $0.backgroundHost = false
+        }.succeeded)
         let checkpointStore = GitTurnBaselineStore(
             directory: fixture.container.appendingPathComponent("checkpoint-state"),
             contextProvider: { requestedSessionID in

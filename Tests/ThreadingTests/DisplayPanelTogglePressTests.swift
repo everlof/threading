@@ -39,6 +39,11 @@ final class DisplayPanelTogglePressTests: HostedStoreTestCase {
         let session = try XCTUnwrap(
             store.addSession(to: project.id, kind: .claude, usesNativeUI: false, title: "Toggle")
         )
+        XCTAssertTrue(store.update(sessionID: session.id) {
+            // The motion assertion needs the terminal fixture allocated in this process. It is
+            // not a background-host integration and must not inherit the developer's setting.
+            $0.backgroundHost = false
+        }.succeeded)
 
         let controller = makeMainWindowController()
         let window = try XCTUnwrap(controller.window)

@@ -21,6 +21,11 @@ final class ConversationOpeningCommandTests: HostedStoreTestCase {
             usesNativeUI: true,
             title: "Opening review"
         ))
+        XCTAssertTrue(store.update(sessionID: session.id) {
+            // This fixture owns the shell process it records. Do not inherit the developer's
+            // background-host choice and silently turn the fixture into a daemon integration.
+            $0.backgroundHost = false
+        }.succeeded)
         let workingDirectory = session.workingDirectory(in: project)
         let script =
             "read -r initialize; printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
@@ -111,6 +116,10 @@ final class ConversationOpeningCommandTests: HostedStoreTestCase {
             usesNativeUI: true,
             title: "Failed opening command"
         ))
+        XCTAssertTrue(store.update(sessionID: session.id) {
+            // The expected exit belongs to the local fixture process, not to threading-ptyd.
+            $0.backgroundHost = false
+        }.succeeded)
         let controller = try XCTUnwrap(ConversationViewController(
             agentSession: session,
             project: project,
