@@ -281,7 +281,11 @@ The mark answers the pointer: it lifts while the pointer is anywhere over the br
 a click turns it one sixth of a turn — the mark has six strands, so it lands back on itself.
 Nothing is opened by the click; the brand names the window rather than pointing anywhere.
 Both are skipped under Reduce Motion. A theme can restyle the whole row — its own logo, its
-own wordmark, even a gradient or image behind the list — see [Themes](#themes).
+own wordmark, even a gradient or image behind the list — see [Themes](#themes). An extension
+can put a picture or a live, animated surface beneath the list as well, above the theme's own
+gradient and below every row; Threading keeps it at most 60% opaque, never faster than 30 frames
+a second, still while the window is hidden and under Reduce Motion, and nothing in it can be
+clicked. Disable the extension and the theme's own sidebar is exactly what was underneath.
 
 Classic Player uses that slot as a tiny workload analyzer instead. Its two-digit reading is the
 number of agents working anywhere in Threading; **MAX** means at least one is using the highest
@@ -4390,6 +4394,14 @@ its light/dark variants, material, sidebar treatment, paired terminal colours, a
 colour roles the app actually reads. Built-in and extension themes are shown at full strength but
 locked; **Duplicate to Edit** creates and applies a custom copy in one step. A custom theme's
 colour changes repaint the open window immediately.
+
+A theme can also put a wash or a picture under the app's panes — the display panel beside a
+conversation, the browser, Git Review, the audit, the settings subpages — the same surfaces a
+theme's dot or grid pattern already reaches, with the pattern drawn over it. Cards, controls,
+the terminal and the sidebar keep their own grounds; the sidebar has its own gradient and image,
+set separately. An agent sets it through the same tools as everything else in a theme
+(`material.backdrop`), and every stop of a wash has to keep the theme's text readable, so a
+theme cannot wallpaper you out of the app.
 
 The page stays live while an agent works too. You can say, for example, “Use Threading's
 app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect

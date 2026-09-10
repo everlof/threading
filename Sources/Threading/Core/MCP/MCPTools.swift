@@ -896,6 +896,8 @@ struct AppThemeMaterialArguments: Codable, Sendable {
   let removeControlBorderWidth: Bool?
   let backdropPattern: AppThemeBackdropPatternArguments?
   let removeBackdropPattern: Bool?
+  let backdrop: AppThemeBackdropArguments?
+  let removeBackdrop: Bool?
   let textScale: Double?
   let choiceHeight: Double?
   let glow: AppThemeGlowArguments?
@@ -932,6 +934,8 @@ struct AppThemeMaterialArguments: Codable, Sendable {
     case removeControlBorderWidth = "remove_control_border_width"
     case backdropPattern = "backdrop_pattern"
     case removeBackdropPattern = "remove_backdrop_pattern"
+    case backdrop
+    case removeBackdrop = "remove_backdrop"
     case textScale = "text_scale"
     case choiceHeight = "choice_height"
     case glow
@@ -1086,6 +1090,40 @@ struct AppThemeSidebarImageArguments: Codable, Sendable {
   let source: AppThemeImageArguments?
   let mode: String?
   let opacity: Double?
+}
+
+/// The material's backdrop — the sidebar block's gradient-and-image half, stated for the app's
+/// broad grounds. Each `remove_*` takes one stated half back to the plain ground, and `remove`
+/// clears the block; the same three-way idiom as the sidebar, because a patch that says nothing
+/// about the backdrop must leave it exactly as it was.
+struct AppThemeBackdropArguments: Codable, Sendable {
+  let gradient: AppThemeGradientArguments?
+  let removeGradient: Bool?
+  let image: AppThemeSidebarImageArguments?
+  let removeImage: Bool?
+  let remove: Bool?
+
+  init(
+    gradient: AppThemeGradientArguments? = nil,
+    removeGradient: Bool? = nil,
+    image: AppThemeSidebarImageArguments? = nil,
+    removeImage: Bool? = nil,
+    remove: Bool? = nil
+  ) {
+    self.gradient = gradient
+    self.removeGradient = removeGradient
+    self.image = image
+    self.removeImage = removeImage
+    self.remove = remove
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case gradient
+    case removeGradient = "remove_gradient"
+    case image
+    case removeImage = "remove_image"
+    case remove
+  }
 }
 
 struct AppThemeSidebarTitleArguments: Codable, Sendable {
@@ -7197,7 +7235,8 @@ enum MCPTools {
       description: """
         Read one complete app-chrome theme document in the same snake-case vocabulary \
         accepted by create_app_theme and update_app_theme. Each available light/dark \
-        variant includes its authored and resolved roles, material, complete paired \
+        variant includes its authored and resolved roles, material (including any \
+        `backdrop` gradient and picture under the app's broad grounds), complete paired \
         terminal palette, and — where stated — its sidebar dressing (gradient, image, \
         brand). Image assets are reported by stored name, never as bytes.
         """,
@@ -7292,7 +7331,11 @@ enum MCPTools {
         theme is applied by default. A variant's optional `sidebar` block dresses the \
         project sidebar: a gradient or image behind the list, a custom logo, and the \
         wordmark's text and face — supplied images arrive as a file path or base64 and \
-        are stored with the theme. A variant's optional `chrome` block goes further: a \
+        are stored with the theme. The material's optional `backdrop` dresses the app's \
+        broad grounds the same way — a gradient and/or picture under the display panel, \
+        the browser, the audit and the settings subpages, beneath any backdrop_pattern — \
+        while cards, controls, the terminal and the sidebar keep their own grounds. A \
+        variant's optional `chrome` block goes further: a \
         theme stating chrome draws the entire window frame itself — an app-drawn title \
         band, window buttons and border replace the native macOS titlebar, traffic \
         lights and rounded corners while the theme is worn. The material's optional \
@@ -7434,9 +7477,11 @@ enum MCPTools {
         add a missing light or dark variant without replacing the existing one. Set \
         appearance to "adaptive" once both exist to follow macOS. An active theme repaints \
         live; an inactive theme stays inactive unless `apply` is true. A patch that says \
-        nothing about a variant's `sidebar` or `chrome` block leaves it exactly as it \
-        was; `chrome.remove` is how a theme hands the window frame back to macOS, and \
-        the exchange happens live when the theme is the active one.
+        nothing about a variant's `sidebar` or `chrome` block, or its material's \
+        `backdrop`, leaves it exactly as it was; `chrome.remove` is how a theme hands the \
+        window frame back to macOS, `material.remove_backdrop` how it returns the panes \
+        to plain grounds, and either exchange happens live when the theme is the active \
+        one.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8129,6 +8174,96 @@ enum MCPTools {
       "remove_backdrop_pattern": MCPPropertySchema(
         type: .boolean,
         description: "True removes the base theme's backdrop pattern."
+      ),
+      "backdrop": MCPPropertySchema(
+        type: .object,
+        description: "Optional gradient and/or picture under the app's broad grounds — the "
+          + "display panel, the browser, the audit, the settings subpages — the same surfaces "
+          + "backdrop_pattern reaches, drawn beneath the pattern. Cards, controls, the "
+          + "terminal and the sidebar do not inherit it; the sidebar states its own "
+          + "background in the variant's `sidebar` block, in the same vocabulary. Each "
+          + "gradient stop must keep the theme's label at 3:1 against the ground. A picture "
+          + "is not gated — check it against real text in both variants, and wash "
+          + "photographs well below 0.4 opacity.",
+        properties: [
+          "gradient": MCPPropertySchema(
+            type: .object,
+            description: "A wash drawn over the ground, CSS angle convention: 0 flows toward "
+              + "the top, 90 toward the trailing edge, 180 toward the bottom.",
+            properties: [
+              "angle_degrees": MCPPropertySchema(
+                type: .number,
+                description: "Direction the gradient flows toward; default 180."
+              ),
+              "stops": MCPPropertySchema(
+                type: .array,
+                description: "2 to 8 stops, each a colour at a position along the run.",
+                items: MCPArrayItemSchema(
+                  type: .object,
+                  properties: [
+                    "color": MCPPropertySchema(
+                      type: .string,
+                      description: "#RRGGBB or #RRGGBBAA."
+                    ),
+                    "position": MCPPropertySchema(
+                      type: .number,
+                      description: "0 at the start of the run, 1 at its end."
+                    ),
+                  ],
+                  required: ["color", "position"]
+                )
+              ),
+            ]
+          ),
+          "remove_gradient": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the gradient and keeps any picture."
+          ),
+          "image": MCPPropertySchema(
+            type: .object,
+            description: "A picture over the gradient, stored with the theme at up to 2048 "
+              + "pixels on the long side.",
+            properties: [
+              "source": MCPPropertySchema(
+                type: .object,
+                description: "{path} to a file on this Mac, or {base64} bytes. PNG, JPEG, "
+                  + "HEIC and every other ImageIO format are accepted; at most 8 MB.",
+                properties: [
+                  "path": MCPPropertySchema(
+                    type: .string,
+                    description: "An absolute or ~-relative path to an image file on this Mac."
+                  ),
+                  "base64": MCPPropertySchema(
+                    type: .string,
+                    description: "The image bytes, base64-encoded."
+                  ),
+                ]
+              ),
+              "mode": MCPPropertySchema(
+                type: .string,
+                description: "\"tile\" repeats the picture at its own size, \"fill\" covers "
+                  + "the pane cropping the overflow, \"fit\" letterboxes inside it; "
+                  + "default fill."
+              ),
+              "opacity": MCPPropertySchema(
+                type: .number,
+                description: "0–1 over the gradient and ground; default 1."
+              ),
+            ]
+          ),
+          "remove_image": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the picture and keeps any gradient."
+          ),
+          "remove": MCPPropertySchema(
+            type: .boolean,
+            description: "True clears the whole backdrop: plain grounds, pattern untouched."
+          ),
+        ]
+      ),
+      "remove_backdrop": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the base theme's backdrop (gradient and picture)."
       ),
       "text_scale": MCPPropertySchema(
         type: .number,

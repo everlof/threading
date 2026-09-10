@@ -126,7 +126,9 @@ The first vertical slice exists:
   chain around the existing view through exactly one `.proceed` node, so an extension can place
   host-rendered content beside or over the original without receiving an `NSView`. A separate
   `ui.rendering.metal` capability admits bounded extension shader source in those declared
-  positions; Threading still owns the renderer and input lifecycle.
+  positions; Threading still owns the renderer and input lifecycle. `sidebar.backdrop@1` is the
+  same hook the other way up: a fill image or a surface *beneath* the sidebar's rows, with the
+  host keeping an opacity ceiling, the cadence, the pointer and the layering.
 - The `media` node is the only one whose pixels move on their own, and the host draws all of
   them. An extension states which document, whether it is playing, how fast and how it loops, and
   receives a coalesced state report; the decoder, the clock, the transport, the ceilings and the
@@ -171,7 +173,7 @@ capabilities, so a small extension can grow without changing package format:
 | Fact provider | `facts.provide` | Typed scalar facts on repository domain keys | Host navigator fact registry |
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
 | Navigator extension | `ui.workspace-navigation` | Complete semantic navigators, optionally augmented with host-evaluated pipelines, virtualized collections, bounded static and registered-fact controls, and conditional host-owned row intents | Leading workspace navigator |
-| Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
+| Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal: over the main window, beneath the sidebar |
 | Media extension | `ui.media-documents` | A `media` node — a document handle plus a playback intent, drawn by a host-owned player | Panels, and any surface whose vocabulary admits media |
 | Asset-browsing extension | `host.project.files.read` | Bounded, cursor-paged enumeration as opaque content handles | A project's own documents |
 | Attachment-preview extension | `attachments.preview` (+ `attachments.file-types`) | A preview body offered for one attachment; ordering decides the winner | The Attachments pane's preview body |

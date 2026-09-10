@@ -284,9 +284,18 @@ final class CurrentThemeViewController: NSViewController {
             case .monospaced: typeface = L10n.string("Monospaced")
             }
         }
-        return "\(typeface) · \(points(material.panelRadius)) panels · "
+        var description = "\(typeface) · \(points(material.panelRadius)) panels · "
             + "\(points(material.controlRadius)) controls · \(points(material.borderWidth)) rules"
             + L10n.format(" · %g%% text", Double(material.textScale * 100))
+        // The backdrop is the one part of a material that shows as a picture rather than a
+        // measure, so the line says it is there; the panel beside this page is wearing it.
+        if material.backdrop?.gradient != nil {
+            description += " · " + L10n.string("backdrop gradient")
+        }
+        if material.backdrop?.image != nil {
+            description += " · " + L10n.string("backdrop image")
+        }
+        return description
     }
 
     private func sidebarDescription(_ sidebar: SidebarStyle?) -> String {

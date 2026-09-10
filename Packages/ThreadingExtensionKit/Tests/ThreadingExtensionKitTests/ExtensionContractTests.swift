@@ -35,6 +35,7 @@ final class ExtensionContractTests: XCTestCase {
                 .sidebarSessionIdentity: 1,
                 .sidebarSessionHoverCard: 1,
                 .sidebarSessionRow: 1,
+                .sidebarBackdrop: 1,
                 .sessionCornerCard: 1,
                 .toolbarAccountUsagePopover: 1
             ]
@@ -1015,6 +1016,158 @@ final class ExtensionContractTests: XCTestCase {
             hook: .overlay(base: .proceed, overlay: .proceed)
         )
         XCTAssertThrowsError(try contract.validate(duplicateProceed))
+    }
+
+    /// The backdrop contract is the window hook turned over: its content goes *under* the
+    /// sidebar's, and the SDK refuses every shape that would put it anywhere else.
+    func testSidebarBackdropHookKeepsExtensionContentBeneathTheSidebar() throws {
+        let contract = ThreadingComponentCatalog.sidebarBackdrop
+        let picture = ExtensionComponentPatch(
+            id: "picture",
+            target: .sidebarBackdrop(),
+            hook: .overlay(
+                base: .image(
+                    .extensionResource("Resources/dunes.png"),
+                    role: .backdrop,
+                    accessibilityLabel: nil
+                ),
+                overlay: .proceed
+            )
+        )
+        try contract.validate(picture)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionComponentPatch.self,
+                from: JSONEncoder().encode(picture)
+            ),
+            picture
+        )
+
+        let example = try XCTUnwrap(
+            ThreadingComponentCatalog.entry(id: .sidebarBackdrop)?.examplePatch
+        )
+        try contract.validate(example)
+
+        // The rain shape — surface over proceed — is exactly what a backdrop must never do.
+        let overTheRows = ExtensionComponentPatch(
+            id: "over",
+            target: .sidebarBackdrop(),
+            hook: .overlay(
+                base: .proceed,
+                overlay: .image(
+                    .extensionResource("Resources/dunes.png"),
+                    role: .backdrop,
+                    accessibilityLabel: nil
+                )
+            )
+        )
+        XCTAssertThrowsError(try contract.validate(overTheRows))
+
+        // A stack holding the proceed node shares the top layer with a sibling: refused.
+        let sharedTop = ExtensionComponentPatch(
+            id: "shared-top",
+            target: .sidebarBackdrop(),
+            hook: .overlay(
+                base: .image(
+                    .extensionResource("Resources/dunes.png"),
+                    role: .backdrop,
+                    accessibilityLabel: nil
+                ),
+                overlay: .stack(axis: .vertical, spacing: .none, children: [.proceed])
+            )
+        )
+        XCTAssertThrowsError(try contract.validate(sharedTop))
+
+        // Nothing under the rows can be read or pressed, so the inline roles and every
+        // control are refused; only the fill role is admitted.
+        let icon = ExtensionComponentPatch(
+            id: "icon",
+            target: .sidebarBackdrop(),
+            hook: .overlay(
+                base: .image(.systemSymbol("cloud"), role: .icon, accessibilityLabel: nil),
+                overlay: .proceed
+            )
+        )
+        XCTAssertThrowsError(try contract.validate(icon))
+        let words = ExtensionComponentPatch(
+            id: "words",
+            target: .sidebarBackdrop(),
+            hook: .overlay(base: .text("Hello", role: .body), overlay: .proceed)
+        )
+        XCTAssertThrowsError(try contract.validate(words))
+
+        // The cadence ceiling is the contract's, and it is below the SDK's own 60.
+        let cap = try XCTUnwrap(contract.hookConstraints?.maximumCustomSurfaceFramesPerSecond)
+        XCTAssertLessThan(cap, ExtensionMetalSurface.maximumFramesPerSecond)
+        func shader(fps: Int) -> ExtensionComponentPatch {
+            ExtensionComponentPatch(
+                id: "shader",
+                target: .sidebarBackdrop(),
+                hook: .overlay(
+                    base: .customSurface(
+                        .metal(ExtensionMetalSurface(
+                            shaderResource: "Resources/aurora.metal",
+                            preferredFramesPerSecond: fps
+                        )),
+                        accessibilityLabel: nil
+                    ),
+                    overlay: .proceed
+                )
+            )
+        }
+        try contract.validate(shader(fps: cap))
+        XCTAssertThrowsError(try contract.validate(shader(fps: cap + 1)))
+    }
+
+    /// The fill role is opt-in per contract. Every surface that existed before it lists the
+    /// inline roles, so `allCases` growing did not hand a wallpaper to a hover card.
+    func testTheBackdropImageRoleIsNotAnInlineRole() throws {
+        XCTAssertTrue(ExtensionImageRole.allCases.contains(.backdrop))
+        XCTAssertFalse(ExtensionImageRole.inline.contains(.backdrop))
+        for contract in ThreadingComponentCatalog.all where contract.id != .sidebarBackdrop {
+            for constraints in [contract.hookConstraints, contract.replacementConstraints]
+                + contract.slots.map(\.contentConstraints) {
+                XCTAssertFalse(
+                    constraints?.allowedImageRoles.contains(.backdrop) ?? false,
+                    "\(contract.id.rawValue) admits the backdrop image role"
+                )
+            }
+        }
+        XCTAssertFalse(ExtensionPanel.nodeConstraints.allowedImageRoles.contains(.backdrop))
+    }
+
+    /// A constraint stating `overlayTop` without the two flags it rests on is refused as a
+    /// contract, before any patch is judged by it.
+    func testOverlayTopPlacementRequiresOverlayAndProceed() {
+        let incoherent = ExtensionComponentNodeConstraints(
+            maximumDepth: 2,
+            maximumNodes: 4,
+            maximumTextLength: 10,
+            allowsProceed: true,
+            proceedPlacement: .overlayTop
+        )
+        XCTAssertThrowsError(try incoherent.validate())
+        let tooFast = ExtensionComponentNodeConstraints(
+            maximumDepth: 2,
+            maximumNodes: 4,
+            maximumTextLength: 10,
+            maximumCustomSurfaceFramesPerSecond: ExtensionMetalSurface.maximumFramesPerSecond + 1
+        )
+        XCTAssertThrowsError(try tooFast.validate())
+    }
+
+    /// The signals an SDK release names are the ones a host may answer; the list exists so a
+    /// host can pin what it supplies against it.
+    func testHostSignalsAreEnumerated() {
+        XCTAssertEqual(
+            Set(ExtensionHostSignal.all),
+            [
+                .activeAccountUsageRemaining,
+                .workloadIntensity,
+                .workloadWorkingCount,
+                .timeOfDayFraction
+            ]
+        )
     }
 
     func testComponentContractAndHStackPatchRoundTrip() throws {
@@ -3316,11 +3469,12 @@ final class ExtensionContractTests: XCTestCase {
     }
 
     func testPublicComponentCatalogueExamplesUseTheirOwnRuntimeValidator() throws {
-        XCTAssertEqual(ThreadingComponentCatalog.entries.count, 16)
+        XCTAssertEqual(ThreadingComponentCatalog.entries.count, 17)
         XCTAssertEqual(
             Set(ThreadingComponentCatalog.all.map(\.id.rawValue)),
             [
                 "application.main-window",
+                "sidebar.backdrop",
                 "composer.conversation-reply",
                 "composer.session-start",
                 "conversation.assistant-message",

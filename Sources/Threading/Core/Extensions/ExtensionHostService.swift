@@ -1893,7 +1893,7 @@ final class ExtensionHostService {
         case .customSurface(.metal(let surface), _):
             return surface.inputs.contains { input in
                 guard case .signal(let signal, _) = input.value else { return false }
-                return signal != .activeAccountUsageRemaining
+                return !ExtensionHostSignals.supported.contains(signal)
             }
         case .overlay(let base, let overlay):
             return nodeUsesUnsupportedSignal(base) || nodeUsesUnsupportedSignal(overlay)

@@ -337,6 +337,72 @@ final class ExtensionAppearanceTests: XCTestCase {
         return png
     }
 
+    /// A theme document's `material.backdrop` names a package picture the same way its
+    /// `sidebar` block does; inspection reads it, a missing file refuses the package, and the
+    /// registry serves the bytes to the backdrop resolver by the name the document wrote.
+    func testAThemeCarriesItsBackdropPictureThroughInspection() throws {
+        let base = AppThemeStyles.newsprint
+        let variants = base.variants.mapValues { variant -> AppTheme.Variant in
+            var material = variant.material
+            material.backdrop = ThemeBackdrop(
+                image: .init(asset: "Resources/wash.png", mode: .fill, opacity: 0.3)
+            )
+            return variant.replacing(material: material)
+        }
+        let document = AppTheme(
+            id: base.id, name: base.name, mode: base.mode, summary: base.summary,
+            variants: variants
+        )
+
+        let root = try makeAppearancePackage(
+            capabilities: [.themeProvider],
+            themes: [.init(id: "washed", resource: "Resources/washed.json")],
+            resources: [
+                "Resources/washed.json": try JSONEncoder().encode(document),
+                "Resources/wash.png": try markPNG(fillsBounds: true)
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let bundle = try ExtensionBundleInspector.inspect(at: root)
+        let contributed = try XCTUnwrap(bundle.themes.first)
+        let bytes = try XCTUnwrap(
+            contributed.sidebarAssets["Resources/wash.png"],
+            "the backdrop picture was not read at inspection"
+        )
+        XCTAssertNotNil(NSImage(data: bytes))
+
+        let registry = ExtensionAppearanceRegistry.shared
+        defer { registry.replace(contributions: []) }
+        registry.replace(contributions: [
+            .init(
+                extensionIdentifier: "com.example.pack",
+                extensionName: "Test Extension",
+                themes: [contributed.theme],
+                fontURLs: [],
+                sidebarAssets: [contributed.theme.id: contributed.sidebarAssets]
+            )
+        ])
+        let kind = contributed.theme.availableVariants[0]
+        let stated = try XCTUnwrap(contributed.theme.variant(kind)?.material.backdrop)
+        let resolved = try XCTUnwrap(
+            ThemeBackdropAppearance.resolve(stated, themeID: contributed.theme.id)
+        )
+        XCTAssertNotNil(resolved.image?.image, "the registry's bytes resolve for drawing")
+        XCTAssertEqual(resolved.image?.opacity, 0.3)
+
+        let missing = try makeAppearancePackage(
+            capabilities: [.themeProvider],
+            themes: [.init(id: "washed", resource: "Resources/washed.json")],
+            resources: ["Resources/washed.json": try JSONEncoder().encode(document)]
+        )
+        defer { try? FileManager.default.removeItem(at: missing) }
+        XCTAssertThrowsError(
+            try ExtensionBundleInspector.inspect(at: missing),
+            "a picture the host will not draw fails the package so the author sees it"
+        )
+    }
+
     func testAManifestDeclaringThemesWithoutTheCapabilityIsRefused() throws {
         let document = try JSONEncoder().encode(AppThemeStyles.newsprint)
         let root = try makeAppearancePackage(

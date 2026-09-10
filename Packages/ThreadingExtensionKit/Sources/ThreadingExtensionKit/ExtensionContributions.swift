@@ -226,7 +226,7 @@ public struct ExtensionPanel: Codable, Equatable, Sendable {
         maximumTextLength: 10_000,
         allowedStackAxes: [.horizontal, .vertical],
         allowedTextRoles: ExtensionTextRole.allCases,
-        allowedImageRoles: ExtensionImageRole.allCases,
+        allowedImageRoles: ExtensionImageRole.inline,
         allowedButtonRoles: ExtensionButtonRole.allCases,
         allowedStatusRoles: ExtensionStatusRole.allCases,
         allowsTextInput: true,

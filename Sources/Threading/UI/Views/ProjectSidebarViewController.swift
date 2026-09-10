@@ -258,6 +258,16 @@ final class ProjectSidebarViewController: NSViewController {
 
     /// The sidebar's ground, under every theme — see `applySidebarSurface`.
     private var themeBackdrop: SidebarBackdropView?
+
+    /// The plane an extension may dress through `sidebar.backdrop@1`, above the theme's
+    /// ground and beneath everything else — see `applySidebarSurface`.
+    private(set) var extensionBackdrop: SidebarExtensionBackdropView?
+
+    /// Where the backdrop plane asks what has been published for it, and how it resolves a
+    /// picture. Injected only by tests; the app reads the shared provider slot and the
+    /// package-contained resource resolver.
+    private let extensionBackdropLookup: ComponentCustomizationHost.Lookup?
+    private let extensionBackdropImageResolver: ComponentCustomizationHost.ImageResolver?
     private(set) var isSettingsMode = false
 
     /// Top level of the tree: a `RepoGroupNode` for repositories with several checkouts,
@@ -418,8 +428,12 @@ final class ProjectSidebarViewController: NSViewController {
         },
         factSnapshotPatchProvider: @escaping FactSnapshotPatchProvider = { _, _, _ in nil },
         defersInitialTreeMount: Bool = false,
-        decorateAccountUsage: @escaping AccountUsageMenu.Decorator = AccountUsageMenu.decorate
+        decorateAccountUsage: @escaping AccountUsageMenu.Decorator = AccountUsageMenu.decorate,
+        extensionBackdropLookup: ComponentCustomizationHost.Lookup? = nil,
+        extensionBackdropImageResolver: ComponentCustomizationHost.ImageResolver? = nil
     ) {
+        self.extensionBackdropLookup = extensionBackdropLookup
+        self.extensionBackdropImageResolver = extensionBackdropImageResolver
         self.projectStore = projectStore
         self.scheduledMessageStore = scheduledMessageStore
         self.canAskAgentToRename = canAskAgentToRename
@@ -800,20 +814,40 @@ private extension ProjectSidebarViewController {
     /// The backdrop stays a *subview* rather than a fill on the controller's own view, because
     /// the outline view, its scroll view and the footer are all layered over it — one view whose
     /// only job is the ground is what keeps the ordering obvious.
+    ///
+    /// Directly above it, and still beneath everything else, sits the plane an extension may
+    /// dress (`sidebar.backdrop@1`). Two views rather than one because they answer to different
+    /// owners: the theme's ground is the user's standing choice, and the extension's plane is
+    /// published by a process that may go away — and when it does, the theme's dressing is
+    /// exactly what was underneath all along.
     private func applySidebarSurface() {
         guard themeBackdrop == nil else { return }
 
         let backdrop = SidebarBackdropView()
         view.addSubview(backdrop, positioned: .below, relativeTo: nil)
 
+        let extensionPlane = SidebarExtensionBackdropView(
+            lookup: extensionBackdropLookup ?? {
+                ComponentCustomizationProviderSlot.shared.customization(for: $0)
+            },
+            imageResolver: extensionBackdropImageResolver
+                ?? ExtensionComponentResourceResolver.image
+        )
+        view.addSubview(extensionPlane, positioned: .above, relativeTo: backdrop)
+
         NSLayoutConstraint.activate([
             backdrop.topAnchor.constraint(equalTo: view.topAnchor),
             backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            extensionPlane.topAnchor.constraint(equalTo: view.topAnchor),
+            extensionPlane.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            extensionPlane.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            extensionPlane.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
 
         themeBackdrop = backdrop
+        extensionBackdrop = extensionPlane
     }
 
 }

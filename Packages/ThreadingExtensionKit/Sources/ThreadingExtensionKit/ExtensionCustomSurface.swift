@@ -77,6 +77,9 @@ public enum ExtensionCustomSurfaceKind: String, Codable, Equatable, Sendable {
 /// `MTLDevice`, command encoder, texture, buffer, or AppKit object.
 public struct ExtensionMetalSurface: Equatable, Sendable {
     public static let defaultFragmentFunction = "threadingExtensionFragment"
+    /// The SDK's own cadence ceiling. A contract may state a lower one through
+    /// `ExtensionComponentNodeConstraints.maximumCustomSurfaceFramesPerSecond`.
+    public static let maximumFramesPerSecond = 60
 
     public let shaderResource: String
     public let fragmentFunction: String
@@ -110,10 +113,10 @@ public struct ExtensionMetalSurface: Equatable, Sendable {
                 message: "must be a valid Metal function identifier"
             ))
         }
-        if !(1...60).contains(preferredFramesPerSecond) {
+        if !(1...Self.maximumFramesPerSecond).contains(preferredFramesPerSecond) {
             issues.append(.init(
                 path: "\(path).preferredFramesPerSecond",
-                message: "must be between 1 and 60"
+                message: "must be between 1 and \(Self.maximumFramesPerSecond)"
             ))
         }
         if inputs.count > 8 {
@@ -250,6 +253,30 @@ public struct ExtensionHostSignal: RawRepresentable, Codable, Hashable, Sendable
     /// limit. The signal resolves to its binding's fallback when no usage reading is available.
     public static let activeAccountUsageRemaining: Self =
         "active-account.usage-remaining"
+
+    /// The app-wide activity envelope, `0...1`: a floor set by how many sessions are working
+    /// right now, raised by recent output and decaying with quiet. This is the same reading the
+    /// sidebar's workload analyzer draws, so a surface bound to it moves with the fleet rather
+    /// than with a clock.
+    public static let workloadIntensity: Self = "workload.intensity"
+
+    /// The exact number of sessions working right now, as a count rather than a fraction. Bind
+    /// it with an `inputMaximum` of your own choosing — eight is a busy Mac — so the mapping
+    /// decides what "many" means for your surface.
+    public static let workloadWorkingCount: Self = "workload.working-count"
+
+    /// How far the local day has run, `0...1` from midnight to midnight, so a surface can follow
+    /// the hour without the extension ever reading the clock.
+    public static let timeOfDayFraction: Self = "time.day-fraction"
+
+    /// Every signal this SDK release names. A host may supply fewer — it refuses a patch naming
+    /// one it cannot answer — and never more without a new SDK release naming them here.
+    public static let all: [Self] = [
+        .activeAccountUsageRemaining,
+        .workloadIntensity,
+        .workloadWorkingCount,
+        .timeOfDayFraction
+    ]
 }
 
 public struct ExtensionScalarMapping: Codable, Equatable, Sendable {

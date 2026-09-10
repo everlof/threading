@@ -18,6 +18,18 @@ saw the betas.
 
 ## [Unreleased]
 
+### Added
+
+- A theme can now put a gradient or a picture under the app's panes — the display panel, the
+  browser, Git Review, the audit and the settings subpages — beneath any dot or grid pattern it
+  already draws there. Agents set it with the theme tools as `material.backdrop`; a wash has to
+  keep the theme's text readable, and a picture is stored with the theme like a sidebar image.
+- An extension can put a picture or a live shader beneath the sidebar's rows
+  (`sidebar.backdrop@1`). Threading keeps it below 60% opacity, at or under 30 frames a second,
+  paused while the window is hidden and frozen under Reduce Motion, and nothing in it can be
+  clicked. Shader surfaces can now follow the app's workload and the time of day as well as the
+  active account's remaining usage.
+
 ### Fixed
 
 - A chat Threading followed into a sibling worktree can no longer be pulled straight back by the

@@ -546,6 +546,22 @@ the durable extension surface.
 - [x] Render both levels in one renderer pass, so a button in the detail keeps the host view's
   action bridge — AppKit's `target` is weak, and a lazily built detail hands back dead buttons.
 
+### Phase 16 — a surface beneath the host's content
+
+- [x] Add `ExtensionComponentNodeConstraints.proceedPlacement` (`anywhere` | `overlayTop`) and
+  `maximumCustomSurfaceFramesPerSecond`, so a contract can state "your content goes under mine"
+  and "no faster than this" as machine-readable rules the SDK refuses against.
+- [x] Add the `backdrop` image role — a fill with no intrinsic size and a nil hit test — and
+  list `ExtensionImageRole.inline` in every earlier contract so the role is opt-in per surface.
+- [x] Publish `sidebar.backdrop@1`: an under-content hook admitting the fill role and a Metal
+  surface at ≤ 30 fps, hosted on a passive plane between the theme's sidebar ground and the
+  list with an empty `.proceed`, composited below a host-owned 60% ceiling.
+- [x] Give host signals one owner (`ExtensionHostSignals`), add `workload.intensity`,
+  `workload.working-count` and `time.day-fraction`, refuse unknown signals at publication, and
+  share the custom-surface renderer between the window hook and the plane.
+- [x] Hold a Metal surface's frames while its window is occluded, miniaturized or the view
+  hidden, and clamp its cadence to the host's ceiling.
+
 ## Expected intrusion
 
 Core extension machinery is additive and removable:

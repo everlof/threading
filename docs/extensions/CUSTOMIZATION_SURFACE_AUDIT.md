@@ -30,6 +30,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
+| Sidebar backdrop | `sidebar.backdrop@1` | under-content hook: an overlay whose top is `.proceed`, admitting only a `backdrop` image and a Metal surface | legibility ceiling, frame cadence and the visibility hold, pointer passthrough, reduced motion, accessibility silence, layering beneath the theme's navigator well | Implemented |
 | Workspace navigator | `ui.workspace-navigation` | complete semantic navigator, optionally augmented with a host-evaluated pipeline, bounded options and row intents | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, and intent availability, revalidation and execution | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
@@ -354,6 +355,30 @@ already an extension's own tree, so there is nothing in it for a second extensio
 into, and the surface exists only while a reader holds a row open. What stays host-owned there
 is the gesture — the dwell, the placement, the growth limit, the pointer bridge that lets the
 pointer cross into it, and the dismissal.
+
+## Backdrop precedent
+
+`sidebar.backdrop@1` is the first contract whose content is drawn **beneath** the host's rather
+than beside, around or over it, and the difference is stated as a constraint rather than left to
+the author: `proceedPlacement: overlayTop` requires the hook's root to be an overlay whose top is
+exactly `.proceed`. The window hook's shape — surface over `.proceed` — is refused here, because
+a backdrop composited over the rows is a wash over the words a person reads.
+
+Three things follow from "beneath". The vocabulary is two nodes, a fill-the-column `backdrop`
+image and a Metal surface, because nothing under the rows can be read or pressed; the role is
+opt-in per contract, so no earlier surface gained a wallpaper when it was added. The plane hosts
+an *empty* `.proceed` — the display-pane header's precedent — and sits between the theme's
+sidebar ground and the list in the controller's own hierarchy, rather than re-parenting a list
+that owns selection, focus and reuse into a tree whose only job is to be under it. And the host
+keeps a legibility ceiling of its own (the plane is composited at 60% and content cannot raise
+it), a cadence ceiling stated in the contract and clamped in the view, and a hold while the
+window is unseen — the frame-rate half being the one place a *contract* states a number the
+runtime must obey, so the catalogue and the host cannot drift.
+
+The theme's own dressing stays beneath the plane and a theme's opaque navigator well stays above
+it; that layering belongs to the theme, not to the extension. The same shape is the intended
+answer for a display-panel or composer backdrop: a sibling contract at another placement, not a
+new vocabulary.
 
 ## Composer precedent
 

@@ -63,7 +63,7 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   (`host.project.files.read`), plus the `attachments.preview@1` offer contract and
   `attachments.file-types` registration.
 - Provider/account icon resolution and constrained session identity composition.
-- Component contracts `application.main-window@1`, `sidebar.project-row@1`,
+- Component contracts `application.main-window@1`, `sidebar.backdrop@1`, `sidebar.project-row@1`,
   `sidebar.project-hover-card@1`, `sidebar.session-row@1`,
   `sidebar.session-hover-card@1`, `sidebar.session-identity@1`,
   `toolbar.account-usage-popover@1`, `composer.session-start@1`, and
@@ -94,7 +94,12 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   Permission decisions, Keychain interaction, destructive confirmation wording and security
   control roles remain host-owned and are not component-replacement surfaces.
 - Capability-gated Metal fragment surfaces in declared hook positions. Threading owns the native
-  view, rendering lifecycle and scalar inputs; the extension supplies bounded shader source.
+  view, rendering lifecycle and scalar inputs; the extension supplies bounded shader source. A
+  contract may place a hook *beneath* the host's content (`proceedPlacement: overlayTop`) and
+  cap a surface's cadence; `sidebar.backdrop@1` does both and admits the `backdrop` image role,
+  a fill that no earlier contract accepts. Surfaces bind host signals by name —
+  `active-account.usage-remaining`, `workload.intensity`, `workload.working-count`,
+  `time.day-fraction` — and a host refuses a patch naming one it cannot answer.
 - Optional advanced companion apps with independently reviewed OS capabilities, declared
   operations, and bounded remote surfaces rendered inside host-owned views.
 - Brokered HTTPS fetches (`network.brokered`) against origins declared in the manifest's

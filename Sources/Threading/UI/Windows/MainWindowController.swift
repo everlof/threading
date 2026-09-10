@@ -854,6 +854,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let displayAndToolsStarted = DispatchTime.now().uptimeNanoseconds
         setupDisplayPane()
         setupAgentToolCoordinator()
+        installExtensionHostSignals()
         startupPerformance.splitDisplayAndToolsNanoseconds = DispatchTime.now().uptimeNanoseconds
             - displayAndToolsStarted
 
@@ -1282,46 +1283,29 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         _ surface: ExtensionCustomSurface,
         extensionIdentifier: String
     ) -> NSView? {
-        switch surface {
-        case let .metal(specification):
-            guard let source = ExtensionManager.shared.customSurfaceSource(
-                relativePath: specification.shaderResource,
-                extensionIdentifier: extensionIdentifier
-            ) else {
-                return nil
-            }
-            do {
-                return try ExtensionMetalSurfaceView(
-                    specification: specification,
-                    source: source,
-                    signalProvider: { [weak self] signal in
-                        self?.extensionHostSignal(signal)
-                    }
-                )
-            } catch {
-                ThreadingLogger.extensions.error(
-                    "Could not render Metal surface from \(extensionIdentifier, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
-                )
-                return nil
-            }
+        ExtensionCustomSurfaceRenderer.render(surface, extensionIdentifier: extensionIdentifier)
+    }
+
+    /// The one host signal only a window can answer: which account is "active" is the
+    /// toolbar's account item's to say. Installed into `ExtensionHostSignals` rather than read
+    /// by this window's surfaces alone, so the sidebar backdrop and any later host get the
+    /// same reading the window hook does.
+    private func installExtensionHostSignals() {
+        ExtensionHostSignals.activeAccountUsageRemaining = { [weak self] in
+            self?.activeAccountUsageRemaining()
         }
     }
 
-    private func extensionHostSignal(_ signal: ExtensionHostSignal) -> Double? {
-        switch signal {
-        case .activeAccountUsageRemaining:
-            guard let account = materializedAccountUsageItemView?.account,
-                  let used = AccountUsageService.shared
-                  .usage(for: account)?
-                  .peakWindow()?
-                  .fraction
-            else {
-                return nil
-            }
-            return 1 - min(max(used, 0), 1)
-        default:
+    private func activeAccountUsageRemaining() -> Double? {
+        guard let account = materializedAccountUsageItemView?.account,
+              let used = AccountUsageService.shared
+              .usage(for: account)?
+              .peakWindow()?
+              .fraction
+        else {
             return nil
         }
+        return 1 - min(max(used, 0), 1)
     }
 
     private func setupAgentToolCoordinator() {

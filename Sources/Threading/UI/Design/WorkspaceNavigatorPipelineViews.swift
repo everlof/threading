@@ -549,6 +549,10 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
         case .identity: Design.Size.extensionIdentityImage
         case .icon: Design.Size.extensionIconImage
         case .decoration: Design.Size.extensionDecorationImage
+        // A navigator's vocabulary is `ExtensionImageRole.inline`, so a fill never reaches
+        // here; sized as a decoration rather than trapped, because a validated document is
+        // not the place to crash.
+        case .backdrop: Design.Size.extensionDecorationImage
         }
     }
 

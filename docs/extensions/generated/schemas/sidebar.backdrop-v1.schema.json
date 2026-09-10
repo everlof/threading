@@ -1,5 +1,5 @@
 {
-  "$id" : "https://threading.codes/schema/components/application.main-window-v1.schema.json",
+  "$id" : "https://threading.codes/schema/components/sidebar.backdrop-v1.schema.json",
   "$schema" : "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties" : false,
   "properties" : {
@@ -7,50 +7,38 @@
       "$ref" : "https://threading.codes/schema/extension-node.schema.json",
       "x-threading-node-constraints" : {
         "allowedButtonRoles" : [
-          "standard",
-          "primary",
-          "destructive"
+
         ],
         "allowedCustomSurfaceKinds" : [
           "metal"
         ],
         "allowedImageRoles" : [
-          "identity",
-          "icon",
-          "decoration"
+          "backdrop"
         ],
         "allowedStackAxes" : [
-          "horizontal",
-          "vertical"
+
         ],
         "allowedStatusRoles" : [
-          "neutral",
-          "positive",
-          "warning",
-          "negative"
+
         ],
         "allowedTextRoles" : [
-          "heading",
-          "body",
-          "detail",
-          "code",
-          "compactBody",
-          "compactDetail"
+
         ],
-        "allowsDivider" : true,
-        "allowsFixedSpacer" : true,
-        "allowsFlexibleSpacer" : true,
+        "allowsDivider" : false,
+        "allowsFixedSpacer" : false,
+        "allowsFlexibleSpacer" : false,
         "allowsMedia" : false,
         "allowsOverlay" : true,
         "allowsProceed" : true,
         "allowsTextInput" : false,
-        "maximumDepth" : 6,
-        "maximumNodes" : 16,
+        "maximumCustomSurfaceFramesPerSecond" : 30,
+        "maximumDepth" : 3,
+        "maximumNodes" : 6,
         "maximumPickerOptions" : 0,
-        "maximumRenderedElements" : 16,
+        "maximumRenderedElements" : 6,
         "maximumSceneItems" : 0,
-        "maximumTextLength" : 200,
-        "proceedPlacement" : "anywhere",
+        "maximumTextLength" : 80,
+        "proceedPlacement" : "overlayTop",
         "requiresProceed" : true
       }
     },
@@ -86,7 +74,7 @@
       "additionalProperties" : false,
       "properties" : {
         "component" : {
-          "const" : "application.main-window"
+          "const" : "sidebar.backdrop"
         },
         "contractVersion" : {
           "const" : 1
@@ -109,6 +97,6 @@
     "properties",
     "slots"
   ],
-  "title" : "Threading application.main-window v1 component patch",
+  "title" : "Threading sidebar.backdrop v1 component patch",
   "type" : "object"
 }

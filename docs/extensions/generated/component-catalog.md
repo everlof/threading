@@ -15,6 +15,20 @@ Composable visual hooks around the complete main-window content.
 - Slots: none
 - Host-owned behavior: `window-chrome`, `input-routing`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 6, nodes 16
+
+## `sidebar.backdrop` v1
+
+A picture or live surface beneath the sidebar's brand row, list and footer.
+
+- Context: `application`
+- Replacement: `none`
+- Composable hooks: around content
+- Properties: none
+- Slots: none
+- Host-owned behavior: `legibility-ceiling`, `frame-cadence`, `pointer-passthrough`, `reduced-motion`, `accessibility-container`
+- Host assets: none
+- Hook limits: depth 3, nodes 6; proceed must be the top of a root overlay (content is drawn beneath the host's); custom surfaces at most 30 fps
 
 ## `composer.session-start` v1
 
@@ -27,6 +41,7 @@ Compact accessories before or after the protected new-session prompt.
 - Slots: none
 - Host-owned behavior: `text-input`, `submission`, `keyboard-routing`, `draft-persistence`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 2, nodes 8
 
 ## `composer.conversation-reply` v1
 
@@ -39,6 +54,7 @@ Compact accessories before or after the protected conversation reply prompt.
 - Slots: none
 - Host-owned behavior: `text-input`, `submission`, `keyboard-routing`, `stream-availability`, `permission-state`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 2, nodes 8
 
 ## `conversation.user-message` v1
 
@@ -51,6 +67,7 @@ Display or action annotations around an intact user-message row.
 - Slots: none
 - Host-owned behavior: `transcript-order`, `message-content`, `turn-boundary`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 2, nodes 10
 
 ## `conversation.assistant-message` v1
 
@@ -63,6 +80,7 @@ Display or action annotations around an intact assistant-message row.
 - Slots: none
 - Host-owned behavior: `transcript-order`, `message-content`, `streaming-lifecycle`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 2, nodes 10
 
 ## `conversation.tool-call` v1
 
@@ -75,6 +93,7 @@ Display or action annotations around an intact collapsible tool-call row.
 - Slots: none
 - Host-owned behavior: `transcript-order`, `tool-result-attachment`, `tool-expansion`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 2, nodes 10
 
 ## `conversation.permission-card` v1
 
@@ -87,6 +106,7 @@ Display-only annotations around an intact host-owned permission card.
 - Slots: none
 - Host-owned behavior: `transcript-order`, `permission-state`, `permission-decision`, `permission-queue`, `remote-mirroring`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 2, nodes 8
 
 ## `display.pane-header` v1
 
@@ -99,6 +119,7 @@ Compact commands or status in the host-owned display-pane header.
 - Slots: none
 - Host-owned behavior: `tab-selection`, `tab-closure`, `tab-order`, `tab-identity`, `tab-active-state`, `tab-overflow`, `tab-persistence`, `new-tab-menu`, `pane-visibility`, `accessibility-container`
 - Host assets: none
+- Hook limits: depth 1, nodes 6
 
 ## `display.tab-header` v1
 
@@ -162,6 +183,7 @@ Composable content inside the hover card presented from a session row.
 - Host-owned behavior: `hover-trigger`, `presentation-lifecycle`, `popover-chrome`, `accessibility-container`
 - Host assets: none
 - Replacement limits: depth 6, nodes 48, text 1000
+- Hook limits: depth 6, nodes 48
 
 ## `toolbar.account-usage-popover` v1
 
@@ -175,6 +197,7 @@ Composable detail content in the toolbar's active-account usage popover.
 - Host-owned behavior: `hover-trigger`, `presentation-lifecycle`, `popover-chrome`, `data-refresh`, `account-selection`, `hover-survival`, `accessibility-container`
 - Host assets: none
 - Replacement limits: depth 6, nodes 48, text 1000
+- Hook limits: depth 6, nodes 48
 
 ## `sidebar.project-row` v1
 
@@ -201,4 +224,5 @@ Composable content inside the hover card presented from a project row.
 - Host-owned behavior: `hover-trigger`, `presentation-lifecycle`, `popover-chrome`, `accessibility-container`
 - Host assets: none
 - Replacement limits: depth 6, nodes 48, text 1000
+- Hook limits: depth 6, nodes 48
 

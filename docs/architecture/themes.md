@@ -1891,3 +1891,179 @@ is scoped by both stable Mac identity and the local pairing identity: current pa
 Mac answer, while an older pairing that predates stable host ids still finds its own record. Demo
 and terminal-wire fixtures never write it. Corrupt bytes are quarantined before replacement and a
 future archive remains untouched with writes disabled.
+
+## 2026-09-10 — backdrops for the broad grounds, and a plane under the sidebar an extension may dress
+
+Three limits were true at once, and each was a design rather than an oversight. A theme could
+dress exactly one region by name — the sidebar, because its content is entirely ours. The
+material's `backdropPattern` reached every other broad ground, but only as four vector patterns
+in one role, "deliberately not an arbitrary image". And the only *live* surface an extension
+could supply was `application.main-window@1`'s overlay: a shader over the whole window, drawn on
+top of everything, bound to one signal. So an extension could rain on the window but could not
+put a picture under a list, and a theme could wallpaper the sidebar but not the panel beside it.
+
+What shipped keeps every one of those decisions where it was load-bearing and moves the rest.
+
+### The vocabulary is shared, the regions are not
+
+`ThemeBackdrop` — a gradient, then an image over it, both optional — is the sidebar block's
+`background` lifted out into a type of its own (`SidebarStyle.Background`, `.Gradient` and
+`.ImageLayer` are typealiases, so nothing that read the sidebar changed). It now has two homes:
+
+| Stated in | Reaches | Gated against |
+|---|---|---|
+| `SidebarStyle.background` | the sidebar column, under the list | the `surface` role, 3:1 label floor per stop |
+| `AppTheme.Material.backdrop` | every surface that opts into the material's backdrop treatment with `applySurface(pattern: .backdrop)` — the display panel, the browser, the execution audit, the drawer, the settings subpages, the About window; the same set `backdropPattern` already reaches | the `ground` role, same floor |
+
+The second home is **collective, not named**. The sidebar is still the only region a theme
+addresses by name, and the reasoning in `SidebarStyle`'s header still holds for the terminal:
+its ground is the terminal palette's, and painting behind another program's output is not a
+theme. What changed is that the display panel, Settings and the audit are *ours* too, and they
+had already been declared "the broad grounds" by opting into the pattern. A picture goes exactly
+where the pattern goes — a surface opts in, cards and controls never inherit it — so no call site
+changed and no view learned a theme's name.
+
+**Beneath the pattern, not instead of it.** `applySurface` hangs a `ThemeBackdropDressingLayer`
+(a gradient layer and a picture layer in one `CALayer`, found and stripped by name like the
+pattern) at index 0 and keeps the pattern layer above it, so a theme may lay a dot field over a
+wash. The ordering is enforced when either layer is *added*, because a theme switch can add the
+pattern after the dressing already exists. Both are frozen `CGColor`/`contents` territory and
+are restated on every apply; the ordinary sweep re-runs `applySurface` from the recorded
+participation, and `ThemedSurfaceView` repaints on an appearance flip, so an adaptive theme's
+per-variant wallpaper follows a system light/dark switch without a notification. Cleared rather
+than skipped when the theme states nothing — leaving a wallpapered theme has to take every
+wallpaper with it, the `applyThemeGlow` rule.
+
+**One resolver.** `ThemeBackdropAppearance.resolve(_:themeID:)` turns a stated block into
+drawable values — sorted stops, decoded images through the tier that owns the theme — and both
+`SidebarAppearance.background` and the material path go through it, so the two never disagree
+about what a name resolves to. It lives in `SidebarAppearance.swift`, which `ThreadingDesignKit`
+already symlinks; `HostSeam` stubs the two stores it reads, so a native plugin's panes wear the
+host's wallpaper for the same reason they wear its colours.
+
+**Assets.** `ThemeAssetSlot` (née `SidebarAssetSlot`, kept as a typealias) gains `.backdrop`,
+stored as `<variant>-backdrop.png` at up to 2048 pixels on the long side and 8 MiB — twice the
+sidebar's, because a pane is twice the picture. Every path that carries a sidebar image carries
+this one too: `ThemeAssetStore.store(slot:)` with a per-slot byte cap,
+`ExtensionBundleLoader.inspectSidebarAssets` reading `material.backdrop.image.asset` out of a
+contributed package at inspection (a missing file still fails the whole package),
+`AppThemeLibrary.duplicate` materialising a contributed theme's bytes into the store, and
+deletion removing the folder. The read-side `maximumStoredBytes` grew to match, or a stored
+8 MiB PNG would have failed to load under the 4 MiB the sidebar read with.
+
+**Gates.** `AppThemeEditing` holds the material's backdrop to the sidebar's rules through one
+shared `validate(_:prefix:subject:kind:label:ground:)`: two to eight stops, positions in 0…1,
+every stop composited over the ground and then the label over that at the 3:1 floor; an image's
+opacity in 0…1 and a non-empty asset name. An image is still not measured — its pixels are
+arbitrary — so its legibility stays the author's to check by looking, and the tool description
+says photographs want opacity well below 0.4. The sidebar's messages are byte-identical to
+before; only the prefix and the ground differ.
+
+**Tools.** `material.backdrop` rides `create_app_theme`/`update_app_theme` with the sidebar's
+idiom — `gradient`, `remove_gradient`, `image {source, mode, opacity}`, `remove_image`,
+`remove` — plus `material.remove_backdrop` beside `remove_backdrop_pattern`, and `get_app_theme`
+returns the block under `material.backdrop` by stored asset name. The update path snapshots the
+backdrop slot before writing it, exactly as it does the sidebar's, so a refused document puts the
+old picture back. The parsing moved out of `AgentToolCoordinator` into `AppThemeToolParsing`
+together with the gradient and image-bytes helpers the sidebar and chrome already used, because
+the coordinator's authority ratchet (`check_architecture_boundaries.sh`) is a ceiling and not an
+allowance: the sidebar's helpers had been counted against it since they were written, and moving
+them out left the coordinator fifteen lines *lighter* than before this work.
+
+Not projected by `RemoteThemeBridge`, like chrome and bevel: the phone has neither the panes
+nor a decoder for the bytes, and the roles ride the resolved colour map anyway.
+
+### `sidebar.backdrop@1` — content beneath the host's, as a contract
+
+The window hook composes `.overlay(base: .proceed, overlay: surface)`: the extension over the
+host. A backdrop is the same node turned over, and the SDK now says so as a rule rather than a
+convention. `ExtensionComponentNodeConstraints.proceedPlacement` (`anywhere`, or `overlayTop`)
+requires the hook's root to be an overlay whose *top* is exactly `.proceed` — not a stack holding
+it, which would let a sibling share the top layer with the rows. `sidebar.backdrop@1` states it,
+admits a vocabulary of exactly two nodes — an `image` in the new `backdrop` role and a Metal
+`customSurface` — and caps custom surfaces at 30 fps through the new
+`maximumCustomSurfaceFramesPerSecond`. The SDK refuses a patch above the cap; the host clamps the
+view it builds to the same number, read from the catalogue so the two cannot disagree.
+
+**`backdrop` is an image role, and it is opt-in per contract.** An `NSImageView` has an
+intrinsic size, and an image under the sidebar would have asked the column to be as wide as the
+picture and won. `ExtensionBackdropImageView` is a bare layer with aspect-fill gravity, no
+intrinsic size, and a nil hit test. Every contract written before the role existed lists
+`ExtensionImageRole.inline` (identity, icon, decoration) rather than `allCases`, so a wallpaper
+cannot arrive inside a hover card or a composer accessory because the SDK grew a role; the
+navigator and phone renderers size it as a decoration rather than trapping, because a validated
+tree is not the place to crash.
+
+**The plane is a view of its own, and `.proceed` is empty.** `SidebarExtensionBackdropView` sits
+in `ProjectSidebarViewController` directly above `SidebarBackdropView` and beneath the header,
+list and footer. Its composition is the ordinary `ComponentCustomizationHost` — same registry
+lookup, same renderer, same refresh on `ComponentCustomizationDidChange`, same atomic skip of a
+hook that fails to render — with an empty anchor as the default content, the display-pane
+header's precedent rather than the window hook's. The list owns selection, focus, drag state and
+thousands of reused rows; re-parenting it into a tree whose only job is to be beneath it would
+have handed all of that back on every republish for nothing. Layering is the theme's call: the
+theme's own gradient and picture stay beneath the plane, and an opaque navigator well a theme
+states stays above it, so under such a theme the backdrop shows only around the well.
+
+What the host keeps, stated as `hostOwnedBehavior` so the catalogue says it:
+
+- **Legibility ceiling** — the plane is composited at `ExtensionBackdropLimits.maximumOpacity`
+  (0.6), and content cannot raise it. A theme's own sidebar image is uncapped because a theme is
+  a choice made in Settings with the result in view; an extension's backdrop is published by a
+  process the user enabled once and may not be watching when it changes its mind, so the host
+  keeps a floor at which the rows' ground can move no more than three fifths of the way toward
+  whatever the surface draws.
+- **Pointer passthrough** — `hitTest` answers nil for every point, on the plane and on the image
+  view, so nothing composed here can take a click, a hover or a cursor.
+- **Frame cadence** — built through `ExtensionCustomSurfaceRenderer` (the one shared path; the
+  window hook uses it too) with the contract's ceiling, and `ExtensionMetalSurfaceView` now
+  holds its frames while its window is occluded, miniaturized or the view hidden, the media
+  player's rule. The clock keeps running through a hold so the animation resumes where time is.
+- **Reduced motion** — the surface's clock stops at zero, as it already did for the window.
+- **Accessibility** — not an element, and nothing beneath the rows is announced.
+
+**Signals have one owner.** `ExtensionHostSignals` answers every `ExtensionHostSignal` in one
+place, and `ExtensionHostService` refuses a patch naming one outside
+`ExtensionHostSignals.supported` — so an extension built against a newer SDK fails at
+publication with a reason instead of drawing its fallback forever and looking merely dull.
+Three signals joined `active-account.usage-remaining`: `workload.intensity` (the same 0…1
+envelope the sidebar's workload analyzer draws), `workload.working-count` (a count, for the
+mapping to normalise), and `time.day-fraction` (measured against the day's actual length so a
+daylight-saving change moves the fraction rather than running it past one). The account signal
+only a window can answer is *installed* into the same type by `MainWindowController` rather than
+read by that window's surfaces alone, so the sidebar backdrop gets the same reading the window
+hook does. `ExtensionHostSignalsTests` pins the host's set against `ExtensionHostSignal.all`.
+
+`Examples/SidebarAuroraExtension` is the worked example: ribbons under the column that brighten
+with `workload.intensity`, lean teal at night and gold by day through `time.day-fraction`, and
+ask for 24 fps.
+
+### Left deliberately for later
+
+- **`display.backdrop@1` and `composer.backdrop@1`** are the same contract shape at other
+  placements. Nothing in the constraint or the plane is sidebar-specific; the display panel's
+  ground is a `ThemedSurfaceView` and would take the same plane.
+- **Band textures beyond the title bar.** `WindowChromeStyle.TitleBar.Texture` already knows
+  pinstripes, brushed metal, dither and rule; letting pane header strips and the tab strip name
+  the same kinds is one field and a component reading it.
+- **Theme packages and importers** stay in
+  [`skin-and-chrome-imports.md`](../feature-drafts/skin-and-chrome-imports.md); the material
+  backdrop is what makes a `.threadingtheme` worth sharing.
+- **Renderer-registry backdrops for the native plugin tier**: a signed plugin registering a
+  backdrop renderer by identifier that a theme document names with parameters — the
+  media-player shape — is the tier-appropriate way for *code* to draw a background. Never an
+  `NSView` across a boundary, and never a view slot in `PluginContext`.
+- **A terminal-theme background image** is a terminal palette field, not an app-theme one, and
+  needs an opacity bound in place of a contrast gate.
+
+### Tests
+
+| What | Where |
+|---|---|
+| Wire form, every stock theme decoding to no backdrop, the sidebar typealiases, `replacing` keeping the block, the gates, the slot's names and ceilings, resolution through the store and a dangling name, the dressing layer installed under the pattern and stripped with the theme — and `theme-backdrop-pane-{light,dark}.png`, a wallpapered pane with a heading, a card and a button on it, which is how the feature is reviewed | `ThemeBackdropTests` |
+| The tool loop — create with a wash and a picture from bytes, read back, `remove_backdrop`, the asset dying with the theme — and the schema describing it | `ThemeToolTests` |
+| A contributed package's backdrop picture read at inspection, served by the registry, and a missing one refusing the package | `ExtensionAppearanceTests` |
+| The registry refusing content over the rows; the plane dressed, filled, passive and below the ceiling; undressed on republish; empty on an unresolvable image; stacked between the theme's ground and the list in the real sidebar; the cadence clamp and the visibility hold — and `sidebar-extension-backdrop-{light,dark}.png`, the real sidebar wearing an extension's picture | `SidebarExtensionBackdropTests` |
+| The host's signal set pinned to the SDK's, each reading, and the window-installed account reading | `ExtensionHostSignalsTests` |
+| Every SDK signal accepted at publication and an unknown one refused | `ExtensionRendererTests` |
+| The contract's shape, the role's opt-in, `overlayTop`'s own coherence rule, the enumerated signals, the catalogue count | `ExtensionContractTests` (SDK) |

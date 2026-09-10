@@ -197,7 +197,7 @@ enum AppThemeLibrary {
     /// folder is copied under the new id; a contributed source's bytes are lifted out of its
     /// package registry and materialised into the store, with the document's asset names
     /// rewritten to the store's slot names — the copy has to own its images, or disabling
-    /// the extension would strip the sidebar off a theme the user now owns.
+    /// the extension would strip the sidebar and the backdrop off a theme the user now owns.
     static func duplicate(_ source: AppTheme, name: String) throws -> AppTheme {
         var copy = try AppThemeEditing.duplicate(
             source,
@@ -230,7 +230,24 @@ enum AppThemeLibrary {
     ) throws -> AppTheme {
         var variants = copy.variants
         for (kind, variant) in variants {
-            guard var sidebar = variant.sidebar else { continue }
+            var materialised = variant
+            if let layer = variant.material.backdrop?.image {
+                guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
+                    named: layer.asset, forThemeID: source.id
+                ), let stored = ThemeAssetStore.store(
+                    imageData: data, for: copy.id, slot: .backdrop, variant: kind
+                ) else {
+                    throw AppThemeEditingError.invalid(
+                        "The contributed theme’s backdrop image could not be copied."
+                    )
+                }
+                var material = variant.material
+                material.backdrop?.image?.asset = stored
+                materialised = variant.replacing(material: material)
+                variants[kind] = materialised
+            }
+
+            guard var sidebar = materialised.sidebar else { continue }
 
             if let layer = sidebar.background?.image {
                 guard let data = ExtensionAppearanceRegistry.shared.sidebarAssetData(
@@ -258,7 +275,7 @@ enum AppThemeLibrary {
                 sidebar.brand?.logo = .asset(stored)
             }
 
-            variants[kind] = variant.replacingSidebar(sidebar)
+            variants[kind] = materialised.replacingSidebar(sidebar)
         }
         return AppTheme(
             id: copy.id,

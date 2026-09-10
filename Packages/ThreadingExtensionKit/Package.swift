@@ -34,6 +34,10 @@ let package = Package(
             targets: ["RainWindowExtensionExample"]
         ),
         .executable(
+            name: "SidebarAuroraExtensionExample",
+            targets: ["SidebarAuroraExtensionExample"]
+        ),
+        .executable(
             name: "SessionInfoExtensionExample",
             targets: ["SessionInfoExtensionExample"]
         ),
@@ -122,6 +126,15 @@ let package = Package(
             name: "RainWindowExtensionExample",
             dependencies: ["ThreadingExtensionKit"],
             path: "Examples/RainWindowExtension",
+            exclude: ["threading-extension.json", "Resources"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        // The backdrop counterpart of the rain window: the same Metal surface node, placed
+        // *under* the sidebar's content by the one hook shape `sidebar.backdrop@1` accepts.
+        .executableTarget(
+            name: "SidebarAuroraExtensionExample",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/SidebarAuroraExtension",
             exclude: ["threading-extension.json", "Resources"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),

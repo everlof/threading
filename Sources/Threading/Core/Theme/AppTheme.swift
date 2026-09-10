@@ -281,6 +281,18 @@ public struct AppTheme: Codable, Equatable {
         /// turning every nested surface into wallpaper.
         public var backdropPattern: BackdropPattern?
 
+        /// A gradient and/or picture under the same broad grounds the pattern reaches.
+        ///
+        /// The pattern was deliberately not an arbitrary image when it arrived; this is the
+        /// arbitrary image, bounded the way every untrusted picture in the app is, and it goes
+        /// exactly where the pattern goes: a surface opts in with `applySurface(pattern:
+        /// .backdrop)`, cards and controls never inherit it, and the terminal's ground is not
+        /// a broad ground. Drawn *under* the pattern, so a theme may lay a dot field over a
+        /// wash. Variant-owned like everything else in the material, because a wallpaper
+        /// authored for a dark ground is wrong on a pale one. The sidebar states its own
+        /// dressing in `SidebarStyle.background`, in the same `ThemeBackdrop` vocabulary.
+        public var backdrop: ThemeBackdrop?
+
         /// A theme-level multiplier for semantic app text. One preserves every historical
         /// theme; a deliberately dense visual language can compact the same roles without
         /// components inventing smaller point sizes. This composes with the user's text-size
@@ -1008,6 +1020,7 @@ public struct AppTheme: Codable, Equatable {
             borderWidth: CGFloat = 1,
             controlBorderWidth: CGFloat? = nil,
             backdropPattern: BackdropPattern? = nil,
+            backdrop: ThemeBackdrop? = nil,
             textScale: CGFloat = 1,
             choiceHeight: CGFloat = 26,
             glow: Glow? = nil,
@@ -1034,6 +1047,7 @@ public struct AppTheme: Codable, Equatable {
             self.borderWidth = borderWidth
             self.controlBorderWidth = controlBorderWidth
             self.backdropPattern = backdropPattern
+            self.backdrop = backdrop
             self.textScale = textScale
             self.choiceHeight = choiceHeight
             self.glow = glow
@@ -1058,6 +1072,7 @@ public struct AppTheme: Codable, Equatable {
 
         private enum CodingKeys: String, CodingKey {
             case panelRadius, controlRadius, borderWidth, controlBorderWidth, backdropPattern
+            case backdrop
             case textScale, choiceHeight
             case glow, popoverStyle, controlGlow, buttonStyle, headingStyle, bevel, typeface, fontFamily
             case fontFallbacks
@@ -1080,6 +1095,7 @@ public struct AppTheme: Codable, Equatable {
             backdropPattern = try container.decodeIfPresent(
                 BackdropPattern.self, forKey: .backdropPattern
             )
+            backdrop = try container.decodeIfPresent(ThemeBackdrop.self, forKey: .backdrop)
             textScale = try container.decodeIfPresent(CGFloat.self, forKey: .textScale) ?? 1
             choiceHeight = try container.decodeIfPresent(CGFloat.self, forKey: .choiceHeight) ?? 26
             glow = try container.decodeIfPresent(Glow.self, forKey: .glow)

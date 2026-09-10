@@ -2526,6 +2526,90 @@ public enum SurfacePattern: Equatable {
     case backdrop
 }
 
+/// A theme-authored gradient and picture behind a broad app surface.
+///
+/// The same two layers `SidebarBackdropView` stacks under the project list, kept as one
+/// `CALayer` so `applySurface` can find, update and strip it by name like the pattern layer.
+/// Both children are frozen `CGColor`/`contents` territory and are restated on every `apply`,
+/// which the theme sweep runs; the layer never trusts a previous theme's answer. Gravity does
+/// the fitting, so a resized pane never re-decodes the picture.
+public final class ThemeBackdropDressingLayer: CALayer {
+    static let layerName = "threading.backdropDressing"
+
+    private let gradient = CAGradientLayer()
+    private let picture = CALayer()
+
+    override init() {
+        super.init()
+        masksToBounds = true
+        gradient.type = .axial
+        picture.masksToBounds = true
+        addSublayer(gradient)
+        addSublayer(picture)
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    public override func layoutSublayers() {
+        super.layoutSublayers()
+        gradient.frame = bounds
+        picture.frame = bounds
+    }
+
+    /// Whether a gradient is showing — what a test can ask without reading pixels.
+    public var showsGradient: Bool { !gradient.isHidden }
+    /// Whether a picture is showing.
+    public var showsPicture: Bool { !picture.isHidden }
+
+    func apply(_ resolved: ThemeBackdropAppearance.Resolved) {
+        picture.contentsScale = contentsScale
+        if let stated = resolved.gradient {
+            gradient.isHidden = false
+            gradient.colors = stated.colors.map(\.cgColor)
+            gradient.locations = stated.locations.map { NSNumber(value: Double($0)) }
+            // CSS angles: 0° flows toward the top, 90° toward the right. The layer's unit
+            // space has its origin at the bottom-left here, so "toward the top" is +y.
+            let radians = stated.angleDegrees * .pi / 180
+            let direction = CGPoint(x: sin(radians) / 2, y: cos(radians) / 2)
+            gradient.startPoint = CGPoint(x: 0.5 - direction.x, y: 0.5 - direction.y)
+            gradient.endPoint = CGPoint(x: 0.5 + direction.x, y: 0.5 + direction.y)
+        } else {
+            gradient.isHidden = true
+            gradient.colors = nil
+        }
+
+        if let stated = resolved.image {
+            picture.isHidden = false
+            picture.opacity = Float(stated.opacity)
+            switch stated.mode {
+            case .tile:
+                picture.contents = nil
+                picture.backgroundColor = NSColor(patternImage: stated.image).cgColor
+            case .fill, .fit:
+                picture.backgroundColor = nil
+                var rect = CGRect(origin: .zero, size: stated.image.size)
+                picture.contents = stated.image.cgImage(
+                    forProposedRect: &rect,
+                    context: nil,
+                    hints: nil
+                )
+                picture.contentsGravity = stated.mode == .fill ? .resizeAspectFill : .resizeAspect
+            }
+        } else {
+            picture.isHidden = true
+            picture.contents = nil
+            picture.backgroundColor = nil
+        }
+        setNeedsLayout()
+    }
+}
+
 /// A theme-authored repeating treatment behind a broad app surface.
 ///
 /// Drawn by a layer rather than baked into the fill so colours can re-resolve on a live theme or
@@ -2910,6 +2994,7 @@ extension NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = fill.cgColor
 
+            applyThemeBackdropDressing(pattern == .backdrop, radius: radius.current)
             applyThemeBackdropPattern(pattern == .backdrop, radius: radius.current)
 
             applyThemeBevel(
@@ -2950,6 +3035,43 @@ extension NSView {
         )
     }
 
+    /// Installs, updates, or strips the material's gradient-and-picture under a broad ground.
+    ///
+    /// Sits at the very bottom of the sublayer stack, beneath the pattern, so a theme may lay
+    /// a dot field over a wash. Resolved in the view's own effective appearance — an adaptive
+    /// theme states a dressing per variant, and the Component Gallery previews both at once —
+    /// and re-resolved by the ordinary theme sweep, because `applySurface` records
+    /// participation rather than a picture. Cleared rather than skipped when the theme has no
+    /// backdrop: switching *away* from a wallpapered theme has to take every wallpaper with it,
+    /// the `applyThemeGlow` rule.
+    private func applyThemeBackdropDressing(_ participates: Bool, radius: CGFloat) {
+        let name = ThemeBackdropDressingLayer.layerName
+        let existing = layer?.sublayers?.first { $0.name == name }
+        guard participates,
+              let layer,
+              let resolved = ThemeBackdropAppearance.material(for: effectiveAppearance) else {
+            existing?.removeFromSuperlayer()
+            return
+        }
+
+        let dressing: ThemeBackdropDressingLayer
+        if let existing = existing as? ThemeBackdropDressingLayer {
+            dressing = existing
+        } else {
+            existing?.removeFromSuperlayer()
+            dressing = ThemeBackdropDressingLayer()
+            dressing.name = name
+            dressing.frame = layer.bounds
+            dressing.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            layer.insertSublayer(dressing, at: 0)
+        }
+        dressing.cornerRadius = radius
+        dressing.contentsScale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2
+        dressing.apply(resolved)
+    }
+
     private func applyThemeBackdropPattern(_ participates: Bool, radius: CGFloat) {
         let name = "threading.backdropPattern"
         let existing = layer?.sublayers?.first { $0.name == name }
@@ -2969,7 +3091,15 @@ extension NSView {
             patternLayer.name = name
             patternLayer.frame = layer.bounds
             patternLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-            layer.insertSublayer(patternLayer, at: 0)
+            // Above the dressing when there is one, so the marks read over the wash rather
+            // than vanishing beneath an opaque gradient.
+            if let dressing = layer.sublayers?.first(
+                where: { $0.name == ThemeBackdropDressingLayer.layerName }
+            ) {
+                layer.insertSublayer(patternLayer, above: dressing)
+            } else {
+                layer.insertSublayer(patternLayer, at: 0)
+            }
         }
 
         patternLayer.kind = spec.kind

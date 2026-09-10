@@ -910,6 +910,11 @@ library, but keeps the value-only safe boundary:
 - [x] Copy project `Resources/` into source-bundled packages.
 - [x] Add install-time GPU-source disclosure and public authoring documentation.
 - [x] Implement Usage Rain as an example extension rather than an app-specific feature.
+- [x] Publish `sidebar.backdrop@1`: a hook whose content goes *beneath* the host's, stated as a
+  contract rule (`proceedPlacement: overlayTop`), with a fill-the-column image role, a cadence
+  ceiling the host clamps to, an opacity ceiling the host owns, and three more host signals
+  (`workload.intensity`, `workload.working-count`, `time.day-fraction`). Sidebar Aurora is the
+  example.
 - [x] Cover hook validation, ordering, generation revocation and Metal capability enforcement in
   tests.
 - [ ] Build Usage Rain with a compatible Swift.org WebAssembly toolchain, import it disabled,

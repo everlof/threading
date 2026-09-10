@@ -2,7 +2,8 @@ import AppKit
 
 // MARK: - Theme Asset Store
 
-/// Owns the image files a custom theme's sidebar references, under Application Support.
+/// Owns the image files a custom theme references — its sidebar's logo and background, and its
+/// material's backdrop — under Application Support.
 ///
 /// A theme document lives in `PreferenceStore` as JSON and stays hand-writable; bytes would
 /// end both. So the document names an asset and this store owns the file — the same split
@@ -10,7 +11,7 @@ import AppKit
 /// `ProjectIconStore.normalizedPNGData`, because a second copy of the ImageIO pipeline is how
 /// one of the two stops rejecting an HTML error page served with a 200.
 ///
-/// Files live one folder per theme, named by `SidebarAssetSlot`, so replacing an asset
+/// Files live one folder per theme, named by `ThemeAssetSlot`, so replacing an asset
 /// overwrites in place and deleting a theme is `removeAll(for:)` — no orphan sweep.
 /// Contributed (extension) themes never touch this store; their bytes come from the package
 /// via `ExtensionAppearanceRegistry`, read at inspection time.
@@ -60,7 +61,7 @@ enum ThemeAssetStore {
     static func store(
         imageData: Data,
         for themeID: AppThemeID,
-        slot: SidebarAssetSlot,
+        slot: ThemeAssetSlot,
         variant: AppTheme.VariantKind
     ) -> String? {
         let fileName = slot.fileName(for: variant)
@@ -68,7 +69,7 @@ enum ThemeAssetStore {
             imageData: imageData,
             for: themeID,
             fileName: fileName,
-            maximumBytes: SidebarStyleLimits.maximumImageBytes,
+            maximumBytes: slot.maximumImageBytes,
             maximumPixelSize: ThemeAssetDefaults.storedPixelSize(for: slot)
         )
     }
@@ -188,7 +189,7 @@ enum ThemeAssetStore {
     /// Deleting a theme deletes its folder; called from the library's delete path so assets
     /// cannot outlive the document that referenced them.
     static func removeAll(for themeID: AppThemeID) {
-        for slot in SidebarAssetSlot.allCases {
+        for slot in ThemeAssetSlot.allCases {
             for kind in AppTheme.VariantKind.allCases {
                 cache.removeObject(forKey: cacheKey(themeID, slot.fileName(for: kind)))
             }
@@ -208,8 +209,8 @@ enum ThemeAssetStore {
         }
     }
 
-    /// Duplicating a theme copies its assets, so the copy's sidebar survives the original's
-    /// deletion.
+    /// Duplicating a theme copies its assets, so the copy's sidebar and backdrop survive the
+    /// original's deletion.
     static func copyAssets(from sourceID: AppThemeID, to targetID: AppThemeID) throws {
         let fileManager = FileManager.default
         guard let source = folder(for: sourceID), let target = folder(for: targetID) else {
@@ -233,23 +234,25 @@ enum ThemeAssetStore {
 // MARK: - Theme Asset Defaults
 
 enum ThemeAssetDefaults {
-    /// Covers both sidebar assets and the larger classic-skin title strip. Stored files are
-    /// normalized PNGs, but the read side repeats the byte boundary because Application Support
-    /// can be externally replaced between launches.
+    /// Covers the sidebar assets, the larger material backdrop and the classic-skin title
+    /// strip. Stored files are normalized PNGs, but the read side repeats the byte boundary
+    /// because Application Support can be externally replaced between launches.
     static let maximumStoredBytes = max(
         SidebarStyleLimits.maximumImageBytes,
+        ThemeBackdropLimits.maximumImageBytes,
         ClassicSkinLimits.maximumImageBytes
     )
     static let assetDirectoryName = "ThemeAssets"
     static let classicSkinTitleBarFileName = "classic-titlebar.png"
 
-    /// A background is stored at 2× the sidebar's widest column; a logo at 4× its slot —
-    /// enough that Retina rendering never upsamples, small enough that a theme cannot smuggle
-    /// a wallpaper library into Application Support.
-    static func storedPixelSize(for slot: SidebarAssetSlot) -> Int {
+    /// A sidebar background is stored at 2× the sidebar's widest column; a logo at 4× its slot;
+    /// a material backdrop at 2× of a wide pane — enough that Retina rendering never upsamples,
+    /// small enough that a theme cannot smuggle a wallpaper library into Application Support.
+    static func storedPixelSize(for slot: ThemeAssetSlot) -> Int {
         switch slot {
         case .background: return 1024
         case .logo: return 128
+        case .backdrop: return 2048
         }
     }
 }

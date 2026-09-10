@@ -588,12 +588,7 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
         _ reference: ExtensionImageReference,
         role: ExtensionImageRole,
         accessibilityLabel: String?
-    ) -> NSImageView {
-        let imageView = NSImageView()
-        imageView.image = imageResolver(reference)
-        imageView.imageScaling = .scaleProportionallyDown
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-
+    ) -> NSView {
         let side: CGFloat
         switch role {
         case .identity:
@@ -602,7 +597,23 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
             side = Design.Size.extensionIconImage
         case .decoration:
             side = Design.Size.extensionDecorationImage
+        case .backdrop:
+            // A fill has no side: it covers whatever it is pinned to and claims no size of its
+            // own, which an `NSImageView` — intrinsic size and all — cannot promise.
+            let backdrop = ExtensionBackdropImageView(image: imageResolver(reference))
+            if let accessibilityLabel {
+                backdrop.setAccessibilityElement(true)
+                backdrop.setAccessibilityRole(.image)
+                backdrop.setAccessibilityLabel(accessibilityLabel)
+            }
+            backdrop.setAccessibilityIdentifier("extension.image.\(role.rawValue)")
+            return backdrop
         }
+
+        let imageView = NSImageView()
+        imageView.image = imageResolver(reference)
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             imageView.widthAnchor.constraint(equalToConstant: side),

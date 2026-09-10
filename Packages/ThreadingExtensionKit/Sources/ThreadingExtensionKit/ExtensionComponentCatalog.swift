@@ -75,7 +75,7 @@ public enum ThreadingComponentCatalog {
         maximumTextLength: 200,
         allowedStackAxes: [.horizontal, .vertical],
         allowedTextRoles: ExtensionTextRole.allCases,
-        allowedImageRoles: ExtensionImageRole.allCases,
+        allowedImageRoles: ExtensionImageRole.inline,
         allowedButtonRoles: ExtensionButtonRole.allCases,
         allowedStatusRoles: ExtensionStatusRole.allCases,
         allowsDivider: true,
@@ -85,6 +85,27 @@ public enum ThreadingComponentCatalog {
         requiresProceed: true,
         allowsOverlay: true,
         allowedCustomSurfaceKinds: [.metal]
+    )
+
+    /// A backdrop is drawn *under* the sidebar's content, so its vocabulary is the two things
+    /// that can honestly sit behind a column of names: a picture that covers the column, and a
+    /// host-run fragment surface. No text, no control, no scene and no media, because nothing
+    /// beneath the rows can be read or pressed — the host hit-tests straight through the whole
+    /// tree. The root must be an overlay whose *top* is `.proceed`: the window hook's shape
+    /// turned over, so a tree that would draw across the rows is refused rather than composited
+    /// at the wrong depth. The cadence ceiling is the window hook's halved: this surface lives
+    /// as long as the window does.
+    private static let sidebarBackdropHookConstraints = ExtensionComponentNodeConstraints(
+        maximumDepth: 3,
+        maximumNodes: 6,
+        maximumTextLength: 80,
+        allowedImageRoles: [.backdrop],
+        allowsProceed: true,
+        requiresProceed: true,
+        allowsOverlay: true,
+        allowedCustomSurfaceKinds: [.metal],
+        proceedPlacement: .overlayTop,
+        maximumCustomSurfaceFramesPerSecond: 30
     )
 
     private static let compactRowAccessoryConstraints = ExtensionComponentNodeConstraints(
@@ -114,7 +135,7 @@ public enum ThreadingComponentCatalog {
         maximumTextLength: 1_000,
         allowedStackAxes: [.horizontal, .vertical],
         allowedTextRoles: ExtensionTextRole.allCases,
-        allowedImageRoles: ExtensionImageRole.allCases,
+        allowedImageRoles: ExtensionImageRole.inline,
         allowedButtonRoles: ExtensionButtonRole.allCases,
         allowedStatusRoles: ExtensionStatusRole.allCases,
         allowsDivider: true,
@@ -129,7 +150,7 @@ public enum ThreadingComponentCatalog {
         maximumTextLength: 1_000,
         allowedStackAxes: [.horizontal, .vertical],
         allowedTextRoles: ExtensionTextRole.allCases,
-        allowedImageRoles: ExtensionImageRole.allCases,
+        allowedImageRoles: ExtensionImageRole.inline,
         allowedButtonRoles: ExtensionButtonRole.allCases,
         allowedStatusRoles: ExtensionStatusRole.allCases,
         allowsDivider: true,
@@ -305,6 +326,20 @@ public enum ThreadingComponentCatalog {
         hostOwnedBehavior: [
             .windowChrome,
             .inputRouting,
+            .accessibilityContainer
+        ]
+    )
+
+    public static let sidebarBackdrop = ExtensionComponentContract(
+        id: .sidebarBackdrop,
+        version: 1,
+        context: .application,
+        hookConstraints: sidebarBackdropHookConstraints,
+        hostOwnedBehavior: [
+            .legibilityCeiling,
+            .frameCadence,
+            .pointerPassthrough,
+            .reducedMotion,
             .accessibilityContainer
         ]
     )
@@ -546,6 +581,39 @@ public enum ThreadingComponentCatalog {
                         )),
                         accessibilityLabel: nil
                     )
+                )
+            )
+        ),
+        ExtensionComponentCatalogEntry(
+            summary: "A picture or live surface beneath the sidebar's brand row, list and footer.",
+            contract: sidebarBackdrop,
+            examplePatch: ExtensionComponentPatch(
+                id: "sidebar-aurora",
+                target: .sidebarBackdrop(),
+                hook: .overlay(
+                    base: .customSurface(
+                        .metal(ExtensionMetalSurface(
+                            shaderResource: "Resources/aurora.metal",
+                            preferredFramesPerSecond: 24,
+                            inputs: [
+                                .init(
+                                    name: "energy",
+                                    value: .signal(
+                                        .workloadIntensity,
+                                        mapping: .init(
+                                            outputMinimum: 0.15,
+                                            outputMaximum: 1,
+                                            curve: .easeOut,
+                                            fallback: 0.15
+                                        )
+                                    )
+                                ),
+                                .init(name: "opacity", value: .constant(0.5))
+                            ]
+                        )),
+                        accessibilityLabel: nil
+                    ),
+                    overlay: .proceed
                 )
             )
         ),
@@ -1090,6 +1158,18 @@ public enum ThreadingComponentCatalog {
                     "- Replacement limits: depth \(constraints.maximumDepth), "
                         + "nodes \(constraints.maximumNodes), text \(constraints.maximumTextLength)"
                 )
+            }
+            if let constraints = contract.hookConstraints {
+                var hookLine = "- Hook limits: depth \(constraints.maximumDepth), "
+                    + "nodes \(constraints.maximumNodes)"
+                if constraints.proceedPlacement == .overlayTop {
+                    hookLine += "; proceed must be the top of a root overlay (content is drawn "
+                        + "beneath the host's)"
+                }
+                if let cap = constraints.maximumCustomSurfaceFramesPerSecond {
+                    hookLine += "; custom surfaces at most \(cap) fps"
+                }
+                lines.append(hookLine)
             }
             lines.append("")
         }

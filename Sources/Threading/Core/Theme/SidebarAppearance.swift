@@ -74,30 +74,10 @@ public enum SidebarAppearance {
 
     public static func background(for appearance: NSAppearance) -> Background? {
         let theme = AppThemePalette.current
-        guard let stated = theme.variant(for: appearance)?.sidebar?.background,
-              !stated.isEmpty else { return nil }
-
-        var resolved = Background()
-
-        if let gradient = stated.gradient, gradient.stops.count >= 2 {
-            let ordered = gradient.stops.sorted { $0.position < $1.position }
-            resolved.gradient = Background.Gradient(
-                colors: ordered.map(\.color),
-                locations: ordered.map { CGFloat($0.position) },
-                angleDegrees: CGFloat(gradient.angleDegrees)
-            )
+        guard let stated = theme.variant(for: appearance)?.sidebar?.background else {
+            return nil
         }
-
-        if let layer = stated.image,
-           let image = image(named: layer.asset, themeID: theme.id) {
-            resolved.image = Background.ImageLayer(
-                image: image,
-                mode: layer.mode,
-                opacity: CGFloat(max(0, min(1, layer.opacity)))
-            )
-        }
-
-        return resolved.gradient == nil && resolved.image == nil ? nil : resolved
+        return ThemeBackdropAppearance.resolve(stated, themeID: theme.id)
     }
 
     // MARK: - Brand
@@ -160,6 +140,65 @@ public enum SidebarAppearance {
     // MARK: - Private Methods
 
     private static func image(named name: String, themeID: AppThemeID) -> NSImage? {
+        ThemeBackdropAppearance.image(named: name, themeID: themeID)
+    }
+}
+
+// MARK: - Theme Backdrop Appearance
+
+/// Resolves a stated `ThemeBackdrop` into drawable values — decoded images, sorted gradient
+/// stops — for whichever region asked. The sidebar's block and the material's backdrop go
+/// through the same door, so the two never disagree about what a name resolves to or which
+/// order stops are drawn in.
+@MainActor
+public enum ThemeBackdropAppearance {
+
+    /// The same resolved shape the sidebar has always drawn from; one type, two regions.
+    public typealias Resolved = SidebarAppearance.Background
+
+    /// The material's backdrop under the current theme, or nil for the plain ground every
+    /// theme drew before it existed. Asked by `applySurface` for every surface that opts into
+    /// the backdrop treatment, in that surface's own effective appearance — an adaptive theme
+    /// states a dressing per variant, and the Component Gallery previews both at once.
+    public static func material(for appearance: NSAppearance) -> Resolved? {
+        let theme = AppThemePalette.current
+        guard let stated = theme.material(for: appearance).backdrop else { return nil }
+        return resolve(stated, themeID: theme.id)
+    }
+
+    /// Stated style in, drawable values out. Nil when nothing resolves — an image whose name
+    /// answers to no asset, a gradient with fewer than two stops — so a caller can hide the
+    /// whole layer rather than draw an empty one.
+    public static func resolve(_ stated: ThemeBackdrop, themeID: AppThemeID) -> Resolved? {
+        guard !stated.isEmpty else { return nil }
+
+        var resolved = Resolved()
+
+        if let gradient = stated.gradient, gradient.stops.count >= 2 {
+            let ordered = gradient.stops.sorted { $0.position < $1.position }
+            resolved.gradient = Resolved.Gradient(
+                colors: ordered.map(\.color),
+                locations: ordered.map { CGFloat($0.position) },
+                angleDegrees: CGFloat(gradient.angleDegrees)
+            )
+        }
+
+        if let layer = stated.image,
+           let image = image(named: layer.asset, themeID: themeID) {
+            resolved.image = Resolved.ImageLayer(
+                image: image,
+                mode: layer.mode,
+                opacity: CGFloat(max(0, min(1, layer.opacity)))
+            )
+        }
+
+        return resolved.gradient == nil && resolved.image == nil ? nil : resolved
+    }
+
+    /// The tier that owns the theme answers for its bytes: a contributed theme's were read out
+    /// of its package at inspection, a custom theme's live in `ThemeAssetStore`. The registry
+    /// is consulted first only because contributed ids are namespaced; the two cannot collide.
+    static func image(named name: String, themeID: AppThemeID) -> NSImage? {
         ExtensionAppearanceRegistry.shared.sidebarAsset(named: name, forThemeID: themeID)
             ?? ThemeAssetStore.image(named: name, for: themeID)
     }

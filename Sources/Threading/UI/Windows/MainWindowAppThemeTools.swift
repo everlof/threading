@@ -185,23 +185,34 @@ extension AgentToolCoordinator {
         // new image under the old everything-else.
         var replacedAssets: [(name: String, data: Data)] = []
         var introducedAssets: [String] = []
+        var slotsToSnapshot: [(ThemeAssetSlot, AppTheme.VariantKind)] = []
         for (rawKind, patch) in arguments.variants ?? [:] {
-            guard let sidebar = patch.sidebar,
-                  let kind = AppTheme.VariantKind(rawValue: rawKind.lowercased()) else { continue }
-            var slots: [SidebarAssetSlot] = []
-            if sidebar.image?.source != nil { slots.append(.background) }
-            if case .image = sidebar.logo { slots.append(.logo) }
-            for slot in slots {
-                let fileName = slot.fileName(for: kind)
-                if let existing = ThemeAssetStore.pngData(named: fileName, for: source.id) {
-                    replacedAssets.append((fileName, existing))
-                } else if ThemeAssetStore.assetExists(named: fileName, for: source.id) {
-                    return .failure(
-                        "The existing sidebar image could not be backed up, so no changes were made."
-                    )
-                } else {
-                    introducedAssets.append(fileName)
-                }
+            guard let kind = AppTheme.VariantKind(rawValue: rawKind.lowercased()) else { continue }
+            if let sidebar = patch.sidebar {
+                if sidebar.image?.source != nil { slotsToSnapshot.append((.background, kind)) }
+                if case .image = sidebar.logo { slotsToSnapshot.append((.logo, kind)) }
+            }
+            if patch.material?.backdrop?.image?.source != nil {
+                slotsToSnapshot.append((.backdrop, kind))
+            }
+        }
+        // A legacy top-level material lands on whichever variant is current, decided further
+        // down; snapshotting both is cheap and never wrong.
+        if arguments.material?.backdrop?.image?.source != nil {
+            for kind in AppTheme.VariantKind.allCases {
+                slotsToSnapshot.append((.backdrop, kind))
+            }
+        }
+        for (slot, kind) in slotsToSnapshot {
+            let fileName = slot.fileName(for: kind)
+            if let existing = ThemeAssetStore.pngData(named: fileName, for: source.id) {
+                replacedAssets.append((fileName, existing))
+            } else if ThemeAssetStore.assetExists(named: fileName, for: source.id) {
+                return .failure(
+                    "The existing theme image could not be backed up, so no changes were made."
+                )
+            } else {
+                introducedAssets.append(fileName)
             }
         }
         do {
@@ -398,7 +409,12 @@ extension AgentToolCoordinator {
         let terminalPatch = patch?.terminalColors ?? legacyTerminalColors
         let roles = try appThemeRoles(rolePatch)
         let baseMaterial = source?.material ?? base.material
-        let material = try appThemeMaterial(materialPatch, base: baseMaterial)
+        let material = try appThemeMaterial(
+            materialPatch,
+            base: baseMaterial,
+            themeID: themeID,
+            variantKind: kind
+        )
         let baseTerminal = source?.terminalPalette ?? base.terminalPalette
         let terminal = try appTerminalPalette(terminalPatch, base: baseTerminal)
         let sidebar = try appThemeSidebar(
@@ -450,7 +466,7 @@ extension AgentToolCoordinator {
             }
             style = WindowChromeStyle(
                 titleBar: WindowChromeStyle.TitleBar(
-                    activeGradient: try sidebarGradient(active)
+                    activeGradient: try AppThemeToolParsing.gradient(active)
                 )
             )
         }
@@ -503,12 +519,12 @@ extension AgentToolCoordinator {
                 )
             }
             if let active = titleBar.activeGradient {
-                style.titleBar.activeGradient = try sidebarGradient(active)
+                style.titleBar.activeGradient = try AppThemeToolParsing.gradient(active)
             }
             if titleBar.removeInactiveGradient == true {
                 style.titleBar.inactiveGradient = nil
             } else if let inactive = titleBar.inactiveGradient {
-                style.titleBar.inactiveGradient = try sidebarGradient(inactive)
+                style.titleBar.inactiveGradient = try AppThemeToolParsing.gradient(inactive)
             }
             if titleBar.removeInk == true {
                 style.titleBar.ink = nil
@@ -764,7 +780,7 @@ extension AgentToolCoordinator {
         if patch.removeGradient == true {
             background.gradient = nil
         } else if let gradient = patch.gradient {
-            background.gradient = try sidebarGradient(gradient)
+            background.gradient = try AppThemeToolParsing.gradient(gradient)
         }
 
         if patch.removeImage == true {
@@ -775,7 +791,7 @@ extension AgentToolCoordinator {
                     "sidebar.image needs a source: {path} or {base64}."
                 )
             }
-            let data = try imageBytes(source, describing: "sidebar.image.source")
+            let data = try AppThemeToolParsing.imageBytes(source, describing: "sidebar.image.source")
             guard let stored = ThemeAssetStore.store(
                 imageData: data,
                 for: themeID,
@@ -846,7 +862,7 @@ extension AgentToolCoordinator {
             case .hidden:
                 brand.logo = .hidden
             case .image(let source):
-                let data = try imageBytes(source, describing: "sidebar.logo")
+                let data = try AppThemeToolParsing.imageBytes(source, describing: "sidebar.logo")
                 guard let stored = ThemeAssetStore.store(
                     imageData: data,
                     for: themeID,
@@ -890,64 +906,7 @@ extension AgentToolCoordinator {
         return .set(style)
     }
 
-    private func sidebarGradient(
-        _ arguments: AppThemeGradientArguments
-    ) throws -> SidebarStyle.Gradient {
-        let stops = try (arguments.stops ?? []).map { stop -> SidebarStyle.Gradient.Stop in
-            guard let hex = cleaned(stop.color), let color = NSColor(hex: hex) else {
-                throw AppThemeEditingError.invalid(
-                    "A gradient stop's color must be #RRGGBB or #RRGGBBAA."
-                )
-            }
-            guard let position = stop.position else {
-                throw AppThemeEditingError.invalid(
-                    "A gradient stop needs a position between 0 and 1."
-                )
-            }
-            return SidebarStyle.Gradient.Stop(color: color, position: position)
-        }
-        return SidebarStyle.Gradient(
-            stops: stops,
-            angleDegrees: arguments.angleDegrees ?? 180
-        )
-    }
-
-    private func imageBytes(
-        _ source: AppThemeImageArguments,
-        describing field: String
-    ) throws -> Data {
-        if let rawPath = cleaned(source.path) {
-            let path = (rawPath as NSString).expandingTildeInPath
-            let data: Data
-            do {
-                data = try BoundedFileReader.read(
-                    URL(fileURLWithPath: path),
-                    maximumBytes: SidebarStyleLimits.maximumImageBytes
-                )
-            } catch BoundedFileReadError.exceedsLimit(maximumBytes: _) {
-                throw AppThemeEditingError.invalid(
-                    "\(field): file exceeds "
-                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB."
-                )
-            } catch {
-                throw AppThemeEditingError.invalid("\(field): no readable file at \(path).")
-            }
-            return data
-        }
-        if let base64 = cleaned(source.base64) {
-            guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
-                throw AppThemeEditingError.invalid("\(field): base64 did not decode.")
-            }
-            guard data.count <= SidebarStyleLimits.maximumImageBytes else {
-                throw AppThemeEditingError.invalid(
-                    "\(field): image exceeds "
-                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB."
-                )
-            }
-            return data
-        }
-        throw AppThemeEditingError.invalid("\(field): provide {path} or {base64}.")
-    }
+    // MARK: Backdrop Parsing
 
     private func appThemeRoles(
         _ values: [String: String]?
@@ -972,9 +931,16 @@ extension AgentToolCoordinator {
 
     private func appThemeMaterial(
         _ patch: AppThemeMaterialArguments?,
-        base: AppTheme.Material
+        base: AppTheme.Material,
+        themeID: AppThemeID,
+        variantKind: AppTheme.VariantKind
     ) throws -> AppTheme.Material {
         guard let patch else { return base }
+        guard patch.backdrop == nil || patch.removeBackdrop != true else {
+            throw AppThemeEditingError.invalid(
+                "material cannot set backdrop and remove_backdrop in the same patch."
+            )
+        }
         guard patch.glow == nil || patch.removeGlow != true else {
             throw AppThemeEditingError.invalid(
                 "material cannot set glow and remove_glow in the same patch."
@@ -1037,6 +1003,16 @@ extension AgentToolCoordinator {
             material.controlBorderWidth = nil
         } else if let value = patch.controlBorderWidth {
             material.controlBorderWidth = CGFloat(value)
+        }
+        if patch.removeBackdrop == true {
+            material.backdrop = nil
+        } else if let backdropPatch = patch.backdrop {
+            material.backdrop = try AppThemeToolParsing.backdrop(
+                backdropPatch,
+                base: base.backdrop,
+                themeID: themeID,
+                kind: variantKind
+            )
         }
         if patch.removeBackdropPattern == true {
             material.backdropPattern = nil
@@ -1694,24 +1670,10 @@ extension AgentToolCoordinator {
         return document
     }
 
-    /// The sidebar block as create/update speak it, with asset names in place of bytes — an
-    /// agent re-supplying an image sends a new {path}/{base64}; everything else round-trips.
     private func appThemeSidebarDocument(_ sidebar: SidebarStyle) -> [String: Any] {
         var document: [String: Any] = [:]
-        if let gradient = sidebar.background?.gradient {
-            document["gradient"] = [
-                "angle_degrees": gradient.angleDegrees,
-                "stops": gradient.stops.map {
-                    ["color": $0.color.hexString, "position": $0.position]
-                }
-            ] as [String: Any]
-        }
-        if let image = sidebar.background?.image {
-            document["image"] = [
-                "asset": image.asset,
-                "mode": image.mode.rawValue,
-                "opacity": image.opacity
-            ] as [String: Any]
+        if let background = sidebar.background {
+            document.merge(AppThemeToolParsing.document(background)) { _, new in new }
         }
         if let brand = sidebar.brand {
             switch brand.logo {
@@ -1785,6 +1747,9 @@ extension AgentToolCoordinator {
                 "spacing": Double(pattern.spacing),
                 "line_width": Double(pattern.lineWidth)
             ]
+        }
+        if let backdrop = material.backdrop {
+            document["backdrop"] = AppThemeToolParsing.document(backdrop)
         }
         let popover = material.popoverStyle
         var popoverDocument: [String: Any] = [

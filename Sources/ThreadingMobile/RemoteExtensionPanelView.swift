@@ -553,6 +553,10 @@ private struct RemoteExtensionImageView: View {
         case .identity: 20
         case .icon: 16
         case .decoration: 14
+        // A panel's vocabulary is `ExtensionImageRole.inline`; the fill role belongs to the
+        // Mac's sidebar backdrop and never crosses to the phone. Sized as a decoration so a
+        // validated tree cannot trap the renderer.
+        case .backdrop: 14
         }
     }
 }

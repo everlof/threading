@@ -43,6 +43,7 @@
         "maximumRenderedElements" : 10,
         "maximumSceneItems" : 0,
         "maximumTextLength" : 160,
+        "proceedPlacement" : "anywhere",
         "requiredRootAxis" : "vertical",
         "requiresProceed" : true
       }

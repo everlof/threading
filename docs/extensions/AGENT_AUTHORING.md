@@ -658,6 +658,48 @@ where the user finds every session. Image legibility is yours: check a backgroun
 rows in both variants, and wash photographs well below 0.4 opacity. Everything is optional;
 state only what your theme's identity actually claims.
 
+## Dressing the app's panes from a theme
+
+The material may carry a `backdrop` — the same gradient-and-image vocabulary as the sidebar's
+`background`, stated once for the app's *broad grounds* collectively: the display panel beside a
+conversation, the browser, Git Review, the execution audit, the drawer, the settings subpages and
+the About window. It goes exactly where `backdropPattern` goes and is drawn beneath it, so a dot
+field may sit over a wash. Cards, controls, popovers, the terminal and the sidebar never inherit
+it — the sidebar keeps its own block, and the terminal's ground belongs to the terminal palette.
+
+```json
+"variants": {
+  "dark": {
+    "roles": { "...": "..." },
+    "material": {
+      "backdropPattern": { "kind": "grid", "role": "border", "opacity": 0.06 },
+      "backdrop": {
+        "gradient": { "angleDegrees": 180, "stops": [
+          { "color": "#0B1020", "position": 0 },
+          { "color": "#141A2E", "position": 1 }
+        ]},
+        "image": { "asset": "art/dunes.jpg", "mode": "fill", "opacity": 0.18 }
+      }
+    }
+  }
+}
+```
+
+What it looks like: a pane's ground is the theme's `ground` colour, then the wash, then the
+picture at its opacity, then the pattern's marks, then the pane's own content — headers, rows,
+cards and text unchanged. Under `fill` the picture covers the pane and is cropped at the edges as
+the pane resizes; `fit` letterboxes it; `tile` repeats it at its own pixel size. A picture is
+stored at up to 2048 pixels on the long side and 8 MB, and every path resizes rather than
+refuses. Nothing is re-decoded on resize.
+
+The rules are the sidebar's, measured against the ground rather than the surface: each gradient
+stop, composited over `ground`, must keep the theme's `label` at 3:1; an image is bounded but not
+measured, so check it against real text in both variants and wash photographs well below 0.4
+opacity. Asset paths are package-relative and read at inspection; a missing file fails the whole
+package. Agents reach the same block through `create_app_theme`/`update_app_theme` as
+`material.backdrop` (with `remove_gradient`, `remove_image`, `remove` and
+`material.remove_backdrop`), and `get_app_theme` returns it by stored asset name.
+
 ## Theme data reloads live
 
 While your extension is enabled, the host watches its package and re-reads your theme
@@ -1276,6 +1318,76 @@ package-size preflight is not trusted) and frame rate to 60 fps.
 Use `Packages/ThreadingExtensionKit/Examples/RainWindowExtension` as the complete hook/surface example.
 Never import Metal, MetalKit, AppKit or SwiftUI in extension Swift source.
 
+### A surface beneath the sidebar
+
+`sidebar.backdrop@1` is the window hook turned over: your content goes *under* the sidebar's
+brand row, list and footer, never over them. The contract enforces that shape — the root must be
+an `overlay` whose top is exactly `.proceed` — and admits only two nodes beneath it: an `image`
+in the `backdrop` role (scaled to cover the column, cropped at the edges, no size of its own) and
+a Metal `customSurface`. No text, controls, scenes or media: nothing under the rows can be read
+or pressed, and the host hit-tests straight through the whole tree.
+
+```swift
+let hook = ExtensionComponentPatch(
+    id: "sidebar-aurora",
+    target: .sidebarBackdrop(),
+    hook: .overlay(
+        base: .customSurface(
+            .metal(ExtensionMetalSurface(
+                shaderResource: "Resources/aurora.metal",
+                preferredFramesPerSecond: 24,
+                inputs: [
+                    .init(name: "energy", value: .signal(.workloadIntensity, mapping: .identity)),
+                    .init(name: "opacity", value: .constant(0.5))
+                ]
+            )),
+            accessibilityLabel: nil
+        ),
+        overlay: .proceed
+    )
+)
+try ThreadingComponentCatalog.sidebarBackdrop.validate(hook)
+```
+
+A static picture is the same patch with `.image(.extensionResource("Resources/dunes.png"),
+role: .backdrop, accessibilityLabel: nil)` as the base; the package image limits (4 MiB,
+1,024 × 1,024) apply.
+
+What the host keeps, whatever you publish — the catalogue lists these as host-owned behaviour:
+
+- **Legibility ceiling.** The whole plane is composited at 60% opacity and you cannot raise it;
+  below that, a shader's own alpha is yours. The example draws at half.
+- **Pointer passthrough.** Nothing in the backdrop can take a click, a hover or a cursor.
+- **Frame cadence.** The SDK refuses a surface asking for more than 30 fps here, the host clamps
+  the view to the same number, and the surface holds its frames while the window is occluded,
+  miniaturized or hidden.
+- **Reduced motion.** The surface's clock stops at zero.
+- **Accessibility.** The plane is not an element and nothing under the rows is announced.
+
+What it looks like: the theme's own sidebar gradient or image stays *beneath* your content, and
+an opaque navigator well a theme states (Explorer-style white trees) stays *above* it, so under
+such a theme your backdrop shows only around the well — the theme's call, not yours. When an
+extension navigator replaces the native sidebar, the plane goes with the native sidebar.
+Disabling, reloading or removing your extension takes the backdrop down with the generation and
+leaves the theme's dressing exactly as it was.
+
+Use `Packages/ThreadingExtensionKit/Examples/SidebarAuroraExtension` as the complete example.
+
+### Live signals a surface may bind
+
+A `customSurface` input may be a constant or a `signal` the host answers at draw time. The host
+refuses a patch that names a signal it cannot answer, so bind only these:
+
+| Signal | Range | Meaning |
+|---|---|---|
+| `active-account.usage-remaining` | `0…1` | Remaining fraction of the active session account's most constrained current limit; the binding's fallback when no reading exists. |
+| `workload.intensity` | `0…1` | The app-wide activity envelope the sidebar's workload analyzer draws: a floor from how many sessions are working, raised by recent output, decaying with quiet. |
+| `workload.working-count` | `0…` | The exact number of working sessions, as a count. State an `inputMaximum` in the mapping — eight is a busy Mac — so your surface decides what "many" means. |
+| `time.day-fraction` | `0…1` | Midnight to midnight in the user's own calendar, so a surface can follow the hour without reading a clock. |
+
+Every signal is cheap and read once per frame; none reaches a store, a file or a process, and
+none identifies a session, an account or a person.
+
 Buttons in a selected full-content replacement arrive as
 `ExtensionComponentActionRequest`. Return an `ExtensionActionResponse` with the matching
 `requestID`; publish new component state through `ExtensionHostClient` when the action changes
@@ -1446,10 +1558,13 @@ Before reporting an extension complete:
 15. For `storage.secrets`, test missing, set, replace, list-names, remove, oversized-value,
     missing-capability, cross-extension isolation, and revoked-generation behavior without
     printing the value.
-16. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
+16. For a `sidebar.backdrop@1` hook, keep the root an overlay whose top is `.proceed`, draw
+    low-contrast and low-frequency (the rows sit on it), ask for a cadence at or below 30 fps,
+    and check the column under a light and a dark theme with the 60% ceiling in mind.
+17. For `ui.rendering.metal`, review the packaged shader source, test its fallback signal value,
     compile it on a Metal-capable Mac, verify controls below it remain clickable, and verify
     reduced motion freezes animation.
-17. For `ui.workspace-navigation`, validate exact manifest/startup registration parity for a
+18. For `ui.workspace-navigation`, validate exact manifest/startup registration parity for a
     pipeline declaration. For a materialized v1 navigator, validate its registered root plus every
     declared load or event response within the document and patch bounds. Exercise every
     applicable option and search path; for a pipeline, also exercise source-session activation and

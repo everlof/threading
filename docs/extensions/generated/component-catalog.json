@@ -49,6 +49,7 @@
             "maximumRenderedElements" : 16,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 200,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : true
           },
           "hostOwnedBehavior" : [
@@ -154,6 +155,7 @@
               "maximumRenderedElements" : 16,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 200,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : true
             }
           },
@@ -219,6 +221,223 @@
     {
       "entry" : {
         "contract" : {
+          "context" : "application",
+          "hookConstraints" : {
+            "allowedButtonRoles" : [
+
+            ],
+            "allowedCustomSurfaceKinds" : [
+              "metal"
+            ],
+            "allowedImageRoles" : [
+              "backdrop"
+            ],
+            "allowedStackAxes" : [
+
+            ],
+            "allowedStatusRoles" : [
+
+            ],
+            "allowedTextRoles" : [
+
+            ],
+            "allowsDivider" : false,
+            "allowsFixedSpacer" : false,
+            "allowsFlexibleSpacer" : false,
+            "allowsMedia" : false,
+            "allowsOverlay" : true,
+            "allowsProceed" : true,
+            "allowsTextInput" : false,
+            "maximumCustomSurfaceFramesPerSecond" : 30,
+            "maximumDepth" : 3,
+            "maximumNodes" : 6,
+            "maximumPickerOptions" : 0,
+            "maximumRenderedElements" : 6,
+            "maximumSceneItems" : 0,
+            "maximumTextLength" : 80,
+            "proceedPlacement" : "overlayTop",
+            "requiresProceed" : true
+          },
+          "hostOwnedBehavior" : [
+            "legibility-ceiling",
+            "frame-cadence",
+            "pointer-passthrough",
+            "reduced-motion",
+            "accessibility-container"
+          ],
+          "id" : "sidebar.backdrop",
+          "properties" : [
+
+          ],
+          "replacement" : "none",
+          "slots" : [
+
+          ],
+          "version" : 1
+        },
+        "examplePatch" : {
+          "hook" : {
+            "base" : {
+              "surface" : {
+                "fragmentFunction" : "threadingExtensionFragment",
+                "inputs" : [
+                  {
+                    "name" : "energy",
+                    "value" : {
+                      "mapping" : {
+                        "curve" : "easeOut",
+                        "fallback" : 0.15,
+                        "inputMaximum" : 1,
+                        "inputMinimum" : 0,
+                        "outputMaximum" : 1,
+                        "outputMinimum" : 0.15
+                      },
+                      "signal" : "workload.intensity",
+                      "type" : "signal"
+                    }
+                  },
+                  {
+                    "name" : "opacity",
+                    "value" : {
+                      "type" : "constant",
+                      "value" : 0.5
+                    }
+                  }
+                ],
+                "preferredFramesPerSecond" : 24,
+                "shaderResource" : "Resources/aurora.metal",
+                "type" : "metal"
+              },
+              "type" : "customSurface"
+            },
+            "overlay" : {
+              "type" : "proceed"
+            },
+            "type" : "overlay"
+          },
+          "id" : "sidebar-aurora",
+          "properties" : [
+
+          ],
+          "slots" : [
+
+          ],
+          "target" : {
+            "component" : "sidebar.backdrop",
+            "contractVersion" : 1
+          }
+        },
+        "hostAssets" : [
+
+        ],
+        "summary" : "A picture or live surface beneath the sidebar's brand row, list and footer."
+      },
+      "patchSchema" : {
+        "$id" : "https://threading.codes/schema/components/sidebar.backdrop-v1.schema.json",
+        "$schema" : "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties" : false,
+        "properties" : {
+          "hook" : {
+            "$ref" : "https://threading.codes/schema/extension-node.schema.json",
+            "x-threading-node-constraints" : {
+              "allowedButtonRoles" : [
+
+              ],
+              "allowedCustomSurfaceKinds" : [
+                "metal"
+              ],
+              "allowedImageRoles" : [
+                "backdrop"
+              ],
+              "allowedStackAxes" : [
+
+              ],
+              "allowedStatusRoles" : [
+
+              ],
+              "allowedTextRoles" : [
+
+              ],
+              "allowsDivider" : false,
+              "allowsFixedSpacer" : false,
+              "allowsFlexibleSpacer" : false,
+              "allowsMedia" : false,
+              "allowsOverlay" : true,
+              "allowsProceed" : true,
+              "allowsTextInput" : false,
+              "maximumCustomSurfaceFramesPerSecond" : 30,
+              "maximumDepth" : 3,
+              "maximumNodes" : 6,
+              "maximumPickerOptions" : 0,
+              "maximumRenderedElements" : 6,
+              "maximumSceneItems" : 0,
+              "maximumTextLength" : 80,
+              "proceedPlacement" : "overlayTop",
+              "requiresProceed" : true
+            }
+          },
+          "id" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "properties" : {
+            "items" : {
+              "properties" : {
+                "property" : {
+                  "enum" : [
+
+                  ]
+                },
+                "value" : {
+                  "$ref" : "https://threading.codes/schema/extension-host.schema.json#/$defs/propertyValue"
+                }
+              },
+              "required" : [
+                "property",
+                "value"
+              ],
+              "type" : "object"
+            },
+            "type" : "array"
+          },
+          "slots" : {
+            "items" : false,
+            "type" : "array"
+          },
+          "target" : {
+            "additionalProperties" : false,
+            "properties" : {
+              "component" : {
+                "const" : "sidebar.backdrop"
+              },
+              "contractVersion" : {
+                "const" : 1
+              },
+              "entityID" : {
+                "minLength" : 1,
+                "type" : "string"
+              }
+            },
+            "required" : [
+              "component",
+              "contractVersion"
+            ],
+            "type" : "object"
+          }
+        },
+        "required" : [
+          "id",
+          "target",
+          "properties",
+          "slots"
+        ],
+        "title" : "Threading sidebar.backdrop v1 component patch",
+        "type" : "object"
+      }
+    },
+    {
+      "entry" : {
+        "contract" : {
           "context" : "project-presentation",
           "hookConstraints" : {
             "allowedButtonRoles" : [
@@ -257,6 +476,7 @@
             "maximumRenderedElements" : 8,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 80,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "horizontal",
             "requiresProceed" : true
           },
@@ -356,6 +576,7 @@
               "maximumRenderedElements" : 8,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 80,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "horizontal",
               "requiresProceed" : true
             }
@@ -460,6 +681,7 @@
             "maximumRenderedElements" : 8,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 80,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "horizontal",
             "requiresProceed" : true
           },
@@ -560,6 +782,7 @@
               "maximumRenderedElements" : 8,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 80,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "horizontal",
               "requiresProceed" : true
             }
@@ -665,6 +888,7 @@
             "maximumRenderedElements" : 10,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 160,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "vertical",
             "requiresProceed" : true
           },
@@ -762,6 +986,7 @@
               "maximumRenderedElements" : 10,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 160,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "vertical",
               "requiresProceed" : true
             }
@@ -867,6 +1092,7 @@
             "maximumRenderedElements" : 10,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 160,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "vertical",
             "requiresProceed" : true
           },
@@ -966,6 +1192,7 @@
               "maximumRenderedElements" : 10,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 160,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "vertical",
               "requiresProceed" : true
             }
@@ -1071,6 +1298,7 @@
             "maximumRenderedElements" : 10,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 160,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "vertical",
             "requiresProceed" : true
           },
@@ -1168,6 +1396,7 @@
               "maximumRenderedElements" : 10,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 160,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "vertical",
               "requiresProceed" : true
             }
@@ -1273,6 +1502,7 @@
             "maximumRenderedElements" : 8,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 160,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "vertical",
             "requiresProceed" : true
           },
@@ -1372,6 +1602,7 @@
               "maximumRenderedElements" : 8,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 160,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "vertical",
               "requiresProceed" : true
             }
@@ -1476,6 +1707,7 @@
             "maximumRenderedElements" : 6,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 40,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "horizontal",
             "requiresProceed" : true
           },
@@ -1585,6 +1817,7 @@
               "maximumRenderedElements" : 6,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 40,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "horizontal",
               "requiresProceed" : true
             }
@@ -1704,6 +1937,7 @@
                 "maximumRenderedElements" : 1,
                 "maximumSceneItems" : 0,
                 "maximumTextLength" : 24,
+                "proceedPlacement" : "anywhere",
                 "requiresProceed" : false
               },
               "id" : "after-title",
@@ -1816,6 +2050,7 @@
                         "maximumRenderedElements" : 1,
                         "maximumSceneItems" : 0,
                         "maximumTextLength" : 24,
+                        "proceedPlacement" : "anywhere",
                         "requiresProceed" : false
                       }
                     },
@@ -1950,6 +2185,7 @@
                   "maximumRenderedElements" : 60,
                   "maximumSceneItems" : 0,
                   "maximumTextLength" : 80,
+                  "proceedPlacement" : "anywhere",
                   "requiresProceed" : false
                 },
                 "maximumDepth" : 2,
@@ -1958,6 +2194,7 @@
                 "maximumRenderedElements" : 8,
                 "maximumSceneItems" : 0,
                 "maximumTextLength" : 40,
+                "proceedPlacement" : "anywhere",
                 "requiresProceed" : false
               },
               "id" : "top-trailing",
@@ -2184,6 +2421,7 @@
                           "maximumRenderedElements" : 60,
                           "maximumSceneItems" : 0,
                           "maximumTextLength" : 80,
+                          "proceedPlacement" : "anywhere",
                           "requiresProceed" : false
                         },
                         "maximumDepth" : 2,
@@ -2192,6 +2430,7 @@
                         "maximumRenderedElements" : 8,
                         "maximumSceneItems" : 0,
                         "maximumTextLength" : 40,
+                        "proceedPlacement" : "anywhere",
                         "requiresProceed" : false
                       }
                     },
@@ -2287,6 +2526,7 @@
             "maximumRenderedElements" : 5,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "horizontal",
             "requiresProceed" : false
           },
@@ -2403,6 +2643,7 @@
               "maximumRenderedElements" : 5,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "horizontal",
               "requiresProceed" : false
             }
@@ -2498,6 +2739,7 @@
             "maximumRenderedElements" : 8,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 80,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "horizontal",
             "requiresProceed" : false
           },
@@ -2538,6 +2780,7 @@
                 "maximumRenderedElements" : 1,
                 "maximumSceneItems" : 0,
                 "maximumTextLength" : 24,
+                "proceedPlacement" : "anywhere",
                 "requiresProceed" : false
               },
               "id" : "after-title",
@@ -2673,6 +2916,7 @@
               "maximumRenderedElements" : 8,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 80,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "horizontal",
               "requiresProceed" : false
             }
@@ -2725,6 +2969,7 @@
                         "maximumRenderedElements" : 1,
                         "maximumSceneItems" : 0,
                         "maximumTextLength" : 24,
+                        "proceedPlacement" : "anywhere",
                         "requiresProceed" : false
                       }
                     },
@@ -2822,6 +3067,7 @@
             "maximumRenderedElements" : 48,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1000,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : true
           },
           "hostOwnedBehavior" : [
@@ -2880,6 +3126,7 @@
             "maximumRenderedElements" : 48,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1000,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : false
           },
           "slots" : [
@@ -2975,6 +3222,7 @@
               "maximumRenderedElements" : 48,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1000,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : true
             }
           },
@@ -3049,6 +3297,7 @@
               "maximumRenderedElements" : 48,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1000,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : false
             }
           },
@@ -3136,6 +3385,7 @@
             "maximumRenderedElements" : 48,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1000,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : true
           },
           "hostOwnedBehavior" : [
@@ -3197,6 +3447,7 @@
             "maximumRenderedElements" : 48,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1000,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : false
           },
           "slots" : [
@@ -3292,6 +3543,7 @@
               "maximumRenderedElements" : 48,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1000,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : true
             }
           },
@@ -3366,6 +3618,7 @@
               "maximumRenderedElements" : 48,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1000,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : false
             }
           },
@@ -3460,6 +3713,7 @@
             "maximumRenderedElements" : 8,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 80,
+            "proceedPlacement" : "anywhere",
             "requiredRootAxis" : "horizontal",
             "requiresProceed" : false
           },
@@ -3500,6 +3754,7 @@
                 "maximumRenderedElements" : 1,
                 "maximumSceneItems" : 0,
                 "maximumTextLength" : 24,
+                "proceedPlacement" : "anywhere",
                 "requiresProceed" : false
               },
               "id" : "after-title",
@@ -3610,6 +3865,7 @@
               "maximumRenderedElements" : 8,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 80,
+              "proceedPlacement" : "anywhere",
               "requiredRootAxis" : "horizontal",
               "requiresProceed" : false
             }
@@ -3662,6 +3918,7 @@
                         "maximumRenderedElements" : 1,
                         "maximumSceneItems" : 0,
                         "maximumTextLength" : 24,
+                        "proceedPlacement" : "anywhere",
                         "requiresProceed" : false
                       }
                     },
@@ -3759,6 +4016,7 @@
             "maximumRenderedElements" : 48,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1000,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : true
           },
           "hostOwnedBehavior" : [
@@ -3817,6 +4075,7 @@
             "maximumRenderedElements" : 48,
             "maximumSceneItems" : 0,
             "maximumTextLength" : 1000,
+            "proceedPlacement" : "anywhere",
             "requiresProceed" : false
           },
           "slots" : [
@@ -3912,6 +4171,7 @@
               "maximumRenderedElements" : 48,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1000,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : true
             }
           },
@@ -3986,6 +4246,7 @@
               "maximumRenderedElements" : 48,
               "maximumSceneItems" : 0,
               "maximumTextLength" : 1000,
+              "proceedPlacement" : "anywhere",
               "requiresProceed" : false
             }
           },

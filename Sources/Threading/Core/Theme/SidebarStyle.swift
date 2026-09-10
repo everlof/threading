@@ -6,12 +6,14 @@ import AppKit
 /// under the list, and an optional restatement of the brand row above it.
 ///
 /// This is deliberately the **one** place a theme reaches past colours-and-material into a
-/// specific region of the window. The sidebar is the surface people asked to make their own —
-/// a wordmark for their team, a gradient, a tiled pattern, a deliberately inset navigator —
-/// and it is also the one pane whose
-/// content is entirely ours (rows of names), so a background can sit *under* it without any
-/// feature view having to know. The content pane's ground stays the terminal's or the
-/// conversation's; a theme that could paint behind those would be painting behind another
+/// specific region of the window *by name*. The sidebar is the surface people asked to make
+/// their own — a wordmark for their team, a gradient, a tiled pattern, a deliberately inset
+/// navigator — and it is also the one pane whose content is entirely ours (rows of names), so
+/// a background can sit *under* it without any feature view having to know. The app's other
+/// broad grounds are dressed collectively rather than named: `AppTheme.Material.backdrop`
+/// reaches every surface that opts into the material's backdrop treatment, in the same
+/// `ThemeBackdrop` vocabulary this block's `background` uses. The terminal's ground stays the
+/// terminal palette's; a theme that could paint behind it would be painting behind another
 /// program's output.
 ///
 /// Everything here is optional, and absent means what absent means everywhere in the theme
@@ -70,69 +72,13 @@ public struct SidebarStyle: Codable, Equatable {
 
     // MARK: - Background
 
-    public struct Background: Codable, Equatable {
-        /// Drawn first, over the theme's surface colour.
-        public var gradient: Gradient?
-        /// Drawn over the gradient (or the surface): a tiled pattern or a fitted picture.
-        public var image: ImageLayer?
-
-        public init(gradient: Gradient? = nil, image: ImageLayer? = nil) {
-            self.gradient = gradient
-            self.image = image
-        }
-
-        public var isEmpty: Bool { gradient == nil && image == nil }
-    }
-
-    public struct Gradient: Equatable {
-        /// At least two, positions in 0...1. Order is the author's; rendering sorts.
-        public var stops: [Stop]
-        /// CSS convention: the direction the gradient flows toward, in degrees clockwise from
-        /// straight up — 0 flows toward the top, 90 toward the trailing edge, 180 toward the
-        /// bottom. Chosen because it is the convention every agent already knows.
-        public var angleDegrees: Double
-
-        public init(stops: [Stop], angleDegrees: Double = 180) {
-            self.stops = stops
-            self.angleDegrees = angleDegrees
-        }
-
-        public struct Stop: Equatable {
-            public let color: NSColor
-            /// 0 at the start of the run, 1 at its end.
-            public let position: Double
-
-            public init(color: NSColor, position: Double) {
-                self.color = color
-                self.position = position
-            }
-        }
-    }
-
-    public struct ImageLayer: Codable, Equatable {
-        /// Resolved through `ThemeAssetStore` for custom themes and the extension registry for
-        /// contributed ones. See `SidebarAssetSlot` for the names custom themes use.
-        public var asset: String
-        public var mode: Mode
-        /// 0...1 over whatever is beneath. Full strength suits a drawn pattern; a photograph
-        /// under white text usually wants far less, and the tool description says so.
-        public var opacity: Double
-
-        public init(asset: String, mode: Mode = .fill, opacity: Double = 1) {
-            self.asset = asset
-            self.mode = mode
-            self.opacity = opacity
-        }
-
-        public enum Mode: String, Codable, CaseIterable {
-            /// Repeated at its own pixel size from the top-leading corner.
-            case tile
-            /// Scaled to cover the column, cropping whatever overflows.
-            case fill
-            /// Scaled to fit inside the column, letterboxed by the layers beneath.
-            case fit
-        }
-    }
+    /// The sidebar's dressing is the shared backdrop vocabulary — gradient below, image above —
+    /// so a theme states a sidebar and a pane wallpaper in one grammar, and the tools, the
+    /// validation and the asset store treat both alike. The names below are the ones this
+    /// block has always used; `ThemeBackdrop` is where the definitions live.
+    public typealias Background = ThemeBackdrop
+    public typealias Gradient = ThemeBackdrop.Gradient
+    public typealias ImageLayer = ThemeBackdrop.ImageLayer
 
     // MARK: - Brand
 
@@ -247,51 +193,6 @@ extension SidebarStyle.NavigatorWell: Codable {
     }
 }
 
-extension SidebarStyle.Gradient: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case stops, angleDegrees
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        stops = try container.decode([Stop].self, forKey: .stops)
-        angleDegrees = try container.decodeIfPresent(Double.self, forKey: .angleDegrees) ?? 180
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(stops, forKey: .stops)
-        try container.encode(angleDegrees, forKey: .angleDegrees)
-    }
-}
-
-extension SidebarStyle.Gradient.Stop: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case color, position
-    }
-
-    /// Hex on the wire, like every colour in a theme document — hand-writable, diffable.
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let hex = try container.decode(String.self, forKey: .color)
-        guard let parsed = NSColor(hex: hex) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .color,
-                in: container,
-                debugDescription: "\(hex) is not a colour."
-            )
-        }
-        color = parsed
-        position = try container.decode(Double.self, forKey: .position)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(color.hexString, forKey: .color)
-        try container.encode(position, forKey: .position)
-    }
-}
-
 extension SidebarStyle.Brand.Logo: Codable {
     private enum CodingKeys: String, CodingKey {
         case asset
@@ -339,7 +240,8 @@ extension SidebarStyle.Brand.Logo: Codable {
 /// field it limits travel together.
 public enum SidebarStyleLimits {
     /// Two paints a wash; past eight the stops stop being a design and start being a bitmap.
-    public static let maximumGradientStops = 8
+    /// Shared with the material's backdrop — one grammar, one bound.
+    public static let maximumGradientStops = ThemeBackdropLimits.maximumGradientStops
     /// The sidebar at its default width truncates well before this; the cap only refuses the
     /// pathological.
     public static let maximumTitleLength = 40
@@ -353,19 +255,6 @@ public enum SidebarStyleLimits {
 
 // MARK: - Asset Slots
 
-/// The names a custom theme's sidebar assets are stored and referenced under.
-///
-/// Slots rather than free names: an MCP call hands over image *bytes*, not a file the document
-/// could point back at, so the store needs a name to keep them under — and one logo plus one
-/// background per variant is the whole vocabulary. Contributed themes are free to use their own
-/// package-relative names; these constants only govern what `ThemeAssetStore` writes.
-public enum SidebarAssetSlot: String, CaseIterable {
-    case logo
-    case background
-
-    /// One asset per slot per variant: a light chrome may want the mono logo its dark half
-    /// inverts.
-    public func fileName(for kind: AppTheme.VariantKind) -> String {
-        "\(kind.rawValue)-\(rawValue).png"
-    }
-}
+/// The sidebar's two slots are two of the three `ThemeAssetSlot` cases; the name this file has
+/// always used stays for the call sites and tests written against it.
+public typealias SidebarAssetSlot = ThemeAssetSlot

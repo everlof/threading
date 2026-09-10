@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.examples.aurora",
+  "name": "Sidebar Aurora",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/sidebar-aurora.wasm",
+  "capabilities": [
+    "ui.components",
+    "ui.rendering.metal"
+  ]
+}

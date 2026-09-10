@@ -6764,6 +6764,64 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     )
   }
 
+  /// The host answers the signals the SDK names and refuses the ones it does not, at
+  /// publication — so a surface bound to a signal from a newer SDK fails with a reason instead
+  /// of drawing its fallback forever.
+  func testSurfaceSignalsAreAcceptedByNameAndUnknownOnesRefused() throws {
+    let registry = ComponentCustomizationRegistry()
+    try registry.register(HostComponentContracts.sidebarBackdrop)
+    let service = ExtensionHostService(
+      registry: registry,
+      baseURL: try XCTUnwrap(URL(string: "http://127.0.0.1:1/v1"))
+    )
+    let metal = try XCTUnwrap(
+      try service.authorize(
+        extensionIdentifier: "com.example.aurora",
+        processGeneration: "one",
+        order: 0,
+        capabilities: [.componentCustomization, .customMetalSurfaces]
+      ))
+
+    func patch(binding signal: ExtensionHostSignal) -> ExtensionComponentPatch {
+      ExtensionComponentPatch(
+        id: "aurora",
+        target: .sidebarBackdrop(),
+        hook: .overlay(
+          base: .customSurface(
+            .metal(
+              ExtensionMetalSurface(
+                shaderResource: "Resources/aurora.metal",
+                preferredFramesPerSecond: 24,
+                inputs: [.init(name: "energy", value: .signal(signal, mapping: .identity))]
+              )),
+            accessibilityLabel: nil
+          ),
+          overlay: .proceed
+        )
+      )
+    }
+
+    for signal in ExtensionHostSignal.all {
+      XCTAssertEqual(
+        route(
+          .init(patches: [patch(binding: signal)]),
+          token: metal.connection.bearerToken,
+          through: service
+        ).status,
+        204,
+        "\(signal.rawValue) is a signal this host answers"
+      )
+    }
+    XCTAssertEqual(
+      route(
+        .init(patches: [patch(binding: ExtensionHostSignal(rawValue: "future.signal"))]),
+        token: metal.connection.bearerToken,
+        through: service
+      ).status,
+      422
+    )
+  }
+
   func testUnavailableCustomSurfaceSkipsTheWholeHook() throws {
     let registry = ComponentCustomizationRegistry()
     let contract = HostComponentContracts.applicationMainWindow

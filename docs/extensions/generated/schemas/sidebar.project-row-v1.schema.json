@@ -69,6 +69,7 @@
         "maximumRenderedElements" : 8,
         "maximumSceneItems" : 0,
         "maximumTextLength" : 80,
+        "proceedPlacement" : "anywhere",
         "requiredRootAxis" : "horizontal",
         "requiresProceed" : false
       }
@@ -121,6 +122,7 @@
                   "maximumRenderedElements" : 1,
                   "maximumSceneItems" : 0,
                   "maximumTextLength" : 24,
+                  "proceedPlacement" : "anywhere",
                   "requiresProceed" : false
                 }
               },

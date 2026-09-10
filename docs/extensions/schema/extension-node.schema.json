@@ -76,7 +76,7 @@
             "type": { "const": "image" },
             "reference": { "$ref": "#/$defs/imageReference" },
             "role": {
-              "enum": ["identity", "icon", "decoration"]
+              "enum": ["identity", "icon", "decoration", "backdrop"]
             },
             "accessibilityLabel": { "type": "string" }
           }

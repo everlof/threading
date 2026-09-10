@@ -70,6 +70,15 @@ public extension ExtensionComponentID {
     /// The usage detail popover presented from the toolbar's active-account item.
     static let toolbarAccountUsagePopover: Self = "toolbar.account-usage-popover"
 
+    /// The ground beneath the project sidebar's brand row, list and footer.
+    ///
+    /// A hook here draws *under* the sidebar's content, never over it: the contract requires an
+    /// overlay whose top is `.proceed`, admits only a fill-the-column image and a host-run
+    /// fragment surface, and the host hit-tests straight through everything it composes. The
+    /// theme's own sidebar dressing stays beneath this; an opaque navigator well a theme states
+    /// stays above it.
+    static let sidebarBackdrop: Self = "sidebar.backdrop"
+
     /// The floating corner card over the selected session's content pane.
     ///
     /// Deliberately not named after any one content kind: today the card carries the
@@ -309,6 +318,18 @@ extension ExtensionComponentDetailConstraints: Codable {
 ///
 /// The SDK can apply the same validation as Threading before publishing a patch. Empty role/axis
 /// arrays mean that node kind is unavailable; booleans cover the kinds which have no role.
+/// Where a hook's `.proceed` may stand in relation to the extension's own content.
+///
+/// `anywhere` is the ordinary around-hook: the host's content may be wrapped, preceded,
+/// followed or overlaid. `overlayTop` is the *backdrop* shape — the root must be an `overlay`
+/// whose top is exactly `.proceed`, so everything the extension draws lands beneath the host's
+/// content and nothing can be composited over the rows a person reads. It is the window hook's
+/// overlay turned over, stated as a rule rather than left to the author's memory.
+public enum ExtensionProceedPlacement: String, Codable, Equatable, Sendable {
+    case anywhere
+    case overlayTop
+}
+
 public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     public let maximumDepth: Int
     public let maximumNodes: Int
@@ -345,6 +366,16 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
     /// `ui.media-documents` gates it a second time.
     public let allowsMedia: Bool
     public let allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind]
+    /// Where `.proceed` must stand. Defaults to `anywhere`, which is every contract that
+    /// existed before a surface drew *under* its host content.
+    public let proceedPlacement: ExtensionProceedPlacement
+    /// A cadence ceiling for custom surfaces on this surface, or nil for the SDK's own 60.
+    ///
+    /// A surface that lives as long as the window — a backdrop under a list — is not a
+    /// transient effect, and a full-rate shader behind a column of names is a battery cost the
+    /// reader never asked for. The contract states the ceiling, the SDK refuses a patch above
+    /// it, and the host clamps to the same number when it builds the view.
+    public let maximumCustomSurfaceFramesPerSecond: Int?
 
     /// What a summary's second level may say here, or nil where summaries have no second level.
     ///
@@ -376,6 +407,8 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         allowsOverlay: Bool = false,
         allowsMedia: Bool = false,
         allowedCustomSurfaceKinds: [ExtensionCustomSurfaceKind] = [],
+        proceedPlacement: ExtensionProceedPlacement = .anywhere,
+        maximumCustomSurfaceFramesPerSecond: Int? = nil,
         disclosureDetail: ExtensionComponentDetailConstraints? = nil
     ) {
         self.maximumDepth = maximumDepth
@@ -399,6 +432,8 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         self.allowsOverlay = allowsOverlay
         self.allowsMedia = allowsMedia
         self.allowedCustomSurfaceKinds = allowedCustomSurfaceKinds
+        self.proceedPlacement = proceedPlacement
+        self.maximumCustomSurfaceFramesPerSecond = maximumCustomSurfaceFramesPerSecond
         self.disclosureDetail = disclosureDetail
     }
 
@@ -410,6 +445,7 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
         case allowsDivider, allowsFixedSpacer, allowsFlexibleSpacer
         case allowsProceed, requiresProceed, allowsOverlay, allowsMedia
         case allowedCustomSurfaceKinds
+        case proceedPlacement, maximumCustomSurfaceFramesPerSecond
         case disclosureDetail
     }
 
@@ -469,6 +505,14 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
             [ExtensionCustomSurfaceKind].self,
             forKey: .allowedCustomSurfaceKinds
         ) ?? []
+        proceedPlacement = try container.decodeIfPresent(
+            ExtensionProceedPlacement.self,
+            forKey: .proceedPlacement
+        ) ?? .anywhere
+        maximumCustomSurfaceFramesPerSecond = try container.decodeIfPresent(
+            Int.self,
+            forKey: .maximumCustomSurfaceFramesPerSecond
+        )
         disclosureDetail = try container.decodeIfPresent(
             ExtensionComponentDetailConstraints.self,
             forKey: .disclosureDetail
@@ -511,6 +555,19 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 message: "requires allowsProceed"
             ))
         }
+        if proceedPlacement == .overlayTop, !(allowsOverlay && requiresProceed) {
+            issues.append(.init(
+                path: "proceedPlacement",
+                message: "overlayTop requires allowsOverlay and requiresProceed"
+            ))
+        }
+        if let cap = maximumCustomSurfaceFramesPerSecond,
+           !(1...ExtensionMetalSurface.maximumFramesPerSecond).contains(cap) {
+            issues.append(.init(
+                path: "maximumCustomSurfaceFramesPerSecond",
+                message: "must be between 1 and \(ExtensionMetalSurface.maximumFramesPerSecond)"
+            ))
+        }
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
         }
@@ -538,6 +595,20 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
             issues.append(.init(path: path, message: "may contain at most one proceed node"))
         } else if requiresProceed && proceedCount != 1 {
             issues.append(.init(path: path, message: "must contain exactly one proceed node"))
+        }
+        if proceedPlacement == .overlayTop {
+            // The one shape that keeps the extension's content beneath the host's: the root
+            // is an overlay, and its top is the proceed node itself — not a stack holding it,
+            // which would let a sibling share the top layer with the rows.
+            var proceedIsOnTop = false
+            if case .overlay(_, .proceed) = node { proceedIsOnTop = true }
+            if !proceedIsOnTop {
+                issues.append(.init(
+                    path: path,
+                    message: "root must be an overlay whose overlay is the proceed node, "
+                        + "so extension content stays beneath the host content"
+                ))
+            }
         }
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
@@ -894,6 +965,15 @@ public struct ExtensionComponentNodeConstraints: Codable, Equatable, Sendable {
                 issues: &issues
             )
             issues.append(contentsOf: surface.validationIssues(path: path))
+            if let cap = maximumCustomSurfaceFramesPerSecond,
+               case .metal(let metal) = surface {
+                require(
+                    metal.preferredFramesPerSecond <= cap,
+                    path: "\(path).preferredFramesPerSecond",
+                    message: "must be at most \(cap) on this surface",
+                    issues: &issues
+                )
+            }
             if let accessibilityLabel {
                 validateText(
                     accessibilityLabel,
@@ -1074,6 +1154,17 @@ public struct ExtensionHostOwnedBehavior: RawRepresentable, Codable, Hashable, S
     public static let newTabMenu: Self = "new-tab-menu"
     public static let paneVisibility: Self = "pane-visibility"
     public static let cardNavigation: Self = "card-navigation"
+
+    /// The host composites a backdrop below a stated opacity ceiling, whatever the tree draws,
+    /// so the content above it keeps a floor of its own contrast.
+    public static let legibilityCeiling: Self = "legibility-ceiling"
+    /// The host clamps a live surface's frame rate to the contract's ceiling and holds its
+    /// frames while its window is occluded, miniaturized or hidden.
+    public static let frameCadence: Self = "frame-cadence"
+    /// The host hit-tests through the whole backdrop; nothing in it can take a click.
+    public static let pointerPassthrough: Self = "pointer-passthrough"
+    /// Under Reduce Motion the host freezes a live surface's clock.
+    public static let reducedMotion: Self = "reduced-motion"
 }
 
 /// A machine-readable description of exactly what one host component allows.
@@ -1244,6 +1335,11 @@ public extension ExtensionComponentTarget {
             contractVersion: 1,
             entityID: sessionID
         )
+    }
+
+    /// Targets the one sidebar backdrop. The sidebar is app-wide, so there is no entity.
+    static func sidebarBackdrop() -> Self {
+        Self(component: .sidebarBackdrop, contractVersion: 1)
     }
 
     /// Targets every project hover card when `projectID` is nil, or one concrete project.

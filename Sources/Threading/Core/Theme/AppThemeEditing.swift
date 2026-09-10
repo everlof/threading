@@ -464,6 +464,20 @@ public enum AppThemeEditing {
             }
         }
 
+        // The material's backdrop sits under every broad ground, so its gradient is held to
+        // the label's floor against the *ground* — the sidebar's block is held against the
+        // surface for the same reason in `validate(_ sidebar:…)`, through the same gate.
+        if let backdrop = material.backdrop {
+            try validate(
+                backdrop,
+                prefix: "material.backdrop",
+                subject: "text on the backdrop gradient stop",
+                kind: kind,
+                label: resolved.resolved(.label, appearance: appearance),
+                ground: ground
+            )
+        }
+
         let button = material.buttonStyle
         guard (-1...4).contains(button.tracking) else {
             throw AppThemeEditingError.invalid(
@@ -768,42 +782,15 @@ public enum AppThemeEditing {
             }
         }
 
-        if let gradient = sidebar.background?.gradient {
-            guard (2...SidebarStyleLimits.maximumGradientStops).contains(gradient.stops.count) else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar.gradient needs 2 to \(SidebarStyleLimits.maximumGradientStops) stops."
-                )
-            }
-            guard gradient.stops.allSatisfy({ (0...1).contains($0.position) }) else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar.gradient stop positions must be between 0 and 1."
-                )
-            }
-            let label = resolved.resolved(.label, appearance: appearance)
-            let surface = resolved.resolved(.surface, appearance: appearance)
-            for stop in gradient.stops {
-                // A stop may be translucent; what the label actually sits on is the stop
-                // composited over the themed surface, so that is what gets measured.
-                let ground = surface.composited(under: stop.color)
-                let ink = ground.composited(under: label)
-                let ratio = ThemeContrast.ratio(ink, ground)
-                guard ratio >= ThemeContrast.minimumRatio else {
-                    throw AppThemeEditingError.invalid(
-                        "\(kind.rawValue) sidebar text on the gradient stop "
-                            + "\(stop.color.hexString) has \(formatted(ratio)):1 contrast; "
-                            + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
-                    )
-                }
-            }
-        }
-
-        if let image = sidebar.background?.image {
-            guard (0...1).contains(image.opacity) else {
-                throw AppThemeEditingError.invalid("sidebar.image.opacity must be between 0 and 1.")
-            }
-            guard !image.asset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw AppThemeEditingError.invalid("sidebar.image names no asset.")
-            }
+        if let background = sidebar.background {
+            try validate(
+                background,
+                prefix: "sidebar",
+                subject: "sidebar text on the gradient stop",
+                kind: kind,
+                label: resolved.resolved(.label, appearance: appearance),
+                ground: resolved.resolved(.surface, appearance: appearance)
+            )
         }
 
         if let brand = sidebar.brand {
@@ -837,6 +824,59 @@ public enum AppThemeEditing {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    /// The gates a backdrop faces wherever it is stated: the sidebar's block against the
+    /// surface it sits on, the material's against the ground. The gradient gets the terminal
+    /// palette's treatment — each stop composited over `ground`, then the label composited
+    /// over that, must keep the label at the same 3:1 floor. An image cannot be measured this
+    /// way (its pixels are arbitrary), so its gates are bounds, and legibility stays the
+    /// author's to check by looking.
+    nonisolated private static func validate(
+        _ backdrop: ThemeBackdrop,
+        prefix: String,
+        subject: String,
+        kind: AppTheme.VariantKind,
+        label: NSColor,
+        ground: NSColor
+    ) throws {
+        if let gradient = backdrop.gradient {
+            guard (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count) else {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).gradient needs 2 to \(ThemeBackdropLimits.maximumGradientStops) stops."
+                )
+            }
+            guard gradient.stops.allSatisfy({ (0...1).contains($0.position) }) else {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).gradient stop positions must be between 0 and 1."
+                )
+            }
+            for stop in gradient.stops {
+                // A stop may be translucent; what the label actually sits on is the stop
+                // composited over the ground beneath it, so that is what gets measured.
+                let effectiveGround = ground.composited(under: stop.color)
+                let ink = effectiveGround.composited(under: label)
+                let ratio = ThemeContrast.ratio(ink, effectiveGround)
+                guard ratio >= ThemeContrast.minimumRatio else {
+                    throw AppThemeEditingError.invalid(
+                        "\(kind.rawValue) \(subject) "
+                            + "\(stop.color.hexString) has \(formatted(ratio)):1 contrast; "
+                            + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+                    )
+                }
+            }
+        }
+
+        if let image = backdrop.image {
+            guard (0...1).contains(image.opacity) else {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).image.opacity must be between 0 and 1."
+                )
+            }
+            guard !image.asset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AppThemeEditingError.invalid("\(prefix).image names no asset.")
             }
         }
     }

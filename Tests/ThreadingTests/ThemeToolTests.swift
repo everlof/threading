@@ -655,6 +655,141 @@ final class ThemeToolTests: XCTestCase {
         )
     }
 
+    /// The same loop for the material's backdrop: create a theme whose panes carry a wash and
+    /// a picture (stored from bytes), read it back in the same vocabulary, take the block away
+    /// again. The asset dies with the theme.
+    func testAgentCanDressReadAndUndressTheBackdrop() throws {
+        let name = "Backdrop Tool Theme \(UUID().uuidString)"
+        let base = AppThemeStyles.cyberpunk
+        let kind = base.availableVariants[0]
+        let ground = base.resolved(
+            .ground,
+            appearance: kind.appearance ?? NSAppearance.currentDrawing()
+        ).hexString
+
+        let pixel = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            NSColor.systemIndigo.setFill()
+            rect.fill()
+            return true
+        }
+        let png = try XCTUnwrap(
+            NSBitmapImageRep(data: try XCTUnwrap(pixel.tiffRepresentation))?
+                .representation(using: .png, properties: [:])
+        )
+
+        // Decoded from JSON rather than built by hand: the snake-case keys are the contract.
+        let create = try JSONDecoder().decode(
+            CreateAppThemeArguments.self,
+            from: Data("""
+            {
+              "name": "\(name)",
+              "base_id": "\(base.id.rawValue)",
+              "apply": false,
+              "variants": {
+                "\(kind.rawValue)": {
+                  "material": {
+                    "backdrop": {
+                      "gradient": {
+                        "angle_degrees": 135,
+                        "stops": [
+                          {"color": "\(ground)", "position": 0},
+                          {"color": "\(ground)", "position": 1}
+                        ]
+                      },
+                      "image": {
+                        "source": {"base64": "\(png.base64EncodedString())"},
+                        "mode": "fill",
+                        "opacity": 0.25
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """.utf8)
+        )
+        let created = coordinator().createAppTheme(create)
+        XCTAssertFalse(created.isError, created.text)
+        let theme = try XCTUnwrap(AppThemeLibrary.all.first { $0.name == name })
+        defer {
+            if let latest = AppThemeLibrary.theme(withID: theme.id) {
+                _ = AppThemeLibrary.delete(latest)
+            }
+        }
+
+        let stored = try XCTUnwrap(theme.variant(kind)?.material.backdrop)
+        XCTAssertEqual(stored.gradient?.angleDegrees, 135)
+        let assetName = try XCTUnwrap(stored.image?.asset)
+        XCTAssertEqual(assetName, ThemeAssetSlot.backdrop.fileName(for: kind))
+        XCTAssertEqual(stored.image?.opacity, 0.25)
+        XCTAssertNotNil(
+            ThemeAssetStore.image(named: assetName, for: theme.id),
+            "the supplied bytes should be stored under the theme"
+        )
+
+        let get = coordinator().getAppTheme(
+            AppThemeReferenceArguments(themeID: theme.id.rawValue)
+        )
+        XCTAssertFalse(get.isError, get.text)
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(get.text.utf8)) as? [String: Any]
+        )
+        let variants = try XCTUnwrap(document["variants"] as? [String: Any])
+        let variantDocument = try XCTUnwrap(variants[kind.rawValue] as? [String: Any])
+        let material = try XCTUnwrap(variantDocument["material"] as? [String: Any])
+        let backdrop = try XCTUnwrap(material["backdrop"] as? [String: Any])
+        let gradient = try XCTUnwrap(backdrop["gradient"] as? [String: Any])
+        XCTAssertEqual(gradient["angle_degrees"] as? Double, 135)
+        let image = try XCTUnwrap(backdrop["image"] as? [String: Any])
+        XCTAssertEqual(image["asset"] as? String, assetName)
+        XCTAssertEqual(image["mode"] as? String, "fill")
+
+        let undress = try JSONDecoder().decode(
+            UpdateAppThemeArguments.self,
+            from: Data("""
+            {
+              "theme_id": "\(theme.id.rawValue)",
+              "apply": false,
+              "variants": {
+                "\(kind.rawValue)": {"material": {"remove_backdrop": true}}
+              }
+            }
+            """.utf8)
+        )
+        let undressed = coordinator().updateAppTheme(undress)
+        XCTAssertFalse(undressed.isError, undressed.text)
+        let bare = try XCTUnwrap(AppThemeLibrary.theme(withID: theme.id))
+        XCTAssertNil(bare.variant(kind)?.material.backdrop)
+
+        _ = AppThemeLibrary.delete(bare)
+        XCTAssertNil(
+            ThemeAssetStore.image(named: assetName, for: theme.id),
+            "deleting the theme should take its asset folder with it"
+        )
+    }
+
+    /// The material schema an agent reads describes the backdrop it can send.
+    func testTheMaterialSchemaDescribesTheBackdrop() throws {
+        let schema = try schema(for: MCPTools.createAppTheme)
+        let input = try XCTUnwrap(schema["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(input["properties"] as? [String: Any])
+        let variants = try XCTUnwrap(properties["variants"] as? [String: Any])
+        let variantProperties = try XCTUnwrap(variants["properties"] as? [String: Any])
+        let dark = try XCTUnwrap(variantProperties["dark"] as? [String: Any])
+        let darkProperties = try XCTUnwrap(dark["properties"] as? [String: Any])
+        let material = try XCTUnwrap(darkProperties["material"] as? [String: Any])
+        let materialProperties = try XCTUnwrap(material["properties"] as? [String: Any])
+        let backdrop = try XCTUnwrap(
+            materialProperties["backdrop"] as? [String: Any],
+            "the material schema does not describe the backdrop"
+        )
+        let backdropProperties = try XCTUnwrap(backdrop["properties"] as? [String: Any])
+        for field in ["gradient", "remove_gradient", "image", "remove_image", "remove"] {
+            XCTAssertNotNil(backdropProperties[field], "backdrop schema lost \(field)")
+        }
+        XCTAssertNotNil(materialProperties["remove_backdrop"])
+    }
+
     /// Asset bytes and the theme document are one logical update. If a later field refuses the
     /// patch, a replaced file must return to its old bytes and a newly introduced slot must not
     /// survive under the standing document.

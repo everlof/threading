@@ -83,9 +83,9 @@ struct ThreadingExtensionThemeDocument: Equatable {
     /// compare equal, and image objects do not.
     let iconMark: Data?
 
-    /// The sidebar images the theme document's own `sidebar` blocks reference, keyed by the
-    /// package-relative name as written, decode-gated and re-encoded like the mark. Empty for
-    /// the many themes that state no sidebar dressing.
+    /// The images the theme document's own `sidebar` blocks and `material.backdrop` reference,
+    /// keyed by the package-relative name as written, decode-gated and re-encoded like the
+    /// mark. Empty for the many themes that state no dressing at all.
     let sidebarAssets: [String: Data]
 
     /// Defaulted, so the many fixtures that care only about a theme document do not each have
@@ -440,32 +440,37 @@ enum ExtensionBundleInspector {
         }
     }
 
-    /// Reads every image the theme document's own `sidebar` blocks reference.
+    /// Reads every image the theme document's own `sidebar` blocks and `material.backdrop`
+    /// reference.
     ///
     /// The document names package-relative paths; nothing new appears in the manifest, because
-    /// the sidebar block is part of the same app-theme vocabulary the contribution already
-    /// ships — the host grows a field and old packages keep validating. The gates match the
-    /// icon mark's: safe relative path, byte cap, the shared ImageIO decode-and-re-encode. A
-    /// referenced file that is missing or not an image fails the whole package at inspection,
-    /// because a theme shipping a background the host will not draw is a disagreement its
-    /// author needs to see — the same stance `inspectThemeIconMark` states.
+    /// both blocks are part of the same app-theme vocabulary the contribution already ships —
+    /// the host grows a field and old packages keep validating. The gates match the icon
+    /// mark's: safe relative path, a byte cap per slot, the shared ImageIO decode-and-re-encode.
+    /// A referenced file that is missing or not an image fails the whole package at inspection,
+    /// because a theme shipping a picture the host will not draw is a disagreement its author
+    /// needs to see — the same stance `inspectThemeIconMark` states.
     ///
     /// The one gate deliberately *not* applied is `fillsItsBounds`: that rule exists so a
-    /// package cannot re-plate the Dock icon, and a sidebar background is an opaque rectangle
-    /// by design.
+    /// package cannot re-plate the Dock icon, and a background is an opaque rectangle by
+    /// design.
     private static func inspectSidebarAssets(
         of theme: AppTheme,
         declaredAt declarationPath: String,
         root: URL
     ) throws -> [String: Data] {
-        var slots: [String: SidebarAssetSlot] = [:]
+        var slots: [String: ThemeAssetSlot] = [:]
         for variant in theme.variants.values {
-            if let name = variant.sidebar?.background?.image?.asset {
+            // A name shared between slots keeps the largest pixel and byte budget it is asked
+            // for, so the one file serves every region that names it.
+            if let name = variant.material.backdrop?.image?.asset {
+                slots[name] = .backdrop
+            }
+            if let name = variant.sidebar?.background?.image?.asset, slots[name] == nil {
                 slots[name] = .background
             }
-            if case .asset(let name) = variant.sidebar?.brand.map(\.logo) {
-                // A name used for both slots keeps the background's larger pixel budget.
-                if slots[name] == nil { slots[name] = .logo }
+            if case .asset(let name) = variant.sidebar?.brand.map(\.logo), slots[name] == nil {
+                slots[name] = .logo
             }
         }
 
@@ -474,12 +479,12 @@ enum ExtensionBundleInspector {
             let url = try resolveResource(
                 name,
                 root: root,
-                maximumBytes: SidebarStyleLimits.maximumImageBytes,
+                maximumBytes: slot.maximumImageBytes,
                 failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
             )
             let data = try boundedData(
                 at: url,
-                maximumBytes: SidebarStyleLimits.maximumImageBytes,
+                maximumBytes: slot.maximumImageBytes,
                 failure: { ExtensionBundleError.themeResourceInvalid(path: name, message: $0) }
             )
             guard let normalized = ProjectIconStore.normalizedPNGData(
@@ -488,7 +493,7 @@ enum ExtensionBundleInspector {
                   ) else {
                 throw ExtensionBundleError.themeResourceInvalid(
                     path: name,
-                    message: "referenced by \(declarationPath)'s sidebar block "
+                    message: "referenced by \(declarationPath)'s sidebar or backdrop block "
                         + "but not a readable image"
                 )
             }

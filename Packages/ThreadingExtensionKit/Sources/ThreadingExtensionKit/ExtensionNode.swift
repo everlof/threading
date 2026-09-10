@@ -89,6 +89,17 @@ public enum ExtensionImageRole: String, Codable, CaseIterable, Equatable, Sendab
     case identity
     case icon
     case decoration
+    /// A picture that covers the surface *behind* other content: scaled to fill, cropped at
+    /// the edges, and given no size of its own, so it can never dictate a row's or a column's
+    /// measure. Only a contract that draws under content admits it — the sidebar backdrop is
+    /// the first — and every contract written before it existed lists `inline` instead.
+    case backdrop
+
+    /// The roles that occupy a slot *inside* a row, card, panel or navigator: a fixed-size
+    /// mark beside text. Contracts name this list rather than `allCases` on purpose, so a
+    /// fill-the-surface image cannot arrive in a hover card or a composer accessory merely
+    /// because the SDK grew a role.
+    public static let inline: [ExtensionImageRole] = [.identity, .icon, .decoration]
 }
 
 public enum ExtensionButtonRole: String, Codable, CaseIterable, Equatable, Sendable {

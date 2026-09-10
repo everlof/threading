@@ -3686,3 +3686,16 @@ leaving material and disabled behavior split between owners.
 rejection and the shared-style path. The existing white-accent crossover test pins the palette's
 dark-ink answer, while the `ios-usage` evidence entry exercises the action through the shipping
 SwiftUI sheet.
+
+## 2026-09-10 — A broad ground may wear a picture, and the pattern reads over it
+
+`applySurface(pattern: .backdrop)` used to mean one thing: the material's vector pattern. It now
+means *the material's backdrop treatment* — a `ThemeBackdropDressingLayer` (gradient, then
+picture) at the bottom of the sublayer stack with the pattern layer kept above it, both found
+and stripped by name, both re-resolved by the sweep from the recorded participation. Nothing
+about who opts in changed: the same fifteen broad grounds, never a card or a control. The
+decisions — why the grounds are dressed collectively where the sidebar is dressed by name, what
+gates a wash, where the bytes live — are in
+[`themes.md`](themes.md#2026-09-10--backdrops-for-the-broad-grounds-and-a-plane-under-the-sidebar-an-extension-may-dress).
+The rule for a new broad ground is unchanged: opt in with `.backdrop` and it wears whatever the
+theme states; do not draw a wash of your own.

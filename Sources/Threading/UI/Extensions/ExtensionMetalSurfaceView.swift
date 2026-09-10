@@ -37,10 +37,19 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let beganAt = ProcessInfo.processInfo.systemUptime
+    /// Whether the view has decided to hold its frames because nobody could see them.
+    ///
+    /// Separate from `isPaused` so a test can ask *why* the view is paused, and so the
+    /// visibility rule below is the one owner of that flag rather than one of several writers.
+    private(set) var isHeldForVisibility = false
 
+    /// `maximumFramesPerSecond` is the host's ceiling for this placement — a contract may state
+    /// one below the SDK's 60, and the sidebar backdrop does — clamped here so the view a
+    /// surface gets can never outrun the promise its catalogue entry made.
     init(
         specification: ExtensionMetalSurface,
         source: String,
+        maximumFramesPerSecond: Int = ExtensionMetalSurface.maximumFramesPerSecond,
         signalProvider: @escaping SignalProvider
     ) throws {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -83,7 +92,10 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
         framebufferOnly = true
         enableSetNeedsDisplay = false
         isPaused = false
-        preferredFramesPerSecond = specification.preferredFramesPerSecond
+        preferredFramesPerSecond = max(
+            1,
+            min(specification.preferredFramesPerSecond, maximumFramesPerSecond)
+        )
         wantsLayer = true
         layer?.isOpaque = false
         setAccessibilityElement(false)
@@ -99,6 +111,57 @@ final class ExtensionMetalSurfaceView: MTKView, MTKViewDelegate {
     /// Visual surfaces are passive. Controls in the next hook or native view remain hittable.
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
+    }
+
+    // MARK: - Visibility
+
+    /// A surface draws only while somebody could see it. An occluded or miniaturized window, or
+    /// a hidden ancestor, holds the frames; the clock keeps running through the hold, so the
+    /// animation resumes where time is rather than where it stopped — the media player's rule,
+    /// for the same reason. A view in no window is held too, which is what an offscreen fixture
+    /// is; `snapshotImage` draws on request regardless.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        if let window {
+            for name in [
+                NSWindow.didChangeOcclusionStateNotification,
+                NSWindow.didMiniaturizeNotification,
+                NSWindow.didDeminiaturizeNotification
+            ] {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(windowVisibilityChanged),
+                    name: name,
+                    object: window
+                )
+            }
+        }
+        updateVisibilityHold()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateVisibilityHold()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateVisibilityHold()
+    }
+
+    @objc private func windowVisibilityChanged() {
+        updateVisibilityHold()
+    }
+
+    /// Re-decides the hold from the window and the view's own hidden state. Exposed so a test
+    /// can drive it through a posted notification without a display.
+    func updateVisibilityHold() {
+        let windowVisible = window.map {
+            $0.occlusionState.contains(.visible) && !$0.isMiniaturized
+        } ?? false
+        isHeldForVisibility = !windowVisible || isHiddenOrHasHiddenAncestor
+        isPaused = isHeldForVisibility
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}

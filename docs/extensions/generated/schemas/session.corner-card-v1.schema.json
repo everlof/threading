@@ -109,6 +109,7 @@
                     "maximumRenderedElements" : 60,
                     "maximumSceneItems" : 0,
                     "maximumTextLength" : 80,
+                    "proceedPlacement" : "anywhere",
                     "requiresProceed" : false
                   },
                   "maximumDepth" : 2,
@@ -117,6 +118,7 @@
                   "maximumRenderedElements" : 8,
                   "maximumSceneItems" : 0,
                   "maximumTextLength" : 40,
+                  "proceedPlacement" : "anywhere",
                   "requiresProceed" : false
                 }
               },

@@ -102,7 +102,7 @@ public enum ExtensionAttachmentPreviewContract {
         maximumTextLength: 2_000,
         allowedStackAxes: [.horizontal, .vertical],
         allowedTextRoles: ExtensionTextRole.allCases,
-        allowedImageRoles: ExtensionImageRole.allCases,
+        allowedImageRoles: ExtensionImageRole.inline,
         allowedButtonRoles: [.standard, .primary],
         allowedStatusRoles: ExtensionStatusRole.allCases,
         allowsTextInput: true,
