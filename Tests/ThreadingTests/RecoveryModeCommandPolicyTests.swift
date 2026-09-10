@@ -55,6 +55,7 @@ final class RecoveryModeCommandPolicyTests: XCTestCase {
             AppCommands.ID.browser,
             AppCommands.ID.files,
             AppCommands.ID.review,
+            AppCommands.ID.attachments,
             AppCommands.ID.saveBaseline,
             AppCommands.ID.sessionInfo,
             AppCommands.ID.shell,

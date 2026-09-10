@@ -1127,6 +1127,22 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         XCTAssertFalse(titles.contains(L10n.string("Info")))
     }
 
+    func testAttachmentsNewTabEntryCarriesItsRegisteredCommandIdentity() throws {
+        let pane = DisplayPaneController()
+        let entry = try XCTUnwrap(
+            pane.newTabEntries(for: SessionID()).first {
+                $0.itemTitle == L10n.string("Attachments")
+            }
+        )
+        let item = try XCTUnwrap(entry.item)
+
+        XCTAssertEqual(
+            item.representedValue as? String,
+            AppCommands.ID.attachments,
+            "the panel action drifted away from the palette and shortcut registry"
+        )
+    }
+
     /// The old commands remain useful anchors, but both focus a section of the same tab. The
     /// selected section is written through the old persisted kind so layouts stay compatible
     /// with builds from before the merge.

@@ -372,6 +372,11 @@ changed query spends a new run.
 ## Display Panel
 
 The panel normally belongs to the selected session and presents that session's persisted tabs.
+Built-in session surfaces exposed as commands use the same `AppCommands` identity in the View
+menu, command palette, Keyboard settings, and the panel's `+` menu. Attachments is
+`view.attachments`: invoking it opens the current session's singleton Attachments tab, while the
+palette's ordinary session-input step can select a chat when none is current. The `+` menu reads
+that command's resolved shortcut rather than describing the same action anonymously.
 **Current Theme is the deliberate app-wide exception.** It temporarily replaces the visible tab
 strip with one non-persisted inspector while leaving both per-session tab lists untouched. It is
 not offered by the tab `+`, cannot be reordered or transferred, and stays visible when the user

@@ -520,7 +520,7 @@ final class DisplayPaneController: NSViewController {
         }
       ),
       (
-        "Attachments", "paperclip", nil, true,
+        "Attachments", "paperclip", AppCommands.ID.attachments, true,
         {
           [weak self] in _ = self?.activateAttachments(for: sessionID)
         }
@@ -557,6 +557,7 @@ final class DisplayPaneController: NSViewController {
             ShortcutOverrideStore.shared.shortcut(forID: $0)
           },
           image: ThemedMenuIcon.symbol(symbol),
+          representedValue: commandID,
           isEnabled: isEnabled,
           onChoose: action
         ))

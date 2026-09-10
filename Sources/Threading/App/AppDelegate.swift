@@ -2463,6 +2463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.browser, action: #selector(openBrowser)))
         menu.addItem(commandItem(AppCommands.ID.files, action: #selector(openFilesTab)))
         menu.addItem(commandItem(AppCommands.ID.review, action: #selector(openReview)))
+        menu.addItem(commandItem(AppCommands.ID.attachments, action: #selector(openAttachments)))
         menu.addItem(commandItem(
             AppCommands.ID.jumpToReviewFile,
             action: #selector(jumpToReviewFile)
@@ -3229,6 +3230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.browser: mainWindowController?.showBrowser()
         case AppCommands.ID.files: mainWindowController?.showFilesTab()
         case AppCommands.ID.review: mainWindowController?.showReview()
+        case AppCommands.ID.attachments: mainWindowController?.showAttachments()
         case AppCommands.ID.jumpToReviewFile: mainWindowController?.showReviewFileJump()
         case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
         case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
@@ -3629,6 +3631,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func openReview() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.review)
+    }
+
+    @objc private func openAttachments() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.attachments)
     }
 
     @objc private func saveBrowserBaseline() {

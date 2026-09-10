@@ -138,6 +138,7 @@ enum AppCommands {
         static let browser = "view.browser"
         static let files = "view.files"
         static let review = "view.review"
+        static let attachments = "view.attachments"
         static let jumpToReviewFile = "review.jumpToFile"
         static let saveBaseline = "view.saveBaseline"
         static let sessionInfo = "view.info"
@@ -292,6 +293,8 @@ enum AppCommands {
         AppCommand(id: ID.review, group: .view, title: "Git Review",
                    defaultShortcut: KeyboardShortcut(key: "r", modifiers: [.command, .shift]), isEditable: true,
                    scope: .session),
+        AppCommand(id: ID.attachments, group: .view, title: "Attachments",
+                   defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.jumpToReviewFile, group: .view, title: "Jump to Review File…",
                    detail: "Searches the files changed in the active Git Review.",
                    defaultShortcut: KeyboardShortcut(key: "j", modifiers: .command), isEditable: true,

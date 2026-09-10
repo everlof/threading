@@ -150,7 +150,8 @@ final class AppDelegateTests: XCTestCase {
 
         let actions = [
             "showPreferences", "openTerminalTab", "openFilesTab", "openBrowser", "openReview",
-            "openInfo", "toggleShell", "toggleDisplayPanel", "toggleCurrentTheme", "newSession", "addProject",
+            "openAttachments", "openInfo", "toggleShell", "toggleDisplayPanel",
+            "toggleCurrentTheme", "newSession", "addProject",
             "newProject", "closeSession", "toggleSidebar", "showFind", "inspectElement",
             "increaseFontSize", "decreaseFontSize", "showCommandPalette"
         ]

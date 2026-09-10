@@ -3554,7 +3554,9 @@ That receipt remains after the inspector closes: use **Edit** to reopen the edit
 the composer can be removed there or with the receipt's **Remove** action; sent revisions remain
 unchanged while the saved document continues to be editable.
 
-Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
+Open **Attachments** from the command palette, the View menu, the session `⋯` menu's
+**Session Options**, or the panel's **+** menu. The command targets the current chat; if none is
+selected, the palette lets you choose one first.
 The tab is two panes: the list above, and the selected file's preview filling the space below —
 images and PDFs inline (click an image to enter the same collection-aware media inspector),
 movies in their own player, archives and documents through the same Quick Look preview the space
@@ -5459,6 +5461,7 @@ on it under **Settings ▸ Extensions**.
 | Browser | Cmd+Shift+B |
 | Activity (Overview section) | Cmd+P |
 | Git Review | Cmd+Shift+R |
+| Attachments | unbound by default — assign one in Settings ▸ Keyboard |
 | Jump to Review File… | Cmd+J |
 | Save as Baseline… (the visible browser page) | unbound by default — assign one in Settings ▸ Keyboard |
 | Session Info (Overview section) | Cmd+Shift+I |

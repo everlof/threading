@@ -231,6 +231,24 @@ final class AppCommandTests: XCTestCase {
         XCTAssertTrue(command.isEditable)
     }
 
+    func testAttachmentsShipsAsAnEditableSessionCommand() throws {
+        let command = try XCTUnwrap(AppCommands.command(id: AppCommands.ID.attachments))
+
+        XCTAssertEqual(command.title, "Attachments")
+        XCTAssertEqual(command.scope, .session)
+        XCTAssertNil(command.defaultShortcut)
+        XCTAssertTrue(command.isEditable)
+
+        let descriptor = command.hostDescriptor(
+            shortcut: nil,
+            availability: .available
+        )
+        XCTAssertEqual(
+            HostCommandSearch.results(in: [descriptor], matching: "Attachment").map(\.id),
+            [AppCommands.ID.attachments]
+        )
+    }
+
     func testManagerCommandsDeclareTheirScopeAndRisk() throws {
         let newManager = try XCTUnwrap(AppCommands.command(id: AppCommands.ID.newManager))
         XCTAssertEqual(newManager.scope, .project)
