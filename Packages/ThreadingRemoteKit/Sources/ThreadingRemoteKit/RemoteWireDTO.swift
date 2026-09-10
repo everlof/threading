@@ -2504,6 +2504,9 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let kind: RemoteAttachmentKind
     public let byteCount: Int64
     public let modifiedAt: Date?
+    /// When the attachment entered the session chronology. Additive and optional so an updated
+    /// phone can still list attachments from a host that predates arrival-time projection.
+    public let referencedAt: Date?
 
     /// `agent` or `user`. Optional because a host from before provenance was recorded sends no
     /// such field, and a phone that guessed would be labelling rows with an answer nobody gave.
@@ -2515,6 +2518,7 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         kind: RemoteAttachmentKind,
         byteCount: Int64,
         modifiedAt: Date? = nil,
+        referencedAt: Date? = nil,
         origin: RemoteAttachmentOrigin? = nil,
         id: String? = nil
     ) {
@@ -2524,11 +2528,12 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         self.kind = kind
         self.byteCount = byteCount
         self.modifiedAt = modifiedAt
+        self.referencedAt = referencedAt
         self.origin = origin
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, path, name, kind, byteCount, modifiedAt, origin
+        case id, path, name, kind, byteCount, modifiedAt, referencedAt, origin
     }
 
     public init(from decoder: Decoder) throws {
@@ -2540,6 +2545,7 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         kind = try container.decode(RemoteAttachmentKind.self, forKey: .kind)
         byteCount = try container.decode(Int64.self, forKey: .byteCount)
         modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt)
+        referencedAt = try container.decodeIfPresent(Date.self, forKey: .referencedAt)
         origin = try container.decodeIfPresent(RemoteAttachmentOrigin.self, forKey: .origin)
     }
 }

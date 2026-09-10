@@ -149,21 +149,34 @@ private struct RemoteAttachmentRow: View {
                     .font(.body.weight(.medium))
                     .foregroundStyle(theme.label)
                     .lineLimit(1)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(theme.tertiaryLabel)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 0) {
+                    if let chronologyDetail {
+                        Text(chronologyDetail)
+                            .fixedSize(horizontal: true, vertical: false)
+                        // localization-ignore: punctuation between already-localized metadata fragments
+                        Text(verbatim: " · ")
+                    }
+                    Text(fileDetail)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .font(.caption)
+                .foregroundStyle(theme.tertiaryLabel)
             }
         }
         .frame(minHeight: 52)
         .accessibilityElement(children: .combine)
     }
 
-    /// Provenance leads when the host sent it: on a phone the list is the whole pane, and which
-    /// side a file came from is the thing the path is least likely to say.
-    private var detail: String {
-        [originLabel, attachment.path, formattedSize]
+    /// Provenance and arrival stay separate from the compressible path so a long filename cannot
+    /// hide the date or its final minute digit at phone widths.
+    private var chronologyDetail: String? {
+        let fields = [originLabel, formattedMoment].compactMap { $0 }
+        return fields.isEmpty ? nil : fields.joined(separator: " · ")
+    }
+
+    private var fileDetail: String {
+        [attachment.path, formattedSize]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -182,8 +195,35 @@ private struct RemoteAttachmentRow: View {
         ByteCountFormatter.string(fromByteCount: attachment.byteCount, countStyle: .file)
     }
 
+    private var formattedMoment: String? {
+        attachment.referencedAt.map { MobileAttachmentMoment.description(of: $0) }
+    }
+
     private var iconName: String {
         RemoteAttachmentGlyph.name(for: attachment.kind)
+    }
+}
+
+/// The attachment chronology's compact, locale-aware date and time on iPhone.
+///
+/// This mirrors the Mac's semantic answer rather than using the file modification date: the row
+/// says when the file entered this session, which is the timestamp that explains its place in the
+/// list. A host that predates `referencedAt` leaves the value absent instead of making the phone
+/// guess from unrelated filesystem metadata.
+enum MobileAttachmentMoment {
+    static func description(
+        of date: Date,
+        calendar: Calendar = .autoupdatingCurrent,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        let format = Date.FormatStyle(
+            locale: locale,
+            calendar: calendar,
+            timeZone: calendar.timeZone
+        )
+        return date.formatted(
+            format.year().month(.twoDigits).day(.twoDigits).hour().minute()
+        )
     }
 }
 

@@ -3130,6 +3130,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     kind: RemoteAttachmentKind(rawValue: attachment.kind.rawValue),
                     byteCount: Int64(size),
                     modifiedAt: values.contentModificationDate,
+                    referencedAt: attachment.referencedAt,
                     origin: RemoteAttachmentOrigin(rawValue: attachment.origin.rawValue),
                     id: attachment.id
                 )

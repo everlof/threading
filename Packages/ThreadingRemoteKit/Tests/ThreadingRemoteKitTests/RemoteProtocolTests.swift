@@ -1469,6 +1469,7 @@ final class RemoteProtocolTests: XCTestCase {
                 kind: .pdf,
                 byteCount: 4_096,
                 modifiedAt: Date(timeIntervalSince1970: 123),
+                referencedAt: Date(timeIntervalSince1970: 456),
                 id: "attachment-1"
             ),
             RemoteAttachmentDTO(
@@ -1486,6 +1487,17 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             payload
         )
+    }
+
+    func testAttachmentPayloadFromBeforeArrivalDatesStillDecodes() throws {
+        let legacy = Data(
+            #"{"path":"images/result.png","name":"result.png","kind":"image","byteCount":512}"#.utf8
+        )
+
+        let attachment = try JSONDecoder().decode(RemoteAttachmentDTO.self, from: legacy)
+
+        XCTAssertNil(attachment.referencedAt)
+        XCTAssertEqual(attachment.id, "images/result.png")
     }
 
     func testWorkspacePayloadAndInvalidationsRoundTrip() throws {

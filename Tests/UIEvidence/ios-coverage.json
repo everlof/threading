@@ -480,8 +480,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session attachments",
-      "description": "The bounded attachment inventory with user/agent provenance and representative image, PDF, HTML and unsupported archive kinds.",
-      "states": ["Mixed file kinds", "User and agent provenance", "Bounded metadata", "Image preview", "PDF preview", "HTML preview", "Unsupported archive refusal"],
+      "description": "The bounded attachment inventory with full arrival dates and times, user/agent provenance, and representative image, PDF, HTML and unsupported archive kinds.",
+      "states": ["Mixed file kinds", "Full arrival date and time", "User and agent provenance", "Bounded metadata", "Image preview", "PDF preview", "HTML preview", "Unsupported archive refusal"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/attachment*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

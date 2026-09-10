@@ -493,12 +493,12 @@ fold down and the panel wider. See [`window-chrome.md`](window-chrome.md#the-cor
 wants to read their attachments rather than a fact about one conversation, and the scratch suite is
 what stops a hosted test's drag from moving the divider in the pane the developer is looking at.
 
-The chronology's timestamp loses resolution with age instead of dropping every non-today row
-straight to a date. Today shows the local time; the preceding six calendar days keep an abbreviated
-weekday and time; rows up to one year old keep day and month; older rows keep month and year. Calendar
-days are evaluated in the user's current time zone, so midnight — not an elapsed 24-hour interval —
-moves a row out of "today". The same localized value remains part of the row's one accessibility
-sentence.
+The chronology's timestamp always keeps a localized numeric date, full year and local time. A
+time-only row made attachments from different calendar days look contemporaneous, and the older
+date-only tiers discarded the within-day ordering the chronology exists to provide. The same
+localized value remains part of the row's one accessibility sentence. The iPhone DTO projects the
+same arrival instant as an additive optional field; an older host leaves it absent rather than
+making the phone substitute the file's unrelated modification date.
 
 The rows are separated by collapsible turns from `GitTurnBaselineStore`, not by transcript
 indexes. A recorded file carries an optional exact user-turn identity plus a temporal placement:

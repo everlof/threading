@@ -874,12 +874,20 @@ struct RootView: View {
         latestActivityID: "browser-private-demo"
     )
 
+    private static let attachmentDemoReferenceDates = (
+        review: Date(timeIntervalSince1970: 1_789_050_720),
+        keyboard: Date(timeIntervalSince1970: 1_789_038_420),
+        report: Date(timeIntervalSince1970: 1_788_983_400),
+        diagnostics: Date(timeIntervalSince1970: 1_788_886_620)
+    )
+
     private static let attachmentDemoItems = [
         RemoteAttachmentDTO(
             path: "artifacts/threading-ui-review.pdf",
             name: "threading-ui-review.pdf",
             kind: .pdf,
             byteCount: 842_761,
+            referencedAt: attachmentDemoReferenceDates.review,
             origin: .agent,
             id: "attachment-review"
         ),
@@ -888,6 +896,7 @@ struct RootView: View {
             name: "keyboard-dismissed.png",
             kind: .image,
             byteCount: 184_320,
+            referencedAt: attachmentDemoReferenceDates.keyboard,
             origin: .user,
             id: "attachment-keyboard"
         ),
@@ -896,6 +905,7 @@ struct RootView: View {
             name: "ui-evidence.html",
             kind: .html,
             byteCount: 32_914,
+            referencedAt: attachmentDemoReferenceDates.report,
             origin: .agent,
             id: "attachment-report"
         ),
@@ -904,6 +914,7 @@ struct RootView: View {
             name: "diagnostics.zip",
             kind: .archive,
             byteCount: 1_204_981,
+            referencedAt: attachmentDemoReferenceDates.diagnostics,
             origin: .user,
             id: "attachment-diagnostics"
         ),

@@ -1157,21 +1157,12 @@ final class SessionAttachmentComparisonTests: XCTestCase {
 @MainActor
 final class AttachmentMomentTests: XCTestCase {
 
-    /// A timestamp keeps the detail that still helps at its age: recent days retain their time,
-    /// then the weekday and finally the day fall away instead of every non-today row collapsing
-    /// straight to one date-only format.
-    func testResolutionFallsAwayAsAnAttachmentAges() throws {
+    /// Every age keeps both halves of the chronology: a full date distinguishes calendar days
+    /// and years, while the time preserves the ordering within one day.
+    func testEveryAgeKeepsItsFullDateAndTime() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
         let locale = Locale(identifier: "en_US_POSIX")
-        let reference = try date(
-            year: 2026,
-            month: 8,
-            day: 17,
-            hour: 15,
-            minute: 45,
-            calendar: calendar
-        )
 
         XCTAssertEqual(
             AttachmentMoment.description(
@@ -1183,11 +1174,10 @@ final class AttachmentMomentTests: XCTestCase {
                     minute: 5,
                     calendar: calendar
                 ),
-                relativeTo: reference,
                 calendar: calendar,
                 locale: locale
             ),
-            "9:05\u{202F}AM"
+            "08/17/2026, 9:05\u{202F}AM"
         )
         XCTAssertEqual(
             AttachmentMoment.description(
@@ -1199,11 +1189,10 @@ final class AttachmentMomentTests: XCTestCase {
                     minute: 5,
                     calendar: calendar
                 ),
-                relativeTo: reference,
                 calendar: calendar,
                 locale: locale
             ),
-            "Fri 9:05\u{202F}AM"
+            "08/14/2026, 9:05\u{202F}AM"
         )
         XCTAssertEqual(
             AttachmentMoment.description(
@@ -1215,11 +1204,10 @@ final class AttachmentMomentTests: XCTestCase {
                     minute: 5,
                     calendar: calendar
                 ),
-                relativeTo: reference,
                 calendar: calendar,
                 locale: locale
             ),
-            "Jul 18"
+            "07/18/2026, 9:05\u{202F}AM"
         )
         XCTAssertEqual(
             AttachmentMoment.description(
@@ -1231,28 +1219,19 @@ final class AttachmentMomentTests: XCTestCase {
                     minute: 5,
                     calendar: calendar
                 ),
-                relativeTo: reference,
                 calendar: calendar,
                 locale: locale
             ),
-            "Feb 2025"
+            "02/17/2025, 9:05\u{202F}AM"
         )
     }
 
-    /// Calendar days, rather than elapsed 24-hour blocks, decide whether a row is "today".
-    /// A file from just before midnight is yesterday once the local date rolls over.
-    func testTheRecentTierUsesCalendarDayBoundaries() throws {
+    /// The localized value reads the calendar and time zone together, including the day on the
+    /// far side of a daylight-saving boundary.
+    func testTheFullTimestampUsesTheCalendarsTimeZone() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Stockholm"))
         let locale = Locale(identifier: "sv_SE")
-        let reference = try date(
-            year: 2026,
-            month: 3,
-            day: 29,
-            hour: 0,
-            minute: 5,
-            calendar: calendar
-        )
         let yesterday = try date(
             year: 2026,
             month: 3,
@@ -1264,12 +1243,10 @@ final class AttachmentMomentTests: XCTestCase {
 
         let value = AttachmentMoment.description(
             of: yesterday,
-            relativeTo: reference,
             calendar: calendar,
             locale: locale
         )
-        XCTAssertTrue(value.contains("lör"), "the weekday was missing from yesterday: \(value)")
-        XCTAssertTrue(value.contains("23:55"), "yesterday lost its useful time: \(value)")
+        XCTAssertEqual(value, "2026-03-28 23:55")
     }
 
     private func date(

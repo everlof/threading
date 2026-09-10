@@ -3535,9 +3535,9 @@ movie gets the same poster-and-play treatment and streams in the attachment gall
 Threading does not carry itself, its preview takes the place of the built-in one; remove the
 extension and the built-in preview comes back.
 
-Every row shows the picture itself and when it arrived. Today's rows show the time; the rest of the
-last week show weekday and time; timestamps then simplify to day and month for a year, and month and
-year after that. Rows are also marked **Agent** or **You**; when a session has both, a small
+Every row shows the picture itself and when it arrived, as a localized full date and time so files
+from different days or years never look contemporaneous. The iPhone's attachment list shows the
+same arrival date and time before the path. Rows are also marked **Agent** or **You**; when a session has both, a small
 **All / Agent / You** filter appears beside the count. It stays hidden while everything came from
 one side. A picture the agent shows opens this tab and selects its row, and resets that filter if it
 would have hidden it: being asked to show something outranks a filter you left set.

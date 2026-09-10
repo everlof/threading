@@ -4315,6 +4315,11 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let listed = try JSONDecoder().decode(RemoteAttachmentsDTO.self, from: listing.body)
         XCTAssertEqual(listed.attachments.map(\.id), [attachment.id])
         XCTAssertEqual(listed.attachments.first?.byteCount, Int64(png.count))
+        XCTAssertEqual(
+            try XCTUnwrap(listed.attachments.first?.referencedAt).timeIntervalSince1970,
+            attachment.referencedAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
 
         let thumbnail = try XCTUnwrap(get(
             "/api/session/\(session.id.uuidString)/attachment-thumbnail?id=\(attachment.id)",
