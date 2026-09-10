@@ -2069,10 +2069,7 @@ final class SessionComposerViewController: NSViewController {
             } : nil
         ) { [weak self, weak popover] model, effort in
             guard let self else { return }
-            self.selectedModel = model
-            self.selectedReasoningEffort = effort
-            self.discardUnsupportedFastMode()
-            self.refreshChips()
+            self.applyModelEffortChoice(model: model, reasoningEffort: effort)
             popover?.close()
         }
         popover.behavior = .transient
@@ -2091,6 +2088,17 @@ final class SessionComposerViewController: NSViewController {
             return nil
         }
         return popover
+    }
+
+    /// Applies the two values owned by the combined model-and-effort chooser as one choice.
+    /// Keeping this mutation in one place also gives restoration and tests the same boundary as
+    /// the popover instead of making them depend on menu presentation details.
+    func applyModelEffortChoice(model: String?, reasoningEffort: String?) {
+        selectedModel = model
+        selectedReasoningEffort = reasoningEffort
+        discardUnsupportedEffort()
+        discardUnsupportedFastMode()
+        refreshChips()
     }
 
     /// Builds one union of every effort the current login advertises. A cell is enabled only

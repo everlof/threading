@@ -20,6 +20,12 @@ enum T3NavigatorSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum T3NavigatorPresentationChange {
+    case reloadAll
+    case reloadRow(T3NavigatorRow)
+    case selection(previous: T3NavigatorRow?, current: T3NavigatorRow?)
+}
+
 struct T3NavigatorProject: Identifiable, Equatable {
     let id: String
     let title: String
@@ -79,19 +85,29 @@ final class T3NavigatorRow: ObservableObject, Identifiable {
     }
 }
 
-/// The state adapter between Threading's bounded workspace stream and the SwiftUI hierarchy.
+/// The state adapter between Threading's bounded workspace stream and its virtual native table.
 ///
 /// Ordinary activity and title edges mutate one retained row object. Published section arrays
-/// change only for structural edges (new, removed, pinned, or archived), so a busy session does
-/// not rebuild every row in a large workspace.
+/// change only for structural edges (new, removed, pinned, or archived), so a busy session asks
+/// the table to repaint one viewport row instead of rebuilding a large workspace.
 @MainActor
 final class T3NavigatorStore: ObservableObject {
     @Published private(set) var pinned: [T3NavigatorRow] = []
     @Published private(set) var active: [T3NavigatorRow] = []
     @Published private(set) var archived: [T3NavigatorRow] = []
     @Published private(set) var projects: [T3NavigatorProject] = []
-    @Published var searchText = ""
-    @Published var selectedProjectIdentifier: String?
+    @Published var searchText = "" {
+        didSet {
+            guard searchText != oldValue else { return }
+            onPresentationChange?(.reloadAll)
+        }
+    }
+    @Published var selectedProjectIdentifier: String? {
+        didSet {
+            guard selectedProjectIdentifier != oldValue else { return }
+            onPresentationChange?(.reloadAll)
+        }
+    }
     @Published private(set) var filterRevision: UInt64 = 0
 
     private let context: PluginWorkspaceNavigatorContext
@@ -101,6 +117,10 @@ final class T3NavigatorStore: ObservableObject {
     private var projectOrder: [String] = []
     private var projectNames: [String: String] = [:]
     private var nextRowOrdinal = 0
+
+    /// One main-actor presentation sink. Content edges identify the exact retained row; only a
+    /// structural/filter edge asks the virtual table to rebuild its lightweight index.
+    var onPresentationChange: ((T3NavigatorPresentationChange) -> Void)?
 
     init(context: PluginWorkspaceNavigatorContext) {
         self.context = context
@@ -159,8 +179,9 @@ final class T3NavigatorStore: ObservableObject {
         selectedProjectIdentifier = identifier
     }
 
-    func activate(_ row: T3NavigatorRow) {
-        _ = context.activate(identity: row.identity)
+    @discardableResult
+    func activate(_ row: T3NavigatorRow) -> Bool {
+        context.activate(identity: row.identity)
     }
 
     func togglePin(_ row: T3NavigatorRow) {
@@ -215,6 +236,7 @@ final class T3NavigatorStore: ObservableObject {
         active = nextActive
         archived = nextArchived
         publishProjects()
+        onPresentationChange?(.reloadAll)
     }
 
     private func receive(_ update: PluginWorkspaceUpdate) {
@@ -260,6 +282,7 @@ final class T3NavigatorStore: ObservableObject {
 
         if projectsChanged {
             publishProjects()
+            onPresentationChange?(.reloadAll)
         }
         if update.selectionChanged {
             setSelection(update.selectedItemIdentity)
@@ -278,10 +301,14 @@ final class T3NavigatorStore: ObservableObject {
             if oldSection != newSection {
                 remove(row, from: oldSection)
                 insert(row, into: newSection)
+                onPresentationChange?(.reloadAll)
             } else if (!searchText.isEmpty && oldTitle != row.title)
                         || (selectedProjectIdentifier != nil
                             && oldProject != row.projectIdentifier) {
                 filterRevision &+= 1
+                onPresentationChange?(.reloadAll)
+            } else {
+                onPresentationChange?(.reloadRow(row))
             }
             return
         }
@@ -294,20 +321,25 @@ final class T3NavigatorStore: ObservableObject {
         nextRowOrdinal += 1
         rowsByKey[key] = row
         insert(row, into: section(for: row))
+        onPresentationChange?(.reloadAll)
     }
 
     private func removeRow(for key: T3NavigatorItemKey) {
         guard let row = rowsByKey.removeValue(forKey: key) else { return }
         remove(row, from: section(for: row))
         if selectedKey == key { selectedKey = nil }
+        onPresentationChange?(.reloadAll)
     }
 
     private func setSelection(_ identity: PluginWorkspaceItemIdentity?) {
         let next = identity.map(T3NavigatorItemKey.init)
         guard next != selectedKey else { return }
-        if let selectedKey { rowsByKey[selectedKey]?.setSelected(false) }
+        let previousRow = selectedKey.flatMap { rowsByKey[$0] }
+        previousRow?.setSelected(false)
         selectedKey = next
-        if let next { rowsByKey[next]?.setSelected(true) }
+        let currentRow = next.flatMap { rowsByKey[$0] }
+        currentRow?.setSelected(true)
+        onPresentationChange?(.selection(previous: previousRow, current: currentRow))
     }
 
     private func updateProject(_ item: PluginWorkspaceItem) {

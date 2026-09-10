@@ -62,9 +62,23 @@ final class NativePluginCatalogTests: XCTestCase {
         let theme = NativePluginCatalog.theme()
         XCTAssertTrue(theme.monospacedFont.isFixedPitch)
         XCTAssertGreaterThan(theme.rowHeight, 0)
+        XCTAssertEqual(theme.semanticColors.count, PluginThemeColorRole.allCases.count)
         let context = PluginContext(theme: theme, arguments: ["sessionID": "abc"])
         XCTAssertEqual(context.argument("sessionID"), "abc")
         XCTAssertNil(context.argument("projectStore"), "there is no door to the model here")
+    }
+
+    func testThePluginThemeCarriesTheActiveSemanticPaletteForCustomViews() {
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+
+        let theme = NativePluginCatalog.theme()
+
+        XCTAssertEqual(theme.color(.surface).hexString, Design.Surface.background.hexString)
+        XCTAssertEqual(theme.color(.fieldSurface).hexString, Design.Surface.field.hexString)
+        XCTAssertEqual(theme.color(.label).hexString, Design.Text.label.hexString)
+        XCTAssertEqual(theme.color(.syntaxString).hexString, Design.Syntax.string.hexString)
     }
 
     func testPaneHostAppliesThemeAfterConstructionAndOnLiveChanges() {

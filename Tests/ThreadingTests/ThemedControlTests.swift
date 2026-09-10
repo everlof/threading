@@ -7894,6 +7894,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ModelEffortPickerViewController",
                 "MorphingMultilineTitleLabel",
                 "MorphingTitleLabel",
+                "NativePluginPresentationBoundaryView",
                 "NavigatorGridItemView",
                 "PageTitleView",
                 "PaneFoldDivider",

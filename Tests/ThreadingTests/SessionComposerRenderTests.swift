@@ -854,6 +854,10 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
     }
 
     func testEffortFollowsTheSelectedModelsCatalogAndCrossesTheStartBoundary() throws {
+        let oldKind = AppSettings.shared.defaultAgentKind
+        defer { AppSettings.shared.defaultAgentKind = oldKind }
+        AppSettings.shared.defaultAgentKind = .claude
+
         let store = ProjectStore.shared
         let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
         defer { store.removeProject(id: project.id) }
@@ -864,19 +868,13 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         _ = composer.view
         composer.show(projectID: project.id)
 
-        let identity = try XCTUnwrap(
-            chip(named: "composer.session-start.identity", in: composer.view)
-        )
-        if AppSettings.shared.defaultAgentKind != .claude {
-            choose(titled: AgentKind.claude.displayName, on: identity)
-        }
+        let identity = try XCTUnwrap(chip(named: "composer.session-start.identity", in: composer.view))
 
         let model = try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
-        choose(titled: "Opus", on: model)
+        composer.applyModelEffortChoice(model: "opus", reasoningEffort: nil)
 
         XCTAssertNil(chip(named: "composer.session-start.effort", in: composer.view))
-        composer.selectedReasoningEffort = "xhigh"
-        choose(titled: "Opus", on: model)
+        composer.applyModelEffortChoice(model: "opus", reasoningEffort: "xhigh")
         XCTAssertTrue(model.accessibilityTitle()?.contains("Extra High") == true)
         let prompt = try XCTUnwrap(promptView(in: composer.view))
         prompt.stringValue = "Think carefully"

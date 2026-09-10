@@ -201,8 +201,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Native plugin workspace navigator",
-      "description": "The bundled T3-inspired SwiftUI navigator loaded through native plugin discovery and hosted in the real main-window split shell. The evidence covers selected and lifecycle-grouped rows, always-reachable row actions, project and branch metadata, and theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
-      "states": ["Selected row", "Pinned, Active, and Archived sections", "Visible Pin and Archive actions", "Project and branch metadata", "Search and project-filter controls"],
+      "description": "The bundled T3-inspired AppKit navigator loaded through native plugin discovery and hosted in the real main-window split shell. It is the reference native-extension composition of ThreadingDesignKit pane, search, virtual table, selection, control, menu, popover, typography, spacing, and palette primitives. The evidence covers selected and lifecycle-grouped rows, project and branch metadata, and exact theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
+      "states": ["Selected row", "Pinned, Active, and Archived sections", "Selection-visible Pin and Archive actions", "Project and branch metadata", "Search and project-filter controls"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],

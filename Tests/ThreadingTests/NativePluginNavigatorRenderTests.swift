@@ -4,13 +4,13 @@ import XCTest
 
 @testable import Threading
 
-/// Renders the bundled SwiftUI navigator through the shipping main-window host.
+/// Renders the bundled DesignKit navigator through the shipping main-window host.
 ///
 /// This intentionally does not import or reconstruct the plugin's views. Static discovery finds
 /// the bundle, the ordinary plugin loader creates its principal object, the main window selects
 /// its declared route, and the host/model tests separately drive the controls the user receives.
 /// That keeps the evidence on the real native-plugin boundary instead of turning it into a
-/// lookalike SwiftUI preview that could pass after the host stopped working.
+/// lookalike preview that could pass after the host stopped working.
 @MainActor
 final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
     private struct EvidenceTimeout: LocalizedError {
@@ -118,7 +118,7 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
 
         // Give the real shell its ordered-window lifecycle, then pin one state the window server
         // can guarantee under xcodebuild. `makeKeyAndOrderFront` cannot make an inactive test app
-        // key, and leaving the window ordered made SwiftUI's control ink depend on whichever app
+        // key, and leaving the window ordered made AppKit control ink depend on whichever app
         // launched the evidence run. An ordered-out product view still exercises the shipping
         // hierarchy while rendering a deterministic inactive control state.
         window.orderOut(nil)
@@ -141,7 +141,7 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
             ),
         ]
         for fixture in appearances {
-            apply(fixture, to: content)
+            apply(fixture, to: content, host: host)
             try write(content, named: "native-plugin-navigator-\(fixture.name).png")
             if fixture.name == "system-light" || fixture.name == "swiss" {
                 try write(
@@ -207,9 +207,17 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
         )
     }
 
-    private func apply(_ fixture: AppearanceFixture, to content: NSView) {
+    private func apply(
+        _ fixture: AppearanceFixture,
+        to content: NSView,
+        host: NativePluginWorkspaceNavigatorHostViewController
+    ) {
         AppThemePalette.set(fixture.theme)
         content.appearance = NSAppearance(named: fixture.appearance)
+        // Evidence changes the palette without posting the production theme event. Deliver the
+        // same fresh payload the host sends in production so the plugin's private DesignKit copy
+        // installs the exact current theme before either tree is repainted.
+        host.loaded?.apply(theme: NativePluginCatalog.theme())
         AppThemeRefresh.repaint(content)
         settle(content)
     }

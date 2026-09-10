@@ -38,6 +38,45 @@ public enum ThreadingPluginAPI {
 
 // MARK: - Theme
 
+/// A colour's semantic role in Threading's active design system.
+///
+/// Native extensions that draw a custom component choose from these roles instead of fixing a
+/// literal colour. The host resolves every role for the appearance currently drawing and sends a
+/// fresh `PluginTheme` on each live theme or appearance change. Names mirror the theme document's
+/// stable wire vocabulary so a future public DesignKit can share them without translation.
+public enum PluginThemeColorRole: String, CaseIterable, Sendable {
+    case ground
+    case surface
+    case panel
+    case fieldSurface
+    case elevated
+    case floatingSurface
+    case tooltipSurface
+    case controlResting
+    case controlHover
+    case border
+    case divider
+    case bevelHighlight
+    case bevelShadow
+    case label
+    case secondaryLabel
+    case tertiaryLabel
+    case quaternaryLabel
+    case accent
+    case accentMuted
+    case selection
+    case statusPositive
+    case statusWarning
+    case statusNegative
+    case diffAdded
+    case diffRemoved
+    case syntaxKeyword
+    case syntaxType
+    case syntaxString
+    case syntaxNumber
+    case syntaxComment
+}
+
 /// The design values a plugin is given, and the whole of what it may assume about appearance.
 ///
 /// A class rather than a struct on purpose. `NSBundle` can only vend an Objective-C principal
@@ -63,6 +102,14 @@ public final class PluginTheme: NSObject {
     /// colours above; this exists for the cases where a system control has to be told.
     public let isDark: Bool
 
+    /// The complete semantic colour palette resolved by the host for this appearance.
+    ///
+    /// This is the custom-composition lane. A plugin using ThreadingDesignKit should keep using
+    /// `encodedTheme`, because real components also need material, type and geometry. A plugin
+    /// drawing its own view reads colours through `color(_:)`; old hosts that do not send this
+    /// dictionary fall back to the seven original tokens instead of failing to draw.
+    public let semanticColors: [PluginThemeColorRole: NSColor]
+
     /// The host's complete theme, encoded.
     ///
     /// Opaque here on purpose: this framework is the narrow contract both sides link, and it must
@@ -81,6 +128,7 @@ public final class PluginTheme: NSObject {
         monospacedFont: NSFont,
         rowHeight: CGFloat,
         isDark: Bool,
+        semanticColors: [PluginThemeColorRole: NSColor] = [:],
         encodedTheme: Data? = nil
     ) {
         self.background = background
@@ -91,8 +139,31 @@ public final class PluginTheme: NSObject {
         self.monospacedFont = monospacedFont
         self.rowHeight = rowHeight
         self.isDark = isDark
+        self.semanticColors = semanticColors
         self.encodedTheme = encodedTheme
         super.init()
+    }
+
+    /// Resolves one design-system role, with a backwards-compatible approximation for an older
+    /// host. Custom components call this rather than reading a literal or system colour.
+    public func color(_ role: PluginThemeColorRole) -> NSColor {
+        if let exact = semanticColors[role] { return exact }
+        switch role {
+        case .ground:
+            return background
+        case .surface, .panel, .fieldSurface, .elevated, .floatingSurface, .tooltipSurface,
+                .controlResting, .controlHover:
+            return surface
+        case .label:
+            return text
+        case .secondaryLabel, .tertiaryLabel, .quaternaryLabel, .divider, .border,
+                .bevelHighlight, .bevelShadow, .syntaxComment:
+            return secondaryText
+        case .accent, .accentMuted, .selection, .statusPositive, .statusWarning,
+                .statusNegative, .diffAdded, .diffRemoved, .syntaxKeyword, .syntaxType,
+                .syntaxString, .syntaxNumber:
+            return accent
+        }
     }
 }
 

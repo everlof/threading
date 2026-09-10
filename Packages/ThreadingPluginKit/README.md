@@ -13,13 +13,12 @@ install review has to say plainly which of the two a thing is.
 This package, and nothing else. `Examples/HelloPanePlugin` is the proof: one dependency, one
 source file, one build command.
 
-Threading's own Device Logs plugin additionally links `ThreadingDesignKit` so its rows are drawn
-by the same components as the rest of the window. That package is not published, so it is worth
-saying exactly what the asymmetry is and is not. It is **convenience, not capability**: nothing in
-`ThreadingDesignKit` reaches the host, and a plugin without it is refused nothing, offered nothing
-less, and asked for by the agent in exactly the same way. What it buys is appearance. The floor
-for everyone else is `PluginTheme`, whose tokens the host keeps up to date across live theme
-changes.
+Threading's bundled native plugins additionally link `ThreadingDesignKit` so their rows are drawn
+by the same components as the rest of the window. That package is not published yet, so external
+plugins use `PluginTheme`: its full semantic colour palette keeps custom components aligned with
+the active design system, while its original seven values remain the compatibility fallback for
+older hosts. The unpublished kit buys exact component, typography, material and geometry reuse;
+it does not grant additional host capabilities or data.
 
 ## Writing one
 

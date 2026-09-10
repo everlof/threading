@@ -1,4 +1,6 @@
+import AppKit
 import XCTest
+import ThreadingDesignKit
 import ThreadingPluginKit
 @testable import T3NavigatorPlugin
 
@@ -76,6 +78,32 @@ final class T3NavigatorModelTests: XCTestCase {
         XCTAssertEqual(original.activity, .awaitingUser)
     }
 
+    func testContentUpdateNamesOnlyTheRetainedRowForPresentation() {
+        let harness = makeHarness(items: [
+            project("one", title: "One"),
+            session("first", project: "one", title: "First"),
+            session("second", project: "one", title: "Second"),
+        ])
+        var changes: [T3NavigatorPresentationChange] = []
+        harness.store.onPresentationChange = { changes.append($0) }
+
+        harness.context.receiveHostUpdate(PluginWorkspaceUpdate(
+            revision: 2,
+            items: [session(
+                "first",
+                project: "one",
+                title: "First",
+                activity: .working
+            )]
+        ))
+
+        XCTAssertEqual(changes.count, 1)
+        guard case .reloadRow(let row) = changes[0] else {
+            return XCTFail("A content edge should not rebuild the virtual table index.")
+        }
+        XCTAssertTrue(row === harness.store.active[0])
+    }
+
     func testStructuralUpdateMovesOnlyTheChangedRow() {
         let harness = makeHarness(items: [
             project("one", title: "One"),
@@ -131,6 +159,56 @@ final class T3NavigatorModelTests: XCTestCase {
         XCTAssertEqual(harness.actions.map(\.0), [.pin, .archive])
         XCTAssertEqual(harness.actions.map(\.1), ["first", "first"])
         XCTAssertFalse(row.isPinned, "The plugin waits for host-authored state.")
+    }
+
+    func testNativeViewUsesPublishedDesignSystemComponents() {
+        let harness = makeHarness(items: [
+            project("one", title: "One"),
+            session("first", project: "one", title: "First"),
+        ])
+
+        let view = T3NavigatorView(store: harness.store)
+
+        XCTAssertTrue(view.subviews.contains { $0 === view.headerForTesting })
+        XCTAssertNotNil(descendant(of: PaneHeaderView.self, in: view))
+        XCTAssertNotNil(descendant(of: ThemedSearchField.self, in: view))
+        XCTAssertNotNil(descendant(of: ThemedTableView.self, in: view))
+        XCTAssertNotNil(descendant(of: ThemedScrollView.self, in: view))
+    }
+
+    func testLargeWorkspaceMaterializesOnlyViewportRows() {
+        let items = [project("one", title: "One")] + (0..<2_000).map {
+            session("session-\($0)", project: "one", title: "Thread \($0)")
+        }
+        let harness = makeHarness(items: items)
+        let navigator = T3NavigatorView(store: harness.store)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 620))
+        navigator.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(navigator)
+        NSLayoutConstraint.activate([
+            navigator.topAnchor.constraint(equalTo: container.topAnchor),
+            navigator.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            navigator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            navigator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        let window = NSWindow(
+            contentRect: container.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        container.layoutSubtreeIfNeeded()
+        navigator.tableForTesting.layoutSubtreeIfNeeded()
+        navigator.tableForTesting.displayIfNeeded()
+
+        XCTAssertEqual(navigator.tableForTesting.numberOfRows, 2_001)
+        let realized = descendants(of: NSTableCellView.self, in: navigator.tableForTesting).count
+        XCTAssertGreaterThan(realized, 0)
+        XCTAssertLessThan(realized, 100)
     }
 
     private func makeHarness(
@@ -196,6 +274,22 @@ final class T3NavigatorModelTests: XCTestCase {
             parentIdentity: identity(project, kind: .project),
             title: "Terminal"
         )
+    }
+
+    private func descendant<T: NSView>(of type: T.Type, in root: NSView) -> T? {
+        if let match = root as? T { return match }
+        for child in root.subviews {
+            if let match = descendant(of: type, in: child) { return match }
+        }
+        return nil
+    }
+
+    private func descendants<T: NSView>(of type: T.Type, in root: NSView) -> [T] {
+        var result = root is T ? [root as! T] : []
+        for child in root.subviews {
+            result += descendants(of: type, in: child)
+        }
+        return result
     }
 }
 

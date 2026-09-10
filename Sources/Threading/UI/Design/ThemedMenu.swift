@@ -425,6 +425,14 @@ public enum ThemedMenuEntry {
 public struct ThemedMenuPresentation {
     public let entries: [ThemedMenuEntry]
     public let minimumWidth: CGFloat
+
+    /// Creates the semantic payload a menu presenter draws. Public because a native extension
+    /// that composes with ThreadingDesignKit must be able to use the same menu surface as the
+    /// host rather than falling back to `NSMenu` chrome.
+    public init(entries: [ThemedMenuEntry], minimumWidth: CGFloat) {
+        self.entries = entries
+        self.minimumWidth = minimumWidth
+    }
 }
 
 // MARK: - Presentation

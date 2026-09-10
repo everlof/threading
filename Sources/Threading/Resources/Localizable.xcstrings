@@ -3752,6 +3752,17 @@
         }
       }
     },
+    "A deliberately custom native subtree may use AppKit chrome inside the narrow host boundary; its colours come from the public semantic plugin palette." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett avsiktligt anpassat inbyggt underträd kan använda AppKit-krom inom den snäva värdgränsen; färgerna kommer från den offentliga semantiska instickspaletten."
+          }
+        }
+      }
+    },
     "A demonstration animation" : {
       "extractionState" : "manual",
       "localizations" : {

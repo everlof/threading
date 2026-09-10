@@ -289,6 +289,30 @@ final class PluginContractTests: XCTestCase {
         XCTAssertEqual(theme.rowHeight, 16)
         XCTAssertTrue(theme.isDark)
         XCTAssertTrue(theme.monospacedFont.isFixedPitch)
+        XCTAssertEqual(theme.color(.label), theme.text)
+        XCTAssertEqual(theme.color(.panel), theme.surface)
+    }
+
+    func testTheThemeVendsExactSemanticColorsToCustomComponents() {
+        let exact = NSColor(calibratedRed: 0.17, green: 0.29, blue: 0.83, alpha: 1)
+        let theme = PluginTheme(
+            background: .black,
+            surface: .darkGray,
+            text: .white,
+            secondaryText: .gray,
+            accent: .orange,
+            monospacedFont: .monospacedSystemFont(ofSize: 11, weight: .regular),
+            rowHeight: 16,
+            isDark: true,
+            semanticColors: [.fieldSurface: exact]
+        )
+
+        XCTAssertEqual(theme.color(.fieldSurface), exact)
+        XCTAssertEqual(
+            PluginThemeColorRole.allCases.count,
+            30,
+            "Adding a host palette role is an SDK decision, not a silent omission."
+        )
     }
 
     /// V4 makes the pane selector optional. A new host can still run a v3 pane plugin, while a v3

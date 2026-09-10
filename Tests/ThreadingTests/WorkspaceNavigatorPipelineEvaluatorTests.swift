@@ -1044,39 +1044,33 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             now: { referenceDate }
         )
 
-        for (name, pipeline) in [
-            ("Activity Inbox", activityPipeline),
-            ("T3 Sidebar", t3Pipeline),
-        ] {
-            let grouped = evaluator.evaluate(try ready(
-                pipeline,
-                snapshot: snapshot,
-                optionValues: ["sort-order": .string("recent")],
-                registeredFactSelections: ["group-by-fact": gitLabKey]
-            ))
-            XCTAssertEqual(
-                grouped.sections.map(\.title),
-                ["Merged", "Open", "Unknown"],
-                "\(name) must group by the discovered GitLab fact"
-            )
-            XCTAssertEqual(
-                grouped.sections.map { $0.items.map(\.sourceSessionID) },
-                [["merged"], ["open"], ["unknown"]]
-            )
+        // Activity Inbox deliberately exposes the provider-neutral group/sort option. T3 keeps
+        // its defining lifecycle buckets and stable manual order; the loop above still proves
+        // that neither shipped declaration names or statically couples itself to GitLab.
+        let grouped = evaluator.evaluate(try ready(
+            activityPipeline,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("recent")],
+            registeredFactSelections: ["group-by-fact": gitLabKey]
+        ))
+        XCTAssertEqual(grouped.sections.map(\.title), ["Merged", "Open", "Unknown"])
+        XCTAssertEqual(
+            grouped.sections.map { $0.items.map(\.sourceSessionID) },
+            [["merged"], ["open"], ["unknown"]]
+        )
 
-            let sorted = evaluator.evaluate(try ready(
-                pipeline,
-                snapshot: snapshot,
-                optionValues: ["sort-order": .string("recent")],
-                registeredFactSelections: ["sort-by-fact": gitLabKey]
-            ))
-            XCTAssertEqual(sorted.sections.count, 1, "\(name) fixture must stay in one host bucket")
-            XCTAssertEqual(
-                sorted.sections.flatMap(\.items).map(\.sourceSessionID),
-                ["merged", "open", "unknown"],
-                "\(name) must sort present values first and keep missing values last"
-            )
-        }
+        let sorted = evaluator.evaluate(try ready(
+            activityPipeline,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("recent")],
+            registeredFactSelections: ["sort-by-fact": gitLabKey]
+        ))
+        XCTAssertEqual(sorted.sections.count, 1, "Activity Inbox fixture must stay in one host bucket")
+        XCTAssertEqual(
+            sorted.sections.flatMap(\.items).map(\.sourceSessionID),
+            ["merged", "open", "unknown"],
+            "Activity Inbox must sort present values first and keep missing values last"
+        )
     }
 
     func testShippedT3SidebarRealizesLifecycleBucketsMetadataAndAvailableActions() throws {

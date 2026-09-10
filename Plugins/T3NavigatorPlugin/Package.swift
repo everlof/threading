@@ -10,12 +10,14 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Packages/ThreadingPluginKit"),
+        .package(path: "../../Packages/ThreadingDesignKit"),
     ],
     targets: [
         .target(
             name: "T3NavigatorPlugin",
             dependencies: [
                 .product(name: "ThreadingPluginKit", package: "ThreadingPluginKit"),
+                .product(name: "ThreadingDesignKit", package: "ThreadingDesignKit"),
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

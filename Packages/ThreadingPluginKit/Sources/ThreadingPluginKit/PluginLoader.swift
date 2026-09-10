@@ -1,8 +1,5 @@
 import Foundation
 import Security
-#if canImport(Darwin)
-import Darwin
-#endif
 
 // MARK: - Refusals
 

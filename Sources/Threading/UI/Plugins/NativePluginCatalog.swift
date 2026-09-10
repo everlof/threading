@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Security
 import ThreadingPluginKit
@@ -254,10 +255,10 @@ enum NativePluginCatalog {
 
     /// The host's current appearance, as the narrow value a plugin is given.
     ///
-    /// Two layers, and the second is the one that matters. The seven tokens are the floor, for a
-    /// plugin that links nothing; `encodedTheme` carries the whole theme, and a plugin linking
-    /// `ThreadingDesignKit` resolves every role, radius, bevel and font from it exactly as the
-    /// application does. See `plugins.md`.
+    /// Three layers: the seven original tokens are the backwards-compatible floor; the semantic
+    /// palette keeps custom components aligned with every host colour role; and `encodedTheme`
+    /// lets a plugin linking `ThreadingDesignKit` resolve every role, radius, bevel and font
+    /// exactly as the application does. See `plugins.md`.
     static func theme() -> PluginTheme {
         PluginTheme(
             background: Design.Surface.ground,
@@ -268,6 +269,19 @@ enum NativePluginCatalog {
             monospacedFont: Design.Typography.compactCode(),
             rowHeight: Design.Spacing.large,
             isDark: isDarkGround(),
+            semanticColors: Dictionary(uniqueKeysWithValues: AppThemeRole.allCases.compactMap {
+                role in
+                guard let pluginRole = PluginThemeColorRole(rawValue: role.rawValue) else {
+                    return nil
+                }
+                return (
+                    pluginRole,
+                    AppThemePalette.current.resolved(
+                        role,
+                        appearance: NSApplication.shared.effectiveAppearance
+                    )
+                )
+            }),
             // A plugin linking ThreadingDesignKit resolves every value itself from this, rather
             // than from the seven tokens above. `try?` because a theme that will not encode is a
             // reason to fall back to the tokens, not a reason to refuse to show the pane.

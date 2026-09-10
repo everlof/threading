@@ -127,6 +127,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ModelEffortPickerViewController",
         "MorphingMultilineTitleLabel",
         "MorphingTitleLabel",
+        "NativePluginPresentationBoundaryView",
         "NavigatorGridItemView",
         "PageTitleView",
         "PaneFoldDivider",
@@ -5349,6 +5350,12 @@ final class ComponentGalleryViewController: NSViewController {
         let semanticHierarchy = makeSemanticHierarchySceneStory()
         var rows = [
             story(
+                "Native UI",
+                "A deliberately custom native subtree may use AppKit chrome inside the narrow "
+                    + "host boundary; its colours come from the public semantic plugin palette.",
+                makeNativePluginPresentationBoundaryStory()
+            ),
+            story(
                 "Workspace Navigator Pipeline",
                 "The persistent search band, bounded realized rows, overflow copy, and empty "
                     + "state. Type a query that misses to transition the populated result in place.",
@@ -5391,6 +5398,36 @@ final class ComponentGalleryViewController: NSViewController {
             note: "Semantic values cross the extension boundary; the same themed controls render them.",
             rows: rows
         )
+    }
+
+    private func makeNativePluginPresentationBoundaryStory() -> NSView {
+        let title = NSTextField(labelWithString: L10n.string("Native UI"))
+        title.applyFont(.control)
+        title.textColor = Design.Text.label
+
+        let field = ThemedSearchField()
+        field.placeholderString = L10n.string("Search")
+        field.setAccessibilityLabel(L10n.string("Search"))
+
+        let content = NSStackView(views: [title, field])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = Design.Spacing.small
+        content.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.small,
+            bottom: Design.Spacing.small,
+            right: Design.Spacing.small
+        )
+        field.widthAnchor.constraint(equalToConstant: 260).isActive = true
+
+        let boundary = NativePluginPresentationBoundaryView()
+        boundary.install(content)
+        NSLayoutConstraint.activate([
+            boundary.widthAnchor.constraint(equalToConstant: 300),
+            boundary.heightAnchor.constraint(equalToConstant: 76),
+        ])
+        return boundary
     }
 
     private func makeWorkspaceNavigatorPipelineStory() -> NSView {

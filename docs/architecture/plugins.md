@@ -5,7 +5,8 @@ principal class conforms to a protocol vended by `Packages/ThreadingPluginKit`. 
 a pane, the leading workspace navigator, or both. The host owns placement and hands over its live
 theme; the plugin owns the native view inside that rectangle. `Plugins/DeviceLogsPlugin` is the
 first pane tenant. `Plugins/T3NavigatorPlugin` is the first navigator-only tenant and proves that a
-bundle can supply a complete SwiftUI thread hierarchy without changing the default navigator.
+bundle can supply a complete, design-system-native thread hierarchy without changing the default
+navigator.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -223,11 +224,24 @@ binaries — so the value cannot be passed. It travels **encoded**, as opaque `D
 `PluginTheme.encodedTheme`, and a plugin linking the design system hands it to
 `HostThemeHandoff.install(encoded:)`.
 
-**Opaque is the point.** `ThreadingPluginKit` is the narrow contract both sides link and must not
-learn what a theme is in order to carry one. The seven tokens beside it — background, surface,
-text, secondary text, accent, monospaced font, row height — remain the floor for a plugin that
-links nothing, and are enough to draw something that belongs. They are not enough for the real
-components, which resolve nineteen roles, a material, radii, bevels and fonts.
+**Opaque is the point for material, not for colour.** `ThreadingPluginKit` is the narrow contract
+both sides link and must not learn how the design system implements a theme in order to carry one.
+The seven original tokens — background, surface, text, secondary text, accent, monospaced font,
+row height — remain the compatibility floor. `PluginTheme.semanticColors` is the complete set of
+named colours resolved by the host for the appearance currently drawing; a custom component asks
+for a `PluginThemeColorRole` and never invents a literal or reaches for an unrelated AppKit system
+colour. The opaque `encodedTheme` remains necessary for the real components, which also resolve
+material, radii, bevels, control anatomy and fonts.
+
+That produces three deliberate lanes rather than one ambiguous freedom:
+
+- safe Wasm extensions declare meaning and the host renders it, so the active design system is
+  automatic;
+- a native extension seeking first-party fidelity links `ThreadingDesignKit`, installs
+  `encodedTheme`, and composes the published pane, field, table, row-selection, button, menu and
+  popover components;
+- a native extension with its own component geometry still reads every colour through
+  `PluginTheme.color(_:)`. Custom means custom composition, not a parallel palette.
 
 **The crossing is exact to 8 bits, not to the bit.** A role travels as a colour hex, so a catalogue
 colour of `0.878433` arrives as `0.878431` and the wide-gamut marker does not survive. Every role
@@ -326,13 +340,19 @@ paths or model objects. The default `WorkspaceNavigatorSelection.native` remains
 plugin navigator is an explicit View → Navigator choice and falls back to Native if its build is
 removed, replaced or refused.
 
-`T3NavigatorPlugin` deliberately uses only the small `PluginTheme` token floor rather than linking
-`ThreadingDesignKit`. Its SwiftUI store retains row objects across title and activity deltas,
-publishes section arrays only for structural changes, and renders through `ScrollView` plus
-`LazyVStack`. The proof of concept offers title search, a project filter, stable Pinned/Active/
-Archived sections, two-band activity/project/branch rows, always-reachable actions that emphasize
-on hover or keyboard focus, and context menus. It does not invent T3's snooze or new-thread
-behavior: those intents are not in the native contract yet.
+`T3NavigatorPlugin` is the reference for the component lane. It links `ThreadingDesignKit`,
+installs the exact encoded host theme on every delivery, and builds its custom T3 information
+architecture from `PaneHeaderView`, `ControlRowView`, `ThemedSearchField`, `ThemedTableView`,
+`ThemedTableRowView`, `ThemedIconButton`, `ThemedMenuPresenter` and `ThemedPopover`. Its own row
+composition uses only `Design` typography, spacing, symbol and semantic colour roles. The model
+retains row objects across title and activity deltas; an ordinary content edge reloads only the
+named virtual table row, while search and structural edges rebuild the lightweight index. A
+2,000-thread fixture asserts fewer than 100 live cells.
+
+The proof offers title search, a virtualized project filter, stable Pinned/Active/Archived
+sections, two-band activity/project/branch rows, hover-revealed but accessibility-reachable actions
+and themed context menus. It does not invent T3's snooze or new-thread behavior: those intents are
+not in the native contract yet.
 
 Throughput is settled for this tier. Replaying a real 24,546-row device capture through the pane:
 
@@ -402,17 +422,15 @@ Three things were fixed *because* they are cheap now and expensive after publica
   clean under `-strict-concurrency=complete`. The host needed no change, which says the isolation
   was always real and merely unstated.
 
-**`ThreadingDesignKit` cannot follow, and that is recorded rather than hoped away.** It is 80
+**`ThreadingDesignKit` cannot follow yet, and that is recorded rather than hoped away.** It is 80
 symlinks into `Sources/Threading` plus dependencies on ThreadingDomain, ThreadingRemoteKit and
 SwiftTerm; publishing it means exporting the app's UI layer and dragging two more of our layers
-behind it. So Device Logs links something a third party cannot get, and the honest line is
-**convenience, not capability**: nothing in the design kit reaches the host, and a plugin without
-it is refused nothing, offered nothing less, and called by the agent identically. What it buys is
-appearance. The floor for everyone else is `PluginTheme`, kept current across live theme changes.
-
-The cheap way to close even that gap is to let `PluginTheme` decode the full palette out of
-`encodedTheme` through this package alone, so a third party draws their own controls in our exact
-colours. That is additive under the rule above, and is the next thing worth doing here.
+behind it. So the bundled Device Logs and T3 navigators link something an external author cannot
+consume from a released package yet. The distinction is now explicit rather than visual debt:
+first-party native plugins use the actual components; external custom components receive all 30
+resolved semantic colours through publishable `ThreadingPluginKit`. The latter is palette parity,
+not component parity — it does not promise Threading's control anatomy, type recipes or interaction
+surfaces.
 
 When the time comes: its own public repository, consumed back at `Packages/ThreadingPluginKit` as a
 submodule the way ThinkingOrbs, LabelMorph and BorderBeamKit already are, so the path does not move
@@ -433,7 +451,8 @@ accept them. A licence still has to be chosen.
 | A plugin-built view paints the host's ground | `PluginViewThemingTests` |
 | Identity and material exactly, colour to 1/255 | `HostThemeHandoffTests` |
 | The plugin's own decode, render and reclaim contracts | `DeviceLogsPluginTests` |
-| Native T3 grouping, filtering, stable row identity and host-owned actions | `T3NavigatorPluginTests` |
+| Native T3 DesignKit composition, filtering, viewport-only cells, stable row identity and host-owned actions | `T3NavigatorPluginTests` |
+| Every custom-component semantic colour crosses from the active host theme | `NativePluginCatalogTests`, `PluginContractTests` |
 | The shipped native navigator metadata and principal-class conformance | `NativeWorkspaceNavigatorDiscoveryTests` |
 
 `NativePluginLoadingTests` skips when no plugin is installed, so a green run on a machine without
