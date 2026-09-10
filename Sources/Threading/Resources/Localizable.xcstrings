@@ -991,6 +991,17 @@
         }
       }
     },
+    "%@ provides read-only change-request status." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ger skrivskyddad status för ändringsbegäranden."
+          }
+        }
+      }
+    },
     "%@ read · %@ written" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1097,6 +1108,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ stoppade direkt efter starten."
+          }
+        }
+      }
+    },
+    "%@ through %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ via %@ · %@"
           }
         }
       }
@@ -3741,6 +3763,17 @@
         }
       }
     },
+    "A connection matches one exact Git remote host. Credentials stay in your Keychain." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En anslutning matchar en exakt Git-fjärrvärd. Inloggningsuppgifter sparas i din nyckelring."
+          }
+        }
+      }
+    },
     "A continuation path across runtimes: the direct source is offered as an action, the older stops stay as provenance." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4886,6 +4919,28 @@
         }
       }
     },
+    "Access token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtkomsttoken"
+          }
+        }
+      }
+    },
+    "Access token, unless anonymous" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtkomsttoken, om anslutningen inte är anonym"
+          }
+        }
+      }
+    },
     "Accessibility" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5400,6 +5455,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till ett projekt först."
+          }
+        }
+      }
+    },
+    "Add a provider connection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till en leverantörsanslutning"
           }
         }
       }
@@ -6934,6 +7000,17 @@
         }
       }
     },
+    "Anonymous" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anonym"
+          }
+        }
+      }
+    },
     "Another 1Password item" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7947,6 +8024,17 @@
         }
       }
     },
+    "Authorization token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auktoriseringstoken"
+          }
+        }
+      }
+    },
     "Auto" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8485,6 +8573,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Baslinje · %@"
+          }
+        }
+      }
+    },
+    "Bearer token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bearer-token"
           }
         }
       }
@@ -13217,6 +13316,17 @@
         }
       }
     },
+    "Connect Source Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut källkodskontroll"
+          }
+        }
+      }
+    },
     "Connect a Codex account to refresh its models." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13406,6 +13516,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslutning"
+          }
+        }
+      }
+    },
+    "Connect…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut…"
           }
         }
       }
@@ -17476,6 +17597,17 @@
         }
       }
     },
+    "Enable an installed source-control extension to connect its provider." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera ett installerat tillägg för källkodskontroll för att ansluta dess leverantör."
+          }
+        }
+      }
+    },
     "Enable at most 32 Codex accounts before refreshing models." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18754,6 +18886,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tilläggsinställningar använder oöverförbar formatversion %lld."
+          }
+        }
+      }
+    },
+    "Extension unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillägget är inte tillgängligt"
           }
         }
       }
@@ -20983,6 +21126,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HTTPS-port 8443 har redan en Tailscale Serve-hanterare. Ta bort den och försök igen."
+          }
+        }
+      }
+    },
+    "HTTPS server URL" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL till HTTPS-server"
           }
         }
       }
@@ -32605,6 +32759,17 @@
         }
       }
     },
+    "Provider and authentication" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverantör och autentisering"
+          }
+        }
+      }
+    },
     "Provider icons" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33575,6 +33740,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skrivskyddat"
+          }
+        }
+      }
+    },
+    "Read-only provider" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skrivskyddad leverantör"
           }
         }
       }
@@ -34616,6 +34792,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort den hanteraren och försök sedan igen."
+          }
+        }
+      }
+    },
+    "Remove the connection to %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort anslutningen till %@?"
           }
         }
       }
@@ -38533,6 +38720,17 @@
         }
       }
     },
+    "Server URL" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server-URL"
+          }
+        }
+      }
+    },
     "Server error (%lld)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41225,6 +41423,17 @@
         }
       }
     },
+    "Source control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källkodskontroll"
+          }
+        }
+      }
+    },
     "Source conversation is no longer available" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41254,6 +41463,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Källa: %@\nHändelse: %@\nProjekt: %@\nAgent: %@\nLäge: %@\nUtcheckning: %@\nHögsta antal samtidiga körningar: %lld"
+          }
+        }
+      }
+    },
+    "Source-control provider" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverantör för källkodskontroll"
           }
         }
       }
@@ -46177,6 +46397,50 @@
         }
       }
     },
+    "The provider returned a change request outside the requested repository state." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverantören returnerade en ändringsbegäran utanför det begärda kodarkivstillståndet."
+          }
+        }
+      }
+    },
+    "The provider returned an unknown change-request lifecycle." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverantören returnerade en okänd livscykel för ändringsbegäran."
+          }
+        }
+      }
+    },
+    "The provider returned no default branch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverantören returnerade ingen standardgren."
+          }
+        }
+      }
+    },
+    "The provider returned no matching change-request lifecycle." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverantören returnerade ingen matchande livscykel för ändringsbegäran."
+          }
+        }
+      }
+    },
     "The queue is full at %lld messages. Send or remove one before adding another." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46883,6 +47147,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Källan anslöts inte"
+          }
+        }
+      }
+    },
+    "The source-control connection is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källkodskontrollanslutningen är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "The source-control provider is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källkodskontrollleverantören är inte tillgänglig."
           }
         }
       }
@@ -49879,6 +50165,28 @@
         }
       }
     },
+    "Threading will attach this credential only to read requests below the provider's declared API path on this exact HTTPS server. The extension never receives the credential." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading bifogar bara den här inloggningsuppgiften till läsbegäranden under leverantörens deklarerade API-sökväg på exakt den här HTTPS-servern. Tillägget tar aldrig emot inloggningsuppgiften."
+          }
+        }
+      }
+    },
+    "Threading will delete its saved credential from your Keychain. Reconnecting requires the token again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading tar bort den sparade inloggningsuppgiften från din nyckelring. För att ansluta igen krävs token på nytt."
+          }
+        }
+      }
+    },
     "Threading will give this chat's agent a small library to link into the app it builds. Everything the app prints then appears in the Device logs pane, and also in the device's own system log, where it stays and can leave the device in a sysdiagnose. Building without it stops new lines but does not remove lines already written.\n\nThis answer is remembered for this chat." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52192,6 +52500,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Användarvalda kontobilder visas alltid över detta resolver."
+          }
+        }
+      }
+    },
+    "Username" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användarnamn"
+          }
+        }
+      }
+    },
+    "Username and token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användarnamn och token"
+          }
+        }
+      }
+    },
+    "Username for basic authentication, when required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användarnamn för grundläggande autentisering, när det krävs"
           }
         }
       }
@@ -55224,6 +55565,28 @@
         }
       }
     },
+    "change request" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ändringsbegäran"
+          }
+        }
+      }
+    },
+    "change requests" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ändringsbegäranden"
+          }
+        }
+      }
+    },
     "changed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56104,6 +56467,17 @@
         }
       }
     },
+    "https://forge.example.com" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://forge.example.com"
+          }
+        }
+      }
+    },
     "iOS 26.5 release image" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56452,6 +56826,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "hävs %@"
+          }
+        }
+      }
+    },
+    "local commits are not published" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "lokala ändringar är inte publicerade"
           }
         }
       }

@@ -47,6 +47,12 @@
     },
     {
       "$ref": "#/$defs/attachmentPreviewResponse"
+    },
+    {
+      "$ref": "extension-source-control.schema.json#/$defs/request"
+    },
+    {
+      "$ref": "extension-source-control.schema.json#/$defs/response"
     }
   ],
   "$defs": {

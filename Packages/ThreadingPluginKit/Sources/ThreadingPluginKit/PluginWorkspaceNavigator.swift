@@ -55,6 +55,74 @@ public enum PluginWorkspaceActivity: Int, Sendable {
     case limitReached
 }
 
+/// Provider-neutral pull/merge-request lifecycle projected by Threading.
+@objc(ThreadingPluginWorkspaceChangeRequestLifecycle)
+public enum PluginWorkspaceChangeRequestLifecycle: Int, Sendable {
+    case open
+    case draft
+    case merged
+    case closed
+}
+
+/// A bounded summary suitable for one realized native navigator row.
+///
+/// Provider credentials, API responses, repository paths, and failure diagnostics remain in the
+/// host. `webURL` is revalidated against the configured provider origin before publication.
+@objc(ThreadingPluginWorkspaceChangeRequest)
+@objcMembers
+public final class PluginWorkspaceChangeRequest: NSObject, @unchecked Sendable {
+    public let providerName: String
+    public let changeRequestName: String
+    public let number: Int
+    public let title: String
+    public let webURL: URL
+    public let lifecycle: PluginWorkspaceChangeRequestLifecycle
+    public let successfulChecks: Int
+    public let nonBlockingChecks: Int
+    public let activeChecks: Int
+    public let checksNeedingAttention: Int
+    public let unknownChecks: Int
+    public let checksAreIncomplete: Bool
+    public let approvals: Int
+    public let changesRequested: Int
+    public let reviewsRequested: Int
+
+    public init(
+        providerName: String,
+        changeRequestName: String,
+        number: Int,
+        title: String,
+        webURL: URL,
+        lifecycle: PluginWorkspaceChangeRequestLifecycle,
+        successfulChecks: Int = 0,
+        nonBlockingChecks: Int = 0,
+        activeChecks: Int = 0,
+        checksNeedingAttention: Int = 0,
+        unknownChecks: Int = 0,
+        checksAreIncomplete: Bool = false,
+        approvals: Int = 0,
+        changesRequested: Int = 0,
+        reviewsRequested: Int = 0
+    ) {
+        self.providerName = providerName
+        self.changeRequestName = changeRequestName
+        self.number = number
+        self.title = title
+        self.webURL = webURL
+        self.lifecycle = lifecycle
+        self.successfulChecks = successfulChecks
+        self.nonBlockingChecks = nonBlockingChecks
+        self.activeChecks = activeChecks
+        self.checksNeedingAttention = checksNeedingAttention
+        self.unknownChecks = unknownChecks
+        self.checksAreIncomplete = checksAreIncomplete
+        self.approvals = approvals
+        self.changesRequested = changesRequested
+        self.reviewsRequested = reviewsRequested
+        super.init()
+    }
+}
+
 /// One immutable row candidate in a native workspace navigator.
 ///
 /// A native navigator owns presentation, not truth. These values are snapshots; every action is
@@ -72,6 +140,7 @@ public final class PluginWorkspaceItem: NSObject, @unchecked Sendable {
     public let isPinned: Bool
     public let isArchived: Bool
     public let lastActiveAt: Date?
+    public let changeRequest: PluginWorkspaceChangeRequest?
 
     public init(
         identity: PluginWorkspaceItemIdentity,
@@ -82,7 +151,8 @@ public final class PluginWorkspaceItem: NSObject, @unchecked Sendable {
         activity: PluginWorkspaceActivity = .none,
         isPinned: Bool = false,
         isArchived: Bool = false,
-        lastActiveAt: Date? = nil
+        lastActiveAt: Date? = nil,
+        changeRequest: PluginWorkspaceChangeRequest? = nil
     ) {
         self.identity = identity
         self.parentIdentity = parentIdentity
@@ -93,6 +163,7 @@ public final class PluginWorkspaceItem: NSObject, @unchecked Sendable {
         self.isPinned = isPinned
         self.isArchived = isArchived
         self.lastActiveAt = lastActiveAt
+        self.changeRequest = changeRequest
         super.init()
     }
 }
@@ -157,6 +228,7 @@ public enum PluginWorkspaceAction: Int, Sendable {
     case pin
     case unpin
     case archive
+    case openChangeRequest
 }
 
 private struct PluginWorkspaceItemKey: Hashable {
@@ -190,19 +262,25 @@ public final class PluginWorkspaceNavigatorContext: NSObject {
 
     private let activationHandler: (PluginWorkspaceItemIdentity) -> Bool
     private let actionHandler: (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool
+    private let visibleItemsHandler: ([PluginWorkspaceItemIdentity]) -> Void
     private var updateHandler: ((PluginWorkspaceUpdate) -> Void)?
+    private var visibleKeys = Set<PluginWorkspaceItemKey>()
+
+    public static let maximumVisibleItemCount = 128
 
     public init(
         navigatorIdentifier: String,
         initialSnapshot: PluginWorkspaceSnapshot,
         activate: @escaping (PluginWorkspaceItemIdentity) -> Bool,
-        perform: @escaping (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool
+        perform: @escaping (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool,
+        visibleItemsDidChange: @escaping ([PluginWorkspaceItemIdentity]) -> Void = { _ in }
     ) {
         self.navigatorIdentifier = navigatorIdentifier
         revision = initialSnapshot.revision
         selectedIdentity = initialSnapshot.selectedItemIdentity
         activationHandler = activate
         actionHandler = perform
+        visibleItemsHandler = visibleItemsDidChange
 
         var order: [PluginWorkspaceItemKey] = []
         var items: [PluginWorkspaceItemKey: PluginWorkspaceItem] = [:]
@@ -256,6 +334,30 @@ public final class PluginWorkspaceNavigatorContext: NSObject {
         identity: PluginWorkspaceItemIdentity
     ) -> Bool {
         actionHandler(action, identity)
+    }
+
+    /// Replaces the presentation's bounded interest set.
+    ///
+    /// Expensive host facts are loaded only for realized session rows. Unknown identities and
+    /// non-session rows are discarded, duplicates are canonicalized, and an oversized report is
+    /// refused atomically rather than partially changing interest.
+    @discardableResult
+    public func setVisibleItemIdentities(
+        _ identities: [PluginWorkspaceItemIdentity]
+    ) -> Bool {
+        guard identities.count <= Self.maximumVisibleItemCount else { return false }
+        var keys = Set<PluginWorkspaceItemKey>()
+        var canonical: [PluginWorkspaceItemIdentity] = []
+        canonical.reserveCapacity(identities.count)
+        for identity in identities where identity.kind == .session {
+            let key = PluginWorkspaceItemKey(identity)
+            guard itemsByKey[key] != nil, keys.insert(key).inserted else { continue }
+            canonical.append(itemsByKey[key]?.identity ?? identity)
+        }
+        guard keys != visibleKeys else { return true }
+        visibleKeys = keys
+        visibleItemsHandler(canonical)
+        return true
     }
 
     /// Publishes one host-authored update and advances the context's coherent state.

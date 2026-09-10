@@ -119,6 +119,7 @@ python3 -m unittest "${repository_directory}/scripts/tests/test_localization_bou
 
 say "Testing public extension schemas"
 python3 "${repository_directory}/scripts/tests/test_workspace_navigator_schema.py"
+python3 "${repository_directory}/scripts/tests/test_source_control_schema.py"
 
 say "Testing UI evidence tooling"
 python3 "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"

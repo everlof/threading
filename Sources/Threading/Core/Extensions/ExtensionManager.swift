@@ -121,6 +121,7 @@ struct InstalledExtensionSnapshot {
     let companionStatuses: [String: InstalledCompanionStatus]
     let services: [ExtensionServiceDefinition]
     let serviceDependencies: [ExtensionServiceDependency]
+    let sourceControlProviders: [ExtensionSourceControlProviderDefinition]
     let packageURL: URL
     let provenance: ExtensionInstallProvenance?
     let isEnabled: Bool
@@ -136,6 +137,13 @@ struct ExtensionMCPToolInventory {
 
     var groupID: String { "extension.\(extensionIdentifier)" }
     var isRunning: Bool { !registeredTools.isEmpty }
+}
+
+struct ExtensionSourceControlProviderInventoryItem: Equatable {
+    let extensionIdentifier: String
+    let extensionName: String
+    let processGeneration: String
+    let provider: ExtensionSourceControlProviderDefinition
 }
 
 struct ExtensionPanelInventoryItem: Equatable {
@@ -592,6 +600,7 @@ final class ExtensionManager:
                 ),
                 services: manifest?.services.map(localization.service) ?? [],
                 serviceDependencies: manifest?.serviceDependencies ?? [],
+                sourceControlProviders: manifest?.sourceControlProviders ?? [],
                 packageURL: package.packageURL,
                 provenance: package.provenance,
                 isEnabled: enabledIdentifiers.contains(identifier),
@@ -1540,6 +1549,65 @@ final class ExtensionManager:
         }
     }
 
+    var sourceControlProviderInventory: [ExtensionSourceControlProviderInventoryItem] {
+        registrations.flatMap { extensionIdentifier, registration in
+            guard enabledIdentifiers.contains(extensionIdentifier),
+                  let package = packages[extensionIdentifier],
+                  let bundle = package.bundle,
+                  let processGeneration = sessionGenerations[extensionIdentifier] else {
+                return [ExtensionSourceControlProviderInventoryItem]()
+            }
+            let localizer = ExtensionLocalizationResolver(catalogs: bundle.localizations)
+            return registration.sourceControlProviders.map { provider in
+                ExtensionSourceControlProviderInventoryItem(
+                    extensionIdentifier: extensionIdentifier,
+                    extensionName: localizer.string(bundle.manifest.name),
+                    processGeneration: processGeneration,
+                    provider: provider
+                )
+            }
+        }.sorted {
+            if $0.extensionName != $1.extensionName {
+                return $0.extensionName.localizedCaseInsensitiveCompare($1.extensionName)
+                    == .orderedAscending
+            }
+            return $0.provider.id < $1.provider.id
+        }
+    }
+
+    @discardableResult
+    func invokeSourceControl(
+        extensionIdentifier: String,
+        providerID: String,
+        connectionID: String,
+        operation: ExtensionSourceControlOperation,
+        repository: ExtensionSourceControlRepository? = nil,
+        changeRequestNumber: Int? = nil,
+        requestID: String = UUID().uuidString.lowercased(),
+        completion: @escaping @MainActor @Sendable (
+            Result<ExtensionSourceControlResponse, Error>
+        ) -> Void
+    ) -> Bool {
+        guard enabledIdentifiers.contains(extensionIdentifier),
+              registrations[extensionIdentifier]?.sourceControlProviders.contains(where: {
+                  $0.id == providerID
+              }) == true,
+              let process = sessions[extensionIdentifier] else {
+            completion(.failure(ExtensionProcessError.notRunning))
+            return false
+        }
+        process.invokeSourceControl(
+            providerID: providerID,
+            connectionID: connectionID,
+            operation: operation,
+            repository: repository,
+            changeRequestNumber: changeRequestNumber,
+            requestID: requestID,
+            completion: completion
+        )
+        return true
+    }
+
     /// Routes an MCP name back to its owning process. Returns `false` only when no installed
     /// extension declares the name; declared-but-disabled tools answer with a useful failure.
     @discardableResult
@@ -2041,6 +2109,7 @@ final class ExtensionManager:
                 serviceDependencies: bundle.manifest.serviceDependencies,
                 factDefinitions: bundle.manifest.factDefinitions,
                 networkGrants: bundle.manifest.networkGrants,
+                sourceControlProviders: bundle.manifest.sourceControlProviders,
                 localization: localization,
                 transport: transport
             )

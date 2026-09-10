@@ -201,6 +201,7 @@ host.repositories.read
 host.providers.read
 host.accounts.presentation.read
 host.events
+source-control.read
 ```
 
 Future contribution/presentation authorities include `sidebar.accessories` and
@@ -224,6 +225,15 @@ does not imply project paths, account configuration, transcripts, network, or cr
 `storage.secrets` is an independent implemented authority: values travel through the exact
 generation-bound loopback broker and are persisted by Threading in an extension-scoped Keychain
 namespace. It grants neither direct Keychain access nor a writable filesystem path.
+
+`source-control.read` is a narrower broker for forge integrations, not general network access.
+The extension names a user-configured opaque connection and an API-relative GET/HEAD path below
+its manifest-declared prefix. Threading selects the exact HTTPS origin, verifies that the
+connection belongs to that extension and provider, attaches the host-owned Keychain credential,
+and refuses redirects that change origin, method, or API scope. The extension receives HTTP data
+and a credential-used receipt, never the secret or a reusable origin authority. The typed
+provider process response normalizes change-request lifecycle, check counts, and review counts;
+see [`SOURCE_CONTROL_PROVIDERS.md`](SOURCE_CONTROL_PROVIDERS.md).
 
 `host.sessions.runtime.read` is separate from the ordinary session snapshot. It accepts one
 stable session ID and returns only the process groups and listening ports Threading attributes to

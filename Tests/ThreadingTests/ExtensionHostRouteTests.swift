@@ -24,6 +24,7 @@ final class ExtensionHostRouteTests: XCTestCase {
         ("/v1/facts", .facts),
         ("/v1/identity-resolutions", .identityResolutions),
         ("/v1/network/fetch", .networkFetch),
+        ("/v1/source-control/fetch", .sourceControlFetch),
         ("/v1/project-files/query", .projectFilesQuery),
 
         ("/v1/secrets", .secrets(nil)),
@@ -85,6 +86,7 @@ final class ExtensionHostRouteTests: XCTestCase {
         case .services: return "services"
         case .companions: return "companions"
         case .networkFetch: return "networkFetch"
+        case .sourceControlFetch: return "sourceControlFetch"
         case .projectFilesQuery: return "projectFilesQuery"
         case .secrets(nil): return "secrets.collection"
         case .secrets: return "secrets.item"
@@ -113,6 +115,7 @@ final class ExtensionHostRouteTests: XCTestCase {
             "services",
             "companions",
             "networkFetch",
+            "sourceControlFetch",
             "projectFilesQuery",
             "secrets.collection",
             "secrets.item",
@@ -171,6 +174,8 @@ final class ExtensionHostRouteTests: XCTestCase {
             "/v1/facts/",
             "/v1/network",
             "/v1/network/fetches",
+            "/v1/source-control",
+            "/v1/source-control/fetches",
             "/v1/project-files"
         ]
         for path in refused {

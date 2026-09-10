@@ -34,13 +34,30 @@ extension GitReviewViewController {
 
         changeRequestTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                let local = try await ChangeRequestGit.state(in: root)
-                guard !Task.isCancelled, expected == self.changeRequestGeneration else { return }
-                self.changeRequestLocalState = local
+            let reading = await ChangeRequestSummaryStore.shared.read(
+                root: root,
+                providers: self.changeRequestProviders,
+                force: forceRemote
+            )
+            guard !Task.isCancelled, expected == self.changeRequestGeneration else { return }
+            guard let local = reading.local else {
+                let message = reading.failureMessage
+                    ?? L10n.string("The source-control provider is unavailable.")
+                self.changeRequestRepositoryStatus = nil
+                self.changeRequestFailureMessage = message
+                self.changeRequestPrimaryAction = .retry
+                self.setChangeRequestBarVisible(true)
+                self.changeRequestBar.showFailure(
+                    message,
+                    policy: self.changeRequestConfiguration.publishPolicy
+                )
+                return
+            }
+            self.changeRequestLocalState = local
 
-                let remoteDetection = ChangeRequestRepository.detect(remote: local.remote)
-                guard case .supported(let repository) = remoteDetection else {
+            let remoteDetection = reading.remoteDetection
+                ?? self.changeRequestProviders.repository(remote: local.remote)
+            guard case .supported(let repository) = remoteDetection else {
                     self.changeRequestRepositoryStatus = nil
                     self.changeRequestFailureMessage = nil
                     self.changeRequestPrimaryAction = .none
@@ -64,57 +81,33 @@ extension GitReviewViewController {
                         policy: self.changeRequestConfiguration.publishPolicy
                     )
                     return
-                }
-                self.changeRequestBar.setProvider(repository.provider)
-                self.changeRequestBar.showLoading(branch: local.branch)
-
-                let signature = "\(local.branch):\(local.headRevision)"
-                if !forceRemote,
-                   let last = self.lastChangeRequestRead,
-                   last.signature == signature,
-                   Date().timeIntervalSince(last.date) < GitReviewChangeRequestDefaults.remoteRefreshInterval {
-                    if self.changeRequestRepositoryStatus != nil {
-                        self.renderChangeRequestBar()
-                    } else if let message = self.changeRequestFailureMessage {
-                        self.changeRequestPrimaryAction = .retry
-                        self.changeRequestBar.showFailure(
-                            message,
-                            policy: self.changeRequestConfiguration.publishPolicy
-                        )
-                    }
-                    return
-                }
-
-                let outcome = await self.changeRequestProviders.discover(
-                    repository: repository,
-                    branch: local.branch,
-                    headRevision: local.headRevision
-                )
-                guard !Task.isCancelled, expected == self.changeRequestGeneration else { return }
-                self.lastChangeRequestRead = (signature, Date())
-                switch outcome {
-                case .loaded(let status):
-                    self.changeRequestRepositoryStatus = status
-                    self.changeRequestFailureMessage = nil
-                    self.renderChangeRequestBar()
-                case .failed(let message):
-                    self.changeRequestRepositoryStatus = nil
-                    self.changeRequestFailureMessage = message
-                    self.changeRequestPrimaryAction = .retry
-                    self.setChangeRequestBarVisible(true)
-                    self.changeRequestBar.showFailure(
-                        message,
-                        policy: self.changeRequestConfiguration.publishPolicy
-                    )
-                }
-            } catch {
-                guard !Task.isCancelled, expected == self.changeRequestGeneration else { return }
+            }
+            self.changeRequestBar.setProvider(repository.provider)
+            self.changeRequestBar.showLoading(branch: local.branch)
+            self.lastChangeRequestRead = ("\(local.branch):\(local.headRevision)", Date())
+            switch reading.outcome {
+            case .loaded(let status):
+                self.changeRequestRepositoryStatus = status
+                self.changeRequestFailureMessage = nil
+                self.renderChangeRequestBar()
+            case .failed(let message):
                 self.changeRequestRepositoryStatus = nil
-                self.changeRequestFailureMessage = error.localizedDescription
+                self.changeRequestFailureMessage = message
                 self.changeRequestPrimaryAction = .retry
                 self.setChangeRequestBarVisible(true)
                 self.changeRequestBar.showFailure(
-                    error.localizedDescription,
+                    message,
+                    policy: self.changeRequestConfiguration.publishPolicy
+                )
+            case nil:
+                let message = reading.failureMessage
+                    ?? L10n.string("The source-control provider is unavailable.")
+                self.changeRequestRepositoryStatus = nil
+                self.changeRequestFailureMessage = message
+                self.changeRequestPrimaryAction = .retry
+                self.setChangeRequestBarVisible(true)
+                self.changeRequestBar.showFailure(
+                    message,
                     policy: self.changeRequestConfiguration.publishPolicy
                 )
             }
@@ -171,6 +164,16 @@ extension GitReviewViewController {
             action = .none
             actionTitle = L10n.string("Working…")
             actionEnabled = false
+        } else if status.repository.provider.extensionIdentifier != nil, request != nil {
+            action = .open
+            actionTitle = L10n.format("Open %@", status.repository.provider.changeRequestName)
+            actionEnabled = true
+            if local.needsPush { details.append(L10n.string("local commits are not published")) }
+        } else if status.repository.provider.extensionIdentifier != nil {
+            action = .none
+            actionTitle = nil
+            actionEnabled = false
+            details.append(L10n.string("Read-only provider"))
         } else if request != nil, local.needsPush {
             action = .push
             actionTitle = L10n.string("Push update")

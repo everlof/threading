@@ -340,6 +340,15 @@ paths or model objects. The default `WorkspaceNavigatorSelection.native` remains
 plugin navigator is an explicit View → Navigator choice and falls back to Native if its build is
 removed, replaced or refused.
 
+API v5 adds one expensive-fact interest loop. A plugin reports at most 128 realized session
+identities; the host discards unknown/non-session values, deduplicates the set, and loads the shared
+provider-neutral change-request summary only for that viewport. Success is cached for 60 seconds,
+failure for 15, in-flight checkout reads deduplicate, and the whole app admits four provider
+pipelines. A row can ask for `openChangeRequest`, but the host opens only its current cached and
+validated URL. Credentials, provider payloads, checkout paths, diagnostics, and mutations never
+cross the plugin contract. See
+[`SOURCE_CONTROL_PROVIDERS.md`](../extensions/SOURCE_CONTROL_PROVIDERS.md).
+
 `T3NavigatorPlugin` is the reference for the component lane. It links `ThreadingDesignKit`,
 installs the exact encoded host theme on every delivery, and builds its custom T3 information
 architecture from `PaneHeaderView`, `ControlRowView`, `ThemedSearchField`, `ThemedTableView`,
@@ -350,9 +359,11 @@ named virtual table row, while search and structural edges rebuild the lightweig
 2,000-thread fixture asserts fewer than 100 live cells.
 
 The proof offers title search, a virtualized project filter, stable Pinned/Active/Archived
-sections, two-band activity/project/branch rows, hover-revealed but accessibility-reachable actions
-and themed context menus. It does not invent T3's snooze or new-thread behavior: those intents are
-not in the native contract yet.
+sections, and T3-shaped three-band rows: project/activity, title, then branch plus a compact
+provider-neutral change-request lifecycle/check/review receipt. Hover and keyboard focus replace
+the activity slot with host-owned actions instead of permanently crowding selected rows. The
+proof does not invent T3's snooze or new-thread behavior: those intents are not in the native
+contract yet.
 
 Throughput is settled for this tier. Replaying a real 24,546-row device capture through the pane:
 

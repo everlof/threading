@@ -146,6 +146,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         nativeActionHandler: { [weak self] action, identity in
             self?.performNativeWorkspaceNavigatorAction(action, identity: identity) ?? false
         },
+        nativeVisibilityHandler: { [weak self] identities in
+            self?.nativeWorkspaceNavigatorSnapshotSource.visibleItemsDidChange(identities)
+        },
         nativePluginLoader: nativeWorkspaceNavigatorPluginLoader,
         contextProvider: { [weak self] in
             ExtensionCommandContext(
@@ -2702,11 +2705,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ) -> Bool {
         guard identity.kind == .session,
               let sessionID = SessionID(uuidString: identity.identifier) else { return false }
+        if action == .openChangeRequest {
+            return nativeWorkspaceNavigatorSnapshotSource.openChangeRequest(sessionID: sessionID)
+        }
         let intent: ExtensionWorkspaceNavigatorIntent
         switch action {
         case .pin: intent = .pin
         case .unpin: intent = .unpin
         case .archive: intent = .archive
+        case .openChangeRequest: return false
         @unknown default: return false
         }
         return workspaceNavigatorIntentDispatcher.perform(intent, sessionID: sessionID) == .accepted

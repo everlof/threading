@@ -51,6 +51,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case ptyHostEnabled
     case prependsCommandLineToolsToPATH
     case workspaceNavigatorSelection
+    case sourceControlProviderConnections
     case reportsClaudeLifecycleEvents
     case installsCodexHooks
     case readsClaudeLoginFromKeychain
@@ -450,6 +451,12 @@ extension TypedAppSettingValidation where Value == Int {
 }
 
 extension TypedAppSettingValidation where Value == Data {
+    static func maximumBytes(_ maximum: Int) -> Self {
+        Self(erased: .maximumDataBytes(maximum)) { value, _ in
+            value.count <= maximum ? value : nil
+        }
+    }
+
     static func workspaceNavigatorIdentity(
         maximumIdentityBytes: Int,
         maximumDataBytes: Int
@@ -1048,6 +1055,13 @@ enum AppSettingDefinitions {
         ),
         encoding: .recoverableCodable
     )
+    static let sourceControlProviderConnections = AppSettingDescriptor<Data>(
+        identity: .sourceControlProviderConnections,
+        persistenceKey: "sourceControlProviderConnections",
+        absence: .recoverableFallback("empty"),
+        validation: .maximumBytes(256 * 1024),
+        encoding: .recoverableCodable
+    )
 
     static let reportsClaudeLifecycleEvents = AppSettingDescriptor<Bool>(
         identity: .reportsClaudeLifecycleEvents,
@@ -1410,7 +1424,8 @@ enum AppSettingDefinitions {
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
         .init(usesMCPStdioBridge), .init(ptyHostEnabled),
         .init(prependsCommandLineToolsToPATH),
-        .init(workspaceNavigatorSelection), .init(reportsClaudeLifecycleEvents),
+        .init(workspaceNavigatorSelection), .init(sourceControlProviderConnections),
+        .init(reportsClaudeLifecycleEvents),
         .init(installsCodexHooks), .init(readsClaudeLoginFromKeychain),
         .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),
         .init(claudeRemoteControl), .init(claudeTerminalRenderer),

@@ -117,6 +117,12 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
 - Domain-keyed fact publication (`facts.provide`) with static manifest and registration
   definitions. Providers may replace bounded values only for canonical repository and
   repository-branch subjects; this capability grants no opaque project or session identifiers.
+- Read-only source-control adapters (`source-control.read`) with static manifest/runtime provider
+  parity, correlated discovery and lifecycle requests, and bounded provider-neutral summaries.
+  Threading owns exact-host connection selection, Keychain credentials, local Git inspection,
+  same-origin HTTPS enforcement, response validation, caching, and all mutations. The extension
+  can request only `GET`/`HEAD` paths below its declared API prefix and never receives a token,
+  checkout path, complete remote URL, or socket.
 
 `ThreadingExtensionAPI.safeCapabilities` is the normative capability set. `network.client` is
 not a safe-v1 capability: it remains decodable for deprecated native format-1 compatibility,
@@ -242,6 +248,7 @@ The reference behavior and authoring rules live in:
 - `AGENT_AUTHORING.md`
 - `DECLARATIVE_UI.md`
 - `WORKSPACE_NAVIGATORS.md`
+- `SOURCE_CONTROL_PROVIDERS.md`
 - `AUTHORING_FLOW.md`
 - `HOST_SURFACES.md`
 - `COMPONENT_CUSTOMIZATION.md`

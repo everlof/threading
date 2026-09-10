@@ -260,6 +260,10 @@ enum ChangeRequestGit {
                 ".gitlab/merge_request_templates/Default.md",
                 ".gitlab/merge_request_templates/default.md"
             ]
+        default:
+            // Read-only extension providers cannot create a change request, so their private
+            // template conventions never cross the host boundary.
+            return nil
         }
         for path in candidates {
             let url = root.appendingPathComponent(path)

@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threading.codes/schema/extension-source-control.schema.json",
+  "title": "Threading extension source-control provider",
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "providerDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "changeRequestName",
+        "changeRequestPluralName",
+        "apiPathPrefix",
+        "authenticationKinds",
+        "reportsChecks",
+        "reportsApprovals",
+        "reportsChangesRequested"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "changeRequestName": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "changeRequestPluralName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "apiPathPrefix": {
+          "type": "string",
+          "maxLength": 160,
+          "pattern": "^/(?!\\.\\.?(?:/|$))(?!.*//)(?!.*?/\\.\\.?(?:/|$))[^/?#\\\\]+(?:/[^/?#\\\\]+)*$"
+        },
+        "authenticationKinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["none", "bearer-token", "authorization-token", "basic-username-token"]
+          }
+        },
+        "reportsChecks": { "type": "boolean" },
+        "reportsApprovals": { "type": "boolean" },
+        "reportsChangesRequested": { "type": "boolean" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "namespace", "name", "branch", "headRevision"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+        },
+        "namespace": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^/]+$" },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "headRevision": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestID",
+        "providerID",
+        "connectionID",
+        "operation"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "providerID": { "$ref": "#/$defs/identifier" },
+        "connectionID": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "operation": { "enum": ["probe", "discover", "lifecycle"] },
+        "repository": { "$ref": "#/$defs/repository" },
+        "changeRequestNumber": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "probe" } } },
+          "then": { "not": { "anyOf": [
+            { "required": ["repository"] },
+            { "required": ["changeRequestNumber"] }
+          ] } }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "discover" } } },
+          "then": {
+            "required": ["repository"],
+            "not": { "required": ["changeRequestNumber"] }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "lifecycle" } } },
+          "then": { "required": ["repository", "changeRequestNumber"] }
+        }
+      ]
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalized"],
+      "properties": {
+        "normalized": { "enum": ["open", "draft", "merged", "closed", "unknown"] },
+        "providerValue": { "type": "string", "maxLength": 40 }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "successful",
+        "nonBlocking",
+        "active",
+        "needsAttention",
+        "unknown",
+        "isIncomplete"
+      ],
+      "properties": {
+        "successful": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "nonBlocking": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "active": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "needsAttention": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "unknown": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "isIncomplete": { "type": "boolean" }
+      }
+    },
+    "reviews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvals", "changesRequested", "requested"],
+      "properties": {
+        "approvals": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "changesRequested": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "requested": { "type": "integer", "minimum": 0, "maximum": 100000 }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "title",
+        "webURL",
+        "lifecycle",
+        "baseBranch",
+        "headBranch",
+        "headRevision",
+        "checks",
+        "reviews"
+      ],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "webURL": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "lifecycle": { "$ref": "#/$defs/lifecycle" },
+        "baseBranch": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "headBranch": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "headRevision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "checks": { "$ref": "#/$defs/checks" },
+        "reviews": { "$ref": "#/$defs/reviews" }
+      }
+    },
+    "providerError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "unavailable",
+            "authentication-required",
+            "forbidden",
+            "not-found",
+            "rate-limited",
+            "transport",
+            "malformed-response",
+            "incomplete"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "retryAfterSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestID", "providerID"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "requestID": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "providerID": { "$ref": "#/$defs/identifier" },
+        "serverVersion": { "type": "string", "maxLength": 80 },
+        "defaultBranch": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "changeRequest": { "$ref": "#/$defs/summary" },
+        "error": { "$ref": "#/$defs/providerError" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["error"] },
+          "then": { "not": { "anyOf": [
+            { "required": ["serverVersion"] },
+            { "required": ["defaultBranch"] },
+            { "required": ["changeRequest"] }
+          ] } }
+        }
+      ]
+    },
+    "queryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "value": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "fetchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectionID", "method", "path", "queryItems", "headers"],
+      "description": "POST /v1/source-control/fetch body. The extension supplies no origin or credential.",
+      "properties": {
+        "connectionID": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "method": { "enum": ["GET", "HEAD"] },
+        "path": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^/(?!\\.\\.?(?:/|$))(?!.*//)(?!.*?/\\.\\.?(?:/|$))(?!.*%2[fF])(?!.*%5[cC])[^/?#\\\\]+(?:/[^/?#\\\\]+)*$"
+        },
+        "queryItems": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/queryItem" }
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+            "not": {
+              "pattern": "^(?:[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|[Cc][Oo][Oo][Kk][Ii][Ee]|[Hh][Oo][Ss][Tt]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Pp][Rr][Oo][Xx][Yy]-[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|[Ff][Oo][Rr][Ww][Aa][Rr][Dd][Ee][Dd]|[Xx]-[Ff][Oo][Rr][Ww][Aa][Rr][Dd][Ee][Dd]-[Ff][Oo][Rr]|[Xx]-[Ff][Oo][Rr][Ww][Aa][Rr][Dd][Ee][Dd]-[Hh][Oo][Ss][Tt]|[Xx]-[Ff][Oo][Rr][Ww][Aa][Rr][Dd][Ee][Dd]-[Pp][Rr][Oo][Tt][Oo])$"
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+          }
+        }
+      }
+    }
+  }
+}

@@ -33,7 +33,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Sidebar backdrop | `sidebar.backdrop@1` | under-content hook: an overlay whose top is `.proceed`, admitting only a `backdrop` image and a Metal surface | legibility ceiling, frame cadence and the visibility hold, pointer passthrough, reduced motion, accessibility silence, layering beneath the theme's navigator well | Implemented |
-| Workspace navigator | `ui.workspace-navigation` | complete semantic navigator, optionally augmented with a host-evaluated pipeline, bounded options and row intents | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, and intent availability, revalidation and execution | Implemented |
+| Workspace navigator | `ui.workspace-navigation` or the signed native PluginKit navigator contract | complete semantic navigator, optionally augmented with a host-evaluated pipeline; native plugins receive bounded typed rows and visible-row enrichment | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, change-request truth and credentials, and intent availability, revalidation and execution | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
@@ -155,6 +155,14 @@ choices, the permanent Native and generation-failback route, declaration/fact va
 background evaluation and viewport realization, theme and accessibility, source-session
 activation, and availability, last-moment revalidation and execution of those named intents
 through native persistence and lifecycle paths.
+
+The signed native navigator tier uses the same ownership rule for richer presentation. A plugin
+may compose DesignKit controls and display the bounded provider-neutral change-request summary
+attached to a visible session row. Threading chooses the repository/provider connection, keeps
+credentials in Keychain, performs local Git and remote reads off the main actor, validates the
+published HTTPS URL, and executes `openChangeRequest`. A plugin cannot fetch a forge directly or
+turn summary presentation into source-control authority. The default Native navigator remains
+unchanged unless the user selects the plugin.
 
 The Archived browser is the lifecycle side of that same host-only navigation boundary. Threading
 keeps the archive timestamp and ordering, search semantics, provider synchronization, and the

@@ -34,6 +34,9 @@ The first vertical slice exists:
   compiling host-evaluated intent reference and T3 Code-inspired proof of concept. It presents
   Pinned, Active, Snoozed, and Archived sections with title/status/project/branch rows, while
   Threading owns its search, pin, unpin, archive, selection, chrome, and routing behavior.
+- [`ForgejoSourceControlExtension`](../../Packages/ThreadingExtensionKit/Examples/ForgejoSourceControlExtension)
+  is the compiling read-only forge-provider reference. It discovers pull requests, checks and
+  reviews through a user-configured connection while Threading keeps the origin and credential.
 - [`extension-manifest.schema.json`](schema/extension-manifest.schema.json) is the
   machine-readable manifest schema.
 - [`extension-settings.schema.json`](schema/extension-settings.schema.json) defines the
@@ -50,8 +53,11 @@ The first vertical slice exists:
 - [`DECLARATIVE_UI.md`](DECLARATIVE_UI.md) documents native value controls, generic semantic
   scenes, correlated action values, surface limits, and the host-rendering architecture.
 - [`extension-process.schema.json`](schema/extension-process.schema.json) describes correlated
-  settings, service, command, panel/component/navigator-action, and MCP-tool requests and
-  responses.
+  settings, service, command, panel/component/navigator-action, source-control, and MCP-tool
+  requests and responses.
+- [`extension-source-control.schema.json`](schema/extension-source-control.schema.json) defines
+  provider declarations, connection-scoped reads, and provider-neutral change-request results;
+  [`SOURCE_CONTROL_PROVIDERS.md`](SOURCE_CONTROL_PROVIDERS.md) explains the trust boundary.
 - [`extension-host.schema.json`](schema/extension-host.schema.json) describes atomic component
   patch publications over the independent host channel.
 - [`extension-host-data.schema.json`](schema/extension-host-data.schema.json) describes safe
@@ -171,6 +177,7 @@ capabilities, so a small extension can grow without changing package format:
 | Settings extension | `settings` | Complete pages and sections appended to stable host pages | Threading Settings |
 | Service extension | `services.provide` | Versioned JSON service contracts | Other declared extensions |
 | Fact provider | `facts.provide` | Typed scalar facts on repository domain keys | Host navigator fact registry |
+| Source-control provider | `source-control.read` | Read-only forge discovery, lifecycle, checks, and reviews through host-owned connections | Git Review and native navigator summaries |
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
 | Navigator extension | `ui.workspace-navigation` | Complete semantic navigators, optionally augmented with host-evaluated pipelines, virtualized collections, bounded static and registered-fact controls, and conditional host-owned row intents | Leading workspace navigator |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal: over the main window, beneath the sidebar |
@@ -718,6 +725,7 @@ Packages/ThreadingExtensionKit/
 ├── Examples/GitLabStateExtension/
 ├── Examples/ActivityInboxExtension/
 ├── Examples/T3SidebarExtension/
+├── Examples/ForgejoSourceControlExtension/
 ├── Examples/SimulatorRelayExtension/
 └── Tests/ThreadingExtensionKitTests/
 
@@ -728,6 +736,7 @@ docs/extensions/
 ├── HOST_SURFACES.md
 ├── COMPONENT_CUSTOMIZATION.md
 ├── CUSTOMIZATION_SURFACE_AUDIT.md
+├── SOURCE_CONTROL_PROVIDERS.md
 ├── SANDBOX_RUNNER.md
 ├── HANDOFF.md
 ├── generated/
@@ -738,6 +747,7 @@ docs/extensions/
     ├── extension-manifest.schema.json
     ├── extension-settings.schema.json
     ├── extension-services.schema.json
+    ├── extension-source-control.schema.json
     ├── extension-node.schema.json
     ├── workspace-navigator.schema.json
     ├── extension-host.schema.json

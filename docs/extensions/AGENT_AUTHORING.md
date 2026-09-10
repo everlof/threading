@@ -380,6 +380,12 @@ items.
   before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories or
   repository branches, never guessed project, session, or terminal IDs. Each call is a complete
   replacement for its named subjects; an empty fact list clears those subjects.
+- Declare `source-control.read` and the same static `sourceControlProviders` in the manifest and
+  registration before serving source-control requests. Use
+  `ExtensionHostClient.sourceControlFetch`; do not declare a static network grant for the user's
+  forge origin. Threading selects one exact-host connection, attaches its Keychain credential, and
+  constrains every request below the definition's API prefix. Return only bounded normalized
+  summaries, never provider JSON. Read `SOURCE_CONTROL_PROVIDERS.md` before authoring an adapter.
 - Declare `ui.components` before constructing `ExtensionHostClient` or publishing component
   patches.
 - Declare `ui.workspace-navigation` before registering workspace navigators. This capability

@@ -24,6 +24,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let settings: ExtensionSettingsContribution
     public let services: [ExtensionServiceDefinition]
     public let factDefinitions: [ExtensionFactDefinition]
+    /// Read-only hosted-Git providers inspectable before the process starts.
+    public let sourceControlProviders: [ExtensionSourceControlProviderDefinition]
     public let serviceDependencies: [ExtensionServiceDependency]
     public let companions: [ExtensionCompanion]
     public let themes: [ExtensionThemeContribution]
@@ -45,6 +47,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         settings: ExtensionSettingsContribution = .init(),
         services: [ExtensionServiceDefinition] = [],
         factDefinitions: [ExtensionFactDefinition] = [],
+        sourceControlProviders: [ExtensionSourceControlProviderDefinition] = [],
         serviceDependencies: [ExtensionServiceDependency] = [],
         companions: [ExtensionCompanion] = [],
         themes: [ExtensionThemeContribution] = [],
@@ -65,6 +68,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.settings = settings
         self.services = services
         self.factDefinitions = factDefinitions
+        self.sourceControlProviders = sourceControlProviders
         self.serviceDependencies = serviceDependencies
         self.companions = companions
         self.themes = themes
@@ -76,7 +80,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities
         case workspaceNavigators, mcpTools, settings
-        case services, factDefinitions, serviceDependencies, companions, themes, fonts
+        case services, factDefinitions, sourceControlProviders, serviceDependencies, companions, themes, fonts
         case localizations, networkGrants
     }
 
@@ -110,6 +114,10 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         factDefinitions = try container.decodeIfPresent(
             [ExtensionFactDefinition].self,
             forKey: .factDefinitions
+        ) ?? []
+        sourceControlProviders = try container.decodeIfPresent(
+            [ExtensionSourceControlProviderDefinition].self,
+            forKey: .sourceControlProviders
         ) ?? []
         serviceDependencies = try container.decodeIfPresent(
             [ExtensionServiceDependency].self,
@@ -294,6 +302,33 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             issues.append(.init(
                 path: "factDefinitions",
                 message: "must declare at least one definition for 'facts.provide'"
+            ))
+        }
+
+        var seenSourceControlProviderIDs: Set<String> = []
+        for (index, provider) in sourceControlProviders.enumerated() {
+            let path = "sourceControlProviders[\(index)]"
+            issues.append(contentsOf: provider.validationIssues(path: path))
+            if !seenSourceControlProviderIDs.insert(provider.id).inserted {
+                issues.append(.init(path: "\(path).id", message: "duplicates '\(provider.id)'"))
+            }
+        }
+        if sourceControlProviders.count > ExtensionSourceControlProviderDefinition.maximumCount {
+            issues.append(.init(
+                path: "sourceControlProviders",
+                message: "must contain at most \(ExtensionSourceControlProviderDefinition.maximumCount) providers"
+            ))
+        }
+        if !sourceControlProviders.isEmpty, !capabilities.contains(.sourceControlRead) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'source-control.read' when source-control providers are declared"
+            ))
+        }
+        if capabilities.contains(.sourceControlRead), sourceControlProviders.isEmpty {
+            issues.append(.init(
+                path: "sourceControlProviders",
+                message: "must declare at least one provider for 'source-control.read'"
             ))
         }
 
@@ -649,6 +684,9 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let secrets = Self(rawValue: "storage.secrets")
     public static let networkClient = Self(rawValue: "network.client")
     public static let networkBrokered = Self(rawValue: "network.brokered")
+    /// Permission to answer host-owned, read-only change-request queries and make connection-
+    /// scoped broker requests. It grants neither local Git access nor forge mutation.
+    public static let sourceControlRead = Self(rawValue: "source-control.read")
 }
 
 public enum ExtensionIdentifierRules {

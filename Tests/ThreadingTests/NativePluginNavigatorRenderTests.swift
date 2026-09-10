@@ -98,6 +98,68 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
         settle(content)
         let host = try waitForNativeHost(in: controller)
         XCTAssertNotNil(host.loaded, "the production host did not retain the bundled plugin")
+        let selectedProject = try XCTUnwrap(
+            ProjectStore.shared.project(forSessionID: fixture.selectedSession.id)
+        )
+        host.receive(PluginWorkspaceUpdate(
+            revision: 10_000,
+            items: [PluginWorkspaceItem(
+                identity: .init(
+                    kind: .session,
+                    identifier: fixture.selectedSession.id.uuidString.lowercased()
+                ),
+                parentIdentity: .init(
+                    kind: .project,
+                    identifier: selectedProject.id.uuidString.lowercased()
+                ),
+                title: fixture.selectedSession.displayTitle,
+                detail: fixture.selectedSession.kind.displayName,
+                branch: fixture.selectedSession.branch,
+                activity: .idle,
+                lastActiveAt: fixture.selectedSession.lastUsedAt,
+                changeRequest: PluginWorkspaceChangeRequest(
+                    providerName: "Forgejo",
+                    changeRequestName: "pull request",
+                    number: 128,
+                    title: "Keep provider status inside the native navigator",
+                    webURL: try XCTUnwrap(URL(
+                        string: "https://forge.example/threading/app/pulls/128"
+                    )),
+                    lifecycle: .draft,
+                    successfulChecks: 6,
+                    activeChecks: 1,
+                    approvals: 2,
+                    reviewsRequested: 1
+                )
+            )]
+        ))
+        settle(content)
+        var changeRequestLabel: NSTextField?
+        try waitUntil("native navigator did not present the change-request status") {
+            settle(content)
+            changeRequestLabel = self.viewDescendants(of: host.view)
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue.contains("#128") }
+            return changeRequestLabel != nil
+        }
+        let statusLabel = try XCTUnwrap(changeRequestLabel)
+        let statusRow = try XCTUnwrap(
+            viewAncestors(of: statusLabel)
+                .compactMap { $0 as? NSTableRowView }
+                .first
+        )
+        XCTAssertFalse(statusLabel.isHidden)
+        XCTAssertGreaterThan(statusLabel.visibleRect.height, 0)
+        XCTAssertTrue(statusRow.bounds.contains(statusLabel.convert(statusLabel.bounds, to: statusRow)))
+        let expectedStatusRowHeight = ceil(
+            Design.Typography.lineHeight(of: Design.Typography.detail())
+                + Design.Spacing.small
+                + Design.Typography.lineHeight(of: Design.Typography.subheading())
+                + Design.Spacing.tight
+                + Design.Typography.lineHeight(of: Design.Typography.caption())
+                + Design.Spacing.inset * 2
+        )
+        XCTAssertEqual(statusRow.bounds.height, expectedStatusRowHeight, accuracy: 1)
         let sidebarWidth = try XCTUnwrap(
             controller.splitViewController.splitViewItems.first?.viewController.view.bounds.width
         )
@@ -292,5 +354,15 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
 
     private func viewDescendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + viewDescendants(of: $0) }
+    }
+
+    private func viewAncestors(of view: NSView) -> [NSView] {
+        var result: [NSView] = []
+        var ancestor = view.superview
+        while let current = ancestor {
+            result.append(current)
+            ancestor = current.superview
+        }
+        return result
     }
 }

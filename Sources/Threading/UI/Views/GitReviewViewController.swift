@@ -609,6 +609,13 @@ final class GitReviewViewController: NSViewController {
             else { return }
             self.renderChangeRequestBar()
         }
+        appEvents.observe(SourceControlProviderConnectionsDidChange.self) { [weak self] _ in
+            guard let self else { return }
+            self.refreshChangeRequest(
+                in: URL(fileURLWithPath: self.folderPath, isDirectory: true),
+                forceRemote: true
+            )
+        }
         appEvents.observe(GitTurnCheckpointsDidChange.self) { [weak self] event in
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshModePresentation()

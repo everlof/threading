@@ -29,6 +29,7 @@ final class NativePluginWorkspaceNavigatorHostViewController: NSViewController {
         initialSnapshot: PluginWorkspaceSnapshot,
         activate: @escaping (PluginWorkspaceItemIdentity) -> Bool,
         perform: @escaping (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool,
+        visibleItemsDidChange: @escaping ([PluginWorkspaceItemIdentity]) -> Void = { _ in },
         loadPlugin: LoadPlugin? = nil,
         onUnavailable: @escaping (PluginLoadFailure) -> Void
     ) {
@@ -37,7 +38,8 @@ final class NativePluginWorkspaceNavigatorHostViewController: NSViewController {
             navigatorIdentifier: descriptor.navigatorID,
             initialSnapshot: initialSnapshot,
             activate: activate,
-            perform: perform
+            perform: perform,
+            visibleItemsDidChange: visibleItemsDidChange
         )
         self.loadPlugin = loadPlugin
         self.onUnavailable = onUnavailable

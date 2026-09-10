@@ -22,6 +22,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let nativeActivationHandler: (PluginWorkspaceItemIdentity) -> Bool
     private let nativeActionHandler:
         (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool
+    private let nativeVisibilityHandler: ([PluginWorkspaceItemIdentity]) -> Void
     private let nativePluginLoader:
         NativePluginWorkspaceNavigatorHostViewController.LoadPlugin?
     private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
@@ -60,6 +61,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
             @escaping (PluginWorkspaceAction, PluginWorkspaceItemIdentity) -> Bool = { _, _ in
                 false
             },
+        nativeVisibilityHandler: @escaping ([PluginWorkspaceItemIdentity]) -> Void = { _ in },
         nativePluginLoader: NativePluginWorkspaceNavigatorHostViewController.LoadPlugin? = nil,
         contextProvider: @escaping WorkspaceNavigatorHostViewController.ContextProvider,
         destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler,
@@ -85,6 +87,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         self.nativeSnapshotSource = nativeSnapshotSource
         self.nativeActivationHandler = nativeActivationHandler
         self.nativeActionHandler = nativeActionHandler
+        self.nativeVisibilityHandler = nativeVisibilityHandler
         self.nativePluginLoader = nativePluginLoader
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
@@ -94,6 +97,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         self.intentHandler = intentHandler
         self.onSelectNative = onSelectNative
         super.init(nibName: nil, bundle: nil)
+        nativeSnapshotSource.onSessionSummaryChange = { [weak self] sessionID in
+            self?.sessionDidChange(sessionID)
+        }
     }
 
     @available(*, unavailable)
@@ -253,6 +259,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 ),
                 activate: nativeActivationHandler,
                 perform: nativeActionHandler,
+                visibleItemsDidChange: nativeVisibilityHandler,
                 loadPlugin: nativePluginLoader,
                 onUnavailable: { [weak self] failure in
                     self?.failBack(nativeDescriptor: descriptor, failure: failure)

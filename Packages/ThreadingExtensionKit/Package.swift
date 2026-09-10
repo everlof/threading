@@ -50,6 +50,10 @@ let package = Package(
             targets: ["GitLabStateExtensionExample"]
         ),
         .executable(
+            name: "ForgejoSourceControlExtensionExample",
+            targets: ["ForgejoSourceControlExtensionExample"]
+        ),
+        .executable(
             name: "ActivityInboxExtensionExample",
             targets: ["ActivityInboxExtensionExample"]
         ),
@@ -170,6 +174,24 @@ let package = Package(
             exclude: ["Support", "threading-extension.json"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),
+        // A complete third-party forge adapter: Threading owns connection metadata, credentials,
+        // remote matching and the HTTPS broker; this Wasm-safe process owns Forgejo JSON only.
+        .target(
+            name: "ForgejoSourceControlExtensionSupport",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/ForgejoSourceControlExtension/Support",
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        .executableTarget(
+            name: "ForgejoSourceControlExtensionExample",
+            dependencies: [
+                "ThreadingExtensionKit",
+                "ForgejoSourceControlExtensionSupport"
+            ],
+            path: "Examples/ForgejoSourceControlExtension",
+            exclude: ["Support", "threading-extension.json"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
         // The acceptance example for host-evaluated navigator pipelines. Its process publishes
         // one immutable declaration; filtering, calendar buckets, sorting, search, row
         // realization and session routing all remain inside Threading.
@@ -235,6 +257,7 @@ let package = Package(
                 "ThreadingExtensionKit",
                 "ThreadingExtensionPolicy",
                 "GitLabStateExtensionSupport",
+                "ForgejoSourceControlExtensionSupport",
                 "ActivityInboxExtensionSupport",
                 "T3SidebarExtensionSupport"
             ]

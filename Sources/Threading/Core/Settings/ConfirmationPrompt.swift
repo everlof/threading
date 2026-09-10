@@ -91,6 +91,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case endOrphanedAgentProcesses
     /// Spends one provider-issued credit. The capacity may return, but the credit cannot.
     case consumeBankedUsageReset
+    case removeSourceControlConnection
 
     // MARK: Security grants
 
@@ -109,6 +110,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case controlSimulatorDevice
     case linkDeviceLogTap
     case runNativePlugin
+    case connectSourceControlProvider
 
     // MARK: Software updates
 
@@ -271,6 +273,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              // The provider consumes this credit permanently. Even if a future window would
              // have reset on its own, Threading cannot put the banked credit back.
              .consumeBankedUsageReset,
+             .removeSourceControlConnection,
              // Regranting authority is possible, but the complete supervision graph this
              // operation closes has no one-step restore in the app. Default to Cancel like
              // the other broad removals whose recovery requires rebuilding state by hand.
@@ -304,6 +307,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              // Nothing about it is reversible by removing a file afterwards, and it is the one
              // grant where a suppressed prompt would mean a folder became an install path.
              .runNativePlugin,
+             .connectSourceControlProvider,
              // Storing a test credential is the moment an origin gains the right to be signed
              // in to unattended, so it belongs with the other grants rather than with the
              // reversible edits: removing the entry later does not un-ring whatever an agent

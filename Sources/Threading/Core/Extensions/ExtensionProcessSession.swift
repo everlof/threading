@@ -9,6 +9,7 @@ enum ExtensionProcessError: LocalizedError {
     case commandTimedOut(String)
     case settingsTimedOut
     case serviceTimedOut(String)
+    case sourceControlTimedOut(String)
     case toolTimedOut(String)
     case outputLineTooLarge(maximum: Int)
     case invalidMessage(String)
@@ -23,6 +24,7 @@ enum ExtensionProcessError: LocalizedError {
         actualID: String,
         actualVersion: Int
     )
+    case responseSourceControlMismatch(expected: String, actual: String)
     case processEnded(status: Int32, message: String)
     case outputClosed
     case notRunning
@@ -42,6 +44,8 @@ enum ExtensionProcessError: LocalizedError {
             return "The extension took too long to apply a settings change."
         case .serviceTimedOut(let service):
             return "The extension took too long to handle service “\(service)”."
+        case .sourceControlTimedOut(let provider):
+            return "The extension took too long to read source-control provider “\(provider)”."
         case .toolTimedOut(let tool):
             return "The extension took too long to run MCP tool “\(tool)”."
         case .outputLineTooLarge(let maximum):
@@ -67,6 +71,8 @@ enum ExtensionProcessError: LocalizedError {
             let actualVersion
         ):
             return "The extension service response named \(actualID) v\(actualVersion) instead of \(expectedID) v\(expectedVersion)."
+        case .responseSourceControlMismatch(let expected, let actual):
+            return "The extension source-control response named \(actual) instead of \(expected)."
         case .processEnded(let status, let message):
             let diagnostic = message.isEmpty ? "No diagnostic was written." : message
             return "The extension exited with status \(status): \(diagnostic)"
@@ -116,6 +122,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
     ) -> Void
     typealias ServiceCompletion = @MainActor @Sendable (
         Result<ExtensionServiceResponse, Error>
+    ) -> Void
+    typealias SourceControlCompletion = @MainActor @Sendable (
+        Result<ExtensionSourceControlResponse, Error>
     ) -> Void
     typealias ToolCompletion = @MainActor @Sendable (
         Result<ExtensionMCPToolResponse, Error>
@@ -169,6 +178,12 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let timeoutItem: DispatchWorkItem
     }
 
+    private struct PendingSourceControl {
+        let providerID: String
+        let completion: SourceControlCompletion
+        let timeoutItem: DispatchWorkItem
+    }
+
     private struct ResponseEnvelope: Decodable {
         let requestID: String
     }
@@ -201,6 +216,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     private var pendingCommands: [String: PendingCommand] = [:]
     private var pendingSettings: [String: PendingSettings] = [:]
     private var pendingServices: [String: PendingService] = [:]
+    private var pendingSourceControl: [String: PendingSourceControl] = [:]
     private var pendingTools: [String: PendingTool] = [:]
     private var isStopped = false
     private var terminalError: Error?
@@ -777,6 +793,79 @@ final class ExtensionProcessSession: @unchecked Sendable {
         }
     }
 
+    func invokeSourceControl(
+        providerID: String,
+        connectionID: String,
+        operation: ExtensionSourceControlOperation,
+        repository: ExtensionSourceControlRepository? = nil,
+        changeRequestNumber: Int? = nil,
+        requestID: String = UUID().uuidString.lowercased(),
+        timeout: TimeInterval = defaultTimeout,
+        completion: @escaping SourceControlCompletion
+    ) {
+        let request = ExtensionSourceControlRequest(
+            requestID: requestID,
+            providerID: providerID,
+            connectionID: connectionID,
+            operation: operation,
+            repository: repository,
+            changeRequestNumber: changeRequestNumber
+        )
+        do {
+            try request.validate()
+            guard bundle.manifest.sourceControlProviders.contains(where: { $0.id == providerID })
+            else {
+                throw ExtensionProcessError.invalidMessage(
+                    "source-control provider “\(providerID)” is not declared"
+                )
+            }
+            var encoded = try JSONEncoder().encode(request)
+            encoded.append(0x0A)
+            let timeoutItem = DispatchWorkItem { [weak self] in
+                self?.timeOutSourceControl(requestID: requestID)
+            }
+            let pending = PendingSourceControl(
+                providerID: providerID,
+                completion: completion,
+                timeoutItem: timeoutItem
+            )
+
+            lock.lock()
+            guard !isStopped, child.isRunning else {
+                lock.unlock()
+                deliverSourceControl(.failure(ExtensionProcessError.notRunning), to: completion)
+                return
+            }
+            guard requestIDIsAvailableLocked(requestID) else {
+                lock.unlock()
+                deliverSourceControl(.failure(ExtensionProcessError.invalidMessage(
+                    "request id “\(requestID)” is already pending"
+                )), to: completion)
+                return
+            }
+            pendingSourceControl[requestID] = pending
+            lock.unlock()
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + timeout,
+                execute: timeoutItem
+            )
+            writeQueue.async { [weak self] in
+                guard let self else { return }
+                do {
+                    try self.stdin.fileHandleForWriting.write(contentsOf: encoded)
+                } catch {
+                    self.finish(
+                        with: ExtensionProcessError.writeFailed(error.localizedDescription),
+                        terminate: true
+                    )
+                }
+            }
+        } catch {
+            deliverSourceControl(.failure(error), to: completion)
+        }
+    }
+
     func updateSettings(
         values: [String: ExtensionJSONValue],
         requestID: String = UUID().uuidString.lowercased(),
@@ -964,6 +1053,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
             }
             if hasPendingService(requestID: envelope.requestID) {
                 try handleServiceResponse(data)
+                return
+            }
+            if hasPendingSourceControl(requestID: envelope.requestID) {
+                try handleSourceControlResponse(data)
                 return
             }
 
@@ -1353,6 +1446,51 @@ final class ExtensionProcessSession: @unchecked Sendable {
         return pendingServices[requestID] != nil
     }
 
+    private func handleSourceControlResponse(_ data: Data) throws {
+        let response = try JSONDecoder().decode(ExtensionSourceControlResponse.self, from: data)
+        try response.validate()
+        guard let pending = takePendingSourceControl(requestID: response.requestID) else {
+            finish(
+                with: ExtensionProcessError.responseForUnknownRequest(response.requestID),
+                terminate: true
+            )
+            return
+        }
+        guard response.providerID == pending.providerID else {
+            deliverSourceControl(
+                .failure(ExtensionProcessError.responseSourceControlMismatch(
+                    expected: pending.providerID,
+                    actual: response.providerID
+                )),
+                to: pending.completion
+            )
+            return
+        }
+        deliverSourceControl(.success(response), to: pending.completion)
+    }
+
+    private func timeOutSourceControl(requestID: String) {
+        guard let pending = takePendingSourceControl(requestID: requestID) else { return }
+        deliverSourceControl(
+            .failure(ExtensionProcessError.sourceControlTimedOut(pending.providerID)),
+            to: pending.completion
+        )
+    }
+
+    private func takePendingSourceControl(requestID: String) -> PendingSourceControl? {
+        lock.lock()
+        let pending = pendingSourceControl.removeValue(forKey: requestID)
+        lock.unlock()
+        pending?.timeoutItem.cancel()
+        return pending
+    }
+
+    private func hasPendingSourceControl(requestID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingSourceControl[requestID] != nil
+    }
+
     private func timeOutTool(requestID: String) {
         guard let tool = takePendingTool(requestID: requestID) else { return }
         deliverTool(
@@ -1382,6 +1520,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
             && pendingCommands[requestID] == nil
             && pendingSettings[requestID] == nil
             && pendingServices[requestID] == nil
+            && pendingSourceControl[requestID] == nil
             && pendingTools[requestID] == nil
             && pendingAttachmentPreviews[requestID] == nil
     }
@@ -1416,6 +1555,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let commands: [PendingCommand]
         let settings: [PendingSettings]
         let services: [PendingService]
+        let sourceControl: [PendingSourceControl]
         let tools: [PendingTool]
         let previews: [PendingAttachmentPreview]
         let observer: (@MainActor @Sendable (Error) -> Void)?
@@ -1441,6 +1581,8 @@ final class ExtensionProcessSession: @unchecked Sendable {
         pendingSettings.removeAll()
         services = Array(pendingServices.values)
         pendingServices.removeAll()
+        sourceControl = Array(pendingSourceControl.values)
+        pendingSourceControl.removeAll()
         tools = Array(pendingTools.values)
         pendingTools.removeAll()
         previews = Array(pendingAttachmentPreviews.values)
@@ -1469,6 +1611,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
         services.forEach {
             $0.timeoutItem.cancel()
             deliverService(.failure(error), to: $0.completion)
+        }
+        sourceControl.forEach {
+            $0.timeoutItem.cancel()
+            deliverSourceControl(.failure(error), to: $0.completion)
         }
         tools.forEach {
             $0.timeoutItem.cancel()
@@ -1553,6 +1699,13 @@ final class ExtensionProcessSession: @unchecked Sendable {
         Task { @MainActor in
             completion(result)
         }
+    }
+
+    private func deliverSourceControl(
+        _ result: Result<ExtensionSourceControlResponse, Error>,
+        to completion: @escaping SourceControlCompletion
+    ) {
+        Task { @MainActor in completion(result) }
     }
 
     private var lockedStartupResult: Result<ExtensionRegistration, Error>? {

@@ -315,15 +315,17 @@ final class PluginContractTests: XCTestCase {
         )
     }
 
-    /// V4 makes the pane selector optional. A new host can still run a v3 pane plugin, while a v3
-    /// host's exact generation check refuses navigator-only v4 code before selector dispatch.
+    /// V5 adds the bounded change-request summary and visibility-interest callback. A new host can
+    /// still run a v3 pane plugin, while an older host's exact generation check refuses newer code
+    /// before selector dispatch.
     func testTheAPIVersionCompatibilityWindowPreservesV3PanePlugins() {
-        XCTAssertEqual(ThreadingPluginAPI.version, 4)
+        XCTAssertEqual(ThreadingPluginAPI.version, 5)
         XCTAssertEqual(ThreadingPluginAPI.minimumSupportedVersion, 3)
         XCTAssertFalse(ThreadingPluginAPI.supports(2))
         XCTAssertTrue(ThreadingPluginAPI.supports(3))
         XCTAssertTrue(ThreadingPluginAPI.supports(4))
-        XCTAssertFalse(ThreadingPluginAPI.supports(5))
+        XCTAssertTrue(ThreadingPluginAPI.supports(5))
+        XCTAssertFalse(ThreadingPluginAPI.supports(6))
     }
 
     /// Version 2 added `encodedTheme`, which is how a plugin linking `ThreadingDesignKit` gets the

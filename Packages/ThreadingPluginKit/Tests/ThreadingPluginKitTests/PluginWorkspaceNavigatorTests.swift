@@ -151,6 +151,98 @@ final class PluginWorkspaceNavigatorTests: XCTestCase {
         XCTAssertEqual(mutation?.1.identifier, "session")
     }
 
+    func testChangeRequestSummaryCarriesOnlyBoundedProviderNeutralState() {
+        let url = URL(string: "https://forge.example/team/project/pulls/42")!
+        let summary = PluginWorkspaceChangeRequest(
+            providerName: "Forgejo",
+            changeRequestName: "pull request",
+            number: 42,
+            title: "Keep navigator provider-neutral",
+            webURL: url,
+            lifecycle: .draft,
+            successfulChecks: 3,
+            nonBlockingChecks: 1,
+            activeChecks: 2,
+            checksNeedingAttention: 1,
+            unknownChecks: 1,
+            checksAreIncomplete: true,
+            approvals: 2,
+            changesRequested: 1,
+            reviewsRequested: 3
+        )
+        let row = PluginWorkspaceItem(
+            identity: identity("session", kind: .session),
+            title: "Session",
+            changeRequest: summary
+        )
+
+        XCTAssertTrue(row.changeRequest === summary)
+        XCTAssertEqual(summary.providerName, "Forgejo")
+        XCTAssertEqual(summary.number, 42)
+        XCTAssertEqual(summary.webURL, url)
+        XCTAssertEqual(summary.lifecycle, .draft)
+        XCTAssertEqual(summary.successfulChecks, 3)
+        XCTAssertEqual(summary.checksNeedingAttention, 1)
+        XCTAssertEqual(summary.approvals, 2)
+        XCTAssertEqual(summary.reviewsRequested, 3)
+    }
+
+    func testVisibleInterestIsDeduplicatedBoundedAndLimitedToLiveSessions() {
+        let liveItems = (0..<200).map { item("session-\($0)", kind: .session) }
+        let contextItems = liveItems + [item("project", kind: .project)]
+        var delivered: [PluginWorkspaceItemIdentity] = []
+        let context = PluginWorkspaceNavigatorContext(
+            navigatorIdentifier: "focused",
+            initialSnapshot: PluginWorkspaceSnapshot(
+                revision: 1,
+                items: contextItems,
+                selectedItemIdentity: nil
+            ),
+            activate: { _ in false },
+            perform: { _, _ in false },
+            visibleItemsDidChange: { delivered = $0 }
+        )
+
+        let requested = [
+            identity("project", kind: .project),
+            identity("missing", kind: .session),
+            identity("session-0", kind: .session),
+            identity("session-0", kind: .session),
+        ] + (1..<124).map { identity("session-\($0)", kind: .session) }
+        XCTAssertTrue(context.setVisibleItemIdentities(requested))
+
+        XCTAssertEqual(delivered.count, 124)
+        XCTAssertEqual(delivered.first?.identifier, "session-0")
+        XCTAssertTrue(delivered.allSatisfy { $0.kind == .session })
+
+        let oversized = (0...PluginWorkspaceNavigatorContext.maximumVisibleItemCount).map {
+            identity("session-\($0)", kind: .session)
+        }
+        XCTAssertFalse(context.setVisibleItemIdentities(oversized))
+        XCTAssertEqual(delivered.first?.identifier, "session-0")
+    }
+
+    func testRepeatedVisibleInterestDoesNotNotifyTheHostAgain() {
+        var deliveries = 0
+        let session = item("session", kind: .session)
+        let context = PluginWorkspaceNavigatorContext(
+            navigatorIdentifier: "focused",
+            initialSnapshot: PluginWorkspaceSnapshot(
+                revision: 1,
+                items: [session],
+                selectedItemIdentity: nil
+            ),
+            activate: { _ in false },
+            perform: { _, _ in false },
+            visibleItemsDidChange: { _ in deliveries += 1 }
+        )
+
+        context.setVisibleItemIdentities([session.identity])
+        context.setVisibleItemIdentities([session.identity])
+
+        XCTAssertEqual(deliveries, 1)
+    }
+
     func testObserverCanBeReplacedAndStopped() {
         let context = context(items: [])
         var first = 0

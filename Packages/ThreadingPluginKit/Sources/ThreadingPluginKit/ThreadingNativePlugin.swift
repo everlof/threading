@@ -13,7 +13,10 @@ public enum ThreadingPluginAPI {
     /// formerly required selector becomes optional.** An ordinary optional addition and a new
     /// stored property on a payload class remain additive under library evolution.
     ///
-    /// Version 4 made the pane factory optional so a navigator-only plugin is valid. The new host
+    /// Version 5 added the callable visible-row interest selector. That selector cannot share v4:
+    /// a v5 plugin may call it, and an older host has no implementation to dispatch to. The
+    /// payload-only change-request summary and action case remain additive, but ship in the same
+    /// generation. Version 4 made the pane factory optional so a navigator-only plugin is valid. The new host
     /// still accepts version 3 pane plugins, whose required selector remains present. An old v3
     /// host rejects a v4 navigator-only plugin by generation before it can send that now-optional
     /// selector unconditionally.
@@ -28,7 +31,7 @@ public enum ThreadingPluginAPI {
     /// Host-side symbols are not the contract at all. `PluginLoader` and `PluginLoadFailure` live
     /// here because the host and its tests need them, but nothing a plugin compiles against
     /// depends on their shape.
-    public static let version = 4
+    public static let version = 5
     public static let minimumSupportedVersion = 3
 
     public static func supports(_ version: Int) -> Bool {

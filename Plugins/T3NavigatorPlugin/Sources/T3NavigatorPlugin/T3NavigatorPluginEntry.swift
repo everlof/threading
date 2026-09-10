@@ -16,7 +16,7 @@ public final class T3NavigatorPlugin: NSObject, ThreadingNativePlugin {
     }
 
     // This is the generation the bundle was compiled against, not the host's live value.
-    public static let pluginAPIVersion = 4
+    public static let pluginAPIVersion = 5
 
     public var pluginIdentifier: String { "codes.threading.plugin.t3navigator" }
 

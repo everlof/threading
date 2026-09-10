@@ -45,6 +45,7 @@ final class T3NavigatorRow: ObservableObject, Identifiable {
     @Published private(set) var isPinned: Bool
     @Published private(set) var isArchived: Bool
     @Published private(set) var lastActiveAt: Date?
+    @Published private(set) var changeRequest: PluginWorkspaceChangeRequest?
     @Published private(set) var isSelected: Bool
 
     init(item: PluginWorkspaceItem, ordinal: Int, isSelected: Bool) {
@@ -59,6 +60,7 @@ final class T3NavigatorRow: ObservableObject, Identifiable {
         isPinned = item.isPinned
         isArchived = item.isArchived
         lastActiveAt = item.lastActiveAt
+        changeRequest = item.changeRequest
         self.isSelected = isSelected
     }
 
@@ -72,6 +74,7 @@ final class T3NavigatorRow: ObservableObject, Identifiable {
         isPinned = item.isPinned
         isArchived = item.isArchived
         lastActiveAt = item.lastActiveAt
+        changeRequest = item.changeRequest
     }
 
     func setSelected(_ selected: Bool) {
@@ -195,6 +198,15 @@ final class T3NavigatorStore: ObservableObject {
     func archive(_ row: T3NavigatorRow) {
         guard !row.isArchived else { return }
         _ = context.perform(action: .archive, identity: row.identity)
+    }
+
+    @discardableResult
+    func openChangeRequest(_ row: T3NavigatorRow) -> Bool {
+        context.perform(action: .openChangeRequest, identity: row.identity)
+    }
+
+    func reportVisibleRows(_ rows: [T3NavigatorRow]) {
+        _ = context.setVisibleItemIdentities(rows.map(\.identity))
     }
 
     private func replace(with snapshot: PluginWorkspaceSnapshot) {

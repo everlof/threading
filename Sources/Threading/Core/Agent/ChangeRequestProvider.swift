@@ -1,60 +1,180 @@
 import Foundation
+import ThreadingExtensionKit
 
-enum SourceControlProvider: String, Codable, CaseIterable, Sendable {
-    case github
-    case gitlab
+struct SourceControlProvider: RawRepresentable, Codable, Hashable, Sendable {
+    let rawValue: String
+    let descriptor: SourceControlProviderDescriptor
+    let extensionIdentifier: String?
+
+    static let github = SourceControlProvider(
+        rawValue: "github",
+        descriptor: .github,
+        extensionIdentifier: nil
+    )
+    static let gitlab = SourceControlProvider(
+        rawValue: "gitlab",
+        descriptor: .gitlab,
+        extensionIdentifier: nil
+    )
+    static let allCases: [SourceControlProvider] = [.github, .gitlab]
+
+    init(rawValue: String) {
+        self.init(
+            rawValue: rawValue,
+            descriptor: Self.builtInDescriptor(rawValue: rawValue) ?? .unknown(rawValue),
+            extensionIdentifier: nil
+        )
+    }
+
+    init(
+        rawValue: String,
+        descriptor: SourceControlProviderDescriptor,
+        extensionIdentifier: String?
+    ) {
+        self.rawValue = rawValue
+        self.descriptor = descriptor
+        self.extensionIdentifier = extensionIdentifier
+    }
+
+    static func extensionProvider(
+        extensionIdentifier: String,
+        definition: ExtensionSourceControlProviderDefinition
+    ) -> SourceControlProvider {
+        SourceControlProvider(
+            rawValue: "extension:\(extensionIdentifier):\(definition.id)",
+            descriptor: SourceControlProviderDescriptor(definition: definition),
+            extensionIdentifier: extensionIdentifier
+        )
+    }
+
+    private static func builtInDescriptor(rawValue: String) -> SourceControlProviderDescriptor? {
+        switch rawValue {
+        case "github": return .github
+        case "gitlab": return .gitlab
+        default: return nil
+        }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.rawValue == rhs.rawValue }
+
+    func hash(into hasher: inout Hasher) { hasher.combine(rawValue) }
+
+    init(from decoder: Decoder) throws {
+        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 
     var displayName: String {
-        switch self {
-        case .github: return "GitHub"
-        case .gitlab: return "GitLab"
-        }
+        descriptor.displayName
     }
 
     var changeRequestName: String {
-        switch self {
-        case .github: return L10n.string("pull request")
-        case .gitlab: return L10n.string("merge request")
-        }
+        descriptor.changeRequestName
     }
 
     var changeRequestTitle: String {
-        switch self {
-        case .github: return L10n.string("Pull request")
-        case .gitlab: return L10n.string("Merge request")
-        }
+        descriptor.changeRequestTitle
     }
 
     var changeRequestPluralName: String {
-        switch self {
-        case .github: return L10n.string("pull requests")
-        case .gitlab: return L10n.string("merge requests")
-        }
+        descriptor.changeRequestPluralName
     }
 
     var capabilities: SourceControlProviderCapabilities {
-        switch self {
-        case .github:
-            return SourceControlProviderCapabilities(
-                createsDrafts: true,
-                createsReadyRequests: true,
-                reportsChecks: true,
-                reportsApprovals: true,
-                reportsChangesRequested: true,
-                hasBrowserCreationFallback: true,
-                supportsSelfHosted: false
-            )
-        case .gitlab:
-            return SourceControlProviderCapabilities(
-                createsDrafts: true,
-                createsReadyRequests: true,
-                reportsChecks: true,
-                reportsApprovals: true,
+        descriptor.capabilities
+    }
+}
+
+struct SourceControlProviderDescriptor: Equatable, Sendable {
+    let displayName: String
+    let changeRequestName: String
+    let changeRequestTitle: String
+    let changeRequestPluralName: String
+    let capabilities: SourceControlProviderCapabilities
+
+    init(
+        displayName: String,
+        changeRequestName: String,
+        changeRequestTitle: String,
+        changeRequestPluralName: String,
+        capabilities: SourceControlProviderCapabilities
+    ) {
+        self.displayName = displayName
+        self.changeRequestName = changeRequestName
+        self.changeRequestTitle = changeRequestTitle
+        self.changeRequestPluralName = changeRequestPluralName
+        self.capabilities = capabilities
+    }
+
+    static let github = SourceControlProviderDescriptor(
+        displayName: "GitHub",
+        changeRequestName: L10n.string("pull request"),
+        changeRequestTitle: L10n.string("Pull request"),
+        changeRequestPluralName: L10n.string("pull requests"),
+        capabilities: SourceControlProviderCapabilities(
+            createsDrafts: true,
+            createsReadyRequests: true,
+            reportsChecks: true,
+            reportsApprovals: true,
+            reportsChangesRequested: true,
+            hasBrowserCreationFallback: true,
+            supportsSelfHosted: false
+        )
+    )
+
+    static let gitlab = SourceControlProviderDescriptor(
+        displayName: "GitLab",
+        changeRequestName: L10n.string("merge request"),
+        changeRequestTitle: L10n.string("Merge request"),
+        changeRequestPluralName: L10n.string("merge requests"),
+        capabilities: SourceControlProviderCapabilities(
+            createsDrafts: true,
+            createsReadyRequests: true,
+            reportsChecks: true,
+            reportsApprovals: true,
+            reportsChangesRequested: false,
+            hasBrowserCreationFallback: false,
+            supportsSelfHosted: false
+        )
+    )
+
+    init(definition: ExtensionSourceControlProviderDefinition) {
+        displayName = definition.displayName
+        changeRequestName = definition.changeRequestName
+        changeRequestTitle = definition.changeRequestName.prefix(1).uppercased()
+            + String(definition.changeRequestName.dropFirst())
+        changeRequestPluralName = definition.changeRequestPluralName
+        capabilities = SourceControlProviderCapabilities(
+            createsDrafts: false,
+            createsReadyRequests: false,
+            reportsChecks: definition.reportsChecks,
+            reportsApprovals: definition.reportsApprovals,
+            reportsChangesRequested: definition.reportsChangesRequested,
+            hasBrowserCreationFallback: false,
+            supportsSelfHosted: true
+        )
+    }
+
+    fileprivate static func unknown(_ rawValue: String) -> SourceControlProviderDescriptor {
+        SourceControlProviderDescriptor(
+            displayName: rawValue,
+            changeRequestName: L10n.string("change request"),
+            changeRequestTitle: L10n.string("Change request"),
+            changeRequestPluralName: L10n.string("change requests"),
+            capabilities: SourceControlProviderCapabilities(
+                createsDrafts: false,
+                createsReadyRequests: false,
+                reportsChecks: false,
+                reportsApprovals: false,
                 reportsChangesRequested: false,
                 hasBrowserCreationFallback: false,
-                supportsSelfHosted: false
+                supportsSelfHosted: true
             )
-        }
+        )
     }
 }
 
@@ -79,6 +199,21 @@ struct ChangeRequestRepository: Equatable, Sendable {
     let host: String
     let namespace: String
     let name: String
+    let connectionID: String?
+
+    init(
+        provider: SourceControlProvider,
+        host: String,
+        namespace: String,
+        name: String,
+        connectionID: String? = nil
+    ) {
+        self.provider = provider
+        self.host = host
+        self.namespace = namespace
+        self.name = name
+        self.connectionID = connectionID
+    }
 
     var slug: String { "\(namespace)/\(name)" }
     var capabilities: SourceControlProviderCapabilities { provider.capabilities }
@@ -479,6 +614,24 @@ struct ChangeRequestChecks: Equatable, Sendable {
     var skipped: Int { count(of: .skipped) }
     var pending: Int { count(disposition: .active) }
     var failed: Int { count(disposition: .needsAttention) }
+    var unknown: Int {
+        buckets.reduce(0) { partial, bucket in
+            switch bucket.outcome {
+            case .unknownActive, .unknownTerminal: partial + bucket.count
+            default: partial
+            }
+        }
+    }
+
+    func unknownCount(disposition: ChangeRequestCheckOutcome.Disposition) -> Int {
+        buckets.reduce(0) { partial, bucket in
+            guard bucket.outcome.disposition == disposition else { return partial }
+            switch bucket.outcome {
+            case .unknownActive, .unknownTerminal: return partial + bucket.count
+            default: return partial
+            }
+        }
+    }
 
     func count(of outcome: ChangeRequestCheckOutcome) -> Int {
         buckets.first { $0.outcome == outcome }?.count ?? 0
@@ -552,6 +705,13 @@ struct ChangeRequestReviews: Equatable, Sendable {
     static let empty = ChangeRequestReviews(approvals: 0, changesRequested: 0, requested: 0)
 }
 
+enum ChangeRequestSummaryLifecycle: Equatable, Sendable {
+    case open
+    case draft
+    case merged
+    case closed
+}
+
 struct ChangeRequestSummary: Equatable, Sendable {
     let number: Int
     var title: String
@@ -564,6 +724,35 @@ struct ChangeRequestSummary: Equatable, Sendable {
     var headRevision: String
     var checks: ChangeRequestChecks
     var reviews: ChangeRequestReviews
+    var lifecycle: ChangeRequestSummaryLifecycle
+
+    init(
+        number: Int,
+        title: String,
+        body: String,
+        url: URL,
+        isDraft: Bool,
+        isMerged: Bool,
+        baseBranch: String,
+        headBranch: String,
+        headRevision: String,
+        checks: ChangeRequestChecks,
+        reviews: ChangeRequestReviews,
+        lifecycle: ChangeRequestSummaryLifecycle? = nil
+    ) {
+        self.number = number
+        self.title = title
+        self.body = body
+        self.url = url
+        self.isDraft = isDraft
+        self.isMerged = isMerged
+        self.baseBranch = baseBranch
+        self.headBranch = headBranch
+        self.headRevision = headRevision
+        self.checks = checks
+        self.reviews = reviews
+        self.lifecycle = lifecycle ?? (isMerged ? .merged : (isDraft ? .draft : .open))
+    }
 }
 
 struct ChangeRequestRepositoryStatus: Equatable, Sendable {
@@ -630,12 +819,8 @@ enum ChangeRequestProviderReadiness: Equatable, Sendable {
     case unavailable(message: String)
 }
 
-protocol ChangeRequestProviderClient: Sendable {
+protocol ChangeRequestReadProvider: Sendable {
     var provider: SourceControlProvider { get }
-
-    func automaticCreationReadiness(
-        repository: ChangeRequestRepository
-    ) async -> ChangeRequestProviderReadiness
     func discover(
         repository: ChangeRequestRepository,
         branch: String,
@@ -645,24 +830,41 @@ protocol ChangeRequestProviderClient: Sendable {
         repository: ChangeRequestRepository,
         number: Int
     ) async -> ChangeRequestLifecycleOutcome
+}
+
+protocol ChangeRequestWriteProvider: Sendable {
+    var provider: SourceControlProvider { get }
+    func automaticCreationReadiness(
+        repository: ChangeRequestRepository
+    ) async -> ChangeRequestProviderReadiness
     func create(
         repository: ChangeRequestRepository,
         proposal: ChangeRequestProposal
     ) async -> ChangeRequestWriteOutcome
 }
 
+protocol ChangeRequestProviderClient: ChangeRequestReadProvider, ChangeRequestWriteProvider {}
+
 /// The forge boundary used by Git Review and managed workspaces. It contains only the operations
 /// those two workflows share today; local Git push/ref work remains in `ChangeRequestGit`.
 struct ChangeRequestProviderRegistry: Sendable {
-    private let github: any ChangeRequestProviderClient
-    private let gitlab: any ChangeRequestProviderClient
+    private let readers: [SourceControlProvider: any ChangeRequestReadProvider]
+    private let writers: [SourceControlProvider: any ChangeRequestWriteProvider]
 
     init(
         github: any ChangeRequestProviderClient,
         gitlab: any ChangeRequestProviderClient
     ) {
-        self.github = github
-        self.gitlab = gitlab
+        readers = [.github: github, .gitlab: gitlab]
+        writers = [.github: github, .gitlab: gitlab]
+    }
+
+    init(
+        readers: [SourceControlProvider: any ChangeRequestReadProvider],
+        writers: [SourceControlProvider: any ChangeRequestWriteProvider]
+    ) {
+        self.readers = readers
+        self.writers = writers
     }
 
     @MainActor
@@ -676,7 +878,13 @@ struct ChangeRequestProviderRegistry: Sendable {
     func automaticCreationReadiness(
         repository: ChangeRequestRepository
     ) async -> ChangeRequestProviderReadiness {
-        await client(for: repository).automaticCreationReadiness(repository: repository)
+        guard let writer = writers[repository.provider] else {
+            return .unavailable(message: L10n.format(
+                "%@ provides read-only change-request status.",
+                repository.provider.displayName
+            ))
+        }
+        return await writer.automaticCreationReadiness(repository: repository)
     }
 
     func discover(
@@ -684,7 +892,10 @@ struct ChangeRequestProviderRegistry: Sendable {
         branch: String,
         headRevision: String
     ) async -> ChangeRequestReadOutcome {
-        await client(for: repository).discover(
+        guard let reader = reader(for: repository) else {
+            return .failed(message: L10n.string("The source-control provider is unavailable."))
+        }
+        return await reader.discover(
             repository: repository,
             branch: branch,
             headRevision: headRevision
@@ -695,20 +906,58 @@ struct ChangeRequestProviderRegistry: Sendable {
         repository: ChangeRequestRepository,
         number: Int
     ) async -> ChangeRequestLifecycleOutcome {
-        await client(for: repository).lifecycle(repository: repository, number: number)
+        guard let reader = reader(for: repository) else {
+            return .failed(message: L10n.string("The source-control provider is unavailable."))
+        }
+        return await reader.lifecycle(repository: repository, number: number)
     }
 
     func create(
         repository: ChangeRequestRepository,
         proposal: ChangeRequestProposal
     ) async -> ChangeRequestWriteOutcome {
-        await client(for: repository).create(repository: repository, proposal: proposal)
+        guard let writer = writers[repository.provider] else {
+            return .failed(message: L10n.format(
+                "%@ provides read-only change-request status.",
+                repository.provider.displayName
+            ))
+        }
+        return await writer.create(repository: repository, proposal: proposal)
     }
 
-    private func client(for repository: ChangeRequestRepository) -> any ChangeRequestProviderClient {
-        switch repository.provider {
-        case .github: return github
-        case .gitlab: return gitlab
-        }
+    @MainActor
+    func repository(remote: String) -> ChangeRequestRemoteDetection {
+        let builtIn = ChangeRequestRepository.detect(remote: remote)
+        if case .supported = builtIn { return builtIn }
+        guard let identity = GitRemoteIdentity(remote: remote),
+              let connection = SourceControlProviderConnectionStore.shared.connection(
+                remoteHost: identity.host
+              ),
+              let inventory = ExtensionManager.shared.sourceControlProviderInventory.first(where: {
+                $0.extensionIdentifier == connection.extensionIdentifier
+                    && $0.provider.id == connection.providerID
+              }) else { return builtIn }
+        let components = identity.path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count >= 2, let name = components.last else { return .unrecognized }
+        let provider = SourceControlProvider.extensionProvider(
+            extensionIdentifier: inventory.extensionIdentifier,
+            definition: inventory.provider
+        )
+        return .supported(ChangeRequestRepository(
+            provider: provider,
+            host: identity.host,
+            namespace: components.dropLast().joined(separator: "/"),
+            name: String(name),
+            connectionID: connection.id
+        ))
+    }
+
+    private func reader(
+        for repository: ChangeRequestRepository
+    ) -> (any ChangeRequestReadProvider)? {
+        if let reader = readers[repository.provider] { return reader }
+        guard repository.provider.extensionIdentifier != nil,
+              repository.connectionID != nil else { return nil }
+        return ExtensionChangeRequestProviderClient(provider: repository.provider)
     }
 }

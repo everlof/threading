@@ -48,6 +48,23 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
             rootURL: workspace.appendingPathComponent("Host", isDirectory: true)
         )
         _ = try store.install(from: source)
+        let defaultsSuite = "ThreadingExtensionsSettingsRender.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defaults.removePersistentDomain(forName: defaultsSuite)
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let connectionStore = SourceControlProviderConnectionStore(
+            defaults: defaults,
+            secrets: RenderSourceControlSecrets()
+        )
+        try connectionStore.upsert(SourceControlProviderConnection(
+            id: "forgejo-render",
+            extensionIdentifier: "com.example.local-build-notes",
+            providerID: "forgejo",
+            remoteHost: "code.example",
+            baseOrigin: "https://code.example",
+            apiPathPrefix: "/api/v1",
+            authenticationKind: .authorizationToken
+        ), credential: Data("render-token".utf8))
         var written = 0
         let renders: [(String, AppTheme, NSAppearance.Name)] = [
             ("system-light", .system, .aqua),
@@ -58,7 +75,11 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
         for (name, theme, appearanceName) in renders {
             AppThemePalette.set(theme)
             let data = try XCTUnwrap(
-                pageImage(store: store, appearance: appearanceName),
+                pageImage(
+                    store: store,
+                    connectionStore: connectionStore,
+                    appearance: appearanceName
+                ),
                 "no Extensions image for \(name)"
             )
             try data.write(to: Render.directory.appendingPathComponent(
@@ -73,6 +94,7 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
     @MainActor
     private func pageImage(
         store: ExtensionPackageStore,
+        connectionStore: SourceControlProviderConnectionStore,
         appearance name: NSAppearance.Name
     ) -> Data? {
         let appearance = NSAppearance(named: name)
@@ -85,7 +107,11 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
             defer { defaults.removePersistentDomain(forName: suite) }
             let trust = AgentExtensionInstallTrustStore(defaults: defaults)
             trust.allow(SessionID(uuidString: "00000000-0000-0000-0000-000000000001")!, name: "Build Tools development")
-            let controller = ExtensionsPreferencesViewController(manager: manager, installTrust: trust)
+            let controller = ExtensionsPreferencesViewController(
+                manager: manager,
+                installTrust: trust,
+                sourceControlConnectionStore: connectionStore
+            )
             let host = self.laidOut(controller.view)
             host.appearance = appearance
             controller.view.appearance = appearance
@@ -141,7 +167,36 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
             version: "1.2.0",
             runtime: .native,
             executable: "bin/local-build-notes",
-            capabilities: [.commands]
+            capabilities: [.commands, .sourceControlRead],
+            sourceControlProviders: [.init(
+                id: "forgejo",
+                displayName: "Forgejo",
+                changeRequestName: "pull request",
+                changeRequestPluralName: "pull requests",
+                apiPathPrefix: "/api/v1",
+                authenticationKinds: [.authorizationToken, .none]
+            )]
         )).write(to: root.appendingPathComponent(ExtensionBundleInspector.manifestName))
+    }
+}
+
+private final class RenderSourceControlSecrets: ExtensionSecretStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: [String: Data]] = [:]
+
+    func data(extensionIdentifier: String, key: String) throws -> Data? {
+        lock.withLock { values[extensionIdentifier]?[key] }
+    }
+
+    func setData(_ data: Data, extensionIdentifier: String, key: String) throws {
+        lock.withLock { values[extensionIdentifier, default: [:]][key] = data }
+    }
+
+    func remove(extensionIdentifier: String, key: String) throws {
+        lock.withLock { values[extensionIdentifier]?[key] = nil }
+    }
+
+    func keys(extensionIdentifier: String) throws -> [String] {
+        lock.withLock { values[extensionIdentifier]?.keys.sorted() ?? [] }
     }
 }

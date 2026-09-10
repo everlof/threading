@@ -15,6 +15,7 @@ public enum ExtensionContributionKind: String, Codable, CaseIterable, Hashable, 
     case providerIcons
     case accountIcons
     case sessionIdentity
+    case sourceControl
 
     public var displayName: String {
         switch self {
@@ -28,6 +29,7 @@ public enum ExtensionContributionKind: String, Codable, CaseIterable, Hashable, 
         case .providerIcons: return "Provider icons"
         case .accountIcons: return "Account icons"
         case .sessionIdentity: return "Session identity"
+        case .sourceControl: return "Source-control provider"
         }
     }
 }
@@ -93,6 +95,9 @@ public extension ExtensionManifest {
         if capabilities.contains(.sessionIdentityRenderer) {
             result.insert(.sessionIdentity)
         }
+        if capabilities.contains(.sourceControlRead) {
+            result.insert(.sourceControl)
+        }
         return result
     }
 
@@ -119,6 +124,8 @@ public extension ExtensionManifest {
             return .component
         case [.workspaceNavigation]:
             return .navigator
+        case [.sourceControl]:
+            return .service
         default:
             return .hybrid
         }

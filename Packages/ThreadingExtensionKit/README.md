@@ -11,6 +11,7 @@ The package contains:
 - statically inspectable, host-rendered Settings pages and built-in-page sections;
 - versioned, manifest-declared extension services brokered without shared storage;
 - versioned, domain-keyed fact providers with bounded atomic publication;
+- read-only hosted-Git provider adapters with host-owned connections, credentials, and HTTPS;
 - host-scoped persistent key-value and disposable cache storage;
 - a tokenized host client for atomic component and primitive identity publications plus safe
   project/session/provider/account snapshots, separately gated session-runtime telemetry, and
@@ -50,6 +51,7 @@ swift test
 swift run HelloStatusExtensionExample --threading-register
 swift run HelloStatusConsumerExtensionExample --threading-register
 swift run GitLabStateExtensionExample --threading-register
+swift run ForgejoSourceControlExtensionExample --threading-register
 swift run ActivityInboxExtensionExample --threading-register
 swift run T3SidebarExtensionExample --threading-register
 ```
@@ -129,6 +131,15 @@ concurrency ceiling, two-page repository limit, and 128-fact repository limit bo
 work and retained generation state. Authoritative refreshes replace complete repository scopes;
 transient or truncated refreshes preserve the last observation so the host, not the provider,
 decides when it is stale.
+
+`source-control.read` is the provider-adapter boundary for a forge Threading does not know. The
+manifest and live registration repeat exact provider definitions; the host maps an exact Git
+remote host to one user-approved connection, keeps its credential in Keychain, and accepts only
+bounded `GET`/`HEAD` requests below the declared API path on that exact HTTPS origin. The provider
+receives repository coordinates and returns normalized lifecycle, checks, and reviews; it receives
+neither a checkout path nor a token. `Examples/ForgejoSourceControlExtension` is the complete
+reference. See
+[`docs/extensions/SOURCE_CONTROL_PROVIDERS.md`](../docs/extensions/SOURCE_CONTROL_PROVIDERS.md).
 
 Component customization is connected end to end. A process declaring `ui.components` receives a
 short-lived host URL and bearer token, then uses `ExtensionHostClient` to atomically replace its

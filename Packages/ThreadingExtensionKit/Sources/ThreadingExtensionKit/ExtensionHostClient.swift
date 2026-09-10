@@ -368,6 +368,33 @@ public struct ExtensionHostClient: Sendable {
         return response
     }
 
+    /// Performs one read beneath a host-configured source-control connection.
+    ///
+    /// The call names an opaque connection and an API-relative path. Threading selects the exact
+    /// approved HTTPS origin, checks provider ownership and path scope, and attaches the Keychain
+    /// credential. The raw secret is never returned to this process.
+    public func sourceControlFetch(
+        _ call: ExtensionSourceControlFetchRequest
+    ) async throws -> ExtensionSourceControlFetchResponse {
+        try call.validate()
+        let data = try await request(
+            path: "source-control/fetch",
+            method: "POST",
+            body: JSONEncoder().encode(call)
+        )
+        let result = try decode(ExtensionSourceControlFetchResult.self, from: data)
+        guard result.protocolVersion == ExtensionSourceControlFetchResult.currentProtocolVersion
+        else { throw ExtensionHostClientError.invalidResponse }
+        if let failure = result.failure { throw failure }
+        guard let response = result.response,
+              (100...599).contains(response.status),
+              response.bodyBase64.count
+                <= ExtensionBrokeredNetwork.maximumResponseBodyBytes * 4 / 3 + 4 else {
+            throw ExtensionHostClientError.invalidResponse
+        }
+        return response
+    }
+
     /// Returns opaque Keychain data owned by this extension, or nil when the key is absent.
     public func secretData(forKey key: String) async throws -> Data? {
         try ExtensionSecretConstraints.validate(key: key)

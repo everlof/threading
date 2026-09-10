@@ -63,7 +63,8 @@ public enum ThreadingExtensionAPI {
         // Host-brokered: every fetch happens in Threading, checked against the manifest's
         // declared origin grants, with Threading's own credential resolution when a grant names
         // a provider. The guest still gains no socket and never sees a token.
-        .networkBrokered
+        .networkBrokered,
+        .sourceControlRead
     ]
 
     /// The component contracts frozen with SDK v1. A component evolves by adding a new contract

@@ -18,6 +18,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case installFirstParty
         case updateFirstParty
         case openFirstPartySource
+        case addSourceControlConnection
+        case removeSourceControlConnection
     }
 
     private struct ControlAction {
@@ -55,6 +57,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case firstPartyEntry(Int)
         case installedCaption
         case identityResolvers
+        case sourceControlCaption
+        case sourceControlConnection(Int)
+        case sourceControlAction
         case inventoryProblem
         case emptyInventory
         case packageHeader(Int)
@@ -69,6 +74,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private let firstPartyCatalog: FirstPartyExtensionCatalog
     private let identityRegistry: ExtensionIdentityResolverRegistry
     private let componentRegistry: ComponentCustomizationRegistry?
+    private let sourceControlConnectionStore: SourceControlProviderConnectionStore
     private let appEvents = AppEventObservations()
     private var pageView: SettingsPageView?
     private var controlActions: [ObjectIdentifier: ControlAction] = [:]
@@ -82,6 +88,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private var providerCandidates: [String] = []
     private var accountCandidates: [String] = []
     private var sessionCandidates: [String] = []
+    private var sourceControlConnections: [SourceControlProviderConnection] = []
+    private var sourceControlProviders: [ExtensionSourceControlProviderInventoryItem] = []
     private var extensionSections: [ExtensionSettingsSectionModel] = []
     private var presentationRows: [PresentationRow] = []
 
@@ -133,7 +141,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
         firstPartyCatalog: FirstPartyExtensionCatalog? = nil,
         identityRegistry: ExtensionIdentityResolverRegistry? = nil,
         componentRegistry: ComponentCustomizationRegistry? = nil,
-        installTrust: AgentExtensionInstallTrustStore? = nil
+        installTrust: AgentExtensionInstallTrustStore? = nil,
+        sourceControlConnectionStore: SourceControlProviderConnectionStore? = nil
     ) {
         self.installTrust = installTrust ?? .shared
         self.manager = manager ?? .shared
@@ -142,6 +151,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         self.componentRegistry = componentRegistry
             ?? ComponentCustomizationProviderSlot.shared.provider
                 as? ComponentCustomizationRegistry
+        self.sourceControlConnectionStore = sourceControlConnectionStore ?? .shared
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -173,6 +183,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
             guard event.targets == nil || event.targets?.contains(where: {
                 $0.component == .sidebarSessionIdentity
             }) == true else { return }
+            self?.render()
+        }
+        appEvents.observe(SourceControlProviderConnectionsDidChange.self) { [weak self] _ in
             self?.render()
         }
     }
@@ -233,6 +246,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         sessionCandidates = componentRegistry?.replacementCandidates(
             for: .sidebarSessionIdentity
         ) ?? []
+        sourceControlConnections = sourceControlConnectionStore.connections
+            .sorted { $0.remoteHost.localizedCaseInsensitiveCompare($1.remoteHost) == .orderedAscending }
+        sourceControlProviders = manager.sourceControlProviderInventory
         extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .extensions)
         expandedExtensions.formIntersection(installedExtensions.map(\.identifier))
         trustedAgents = installTrust.grants
@@ -284,6 +300,14 @@ final class ExtensionsPreferencesViewController: NSViewController {
             || accountCandidates.count > 1
             || sessionCandidates.count > 1 {
             rows.append(.identityResolvers)
+        }
+        if installedExtensions.contains(where: { !$0.sourceControlProviders.isEmpty })
+            || !sourceControlConnections.isEmpty {
+            rows.append(.sourceControlCaption)
+            rows.append(contentsOf: sourceControlConnections.indices.map {
+                .sourceControlConnection($0)
+            })
+            rows.append(.sourceControlAction)
         }
         if inventoryProblem != nil {
             rows.append(.inventoryProblem)
@@ -444,6 +468,216 @@ final class ExtensionsPreferencesViewController: NSViewController {
                 identifier,
                 for: .sidebarSessionIdentity
             )
+        }
+    }
+
+    private struct SourceControlProviderChoice {
+        let extensionIdentifier: String
+        let extensionName: String
+        let provider: ExtensionSourceControlProviderDefinition
+        let authentication: ExtensionSourceControlAuthenticationKind
+    }
+
+    private var sourceControlProviderChoices: [SourceControlProviderChoice] {
+        sourceControlProviders.flatMap { item in
+            item.provider.authenticationKinds.map { authentication in
+                SourceControlProviderChoice(
+                    extensionIdentifier: item.extensionIdentifier,
+                    extensionName: item.extensionName,
+                    provider: item.provider,
+                    authentication: authentication
+                )
+            }
+        }
+    }
+
+    private func sourceControlConnectionRow(
+        _ connection: SourceControlProviderConnection
+    ) -> NSView {
+        let remove = SettingsUI.button(
+            "Remove…",
+            target: self,
+            action: #selector(removeSourceControlConnection(_:))
+        )
+        remove.setAccessibilityIdentifier(
+            "settings.extensions.source-control.remove.\(connection.id)"
+        )
+        remember(remove, action: .removeSourceControlConnection, identifier: connection.id)
+
+        let installed = installedExtensions.first {
+            $0.identifier == connection.extensionIdentifier
+        }
+        let definition = installed?.sourceControlProviders.first {
+            $0.id == connection.providerID
+        }
+        let providerName = definition?.displayName ?? connection.providerID
+        let status = sourceControlProviders.contains {
+            $0.extensionIdentifier == connection.extensionIdentifier
+                && $0.provider.id == connection.providerID
+        } ? L10n.string("Running") : L10n.string("Extension unavailable")
+        let subtitle = L10n.format(
+            "%@ through %@ · %@",
+            providerName,
+            installed?.name ?? connection.extensionIdentifier,
+            status
+        )
+        return SettingsUI.row(
+            title: connection.remoteHost,
+            subtitle: subtitle,
+            control: remove,
+            localizes: false
+        )
+    }
+
+    private func sourceControlActionRow() -> NSView {
+        let add = SettingsUI.button(
+            "Connect…",
+            target: self,
+            action: #selector(addSourceControlConnection(_:))
+        )
+        add.isEnabled = !sourceControlProviderChoices.isEmpty
+        add.setAccessibilityIdentifier("settings.extensions.source-control.connect")
+        remember(add, action: .addSourceControlConnection, identifier: "connect")
+        return SettingsUI.row(
+            title: "Add a provider connection",
+            subtitle: sourceControlProviderChoices.isEmpty
+                ? L10n.string("Enable an installed source-control extension to connect its provider.")
+                : L10n.string(
+                    "A connection matches one exact Git remote host. Credentials stay in your Keychain."
+                ),
+            control: add
+        )
+    }
+
+    @objc private func addSourceControlConnection(_ sender: ThemedButton) {
+        guard identifier(for: sender, action: .addSourceControlConnection) != nil,
+              let window = view.window else { return }
+        let choices = sourceControlProviderChoices
+        guard !choices.isEmpty else { return }
+
+        let provider = ThemedPopUp()
+        for choice in choices {
+            provider.addItem(withTitle: L10n.format(
+                "%@ · %@",
+                choice.provider.displayName,
+                localizedName(choice.authentication)
+            ))
+        }
+        provider.setAccessibilityLabel(L10n.string("Provider and authentication"))
+
+        let origin = ThemedTextField()
+        origin.placeholderString = L10n.string("https://forge.example.com")
+        origin.setAccessibilityLabel(L10n.string("Server URL"))
+        let username = ThemedTextField()
+        username.placeholderString = L10n.string("Username for basic authentication, when required")
+        username.setAccessibilityLabel(L10n.string("Username"))
+        let credential = ThemedSecureField()
+        credential.placeholderString = L10n.string("Access token, unless anonymous")
+        credential.setAccessibilityLabel(L10n.string("Access token"))
+
+        let fields = NSStackView(views: [provider, origin, username, credential])
+        fields.orientation = .vertical
+        fields.alignment = .leading
+        fields.spacing = Design.Spacing.small
+        for field in [provider, origin, username, credential] as [NSView] {
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        }
+
+        let request = ConfirmationRequest(
+            prompt: .connectSourceControlProvider,
+            title: L10n.string("Connect Source Control"),
+            message: L10n.string(
+                "Threading will attach this credential only to read requests below the provider's declared API path on this exact HTTPS server. The extension never receives the credential."
+            ),
+            confirmTitle: L10n.string("Connect"),
+            style: .informational,
+            accessory: fields
+        )
+        ConfirmationAlert.ask(request, in: window) { [weak self] confirmed in
+            guard let self, confirmed,
+                  choices.indices.contains(provider.indexOfSelectedItem) else { return }
+            let choice = choices[provider.indexOfSelectedItem]
+            do {
+                let canonical = try self.canonicalSourceControlOrigin(origin.stringValue)
+                let trimmedUsername = username.stringValue.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+                let connection = SourceControlProviderConnection(
+                    extensionIdentifier: choice.extensionIdentifier,
+                    providerID: choice.provider.id,
+                    remoteHost: canonical.host,
+                    baseOrigin: canonical.origin,
+                    apiPathPrefix: choice.provider.apiPathPrefix,
+                    authenticationKind: choice.authentication,
+                    username: choice.authentication == .basicUsernameToken
+                        && !trimmedUsername.isEmpty ? trimmedUsername : nil
+                )
+                let token = credential.stringValue.data(using: .utf8)
+                try self.sourceControlConnectionStore.upsert(
+                    connection,
+                    credential: choice.authentication == .none ? nil : token
+                )
+            } catch {
+                self.present(error: error)
+            }
+        }
+    }
+
+    @objc private func removeSourceControlConnection(_ sender: ThemedButton) {
+        guard let id = identifier(for: sender, action: .removeSourceControlConnection),
+              let connection = sourceControlConnections.first(where: { $0.id == id }) else {
+            return
+        }
+        let request = ConfirmationRequest(
+            prompt: .removeSourceControlConnection,
+            title: L10n.format("Remove the connection to %@?", connection.remoteHost),
+            message: L10n.string(
+                "Threading will delete its saved credential from your Keychain. Reconnecting requires the token again."
+            ),
+            confirmTitle: L10n.string("Remove")
+        )
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] confirmed in
+            guard let self, confirmed else { return }
+            do {
+                try self.sourceControlConnectionStore.remove(id: id)
+            } catch {
+                self.present(error: error)
+            }
+        }
+    }
+
+    private func canonicalSourceControlOrigin(
+        _ rawValue: String
+    ) throws -> (host: String, origin: String) {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              let host = components.host?.lowercased(),
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil,
+              components.path.isEmpty || components.path == "/" else {
+            throw SourceControlProviderConnectionError.invalid(L10n.string("HTTPS server URL"))
+        }
+        var canonical = URLComponents()
+        canonical.scheme = "https"
+        canonical.host = host
+        canonical.port = components.port
+        guard let origin = canonical.url?.absoluteString else {
+            throw SourceControlProviderConnectionError.invalid(L10n.string("HTTPS server URL"))
+        }
+        return (host, origin)
+    }
+
+    private func localizedName(
+        _ authentication: ExtensionSourceControlAuthenticationKind
+    ) -> String {
+        switch authentication {
+        case .none: L10n.string("Anonymous")
+        case .bearerToken: L10n.string("Bearer token")
+        case .authorizationToken: L10n.string("Authorization token")
+        case .basicUsernameToken: L10n.string("Username and token")
         }
     }
 
@@ -640,6 +874,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case .providerIcons: L10n.string("Provider icons")
         case .accountIcons: L10n.string("Account icons")
         case .sessionIdentity: L10n.string("Session identity")
+        case .sourceControl: L10n.string("Source-control provider")
         }
     }
 
@@ -1155,6 +1390,15 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return SettingsUI.caption("Installed")
         case .identityResolvers:
             return identityResolverSection() ?? NSView()
+        case .sourceControlCaption:
+            return SettingsUI.caption("Source control")
+        case .sourceControlConnection(let connectionIndex):
+            guard sourceControlConnections.indices.contains(connectionIndex) else {
+                return NSView()
+            }
+            return sourceControlConnectionRow(sourceControlConnections[connectionIndex])
+        case .sourceControlAction:
+            return sourceControlActionRow()
         case .inventoryProblem:
             return SettingsUI.section(
                 "Installed",
@@ -1345,6 +1589,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
         var packageBounds: [Int: (first: Int, last: Int)] = [:]
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
         var firstPartyBounds: (first: Int, last: Int)?
+        var sourceControlBounds: (first: Int, last: Int)?
         for (rowIndex, row) in presentationRows.enumerated() {
             switch row {
             case .firstPartyEntry:
@@ -1368,8 +1613,16 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem, .firstPartyCaption, .installedCaption,
-                 .identityResolvers,
+            case .sourceControlConnection, .sourceControlAction:
+                if var bounds = sourceControlBounds {
+                    bounds.last = rowIndex
+                    sourceControlBounds = bounds
+                } else {
+                    sourceControlBounds = (rowIndex, rowIndex)
+                }
+            case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem,
+                 .firstPartyCaption, .installedCaption, .identityResolvers,
+                 .sourceControlCaption,
                  .inventoryProblem, .emptyInventory, .extensionCaption:
                 break
             }
@@ -1381,6 +1634,15 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                 rows: firstPartyBounds.first...firstPartyBounds.last,
                 topInset: 0,
                 bottomInset: firstPartyBounds.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            ))
+        }
+        if let sourceControlBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: sourceControlBounds.first...sourceControlBounds.last,
+                topInset: 0,
+                bottomInset: sourceControlBounds.last == presentationRows.count - 1
                     ? Design.Spacing.large
                     : 0
             ))
@@ -1409,7 +1671,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
 
     private func topInset(for row: PresentationRow) -> CGFloat {
         switch row {
-        case .packageDetail, .firstPartyEntry:
+        case .packageDetail, .firstPartyEntry, .sourceControlConnection, .sourceControlAction:
             return 0
         case .extensionField(let sectionIndex, let fieldIndex):
             guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
@@ -1418,8 +1680,9 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return extensionSections[sectionIndex].visibleTitle == nil
                 ? Design.Spacing.large
                 : 0
-        case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem, .firstPartyCaption, .installedCaption,
-             .identityResolvers, .inventoryProblem, .emptyInventory, .packageHeader,
+        case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem,
+             .firstPartyCaption, .installedCaption, .identityResolvers,
+             .sourceControlCaption, .inventoryProblem, .emptyInventory, .packageHeader,
              .extensionCaption:
             return Design.Spacing.large
         }
@@ -1434,6 +1697,9 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return Design.Spacing.small
         }
         if case .installedCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
+        if case .sourceControlCaption = presentationRows[row] {
             return Design.Spacing.small
         }
         return row == presentationRows.count - 1 ? Design.Spacing.large : 0

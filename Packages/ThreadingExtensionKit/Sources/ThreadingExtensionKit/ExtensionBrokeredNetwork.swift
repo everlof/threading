@@ -27,7 +27,8 @@ public enum ExtensionBrokeredNetwork {
     /// Headers the broker owns or that would smuggle authority; requests naming one are
     /// refused rather than silently rewritten.
     public static let deniedRequestHeaders: Set<String> = [
-        "authorization", "cookie", "host", "content-length", "proxy-authorization"
+        "authorization", "cookie", "host", "content-length", "proxy-authorization",
+        "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"
     ]
     /// Response headers that carry ambient authority rather than data.
     public static let deniedResponseHeaders: Set<String> = ["set-cookie"]

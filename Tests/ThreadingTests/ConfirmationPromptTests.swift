@@ -63,6 +63,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "takeOverSingleInstanceLock",
             "endOrphanedAgentProcesses",
             "consumeBankedUsageReset",
+            "removeSourceControlConnection",
             "grantBrowserOriginAccess",
             "approveSensitiveBrowserAction",
             "approveToolPermission",
@@ -78,6 +79,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "controlSimulatorDevice",
             "linkDeviceLogTap",
             "runNativePlugin",
+            "connectSourceControlProvider",
             "installUpdate",
             "installUpdateAndRelaunch"
         ])

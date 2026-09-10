@@ -877,6 +877,105 @@ final class ExtensionProcessSessionTests: XCTestCase {
         wait(for: [completed], timeout: 2)
     }
 
+    func testPersistentProcessRoutesACorrelatedSourceControlResponse() throws {
+        let provider = ExtensionSourceControlProviderDefinition(
+            id: "forgejo",
+            displayName: "Forgejo",
+            changeRequestName: "pull request",
+            changeRequestPluralName: "pull requests",
+            apiPathPrefix: "/api/v1",
+            authenticationKinds: [.authorizationToken, .none]
+        )
+        let response = ExtensionSourceControlResponse(
+            requestID: "source-control-request",
+            providerID: provider.id,
+            defaultBranch: "main"
+        )
+        let directory = try makeBundle(
+            registration: .init(sourceControlProviders: [provider]),
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory)
+        )
+        defer { started.session.terminate() }
+
+        let completed = expectation(description: "source-control response")
+        started.session.invokeSourceControl(
+            providerID: provider.id,
+            connectionID: "connection-one",
+            operation: .discover,
+            repository: .init(
+                host: "forge.example",
+                namespace: "team",
+                name: "repo",
+                branch: "feature/providers",
+                headRevision: "abc123"
+            ),
+            requestID: response.requestID
+        ) { result in
+            XCTAssertEqual(try? result.get(), response)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+    }
+
+    func testSourceControlResponseMustNameTheInvokedProvider() throws {
+        let provider = ExtensionSourceControlProviderDefinition(
+            id: "forgejo",
+            displayName: "Forgejo",
+            changeRequestName: "pull request",
+            changeRequestPluralName: "pull requests",
+            apiPathPrefix: "/api/v1",
+            authenticationKinds: [.none]
+        )
+        let response = ExtensionSourceControlResponse(
+            requestID: "source-control-mismatch",
+            providerID: "another-provider",
+            serverVersion: "1.0"
+        )
+        let directory = try makeBundle(
+            registration: .init(sourceControlProviders: [provider]),
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory)
+        )
+        defer { started.session.terminate() }
+
+        let completed = expectation(description: "source-control mismatch")
+        started.session.invokeSourceControl(
+            providerID: provider.id,
+            connectionID: "connection-one",
+            operation: .probe,
+            requestID: response.requestID
+        ) { result in
+            guard case .failure(let error) = result,
+                  case .responseSourceControlMismatch(let expected, let actual) =
+                    error as? ExtensionProcessError else {
+                XCTFail("mismatched source-control provider was accepted")
+                completed.fulfill()
+                return
+            }
+            XCTAssertEqual(expected, provider.id)
+            XCTAssertEqual(actual, response.providerID)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+    }
+
     private func makeBundle(
         registration: ExtensionRegistration,
         writesRegistration: Bool = true,
@@ -907,6 +1006,9 @@ final class ExtensionProcessSessionTests: XCTestCase {
         if !registration.workspaceNavigators.isEmpty {
             capabilities.insert(.workspaceNavigation)
         }
+        if !registration.sourceControlProviders.isEmpty {
+            capabilities.insert(.sourceControlRead)
+        }
         capabilities.formUnion(additionalCapabilities)
         if !settings.isEmpty {
             capabilities.insert(.settings)
@@ -922,7 +1024,8 @@ final class ExtensionProcessSessionTests: XCTestCase {
                 ?? registration.workspaceNavigators.filter { $0.pipeline != nil },
             mcpTools: registration.mcpTools,
             settings: settings,
-            services: registration.services
+            services: registration.services,
+            sourceControlProviders: registration.sourceControlProviders
         )
         try JSONEncoder().encode(manifest).write(
             to: root.appendingPathComponent(ExtensionBundleInspector.manifestName)

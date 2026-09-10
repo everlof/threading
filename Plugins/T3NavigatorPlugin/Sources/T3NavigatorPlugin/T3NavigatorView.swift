@@ -121,6 +121,13 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             name: AppThemeDidChange.name,
             object: nil
         )
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(visibleBoundsDidChange),
+            name: NSView.boundsDidChangeNotification,
+            object: scroll.contentView
+        )
         applyThemeMetrics()
     }
 
@@ -138,6 +145,16 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     override func draw(_ dirtyRect: NSRect) {
         Design.Surface.background.setFill()
         dirtyRect.fill()
+    }
+
+    override func layout() {
+        super.layout()
+        reportVisibleRows()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { store.reportVisibleRows([]) }
     }
 
     private func setupViews() {
@@ -216,12 +233,14 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
             }
         }
         items = next
+        applyTableRowMetric()
         table.reloadData()
         projectButton.title = store.selectedProjectTitle
         projectButton.setAccessibilityValue(store.selectedProjectTitle)
         emptyState.isHidden = !items.isEmpty
         scroll.isHidden = items.isEmpty
         synchronizeSelection()
+        DispatchQueue.main.async { [weak self] in self?.reportVisibleRows() }
     }
 
     private func reload(_ model: T3NavigatorRow) {
@@ -272,12 +291,27 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return visible.location..<NSMaxRange(visible)
     }
 
+    private func reportVisibleRows() {
+        let rows = visibleTableRows().compactMap { index -> T3NavigatorRow? in
+            guard index >= 0, index < items.count, case .row(let row) = items[index] else {
+                return nil
+            }
+            return row
+        }
+        store.reportVisibleRows(rows)
+    }
+
+    /// T3's live-thread card is a stable three-band row: project and activity, title, then
+    /// branch and source-control state. A source-control receipt replaces content in the final
+    /// band; it never changes the row's geometry or makes neighbouring threads jump.
     private func rowHeight() -> CGFloat {
         ceil(
-            Design.Typography.lineHeight(of: Design.Typography.subheading())
-                + Design.Spacing.hairline
-                + Design.Typography.lineHeight(of: Design.Typography.detail())
-                + Design.Spacing.small * 2
+            Design.Typography.lineHeight(of: Design.Typography.detail())
+                + Design.Spacing.small
+                + Design.Typography.lineHeight(of: Design.Typography.subheading())
+                + Design.Spacing.tight
+                + Design.Typography.lineHeight(of: Design.Typography.caption())
+                + Design.Spacing.inset * 2
         )
     }
 
@@ -286,9 +320,13 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     private func applyThemeMetrics() {
-        table.rowHeight = rowHeight()
+        applyTableRowMetric()
         projectButton.title = store.selectedProjectTitle
         projectPicker?.applyTheme()
+    }
+
+    private func applyTableRowMetric() {
+        table.rowHeight = rowHeight()
     }
 
     @objc private func themeDidChange() {
@@ -300,6 +338,10 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if let projectPicker {
             AppThemeRefresh.repaint(projectPicker.view)
         }
+    }
+
+    @objc private func visibleBoundsDidChange() {
+        reportVisibleRows()
     }
 
     @objc private func showProjectPicker() {
@@ -350,7 +392,19 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
               let source = table.rowView(atRow: index, makeIfNecessary: false)
         else { return false }
 
-        let entries: [ThemedMenuEntry] = [
+        var entries: [ThemedMenuEntry] = []
+        if let request = row.changeRequest {
+            entries.append(.item(ThemedMenuItem(
+                title: "Open \(request.changeRequestName) #\(request.number)",
+                image: ThemedMenuIcon.symbol("arrow.up.forward.app"),
+                onChoose: { [weak self, weak row] in
+                    guard let row else { return }
+                    _ = self?.store.openChangeRequest(row)
+                }
+            )))
+            entries.append(.separator)
+        }
+        entries.append(contentsOf: [
             .item(ThemedMenuItem(
                 title: row.isPinned ? "Unpin" : "Pin",
                 image: ThemedMenuIcon.symbol(row.isPinned ? "pin.slash" : "pin"),
@@ -367,7 +421,7 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                     self?.store.archive(row)
                 }
             )),
-        ]
+        ])
         contextMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: SidebarDefaults.menuWidth),
             from: source,
@@ -436,7 +490,10 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
                 row: row,
                 projectTitle: store.projectTitle(for: row.projectIdentifier),
                 onPin: { [weak self] row in self?.store.togglePin(row) },
-                onArchive: { [weak self] row in self?.store.archive(row) }
+                onArchive: { [weak self] row in self?.store.archive(row) },
+                onOpenChangeRequest: { [weak self] row in
+                    _ = self?.store.openChangeRequest(row)
+                }
             )
             return cell
         }
@@ -480,6 +537,7 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
     private weak var model: T3NavigatorRow?
     private var onPin: ((T3NavigatorRow) -> Void)?
     private var onArchive: ((T3NavigatorRow) -> Void)?
+    private var onOpenChangeRequest: ((T3NavigatorRow) -> Void)?
     private var isHovered = false
 
     /// AppKit changes this when the table's selection moves between the active accent and its
@@ -489,11 +547,18 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         didSet { updatePresentation() }
     }
 
+    private let projectGlyph = GlyphView()
+    private let projectLabel = NSTextField(labelWithString: "")
+    private let statusSlot = NSView()
     private let activitySlot = NSView()
     private let activityGlyph = GlyphView()
     private let spinner = ThemedSpinner()
+    private let activityLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
-    private let metadataLabel = NSTextField(labelWithString: "")
+    private let branchGlyph = GlyphView()
+    private let branchLabel = NSTextField(labelWithString: "")
+    private let changeRequestGlyph = GlyphView()
+    private let changeRequestLabel = NSTextField(labelWithString: "")
     private let pinButton = ThemedIconButton(
         symbolName: "pin",
         accessibility: "Pin thread",
@@ -508,11 +573,34 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         inkSource: .chrome,
         glyphMaterialization: .deferred
     )
-    private lazy var actionStack = NSStackView(views: [pinButton, archiveButton])
+    private let openChangeRequestButton = ThemedIconButton(
+        symbolName: "arrow.up.forward.app",
+        accessibility: "Open change request",
+        target: .inline,
+        inkSource: .chrome,
+        glyphMaterialization: .deferred
+    )
+    private lazy var actionStack = NSStackView(
+        views: [openChangeRequestButton, pinButton, archiveButton]
+    )
+    private lazy var activityStack = NSStackView(views: [activitySlot, activityLabel])
+    private lazy var projectStack = NSStackView(views: [projectGlyph, projectLabel])
+    private lazy var branchStack = NSStackView(views: [branchGlyph, branchLabel])
+    private lazy var changeRequestStack = NSStackView(
+        views: [changeRequestGlyph, changeRequestLabel]
+    )
+    private var statusWidthConstraint: NSLayoutConstraint?
+    private var areActionsPresented = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupViews()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidUpdate(_:)),
+            name: NSWindow.didUpdateNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -520,15 +608,48 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     private func setupViews() {
+        projectGlyph.setSymbol(
+            "folder",
+            slot: Design.Size.extensionDecorationImage,
+            role: .control,
+            weight: .medium
+        )
+        projectLabel.applyFont(.detail(weight: .medium))
+        projectLabel.lineBreakMode = .byTruncatingTail
+        projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        activityLabel.applyFont(.detail(weight: .medium))
+        activityLabel.lineBreakMode = .byTruncatingTail
+        activityLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
         titleLabel.applyFont(.subheading)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        metadataLabel.applyFont(.detail())
-        metadataLabel.lineBreakMode = .byTruncatingTail
-        metadataLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        branchGlyph.setSymbol(
+            "arrow.triangle.branch",
+            slot: Design.Size.extensionDecorationImage,
+            role: .control,
+            weight: .medium
+        )
+        branchLabel.applyFont(.caption)
+        branchLabel.lineBreakMode = .byTruncatingMiddle
+        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        changeRequestLabel.applyFont(.caption)
+        changeRequestLabel.lineBreakMode = .byTruncatingTail
+        changeRequestLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        changeRequestGlyph.setSymbol(
+            "arrow.triangle.pull",
+            slot: Design.Size.extensionDecorationImage,
+            role: .control,
+            weight: .semibold
+        )
         spinner.translatesAutoresizingMaskIntoConstraints = false
         activityGlyph.translatesAutoresizingMaskIntoConstraints = false
         activitySlot.translatesAutoresizingMaskIntoConstraints = false
@@ -542,40 +663,80 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
             activityGlyph.centerYAnchor.constraint(equalTo: activitySlot.centerYAnchor),
         ])
 
-        let labels = NSStackView(views: [titleLabel, metadataLabel])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setHuggingPriority(.defaultLow, for: .horizontal)
-        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for stack in [activityStack, projectStack, branchStack, changeRequestStack] {
+            stack.orientation = .horizontal
+            stack.alignment = .centerY
+            stack.spacing = Design.Spacing.tight
+        }
+        projectStack.setHuggingPriority(.defaultLow, for: .horizontal)
+        projectStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        branchStack.setHuggingPriority(.defaultLow, for: .horizontal)
+        branchStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        changeRequestStack.setHuggingPriority(.defaultHigh, for: .horizontal)
 
         actionStack.orientation = .horizontal
         actionStack.alignment = .centerY
         actionStack.spacing = Design.Spacing.hairline
+        statusSlot.translatesAutoresizingMaskIntoConstraints = false
+        activityStack.translatesAutoresizingMaskIntoConstraints = false
+        actionStack.translatesAutoresizingMaskIntoConstraints = false
+        statusSlot.addSubview(activityStack)
+        statusSlot.addSubview(actionStack)
+        NSLayoutConstraint.activate([
+            activityStack.leadingAnchor.constraint(greaterThanOrEqualTo: statusSlot.leadingAnchor),
+            activityStack.trailingAnchor.constraint(equalTo: statusSlot.trailingAnchor),
+            activityStack.centerYAnchor.constraint(equalTo: statusSlot.centerYAnchor),
+            actionStack.leadingAnchor.constraint(greaterThanOrEqualTo: statusSlot.leadingAnchor),
+            actionStack.trailingAnchor.constraint(equalTo: statusSlot.trailingAnchor),
+            actionStack.centerYAnchor.constraint(equalTo: statusSlot.centerYAnchor),
+        ])
+        statusWidthConstraint = statusSlot.widthAnchor.constraint(equalTo: activityStack.widthAnchor)
+        statusWidthConstraint?.isActive = true
 
-        let content = NSStackView(views: [activitySlot, labels, actionStack])
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = Design.Spacing.small
+        let topRow = NSStackView(views: [projectStack, statusSlot])
+        topRow.orientation = .horizontal
+        topRow.alignment = .centerY
+        topRow.spacing = Design.Spacing.small
+        projectStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusSlot.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
+        let bottomRow = NSStackView(views: [branchStack, changeRequestStack])
+        bottomRow.orientation = .horizontal
+        bottomRow.alignment = .centerY
+        bottomRow.spacing = Design.Spacing.small
+
+        let content = NSStackView(views: [topRow, titleLabel, bottomRow])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = Design.Spacing.tight
+        content.setCustomSpacing(Design.Spacing.small, after: topRow)
+        content.setHuggingPriority(.defaultLow, for: .horizontal)
+        content.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(
-                greaterThanOrEqualTo: topAnchor,
-                constant: Design.Spacing.small
-            ),
-            content.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor,
-                constant: -Design.Spacing.small
-            ),
-            content.centerYAnchor.constraint(equalTo: centerYAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.inset),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.inset),
             content.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
-                constant: Design.Spacing.inset
+                constant: Design.Spacing.medium
             ),
             content.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
-                constant: -Design.Spacing.small
+                constant: -Design.Spacing.medium
+            ),
+            topRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            titleLabel.widthAnchor.constraint(equalTo: content.widthAnchor),
+            bottomRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            topRow.heightAnchor.constraint(
+                greaterThanOrEqualToConstant: Design.Typography.lineHeight(
+                    of: Design.Typography.detail()
+                )
+            ),
+            bottomRow.heightAnchor.constraint(
+                greaterThanOrEqualToConstant: Design.Typography.lineHeight(
+                    of: Design.Typography.caption()
+                )
             ),
         ])
 
@@ -587,6 +748,10 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
             guard let self, let model = self.model else { return }
             self.onArchive?(model)
         }
+        openChangeRequestButton.onPress = { [weak self] in
+            guard let self, let model = self.model else { return }
+            self.onOpenChangeRequest?(model)
+        }
 
         updateActions()
     }
@@ -595,17 +760,29 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         row: T3NavigatorRow,
         projectTitle: String,
         onPin: @escaping (T3NavigatorRow) -> Void,
-        onArchive: @escaping (T3NavigatorRow) -> Void
+        onArchive: @escaping (T3NavigatorRow) -> Void,
+        onOpenChangeRequest: @escaping (T3NavigatorRow) -> Void
     ) {
         model = row
         self.onPin = onPin
         self.onArchive = onArchive
+        self.onOpenChangeRequest = onOpenChangeRequest
         titleLabel.stringValue = row.title.isEmpty ? "Untitled thread" : row.title
-        metadataLabel.stringValue = metadata(for: row, projectTitle: projectTitle)
+        projectLabel.stringValue = projectTitle
+        let branch = row.branch?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        branchLabel.stringValue = branch
+        branchStack.isHidden = branch.isEmpty
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(titleLabel.stringValue)
-        setAccessibilityValue(metadataLabel.stringValue)
+        configureActivity(row.activity)
+        configureChangeRequest(row.changeRequest)
+        setAccessibilityValue([
+            activityLabel.stringValue,
+            projectLabel.stringValue,
+            branch.isEmpty ? nil : "Branch \(branch)",
+            changeRequestAccessibilityValue(row.changeRequest)
+        ].compactMap { $0 }.joined(separator: ", "))
         setAccessibilityIdentifier("t3.navigator.row.\(row.identity.identifier)")
 
         let pinTitle = row.isPinned ? "Unpin \(titleLabel.stringValue)" : "Pin \(titleLabel.stringValue)"
@@ -615,7 +792,18 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         archiveButton.setSymbol("archivebox", accessibility: "Archive \(titleLabel.stringValue)")
         archiveButton.toolTip = "Archive thread"
         archiveButton.setAccessibilityIdentifier("t3.navigator.archive.\(row.identity.identifier)")
-        configureActivity(row.activity)
+        openChangeRequestButton.setSymbol(
+            "arrow.up.forward.app",
+            accessibility: row.changeRequest.map {
+                "Open \($0.changeRequestName) #\($0.number)"
+            } ?? "Open change request"
+        )
+        openChangeRequestButton.toolTip = row.changeRequest.map {
+            "Open \($0.changeRequestName) #\($0.number)"
+        }
+        openChangeRequestButton.setAccessibilityIdentifier(
+            "t3.navigator.change-request.\(row.identity.identifier)"
+        )
         updatePresentation()
     }
 
@@ -625,8 +813,13 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         model = nil
         onPin = nil
         onArchive = nil
+        onOpenChangeRequest = nil
         isHovered = false
+        areActionsPresented = false
         spinner.isAnimating = false
+        statusWidthConstraint?.isActive = false
+        statusWidthConstraint = statusSlot.widthAnchor.constraint(equalTo: activityStack.widthAnchor)
+        statusWidthConstraint?.isActive = true
         updateActions()
     }
 
@@ -662,11 +855,17 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         updateActions()
     }
 
+    @objc private func windowDidUpdate(_ notification: Notification) {
+        guard notification.object as? NSWindow === window else { return }
+        updateActions()
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         let target = super.hitTest(point)
         guard actionStack.alphaValue == 0,
               let target,
               target === pinButton || target === archiveButton
+                || target === openChangeRequestButton
         else { return target }
         return self
     }
@@ -674,14 +873,24 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
     func updatePresentation() {
         let ink = enclosingRow?.contentInk ?? (model?.isSelected == true ? .selection : .chrome)
         titleLabel.textColor = ink.label
-        metadataLabel.textColor = ink.tertiary
-        activityGlyph.tint = activityColor(for: model?.activity, ink: ink)
+        projectGlyph.tint = ink.tertiary
+        projectLabel.textColor = ink.secondary
+        branchGlyph.tint = ink.quaternary
+        branchLabel.textColor = ink.quaternary
+        let activityInk = activityColor(for: model?.activity, ink: ink)
+        activityGlyph.tint = activityInk
+        activityLabel.textColor = activityInk
+        let requestInk = backgroundStyle == .emphasized
+            ? ink.label : changeRequestColor(model?.changeRequest, ink: ink)
+        changeRequestGlyph.tint = requestInk
+        changeRequestLabel.textColor = requestInk
         // `.selection` describes the active accent fill. An inactive row paints a quiet wash and
         // keeps chrome ink; choosing active-selection ink there makes System's white symbols fade
         // into its pale grey row.
         let selectionGround: InkSource? = backgroundStyle == .emphasized ? .selection : nil
         pinButton.hostGround = selectionGround
         archiveButton.hostGround = selectionGround
+        openChangeRequestButton.hostGround = selectionGround
         spinner.hostGround = selectionGround
         updateActions()
     }
@@ -700,12 +909,26 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
     }
 
     private func updateActions() {
-        let presented = isHovered || enclosingRow?.isSelected == true || model?.isSelected == true
+        let firstResponder = window?.firstResponder as? NSView
+        let actionsHaveFocus = firstResponder?.isDescendant(of: actionStack) == true
+        let presented = model != nil
+            && (isHovered || actionsHaveFocus)
+            && model?.isArchived != true
         if presented {
             pinButton.materializeGlyphIfNeeded()
             archiveButton.materializeGlyphIfNeeded()
+            if model?.changeRequest != nil { openChangeRequestButton.materializeGlyphIfNeeded() }
         }
-        actionStack.alphaValue = presented && model?.isArchived != true ? 1 : 0
+        if areActionsPresented != presented {
+            areActionsPresented = presented
+            statusWidthConstraint?.isActive = false
+            let visibleStack = presented ? actionStack : activityStack
+            statusWidthConstraint = statusSlot.widthAnchor.constraint(equalTo: visibleStack.widthAnchor)
+            statusWidthConstraint?.isActive = true
+        }
+        openChangeRequestButton.isHidden = model?.changeRequest == nil
+        actionStack.alphaValue = presented ? 1 : 0
+        activityStack.alphaValue = presented ? 0 : 1
     }
 
     private func configureActivity(_ activity: PluginWorkspaceActivity) {
@@ -719,12 +942,101 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
             role: .control,
             weight: activity == .needsAttention || activity == .limitReached ? .semibold : .medium
         )
+        activityLabel.stringValue = activityLabel(for: activity)
     }
 
-    private func metadata(for row: T3NavigatorRow, projectTitle: String) -> String {
-        var parts = [activityLabel(for: row.activity), projectTitle]
-        if let branch = row.branch, !branch.isEmpty { parts.append("⌘ \(branch)") }
-        return parts.joined(separator: "  ·  ")
+    private func configureChangeRequest(_ request: PluginWorkspaceChangeRequest?) {
+        guard let request else {
+            changeRequestGlyph.isHidden = true
+            changeRequestLabel.isHidden = true
+            changeRequestLabel.stringValue = ""
+            changeRequestStack.isHidden = true
+            return
+        }
+        changeRequestGlyph.isHidden = false
+        changeRequestLabel.isHidden = false
+        changeRequestStack.isHidden = false
+        var parts = [
+            "#\(request.number)",
+            changeRequestLifecycleLabel(request.lifecycle)
+        ]
+        let checkCount = request.successfulChecks + request.nonBlockingChecks
+            + request.activeChecks + request.checksNeedingAttention + request.unknownChecks
+        if request.checksNeedingAttention > 0 {
+            parts.append("\(request.checksNeedingAttention) failing")
+        } else if request.activeChecks > 0 {
+            parts.append("\(request.activeChecks) running")
+        } else if checkCount > 0 {
+            let suffix = request.checksAreIncomplete ? "+" : ""
+            parts.append("\(request.successfulChecks + request.nonBlockingChecks)/\(checkCount)\(suffix) checks")
+        }
+        if request.changesRequested > 0 {
+            parts.append("\(request.changesRequested) changes")
+        } else if request.approvals > 0 {
+            parts.append("\(request.approvals) approved")
+        } else if request.reviewsRequested > 0 {
+            parts.append("\(request.reviewsRequested) review")
+        }
+        changeRequestLabel.stringValue = parts.joined(separator: " · ")
+    }
+
+    private func changeRequestAccessibilityValue(
+        _ request: PluginWorkspaceChangeRequest?
+    ) -> String? {
+        guard let request else { return nil }
+        var parts = [
+            "\(request.providerName) \(request.changeRequestName) #\(request.number)",
+            changeRequestLifecycleLabel(request.lifecycle)
+        ]
+        let completedChecks = request.successfulChecks + request.nonBlockingChecks
+        let knownChecks = completedChecks + request.activeChecks + request.checksNeedingAttention
+            + request.unknownChecks
+        if knownChecks > 0 {
+            parts.append("\(completedChecks) of \(knownChecks) checks passed")
+        }
+        if request.activeChecks > 0 { parts.append("\(request.activeChecks) checks running") }
+        if request.checksNeedingAttention > 0 {
+            parts.append("\(request.checksNeedingAttention) checks need attention")
+        }
+        if request.approvals > 0 { parts.append("\(request.approvals) approved") }
+        if request.changesRequested > 0 {
+            parts.append("\(request.changesRequested) changes requested")
+        }
+        if request.reviewsRequested > 0 {
+            parts.append("\(request.reviewsRequested) review requested")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func changeRequestLifecycleLabel(
+        _ lifecycle: PluginWorkspaceChangeRequestLifecycle
+    ) -> String {
+        switch lifecycle {
+        case .open: "Open"
+        case .draft: "Draft"
+        case .merged: "Merged"
+        case .closed: "Closed"
+        @unknown default: "Unknown"
+        }
+    }
+
+    private func changeRequestColor(
+        _ request: PluginWorkspaceChangeRequest?,
+        ink: Design.Ink
+    ) -> NSColor {
+        guard let request else { return ink.tertiary }
+        if request.checksNeedingAttention > 0 || request.changesRequested > 0 {
+            return Design.Status.negative
+        }
+        if request.activeChecks > 0 || request.lifecycle == .draft {
+            return Design.Status.warning
+        }
+        switch request.lifecycle {
+        case .open, .merged: return Design.Status.positive
+        case .draft: return Design.Status.warning
+        case .closed: return ink.tertiary
+        @unknown default: return ink.tertiary
+        }
     }
 
     private func activityLabel(for activity: PluginWorkspaceActivity) -> String {

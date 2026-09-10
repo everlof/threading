@@ -1,0 +1,28 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.forgejo-source-control",
+  "name": "Forgejo Source Control",
+  "version": "0.1.0",
+  "dataVersion": 1,
+  "runtime": "webAssembly",
+  "executable": "bin/forgejo-source-control.wasm",
+  "capabilities": [
+    "source-control.read"
+  ],
+  "sourceControlProviders": [
+    {
+      "id": "forgejo",
+      "displayName": "Forgejo",
+      "changeRequestName": "pull request",
+      "changeRequestPluralName": "pull requests",
+      "apiPathPrefix": "/api/v1",
+      "authenticationKinds": [
+        "authorization-token",
+        "none"
+      ],
+      "reportsChecks": true,
+      "reportsApprovals": true,
+      "reportsChangesRequested": true
+    }
+  ]
+}

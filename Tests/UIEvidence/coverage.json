@@ -234,8 +234,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Native plugin workspace navigator",
-      "description": "The bundled T3-inspired AppKit navigator loaded through native plugin discovery and hosted in the real main-window split shell. It is the reference native-extension composition of ThreadingDesignKit pane, search, virtual table, selection, control, menu, popover, typography, spacing, and palette primitives. The evidence covers selected and lifecycle-grouped rows, project and branch metadata, and exact theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
-      "states": ["Selected row", "Pinned, Active, and Archived sections", "Selection-visible Pin and Archive actions", "Project and branch metadata", "Search and project-filter controls"],
+      "description": "The bundled T3-inspired AppKit navigator loaded through native plugin discovery and hosted in the real main-window split shell. It is the reference native-extension composition of ThreadingDesignKit pane, search, virtual table, selection, control, menu, popover, typography, spacing, and palette primitives. The evidence covers selected and lifecycle-grouped rows, project and branch metadata, a provider-neutral change-request/check/review receipt, and exact theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
+      "states": ["Selected row", "Pinned, Active, and Archived sections", "Selection-visible Pin and Archive actions", "Project and branch metadata", "Draft change request with checks and reviews", "Search and project-filter controls"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
@@ -1071,8 +1071,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Extensions settings",
-      "description": "The real virtualized Extensions page with app-included Storm, an installed disabled local package, source/install controls, and no network discovery.",
-      "states": ["First-party package available", "Local package installed and disabled", "Trusted chat with revocation"],
+      "description": "The real virtualized Extensions page with app-included Storm, an installed disabled local package, source/install controls, a trusted chat with revocation, and a host-owned Forgejo connection whose provider is currently unavailable, with no network discovery.",
+      "states": ["First-party package available", "Local package installed and disabled", "Trusted chat with revocation", "Saved source-control connection", "Provider unavailable without losing configuration"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["System light/dark", "Authored fixed-theme appearances"],

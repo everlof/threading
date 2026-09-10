@@ -161,6 +161,41 @@ final class T3NavigatorModelTests: XCTestCase {
         XCTAssertFalse(row.isPinned, "The plugin waits for host-authored state.")
     }
 
+    func testChangeRequestStateAndOpenIntentStayHostOwned() {
+        let summary = PluginWorkspaceChangeRequest(
+            providerName: "Forgejo",
+            changeRequestName: "pull request",
+            number: 42,
+            title: "Provider-neutral sidebar status",
+            webURL: URL(string: "https://forge.example/team/project/pulls/42")!,
+            lifecycle: .open,
+            successfulChecks: 4,
+            approvals: 2
+        )
+        let harness = makeHarness(items: [
+            project("one", title: "One"),
+            session("first", project: "one", title: "First", changeRequest: summary),
+        ])
+        let row = harness.store.active[0]
+
+        XCTAssertTrue(row.changeRequest === summary)
+        XCTAssertTrue(harness.store.openChangeRequest(row))
+        XCTAssertEqual(harness.actions.map(\.0), [.openChangeRequest])
+        XCTAssertEqual(harness.actions.map(\.1), ["first"])
+    }
+
+    func testVisibleRowsAreReportedThroughTheBoundedContext() {
+        let harness = makeHarness(items: [
+            project("one", title: "One"),
+            session("first", project: "one", title: "First"),
+            session("second", project: "one", title: "Second"),
+        ])
+
+        harness.store.reportVisibleRows([harness.store.active[1], harness.store.active[0]])
+
+        XCTAssertEqual(harness.visibleItems.map(\.identifier), ["second", "first"])
+    }
+
     func testNativeViewUsesPublishedDesignSystemComponents() {
         let harness = makeHarness(items: [
             project("one", title: "One"),
@@ -174,6 +209,78 @@ final class T3NavigatorModelTests: XCTestCase {
         XCTAssertNotNil(descendant(of: ThemedSearchField.self, in: view))
         XCTAssertNotNil(descendant(of: ThemedTableView.self, in: view))
         XCTAssertNotNil(descendant(of: ThemedScrollView.self, in: view))
+    }
+
+    func testChangeRequestUpdateKeepsThreeBandRowStableAndPresentsStatus() {
+        let harness = makeHarness(items: [
+            project("one", title: "One"),
+            session("first", project: "one", title: "First"),
+        ])
+        let navigator = T3NavigatorView(store: harness.store)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 320))
+        navigator.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(navigator)
+        NSLayoutConstraint.activate([
+            navigator.topAnchor.constraint(equalTo: container.topAnchor),
+            navigator.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            navigator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            navigator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        let window = NSWindow(
+            contentRect: container.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        container.layoutSubtreeIfNeeded()
+        let table = navigator.tableForTesting
+        table.layoutSubtreeIfNeeded()
+        let initialHeight = table.rect(ofRow: 1).height
+
+        harness.context.receiveHostUpdate(PluginWorkspaceUpdate(
+            revision: 2,
+            items: [session(
+                "first",
+                project: "one",
+                title: "First",
+                changeRequest: PluginWorkspaceChangeRequest(
+                    providerName: "Forgejo",
+                    changeRequestName: "pull request",
+                    number: 42,
+                    title: "Provider-neutral sidebar status",
+                    webURL: URL(string: "https://forge.example/team/project/pulls/42")!,
+                    lifecycle: .draft,
+                    successfulChecks: 4,
+                    activeChecks: 1,
+                    approvals: 2
+                )
+            )]
+        ))
+        container.layoutSubtreeIfNeeded()
+        table.layoutSubtreeIfNeeded()
+        table.displayIfNeeded()
+
+        let expectedHeight = ceil(
+            Design.Typography.lineHeight(of: Design.Typography.detail())
+                + Design.Spacing.small
+                + Design.Typography.lineHeight(of: Design.Typography.subheading())
+                + Design.Spacing.tight
+                + Design.Typography.lineHeight(of: Design.Typography.caption())
+                + Design.Spacing.inset * 2
+        )
+        XCTAssertEqual(initialHeight, expectedHeight, accuracy: 1)
+        XCTAssertEqual(table.rect(ofRow: 1).height, expectedHeight, accuracy: 1)
+        XCTAssertTrue(
+            descendants(of: NSTextField.self, in: table).contains {
+                $0.stringValue.contains("#42")
+                    && $0.stringValue.contains("running")
+                    && $0.stringValue.contains("approved")
+            }
+        )
     }
 
     func testLargeWorkspaceMaterializesOnlyViewportRows() {
@@ -230,6 +337,9 @@ final class T3NavigatorModelTests: XCTestCase {
             perform: { action, identity in
                 harness.actions.append((action, identity.identifier))
                 return true
+            },
+            visibleItemsDidChange: { identities in
+                harness.visibleItems = identities
             }
         )
         harness.context = context
@@ -255,7 +365,8 @@ final class T3NavigatorModelTests: XCTestCase {
         branch: String? = nil,
         activity: PluginWorkspaceActivity = .idle,
         pinned: Bool = false,
-        archived: Bool = false
+        archived: Bool = false,
+        changeRequest: PluginWorkspaceChangeRequest? = nil
     ) -> PluginWorkspaceItem {
         PluginWorkspaceItem(
             identity: identity(identifier, kind: .session),
@@ -264,7 +375,8 @@ final class T3NavigatorModelTests: XCTestCase {
             branch: branch,
             activity: activity,
             isPinned: pinned,
-            isArchived: archived
+            isArchived: archived,
+            changeRequest: changeRequest
         )
     }
 
@@ -299,4 +411,5 @@ private final class Harness {
     var store: T3NavigatorStore!
     var activations: [String] = []
     var actions: [(PluginWorkspaceAction, String)] = []
+    var visibleItems: [PluginWorkspaceItemIdentity] = []
 }

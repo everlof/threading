@@ -319,6 +319,7 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
     public let mcpTools: [ExtensionMCPTool]
     public let services: [ExtensionServiceDefinition]
     public let factDefinitions: [ExtensionFactDefinition]
+    public let sourceControlProviders: [ExtensionSourceControlProviderDefinition]
     /// File extensions this package asks the attachments scanner to notice.
     public let previewableFileTypes: [ExtensionPreviewableFileType]
 
@@ -329,6 +330,7 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         mcpTools: [ExtensionMCPTool] = [],
         services: [ExtensionServiceDefinition] = [],
         factDefinitions: [ExtensionFactDefinition] = [],
+        sourceControlProviders: [ExtensionSourceControlProviderDefinition] = [],
         previewableFileTypes: [ExtensionPreviewableFileType] = []
     ) {
         self.commands = commands
@@ -337,11 +339,13 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         self.mcpTools = mcpTools
         self.services = services
         self.factDefinitions = factDefinitions
+        self.sourceControlProviders = sourceControlProviders
         self.previewableFileTypes = previewableFileTypes
     }
 
     private enum CodingKeys: String, CodingKey {
         case commands, panels, workspaceNavigators, mcpTools, services, factDefinitions
+        case sourceControlProviders
         case previewableFileTypes
     }
 
@@ -361,6 +365,10 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         factDefinitions = try container.decodeIfPresent(
             [ExtensionFactDefinition].self,
             forKey: .factDefinitions
+        ) ?? []
+        sourceControlProviders = try container.decodeIfPresent(
+            [ExtensionSourceControlProviderDefinition].self,
+            forKey: .sourceControlProviders
         ) ?? []
         previewableFileTypes = try container.decodeIfPresent(
             [ExtensionPreviewableFileType].self,
@@ -393,6 +401,7 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
               mcpTools.isEmpty,
               services.isEmpty,
               factDefinitions.isEmpty,
+              sourceControlProviders.isEmpty,
               previewableFileTypes.isEmpty else {
             throw ExtensionValidationError(issues: [.init(
                 path: "workspaceNavigators",
@@ -619,6 +628,27 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
                 message: "must contain 'facts.provide' when fact definitions are registered"
             ))
         }
+        if !sourceControlProviders.isEmpty,
+           !manifest.capabilities.contains(.sourceControlRead) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'source-control.read' when source-control providers are registered"
+            ))
+        }
+        if sourceControlProviders.count > ExtensionSourceControlProviderDefinition.maximumCount {
+            issues.append(.init(
+                path: "sourceControlProviders",
+                message: "must contain at most \(ExtensionSourceControlProviderDefinition.maximumCount) providers"
+            ))
+        }
+        var seenSourceControlProviderIDs: Set<String> = []
+        for (index, provider) in sourceControlProviders.enumerated() {
+            let path = "sourceControlProviders[\(index)]"
+            issues.append(contentsOf: provider.validationIssues(path: path))
+            if !seenSourceControlProviderIDs.insert(provider.id).inserted {
+                issues.append(.init(path: "\(path).id", message: "duplicates '\(provider.id)'"))
+            }
+        }
         if factDefinitions.count > ExtensionFactProviderLimits.maximumDefinitions {
             issues.append(.init(
                 path: "factDefinitions",
@@ -683,6 +713,12 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         if Set(factDefinitions) != Set(manifest.factDefinitions) {
             issues.append(.init(
                 path: "factDefinitions",
+                message: "must match the manifest declarations exactly"
+            ))
+        }
+        if sourceControlProviders != manifest.sourceControlProviders {
+            issues.append(.init(
+                path: "sourceControlProviders",
                 message: "must match the manifest declarations exactly"
             ))
         }

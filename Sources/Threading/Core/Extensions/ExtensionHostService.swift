@@ -104,6 +104,7 @@ final class ExtensionHostService {
         let capabilities: Set<ExtensionCapability>
         let serviceDependencies: Set<ExtensionServiceDependency>
         let networkGrants: [ExtensionNetworkGrant]
+        let sourceControlProviders: [ExtensionSourceControlProviderDefinition]
         let localization: ExtensionLocalizationResolver
     }
 
@@ -149,6 +150,7 @@ final class ExtensionHostService {
         /// The suffix after `/v1/companions/`, unparsed for the same reason.
         case companions(String)
         case networkFetch
+        case sourceControlFetch
         case projectFilesQuery
         /// `nil` is the collection; a value is one item, decoded and possibly empty.
         case secrets(String?)
@@ -162,6 +164,7 @@ final class ExtensionHostService {
             case "/v1/facts": self = .facts
             case "/v1/identity-resolutions": self = .identityResolutions
             case "/v1/network/fetch": self = .networkFetch
+            case "/v1/source-control/fetch": self = .sourceControlFetch
             case "/v1/project-files/query": self = .projectFilesQuery
             case "/v1/secrets": self = .secrets(nil)
             case "/v1/storage/kv": self = .keyValue(nil)
@@ -247,7 +250,8 @@ final class ExtensionHostService {
         .servicesConsume,
         .companionOperations,
         .secrets,
-        .networkBrokered
+        .networkBrokered,
+        .sourceControlRead
     ]
     /// Capabilities that qualify for a host connection **only** over the descriptor transport.
     ///
@@ -277,6 +281,8 @@ final class ExtensionHostService {
     private let runtimeSnapshotProvider: ExtensionSessionRuntimeSnapshotProviding?
     private let secretStore: ExtensionSecretStoring
     private let networkBroker: ExtensionNetworkBrokering
+    private let sourceControlConnectionStore: SourceControlProviderConnectionStore
+    private let sourceControlNetworkBroker: any SourceControlConnectionFetching
     private let entropySource: EntropySource
     private weak var keyValueStore: ExtensionKeyValueStoring?
     private weak var cacheStore: ExtensionCacheStoring?
@@ -306,6 +312,8 @@ final class ExtensionHostService {
         runtimeSnapshotProvider = provider
         secretStore = KeychainExtensionSecretStore.shared
         networkBroker = ExtensionNetworkBroker.live()
+        sourceControlConnectionStore = .shared
+        sourceControlNetworkBroker = SourceControlConnectionNetworkBroker()
         entropySource = Self.secureEntropy
         ExtensionProjectFileBroker.shared.rootProvider = provider
     }
@@ -324,6 +332,8 @@ final class ExtensionHostService {
         keyValueStore: ExtensionKeyValueStoring? = nil,
         cacheStore: ExtensionCacheStoring? = nil,
         networkBroker: ExtensionNetworkBrokering? = nil,
+        sourceControlConnectionStore: SourceControlProviderConnectionStore? = nil,
+        sourceControlNetworkBroker: (any SourceControlConnectionFetching)? = nil,
         entropySource: @escaping EntropySource = ExtensionHostService.secureEntropy
     ) {
         self.registry = registry
@@ -341,6 +351,9 @@ final class ExtensionHostService {
         }
         self.secretStore = secretStore ?? KeychainExtensionSecretStore.shared
         self.networkBroker = networkBroker ?? ExtensionNetworkBroker.live()
+        self.sourceControlConnectionStore = sourceControlConnectionStore ?? .shared
+        self.sourceControlNetworkBroker = sourceControlNetworkBroker
+            ?? SourceControlConnectionNetworkBroker()
         self.entropySource = entropySource
         self.keyValueStore = keyValueStore
         self.cacheStore = cacheStore
@@ -468,6 +481,7 @@ final class ExtensionHostService {
         serviceDependencies: [ExtensionServiceDependency] = [],
         factDefinitions: [ExtensionFactDefinition] = [],
         networkGrants: [ExtensionNetworkGrant] = [],
+        sourceControlProviders: [ExtensionSourceControlProviderDefinition] = [],
         localization: ExtensionLocalizationResolver = .init(strings: [:]),
         transport: ExtensionHostTransport = .loopback
     ) throws -> ExtensionHostAuthorization? {
@@ -521,6 +535,7 @@ final class ExtensionHostService {
             capabilities: capabilities,
             serviceDependencies: Set(serviceDependencies),
             networkGrants: networkGrants,
+            sourceControlProviders: sourceControlProviders,
             localization: localization
         )
 
@@ -722,6 +737,13 @@ final class ExtensionHostService {
                 return
             }
             routeBrokeredFetch(request, authority: authority, respond: respond)
+
+        case .sourceControlFetch:
+            guard request.method == "POST" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
+            routeSourceControlFetch(request, authority: authority, respond: respond)
 
         case .projectFilesQuery:
             guard request.method == "POST" else {
@@ -1236,6 +1258,104 @@ final class ExtensionHostService {
                     operationID: operationID,
                     value: value
                 )))
+            }
+        }
+    }
+
+    /// A read beneath one user-approved source-control connection.
+    private func routeSourceControlFetch(
+        _ request: HTTPRequest,
+        authority: Authority,
+        respond: @escaping @Sendable (HTTPResponse) -> Void
+    ) {
+        guard require(.sourceControlRead, for: authority, respond: respond) else { return }
+        guard request.header("content-type")?
+            .lowercased()
+            .hasPrefix("application/json") == true else {
+            respond(jsonFailure(
+                status: 415,
+                reason: "Unsupported Media Type",
+                "Expected application/json."
+            ))
+            return
+        }
+        guard request.body.count <= Self.maximumPublicationBytes else {
+            respond(jsonFailure(
+                status: 413,
+                reason: "Payload Too Large",
+                "A source-control fetch may not exceed 1 MiB."
+            ))
+            return
+        }
+
+        let call: ExtensionSourceControlFetchRequest
+        do {
+            call = try JSONDecoder().decode(
+                ExtensionSourceControlFetchRequest.self,
+                from: request.body
+            )
+            try call.validate()
+        } catch {
+            let detail = (error as? ExtensionValidationError)?.description
+                ?? error.localizedDescription
+            respond(jsonFailure(status: 422, reason: "Unprocessable Content", detail))
+            return
+        }
+
+        guard let connection = sourceControlConnectionStore.connection(
+            id: call.connectionID,
+            extensionIdentifier: authority.extensionIdentifier
+        ), let definition = authority.sourceControlProviders.first(where: {
+            $0.id == connection.providerID
+        }) else {
+            respond(jsonFailure(
+                status: 403,
+                reason: "Forbidden",
+                "The connection is not approved for this extension generation."
+            ))
+            return
+        }
+
+        let credential: Data?
+        do {
+            credential = try sourceControlConnectionStore.credential(for: connection)
+        } catch {
+            respond(jsonFailure(
+                status: 503,
+                reason: "Service Unavailable",
+                "The source-control credential is unavailable."
+            ))
+            return
+        }
+
+        let broker = sourceControlNetworkBroker
+        Task {
+            let result = await broker.fetch(
+                call,
+                connection: connection,
+                definition: definition,
+                credential: credential
+            )
+            await MainActor.run {
+                switch result {
+                case .success(let reading):
+                    respond(self.jsonResponse(ExtensionSourceControlFetchResult(
+                        response: ExtensionSourceControlFetchResponse(
+                            status: reading.status,
+                            headers: reading.headers,
+                            bodyBase64: reading.body.base64EncodedString(),
+                            credential: reading.usedCredential ? "host-attached" : "anonymous",
+                            finalURL: reading.finalURL
+                        )
+                    )))
+                case .failure(let failure):
+                    respond(self.jsonResponse(ExtensionSourceControlFetchResult(
+                        failure: ExtensionBrokeredFetchFailure(
+                            message: failure.message,
+                            credential: failure.usedCredential ? "host-attached" : "anonymous"
+                        )
+                    )))
+                }
             }
         }
     }

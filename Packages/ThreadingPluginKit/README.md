@@ -28,7 +28,7 @@ import ThreadingPluginKit
 
 @objc(MyPlugin)
 public final class MyPlugin: NSObject, ThreadingNativePlugin {
-    public static let pluginAPIVersion = 4
+    public static let pluginAPIVersion = 5
     public var pluginIdentifier: String { "com.example.myplugin" }
 
     public override required init() { super.init() }
@@ -95,6 +95,12 @@ or when a formerly required selector becomes optional. Ordinary new protocol mem
 Version 4 makes `makePaneView` optional so a plugin may provide only a workspace navigator. A v4
 host still accepts v3 pane plugins; a v3 host rejects a v4 navigator-only plugin before attempting
 the pane selector.
+
+Version 5 adds the optional provider-neutral `PluginWorkspaceChangeRequest` on session rows, the
+`openChangeRequest` host action, and bounded visible-row interest through
+`setVisibleItemIdentities`. A navigator reports only realized session rows; Threading owns local
+Git, remote providers, credentials, caching, URL validation, and the browser action. Existing v3
+and v4 plugins remain in the compatibility window.
 
 The plugin's `pluginAPIVersion` must be a numeric literal for the SDK generation it was compiled
 against. Do not implement it by returning `ThreadingPluginAPI.version`: installed plugins use the
