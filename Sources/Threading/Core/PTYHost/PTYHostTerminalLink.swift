@@ -365,7 +365,12 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     /// write as complete later, and the close that follows here is the process exiting, so a
     /// detach that has not left yet is a seed the next launch never sees.
     @discardableResult
-    func detach(screenSeed: Data, modeSeed: Data, by deadline: Date) -> Bool {
+    func detach(
+        screenSeed: Data,
+        modeSeed: Data,
+        by deadline: Date,
+        idleExpiresAt: Date? = nil
+    ) -> Bool {
         lock.lock()
         guard !hasEnded, let transport = transportStorage else {
             lock.unlock()
@@ -381,7 +386,8 @@ final class PTYHostTerminalLink: @unchecked Sendable {
                 id: identity,
                 screenSeed: screenSeed,
                 modeSeed: modeSeed,
-                ringOffset: offset
+                ringOffset: offset,
+                idleExpiresAt: idleExpiresAt
             ))
         } catch {
             let cause = (error as? PTYHostClientError)?.token ?? "unknown"

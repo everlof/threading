@@ -724,6 +724,14 @@ macOS's. `TerminalSessionDidEnd` clears a terminal that disappears without anoth
 runtime map, so a discarded native conversation projects `.dormant` even though it has no
 terminal-end callback. The quit path stops the service before tearing runtimes down.
 
+The same runtime snapshot is also the safety input to idle process retention, but activity alone
+is never enough to stop a process. `SessionProcessRetentionPolicy` additionally requires a ready,
+resumable runtime with provider-reported turn boundaries, no turn or continuation, no
+`awaitingUser` blocker, no pending input or checkout move, and no local or remote viewer. Thus a
+quiet inferred terminal remains live, while durable unread completion and a settled usage-limit
+state may become dormant. Runtime and visibility edges drive one aggregate deadline timer; the
+policy never polls terminal output or treats a quiet interval as proof of completion.
+
 **The activity states also feed macOS notifications** (`AttentionAlerts.swift`), and the
 split above is what makes them worth having: `awaitingUser` posts with sound (a turn stopped
 dead), `needsAttention` posts silently (unread), and the *visible* session finishing while the

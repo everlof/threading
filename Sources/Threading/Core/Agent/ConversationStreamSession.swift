@@ -71,6 +71,8 @@ protocol ConversationStreamSession: AnyObject {
     /// `terminate()` is still its ending. **Blocking, bounded by `deadline`** — the frame has to
     /// have left before the process does.
     func detachFromBackgroundHost(by deadline: Date) -> Bool
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool
 }
 
 /// A transport that can expose the provider's execution-bearing wire objects before its
@@ -100,6 +102,10 @@ extension ConversationStreamSession {
     var isHostBacked: Bool { false }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        detachFromBackgroundHost(by: deadline)
+    }
 
     /// The shared context boundary. Providers continue to own only their text wire protocol;
     /// every reference and comment reaches Claude, Codex, and ACP in the same durable envelope.

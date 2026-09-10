@@ -1216,18 +1216,18 @@ which reads to the user as the app breaking, not as a feature. See [`pty-host.md
 
 Quitting with agents running keeps the records and loses the processes — that is the app's
 premise — but it used to mean the next launch began as a sidebar of dormant rows, one resume
-per click. `AppSettings.sessionRestorePolicy` (Settings ▸ General ▸ Startup) closes that loop:
+per click. `AppSettings.sessionRestorePolicy` (Settings ▸ General ▸ Session Processes) closes that loop:
 `applicationShouldTerminate` records `AgentRuntime.runningSessionIDs` just before
 `terminateAll`, and the next launch relaunches sessions in the background, so selecting one
 attaches an agent that is already up instead of paying the resume on the click.
 The rules, each of which is the answer to a way this goes wrong:
 
-- **Every policy is a policy about a bound, and there are two of them.**
-  `.runningAtLastQuit` (the default, and what the `restoresRunningSessions` toggle it replaced
-  now migrates to) is bounded by evidence: the machine ran exactly those agents side by side a
-  moment before the quit, so bringing the same set back returns it to a load it has
-  demonstrably carried. `.recentlyUsed` is bounded only by `sessionRestoreLimit`, because a
-  time window is not a bound — a heavy week is a heavy launch. Neither may become "every
+- **Every policy is a policy about a bound.** `.runningAtLastQuit` (the default, and what the
+  `restoresRunningSessions` toggle it replaced now migrates to) reads the live set only after idle
+  retention has removed settled work outside the window or cap; protected unfinished work may
+  exceed the cap and remains recorded. `.recentlyUsed` is bounded directly by
+  `sessionRestoreLimit`, because a time window is not a bound — a heavy week is a heavy launch.
+  Neither may become "every
   session in the sidebar": a store with forty dormant conversations must not boot forty CLIs at
   a couple of hundred megabytes each. `StartupSessionRelaunch.plan` also drops what was deleted
   or archived since, and orders most recently used first — the stagger means the last in line
@@ -1331,6 +1331,31 @@ The rules, each of which is the answer to a way this goes wrong:
   session was the selected one that `restoreSelectedSession` is already bringing back (the
   ordinary "recorded 1, relaunching 0", and the reason a one-session test of this feature
   looks like it did nothing).
+
+### Idle process retention
+
+The same age and count settings bound agents after startup. `SessionProcessRetentionCoordinator`
+plans over `AgentRuntime.runningSessionIDs`, not the durable store, and wakes on runtime,
+visibility, remote-viewer, relevant project-row, and settings edges. It keeps one timer at the
+earliest absolute expiry. There is no polling, transcript read, dormant-surface construction, or
+timer per session, so one decision is O(live runtimes) and the steady-state cost is O(1).
+
+Retirement is fail-closed. A candidate must be resumable, process-ready, and report its own turn
+boundaries; it must have no in-flight turn or continuation, no awaiting-user blocker, no pending
+turn-start waiter or checkout-move input, no pending checkout move, and no local or remote viewer.
+Terminal providers whose quiet state is inferred rather than reported are protected indefinitely:
+silence cannot prove that a long-running command finished. Unread completed output and a settled
+usage-limit stop are durable states and may be retired. Protected processes do not consume the
+warm cap, so unfinished work can legitimately take the live count above it.
+
+Retiring calls the ordinary `AgentRuntime.discard(sessionID:)` lifecycle path. It stops only the
+process/controller; the `AgentSession`, transcript, unread state, checkout, and resumability stay
+durable, and selecting the dormant row resumes through the existing launch path. On quit, local
+visibility stops being a protection because the window is leaving, while a remote viewer remains
+one. Warm host-backed sessions receive their absolute expiry in `detach` and are omitted from the
+running-at-last-quit record: the next app either reattaches the still-live child or finds the
+durable conversation dormant after the daemon enforced the same deadline. Protected hosted work
+gets no deadline. See [`pty-host.md`](pty-host.md#detach-and-reattach).
 
 Everything else is deliberately the ordinary machinery: the background launch uses the same
 `AgentRuntime` caches and the same container delegate as a click, so the sidebar's dot, exit

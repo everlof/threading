@@ -322,7 +322,7 @@ final class PTYHostPipeLink: @unchecked Sendable {
     ///
     /// **Blocking, bounded by `deadline`.** Answers whether the frame was sent.
     @discardableResult
-    func detach(by deadline: Date) -> Bool {
+    func detach(by deadline: Date, idleExpiresAt: Date? = nil) -> Bool {
         lock.lock()
         guard !hasEnded, let transport = transportStorage else {
             lock.unlock()
@@ -337,7 +337,8 @@ final class PTYHostPipeLink: @unchecked Sendable {
                 id: identity,
                 screenSeed: Data(),
                 modeSeed: Data(),
-                ringOffset: 0
+                ringOffset: 0,
+                idleExpiresAt: idleExpiresAt
             ))
         } catch {
             let cause = (error as? PTYHostClientError)?.token ?? "unknown"

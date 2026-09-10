@@ -138,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private let remoteSessionEvents = AppEventObservations()
     private let macNotificationActivityMonitor = MacNotificationActivityMonitor()
     private var activeTurnSleepInhibitor: ActiveTurnSleepInhibitor?
+    private var sessionProcessRetention: SessionProcessRetentionCoordinator?
     private var onboardingWindowController: OnboardingWindowController?
     /// True while first-launch onboarding is deferring the main window. Gates session restore
     /// and routes Dock-click reopens to the onboarding window instead of the hidden main one.
@@ -677,6 +678,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
             let runtime = environment.agentRuntime
             let settings = environment.settings
+            let projectStore = environment.projectStore
+            let eventLog = environment.eventLog
             let inhibitor = ActiveTurnSleepInhibitor(
                 currentInFlightSessionIDs: {
                     Set(runtime.runningSessionIDs.filter {
@@ -688,6 +691,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             )
             inhibitor.start()
             activeTurnSleepInhibitor = inhibitor
+
+            let retention = SessionProcessRetentionCoordinator(
+                candidates: {
+                    runtime.processRetentionCandidates { sessionID in
+                        projectStore.session(withID: sessionID)
+                    }
+                },
+                configuration: {
+                    SessionProcessRetentionCoordinator.Configuration(
+                        windowDays: settings.sessionRestoreWindowDays,
+                        limit: settings.sessionRestoreLimit
+                    )
+                },
+                retire: { sessionID in
+                    runtime.discard(sessionID: sessionID)
+                },
+                hasRemoteViewers: { sessionID in
+                    runtime.hasRemoteViewers(sessionID: sessionID)
+                },
+                didRetire: { count in
+                    eventLog.record(.session, "Idle session processes retired", [
+                        "sessions": String(count)
+                    ])
+                }
+            )
+            retention.start()
+            sessionProcessRetention = retention
         }
 
         // One activity signal replaces a device-by-device settings matrix. The phone already
@@ -960,6 +990,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let quitAnswer = confirmQuitIfAgentsRunning()
         guard quitAnswer.quits else { return .terminateCancel }
 
+        let retentionDisposition: SessionProcessRetentionCoordinator.QuitDisposition
+        if quitAnswer == .stopEverything {
+            sessionProcessRetention?.stop()
+            retentionDisposition = .empty
+        } else {
+            retentionDisposition = sessionProcessRetention?.prepareForQuit() ?? .empty
+        }
+        sessionProcessRetention = nil
+
         // Projects are persisted by ProjectStore as they change, but a coalesced write may
         // still be pending, so it is flushed before the agents are torn down.
         //
@@ -977,7 +1016,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // What is live right now, recorded for the next launch to bring back — necessarily
             // ahead of `terminateAll`, after which nothing is. `AppRelaunch` exits without
             // running this on purpose: a reset comes back to nothing running.
-            runningSessionIDs = Array(AgentRuntime.shared.runningSessionIDs)
+            runningSessionIDs = Array(
+                AgentRuntime.shared.runningSessionIDs
+                    .subtracting(retentionDisposition.warmHostSessionIDs)
+            )
             // The same hazard the recovery note above describes, through a different door: a
             // launch that quits again before it ever read the record has nothing running *and*
             // nothing to say, and writing its emptiness over a real list is how the sessions from
@@ -1005,7 +1047,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if quitAnswer == .stopEverything {
             AgentRuntime.shared.terminateHostBackedSessions()
         }
-        AgentRuntime.shared.detachHostBackedSessions()
+        AgentRuntime.shared.detachHostBackedSessions(
+            idleExpirations: retentionDisposition.hostIdleExpirations
+        )
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
         macNotificationActivityMonitor.stop()

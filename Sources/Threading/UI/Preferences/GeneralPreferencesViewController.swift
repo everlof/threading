@@ -344,11 +344,11 @@ final class GeneralPreferencesViewController: NSViewController {
         SettingsUI.preferControlWidth(updateChannelPopUp)
     }
 
-    /// The three launch-restore controls.
+    /// The launch choice and the two process-retention controls.
     ///
-    /// The window and the limit are pop-ups rather than fields because both decide how many agent
-    /// processes a launch spawns: the range belongs to the product, not to whatever somebody can
-    /// type. See `SessionRestoreDefaults`.
+    /// The window and the limit are pop-ups rather than fields because both bound live agent
+    /// processes as well as startup: the range belongs to the product, not to whatever somebody
+    /// can type. See `SessionRestoreDefaults`.
     private func configureRestoreControls() {
         let settings = AppSettings.shared
 
@@ -395,8 +395,6 @@ final class GeneralPreferencesViewController: NSViewController {
             action: #selector(restoreLimitChanged),
             accessibilityIdentifier: "settings.general.session-restore-limit"
         )
-
-        updateRestoreRefinements()
     }
 
     private func configureRestorePopUp(
@@ -408,14 +406,6 @@ final class GeneralPreferencesViewController: NSViewController {
         popUp.action = action
         popUp.setAccessibilityIdentifier(accessibilityIdentifier)
         SettingsUI.preferControlWidth(popUp)
-    }
-
-    /// The window and the limit belong to one policy, so they are dimmed rather than hidden under
-    /// the others: a row that disappears takes the explanation of what the policy does with it.
-    private func updateRestoreRefinements() {
-        let refines = AppSettings.shared.sessionRestorePolicy == .recentlyUsed
-        restoreWindowPopUp.isEnabled = refines
-        restoreLimitPopUp.isEnabled = refines
     }
 
     /// "1 day", "3 days", localized by the system rather than by a plural rule of ours.
@@ -484,15 +474,15 @@ final class GeneralPreferencesViewController: NSViewController {
                 control: restorePolicyPopUp
             ),
             SettingsUI.row(
-                title: "Counts as recently used",
-                subtitle: "How far back to look. Measured from the last time a turn ran in the "
-                    + "conversation, not from the last time Threading opened it.",
+                title: "Stop idle agents after",
+                subtitle: "A settled conversation becomes dormant after this long without a "
+                    + "submitted turn. Opening it resumes it.",
                 control: restoreWindowPopUp
             ),
             SettingsUI.row(
-                title: "Sessions brought back",
-                subtitle: "Most recent first. Each one is a real agent process, so this is the "
-                    + "ceiling on what a launch may start.",
+                title: "Keep idle agents running",
+                subtitle: "Most recent first. Unfinished, non-resumable, visible, or remotely "
+                    + "viewed work is never stopped by this limit.",
                 control: restoreLimitPopUp
             )
         ])
@@ -523,7 +513,7 @@ final class GeneralPreferencesViewController: NSViewController {
                 + "first time you start a scratchpad, and it is an ordinary git repository, so "
                 + "Git Review works on it and nothing you write is lost. It sits outside "
                 + "Threading's own storage on purpose — Reset Everything does not touch it."),
-            SettingsUI.section("Startup", startup),
+            SettingsUI.section("Session Processes", startup),
             SettingsUI.section("Confirmations", confirmations),
             SettingsUI.note("Only interruptions you can safely stop are listed. Anything that deletes something "
                 + "for good, or grants access to a website, a tool, an extension or another person, "
@@ -1328,7 +1318,6 @@ final class GeneralPreferencesViewController: NSViewController {
         guard let value = restorePolicyPopUp.selectedItem?.representedValue
             as? SessionRestorePolicy else { return }
         AppSettings.shared.sessionRestorePolicy = value
-        updateRestoreRefinements()
     }
 
     @objc private func restoreWindowChanged() {

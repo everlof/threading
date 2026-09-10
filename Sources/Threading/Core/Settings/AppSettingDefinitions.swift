@@ -701,7 +701,7 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestorePolicy",
         absence: .legacy(.restoresRunningSessions),
         validation: .allowedStrings(Set(SessionRestorePolicy.allCases.map(\.rawValue))),
-        presentations: [row("general", 14, "Startup", "Bring back at launch",
+        presentations: [row("general", 14, "Session Processes", "Bring back at launch",
                             ["reopen", "resume automatically", "running at quit", "restore"])]
     )
     static let sessionRestoreWindowDays = AppSettingDescriptor<Int>(
@@ -709,16 +709,16 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestoreWindowDays",
         absence: .registered(SessionRestoreDefaults.windowDays),
         validation: .range((SessionRestoreDefaults.windowDayChoices.first ?? 1)...(SessionRestoreDefaults.windowDayChoices.last ?? 30)),
-        presentations: [row("general", 15, "Startup", "Counts as recently used",
-                            ["recently used", "days", "dormant"])]
+        presentations: [row("general", 15, "Session Processes", "Stop idle agents after",
+                            ["recently used", "days", "dormant", "process retention"])]
     )
     static let sessionRestoreLimit = AppSettingDescriptor<Int>(
         identity: .sessionRestoreLimit,
         persistenceKey: "sessionRestoreLimit",
         absence: .registered(SessionRestoreDefaults.limit),
         validation: .range((SessionRestoreDefaults.limitChoices.first ?? 4)...(SessionRestoreDefaults.limitChoices.last ?? 32)),
-        presentations: [row("general", 16, "Startup", "Sessions brought back",
-                            ["restore limit"])]
+        presentations: [row("general", 16, "Session Processes", "Keep idle agents running",
+                            ["restore limit", "process limit", "warm agents"])]
     )
     static let newChatOpeningPrefix = AppSettingDescriptor<String>(
         identity: .newChatOpeningPrefix,

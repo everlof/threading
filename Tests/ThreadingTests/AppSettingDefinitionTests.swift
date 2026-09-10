@@ -504,7 +504,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Include files outside the project",
             "Keep the page as it was before each agent action",
             "Reopen the last session at launch", "Bring back at launch",
-            "Counts as recently used", "Sessions brought back", "Hidden extension messages",
+            "Stop idle agents after", "Keep idle agents running", "Hidden extension messages",
             "Notify when a session needs you", "Alert sound", "Sounds for each alert",
             "Bell sound", "Sounds for each bell", "Silence every sound",
             "New sessions start in", "Remote Control for new Claude sessions",

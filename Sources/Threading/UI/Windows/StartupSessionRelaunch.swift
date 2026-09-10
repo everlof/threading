@@ -4,10 +4,10 @@ import AppKit
 
 /// Decides which sessions a launch brings back after the app was quit with agents running.
 ///
-/// **Every rule here is a rule about a bound.** `.runningAtLastQuit` is bounded by evidence: the
-/// machine already ran those agents side by side a moment before the quit, so bringing the same
-/// set back returns it to a load it has demonstrably carried. `.recentlyUsed` is bounded by the
-/// cap it is given, because a time window is not a bound at all — a heavy week is a heavy launch.
+/// **Every rule here is a rule about a bound.** `.runningAtLastQuit` is bounded by the live set the
+/// quit recorded after idle retention ran; protected unfinished work may exceed the warm-process
+/// cap and stays in that record. `.recentlyUsed` is bounded by the cap it is given, because a time
+/// window is not a bound at all — a heavy week is a heavy launch.
 /// A rule like "every session in the sidebar" has neither: a store with forty dormant
 /// conversations would boot forty CLIs nobody asked for, at a couple of hundred megabytes each.
 ///

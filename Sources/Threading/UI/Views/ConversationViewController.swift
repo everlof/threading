@@ -2814,6 +2814,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
             return false
         }
+        // Native transports do not emit the hook edge terminal sessions use for this durable
+        // timestamp. The accepted send is their authoritative submitted-turn edge.
+        ProjectStore.shared.noteTurnStarted(sessionID: sessionID)
         refreshConversationControls()
         runProgress = nil
 
@@ -3938,6 +3941,10 @@ extension ConversationViewController: AgentConversationRuntimeSurface {
 
     var isHostBacked: Bool { stream.isHostBacked }
 
+    var hasPendingInputForRetirement: Bool {
+        pendingInitialPrompt != nil || checkoutMoveOutboxSnapshot()?.isEmpty == false
+    }
+
     /// A quit hands this conversation's CLI over rather than ending it.
     ///
     /// The viewport is still saved, because the conversation is coming back: the next launch
@@ -3945,7 +3952,14 @@ extension ConversationViewController: AgentConversationRuntimeSurface {
     /// survived. Nothing else about the teardown runs — no permission is denied and no stream is
     /// stopped — because nothing is ending.
     func detachFromBackgroundHost(by deadline: Date) -> Bool {
-        guard stream.detachFromBackgroundHost(by: deadline) else { return false }
+        detachFromBackgroundHost(by: deadline, idleExpiresAt: nil)
+    }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        guard stream.detachFromBackgroundHost(
+            by: deadline,
+            idleExpiresAt: idleExpiresAt
+        ) else { return false }
         saveConversationViewport()
         return true
     }

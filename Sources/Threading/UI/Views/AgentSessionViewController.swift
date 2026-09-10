@@ -1808,7 +1808,14 @@ extension AgentSessionViewController: AgentTerminalRuntimeSurface {
     /// The tracker is deliberately **not** marked dormant: nothing became dormant. The agent is
     /// still working, in a process that is about to outlive this one.
     func detachFromBackgroundHost(by deadline: Date) -> Bool {
-        guard isRunning, session.detachFromHost(by: deadline) else { return false }
+        detachFromBackgroundHost(by: deadline, idleExpiresAt: nil)
+    }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        guard isRunning,
+              session.detachFromHost(by: deadline, idleExpiresAt: idleExpiresAt) else {
+            return false
+        }
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         isRunning = false
         resetTranscriptFallbackObservation()

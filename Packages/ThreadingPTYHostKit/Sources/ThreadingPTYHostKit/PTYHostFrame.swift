@@ -499,17 +499,22 @@ public struct PTYHostDetach: Codable, Equatable, Sendable {
     public let modeSeed: Data
     /// The ring's `totalBytesWritten` as of the last byte this watcher had applied.
     public let ringOffset: UInt64
+    /// When a deliberately idle child may be stopped if nobody has attached again. Nil for
+    /// unfinished or otherwise protected work. Optional so version-1 detach frames still decode.
+    public let idleExpiresAt: Date?
 
     public init(
         id: PTYHostSessionIdentity,
         screenSeed: Data,
         modeSeed: Data,
-        ringOffset: UInt64
+        ringOffset: UInt64,
+        idleExpiresAt: Date? = nil
     ) {
         self.id = id
         self.screenSeed = screenSeed
         self.modeSeed = modeSeed
         self.ringOffset = ringOffset
+        self.idleExpiresAt = idleExpiresAt
     }
 }
 

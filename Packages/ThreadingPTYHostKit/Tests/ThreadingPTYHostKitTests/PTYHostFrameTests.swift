@@ -93,7 +93,8 @@ final class PTYHostFrameTests: XCTestCase {
                 id: identity,
                 screenSeed: Data([0x1B, 0x5B, 0x32, 0x4A]),
                 modeSeed: Data([0x18, 0x1B, 0x5B, 0x3F, 0x31, 0x6C]),
-                ringOffset: 4096
+                ringOffset: 4096,
+                idleExpiresAt: Date(timeIntervalSince1970: 1_770_086_400)
             )),
             .kill(PTYHostKill(id: identity, escalate: true)),
             .exited(PTYHostExited(id: identity, status: 9, signalled: true)),
@@ -109,6 +110,27 @@ final class PTYHostFrameTests: XCTestCase {
 
     func testEveryFrameRoundTripsThroughJSON() throws {
         for frame in everyFrame { try roundTrip(frame) }
+    }
+
+    func testDetachWithoutAnIdleDeadlineRemainsWireCompatible() throws {
+        let frame = PTYHostFrame.detach(PTYHostDetach(
+            id: identity,
+            screenSeed: Data(),
+            modeSeed: Data(),
+            ringOffset: 0
+        ))
+        let payload = try encoder.encode(frame)
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: payload) as? [String: Any]
+        )
+        let body = try XCTUnwrap(object["body"] as? [String: Any])
+        XCTAssertNil(body["idleExpiresAt"], "nil keeps the field absent for older peers")
+
+        let decoded = try decoder.decode(PTYHostFrame.self, from: payload)
+        guard case .detach(let detach) = decoded else {
+            return XCTFail("the legacy frame did not decode as detach")
+        }
+        XCTAssertNil(detach.idleExpiresAt)
     }
 
     /// The set above must actually cover the enum. A new case with no fixture would otherwise

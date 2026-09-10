@@ -441,6 +441,7 @@ final class PTYHostServer: @unchecked Sendable {
                 )
             }
             unbind(connection, from: session, keepingSeed: session.channel == .pty)
+            scheduleIdleExpiry(of: session, at: request.idleExpiresAt)
             journal.record(.detached, [
                 Field.session: session.id.description,
                 Field.connection: String(connection.number),
@@ -750,6 +751,7 @@ final class PTYHostServer: @unchecked Sendable {
     }
 
     private func bind(_ connection: PTYHostConnection, to session: PTYSession) {
+        cancelIdleExpiry(of: session)
         connection.boundSession = session.id
         session.watchers.append(connection)
         session.detachedAt = nil
@@ -823,6 +825,7 @@ final class PTYHostServer: @unchecked Sendable {
     /// The group rather than the process, because `forkpty` made the child a session leader and
     /// its own children are in that group; signalling the leader alone is how orphans are made.
     private func kill(_ session: PTYSession, escalate: Bool) {
+        cancelIdleExpiry(of: session)
         session.wasKilled = true
         journal.record(.killRequested, [
             Field.session: session.id.description,
@@ -842,6 +845,46 @@ final class PTYHostServer: @unchecked Sendable {
             ])
             PTYSpawn.signalGroup(pid, SIGKILL)
         }
+    }
+
+    /// Stops a deliberately idle child once the absolute retention deadline passes.
+    ///
+    /// The app is the policy owner and supplies the date; the daemon only owns the timer and the
+    /// process. A later attach cancels it before binding. Nil means protected work and removes any
+    /// earlier deadline rather than inheriting policy from a previous watcher.
+    private func scheduleIdleExpiry(of session: PTYSession, at expiration: Date?) {
+        cancelIdleExpiry(of: session)
+        guard let expiration, !session.isAttached, session.exit == nil else { return }
+
+        let interval = max(0, expiration.timeIntervalSinceNow)
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + interval,
+            leeway: .seconds(1)
+        )
+        timer.setEventHandler { [weak self, weak session] in
+            guard let self, let session,
+                  sessions[session.id] === session,
+                  !session.isAttached,
+                  session.exit == nil,
+                  session.idleExpiresAt == expiration else { return }
+            session.idleExpiryTimer?.cancel()
+            session.idleExpiryTimer = nil
+            journal.record(.idleExpired, [
+                Field.session: session.id.description,
+                Field.pid: String(session.pid)
+            ])
+            kill(session, escalate: true)
+        }
+        session.idleExpiresAt = expiration
+        session.idleExpiryTimer = timer
+        timer.activate()
+    }
+
+    private func cancelIdleExpiry(of session: PTYSession) {
+        session.idleExpiryTimer?.cancel()
+        session.idleExpiryTimer = nil
+        session.idleExpiresAt = nil
     }
 
     // MARK: - Private Methods — the byte stream
@@ -1069,6 +1112,7 @@ final class PTYHostServer: @unchecked Sendable {
             ? -1
             : (signalled ? (status & 0x7F) : ((status >> 8) & 0xFF))
         session.noteExit(status: value, signalled: signalled)
+        cancelIdleExpiry(of: session)
         session.processSource?.cancel()
         session.processSource = nil
 
@@ -1173,6 +1217,7 @@ final class PTYHostServer: @unchecked Sendable {
         sessions.removeValue(forKey: session.id)
         session.foregroundTimer?.cancel()
         session.foregroundTimer = nil
+        cancelIdleExpiry(of: session)
         session.processSource?.cancel()
         session.processSource = nil
         session.io?.close(flags: .stop)

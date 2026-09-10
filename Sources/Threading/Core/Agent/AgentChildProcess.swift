@@ -230,6 +230,7 @@ final class AgentChildProcess {
     @discardableResult
     func detachFromBackgroundHost(
         by deadline: Date,
+        idleExpiresAt: Date? = nil,
         ledger: AgentChildLedger = .shared
     ) -> Bool {
         // A stop that has already been asked for is not a hand-over waiting to happen. The quit
@@ -238,7 +239,7 @@ final class AgentChildProcess {
         // a transport's own `isRunning` does not clear until the exit is observed, which is a
         // frame away, so a `kill` would otherwise be followed by a `detach` for the same session.
         guard let host, !detached.isSet, !stopped.isSet else { return false }
-        guard host.detach(by: deadline) else { return false }
+        guard host.detach(by: deadline, idleExpiresAt: idleExpiresAt) else { return false }
         detached.set()
         ledger.clear(pid: processIdentifier)
         ThreadingLogger.agent.notice(

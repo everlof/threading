@@ -275,7 +275,15 @@ final class ACPStreamSession:
     /// are how a conversation *ends*, and this is the one path where the turn goes on running
     /// after the window it was started from has gone.
     func detachFromBackgroundHost(by deadline: Date) -> Bool {
-        guard isRunning, let process, process.detachFromBackgroundHost(by: deadline) else {
+        detachFromBackgroundHost(by: deadline, idleExpiresAt: nil)
+    }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        guard isRunning, let process,
+              process.detachFromBackgroundHost(
+                by: deadline,
+                idleExpiresAt: idleExpiresAt
+              ) else {
             return false
         }
         isRunning = false

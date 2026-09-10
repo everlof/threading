@@ -69,6 +69,9 @@ protocol AgentTerminalRuntimeSurface:
     /// before the process does.
     func detachFromBackgroundHost(by deadline: Date) -> Bool
 
+    /// The quit handoff with an optional absolute expiry for a settled warm process.
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool
+
     func removeFromPresentation()
 }
 
@@ -81,6 +84,10 @@ extension AgentTerminalRuntimeSurface {
     var hasCodexTurnBoundarySource: Bool { false }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        detachFromBackgroundHost(by: deadline)
+    }
 
     /// Only Codex terminal surfaces own a rollout reader. Other runtime surfaces and focused
     /// test doubles have no continuation protocol to reconcile.
@@ -107,6 +114,10 @@ protocol AgentConversationRuntimeSurface:
     var onAttention: (() -> Void)? { get set }
     var conversationRootProcessIdentifier: pid_t? { get }
 
+    /// User-authored input accepted by the surface but not yet owned by a provider turn.
+    /// Retirement is forbidden while this is true even when the activity snapshot is idle.
+    var hasPendingInputForRetirement: Bool { get }
+
     /// The input behind this surface's current state, where it has one to name. Defaulted
     /// rather than required, because a surface that computes its activity has no such input —
     /// see `AgentRuntime.activityCause(sessionID:)`.
@@ -128,6 +139,8 @@ protocol AgentConversationRuntimeSurface:
     /// stop. **Blocking, bounded by `deadline`**, which the caller shares across every session.
     func detachFromBackgroundHost(by deadline: Date) -> Bool
 
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool
+
     func removeFromPresentation()
 }
 
@@ -140,7 +153,13 @@ extension AgentConversationRuntimeSurface {
     /// the background host existing.
     var isHostBacked: Bool { false }
 
+    var hasPendingInputForRetirement: Bool { false }
+
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        detachFromBackgroundHost(by: deadline)
+    }
 
     func checkoutMoveOutboxSnapshot() -> ConversationOutbox? { nil }
     func restoreCheckoutMoveOutbox(_ outbox: ConversationOutbox) {}
@@ -443,15 +462,23 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// **Blocking, and bounded once for the whole set**: one deadline shared by every session, so
     /// forty host-backed sessions cost the same wait as one.
     @discardableResult
-    func detachHostBackedSessions() -> Set<SessionID> {
+    func detachHostBackedSessions(
+        idleExpirations: [SessionID: Date] = [:]
+    ) -> Set<SessionID> {
         let deadline = Date().addingTimeInterval(PTYHostSessionDefaults.detachDrainSeconds)
         var detached: Set<SessionID> = []
         for (sessionID, controller) in controllers
-        where controller.detachFromBackgroundHost(by: deadline) {
+        where controller.detachFromBackgroundHost(
+            by: deadline,
+            idleExpiresAt: idleExpirations[sessionID]
+        ) {
             detached.insert(sessionID)
         }
         for (sessionID, conversation) in conversations
-        where conversation.detachFromBackgroundHost(by: deadline) {
+        where conversation.detachFromBackgroundHost(
+            by: deadline,
+            idleExpiresAt: idleExpirations[sessionID]
+        ) {
             detached.insert(sessionID)
         }
         guard !detached.isEmpty else { return detached }
@@ -533,6 +560,39 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         controllers[sessionID]?.activityTracker.runtimeSnapshot
             ?? conversations[sessionID]?.runtimeSnapshot
             ?? .dormant
+    }
+
+    /// A live process and every already-known fact needed by the bounded retention policy.
+    ///
+    /// The lookup is intentionally here, at runtime ownership: pending delivery receipts,
+    /// provider outboxes and remote viewers are not facts a settings or app coordinator should
+    /// rediscover through concrete controllers.
+    func processRetentionCandidates(
+        session: (SessionID) -> AgentSession?
+    ) -> [SessionProcessRetentionCandidate] {
+        let running = runningSessionIDs
+        let hosted = hostBackedSessionIDs
+        return running.compactMap { sessionID in
+            guard let session = session(sessionID) else { return nil }
+            let hasPendingInput = turnStartWaiters.contains { $0.sessionID == sessionID }
+                || checkoutMoveOutboxes[sessionID]?.isEmpty == false
+                || conversations[sessionID]?.hasPendingInputForRetirement == true
+            return SessionProcessRetentionCandidate(
+                sessionID: sessionID,
+                lastUsedAt: session.lastUsedAt,
+                isResumable: session.resumeState.isResumable,
+                isHostBacked: hosted.contains(sessionID),
+                runtime: runtimeSnapshot(sessionID: sessionID),
+                isLocallyVisible: visibleSessionID == sessionID,
+                hasRemoteViewers: !remotelyViewingParticipantIDs(sessionID).isEmpty,
+                hasPendingInput: hasPendingInput,
+                hasPendingCheckoutMove: session.pendingCheckoutMove != nil
+            )
+        }
+    }
+
+    func hasRemoteViewers(sessionID: SessionID) -> Bool {
+        !remotelyViewingParticipantIDs(sessionID).isEmpty
     }
 
     /// Called by both renderer adapters whenever an operational fact may have moved.
@@ -883,11 +943,18 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     /// Marks which session is on screen, so only the others flag finished work.
     func setVisibleSession(_ sessionID: SessionID?) {
+        let previousSessionID = visibleSessionID
         visibleSessionID = sessionID
         // Selection is a viewport owner as well as attention state. A disconnected phone may
         // keep its grid only while no local renderer is looking at this session; publishing the
         // transition here also catches a Mac opening a chat after the phone's grace began.
         localSessionVisibilityChanged(sessionID)
+        if sessionID != previousSessionID {
+            NotificationCenter.default.post(SessionVisibilityDidChange(
+                previousSessionID: previousSessionID,
+                sessionID: sessionID
+            ))
+        }
         for (id, controller) in controllers {
             controller.isVisible = (id == sessionID)
         }

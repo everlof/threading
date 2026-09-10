@@ -435,7 +435,15 @@ final class ClaudeStreamSession:
     /// does; the child keeps the daemon's, and the next launch resumes the conversation with
     /// whatever the turn finished writing.
     func detachFromBackgroundHost(by deadline: Date) -> Bool {
-        guard isRunning, let process, process.detachFromBackgroundHost(by: deadline) else {
+        detachFromBackgroundHost(by: deadline, idleExpiresAt: nil)
+    }
+
+    func detachFromBackgroundHost(by deadline: Date, idleExpiresAt: Date?) -> Bool {
+        guard isRunning, let process,
+              process.detachFromBackgroundHost(
+                by: deadline,
+                idleExpiresAt: idleExpiresAt
+              ) else {
             return false
         }
         isRunning = false

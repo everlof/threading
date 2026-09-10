@@ -1814,17 +1814,16 @@ public enum AppTextSize: String, CaseIterable {
 /// Which sessions a launch brings back live.
 ///
 /// The two answers differ in what they are bounded by, which is the whole of the choice.
-/// `.runningAtLastQuit` is bounded by evidence: the machine ran exactly that set side by side a
-/// second before the quit. It depends on one record, though, and a reboot, a force quit, or an
-/// app that opened and closed again without restoring anything leaves that record saying nothing.
-/// `.recentlyUsed` survives all of those because it reads the conversations themselves, and is
-/// bounded only by the cap it is given.
+/// `.runningAtLastQuit` reads the post-retention live set the quit recorded. It depends on that
+/// one record, though, and a reboot, a force quit, or an app that opened and closed again without
+/// restoring anything leaves that record saying nothing. `.recentlyUsed` survives all of those
+/// because it reads the conversations themselves, and is bounded by the age and count settings.
 enum SessionRestorePolicy: String, CaseIterable, Sendable {
 
     /// Bring nothing back. Every row starts dormant and resumes when it is opened.
     case nothing
 
-    /// What had a live agent at the last quit.
+    /// What had a live agent at the last quit after settled idle processes were retired.
     case runningAtLastQuit
 
     /// What was used inside the window, most recent first, up to the limit.
@@ -1863,9 +1862,10 @@ enum SessionRestoreDefaults {
     /// conversation somebody left open overnight without reaching last week's.
     static let windowDays = 1
 
-    /// Twelve, which is about what one machine already carries comfortably and roughly a dozen
-    /// staggered CLI starts, so the launch settles in well under a minute.
-    static let limit = 12
+    /// Four settled agents kept warm. Each is a real CLI process and can own its own descendants;
+    /// a small default keeps quick switching useful without turning the sidebar into a process
+    /// inventory. Unfinished or otherwise unsafe-to-retire work does not count against this cap.
+    static let limit = 4
 
     /// Offered in the settings pop-ups. Bounds rather than a free field: both values decide how
     /// many processes a launch spawns, so the range is the product's, not a text field's.

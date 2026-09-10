@@ -33,7 +33,8 @@ final class StartupSessionRelaunchTests: XCTestCase {
         let planned = StartupSessionRelaunch.plan(
             policy: .runningAtLastQuit,
             recorded: [older.id, newest.id, middle.id],
-            sessions: [older, newest, middle]
+            sessions: [older, newest, middle],
+            now: Date(timeIntervalSince1970: 350)
         )
 
         XCTAssertEqual(
@@ -57,7 +58,8 @@ final class StartupSessionRelaunchTests: XCTestCase {
         let planned = StartupSessionRelaunch.plan(
             policy: .runningAtLastQuit,
             recorded: [deleted, archived.id, kept.id],
-            sessions: [kept, archived]
+            sessions: [kept, archived],
+            now: Date(timeIntervalSince1970: 250)
         )
 
         XCTAssertEqual(planned.sessionIDs, [kept.id])
@@ -77,6 +79,7 @@ final class StartupSessionRelaunchTests: XCTestCase {
             policy: .runningAtLastQuit,
             recorded: [selected.id, other.id],
             sessions: [selected, other],
+            now: Date(timeIntervalSince1970: 350),
             excluding: selected.id
         )
 
@@ -114,7 +117,8 @@ final class StartupSessionRelaunchTests: XCTestCase {
         let planned = StartupSessionRelaunch.plan(
             policy: .runningAtLastQuit,
             recorded: [running.id],
-            sessions: [running, idle]
+            sessions: [running, idle],
+            now: Date(timeIntervalSince1970: 350)
         )
 
         XCTAssertEqual(planned.outcomes[running.id], .restored)
@@ -287,6 +291,8 @@ final class StartupSessionRelaunchTests: XCTestCase {
 
     /// Both values decide how many processes a launch spawns, so neither trusts what it is given.
     func testTheWindowAndLimitAreClamped() {
+        XCTAssertEqual(SessionRestoreDefaults.windowDays, 1)
+        XCTAssertEqual(SessionRestoreDefaults.limit, 4)
         XCTAssertEqual(SessionRestoreDefaults.clampWindowDays(0), SessionRestoreDefaults.windowDays)
         XCTAssertEqual(SessionRestoreDefaults.clampWindowDays(-5), SessionRestoreDefaults.windowDays)
         XCTAssertEqual(SessionRestoreDefaults.clampWindowDays(9_000), 30)

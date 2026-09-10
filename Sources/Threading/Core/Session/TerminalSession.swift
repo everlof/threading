@@ -741,14 +741,15 @@ final class TerminalSession: NSObject {
     /// `PTYHostTerminalLink.detach(screenSeed:modeSeed:by:)`; this is the quit path, where the
     /// close after the frame is the process exiting.
     @discardableResult
-    func detachFromHost(by deadline: Date) -> Bool {
+    func detachFromHost(by deadline: Date, idleExpiresAt: Date? = nil) -> Bool {
         guard let hostLink else { return false }
 
         let terminal = terminalView.terminalStateSnapshot(origin: .liveScreen)
         let sent = hostLink.detach(
             screenSeed: RemoteScreenSeed.repaint(of: terminal),
             modeSeed: RemoteTerminalModeSeed.bytes(for: RemoteTerminalModes(terminal)),
-            by: deadline
+            by: deadline,
+            idleExpiresAt: idleExpiresAt
         )
 
         hostOutputParser?.invalidate()

@@ -30,6 +30,7 @@ enum PTYHostJournalEvent: String {
     case replacementStarted
     case attached
     case detached
+    case idleExpired
     case resized
     case resizeFailed
     case killRequested

@@ -4352,6 +4352,17 @@
         }
       }
     },
+    "A settled conversation becomes dormant after this long without a submitted turn. Opening it resumes it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En avslutad konversation blir vilande efter så lång tid utan ett skickat meddelande. När du öppnar den återupptas den."
+          }
+        }
+      }
+    },
     "A standing cleanup report at half progress. Its determinate bar is content, not the dwell countdown on the card edge; completion updates this same band and starts the ordinary receipt clock." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22659,6 +22670,17 @@
         }
       }
     },
+    "Keep idle agents running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behåll inaktiva agenter igång"
+          }
+        }
+      }
+    },
     "Keep it under %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25299,13 +25321,13 @@
         }
       }
     },
-    "Most recent first. Each one is a real agent process, so this is the ceiling on what a launch may start." : {
+    "Most recent first. Unfinished, non-resumable, visible, or remotely viewed work is never stopped by this limit." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Senast använda först. Varje session är en riktig agentprocess, så det här är taket för vad en start får starta."
+            "value" : "Senast använda först. Oavslutat arbete och arbete som inte kan återupptas, visas eller fjärrvisas stoppas aldrig av den här gränsen."
           }
         }
       }
@@ -37754,6 +37776,17 @@
         }
       }
     },
+    "Session Processes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konversationsprocesser"
+          }
+        }
+      }
+    },
     "Session Status Card" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41080,6 +41113,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stanna här och fortsätt när användningsfönstret återställs"
+          }
+        }
+      }
+    },
+    "Stop idle agents after" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa inaktiva agenter efter"
           }
         }
       }

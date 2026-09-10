@@ -31,6 +31,16 @@ struct SessionRuntimeDidChange: AppEvent {
     let cause: SessionActivityCause?
 }
 
+/// The one conversation occupying the local display pane changed.
+///
+/// Kept separate from activity and followers: selection is neither work nor a remote audience,
+/// but it protects an otherwise-idle process from retirement while the person is looking at it.
+struct SessionVisibilityDidChange: AppEvent {
+    static let name = Notification.Name("sessionVisibilityDidChange")
+    let previousSessionID: SessionID?
+    let sessionID: SessionID?
+}
+
 /// One chat's live audience moved: somebody joined, left, resized, or started composing.
 ///
 /// Separate from `SessionSharingDidChange` on purpose — who is *watching* changes many times a

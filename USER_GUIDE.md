@@ -1088,13 +1088,12 @@ showing a different, empty one. So Cursor sessions are always Chat, and the surf
 choice for them. Everything else about Cursor is its own CLI and your own Cursor login.
 
 **Sessions come back on their own, and you choose which ones.** **Bring back at launch**
-(Settings ▸ General ▸ Startup) offers three answers:
+(Settings ▸ General ▸ Session Processes) offers three answers:
 
-- **Running at last quit** (the default) brings back exactly what had a live agent when you
-  quit. It is the cheapest honest rule, because the machine was already running that set a
-  moment earlier.
+- **Running at last quit** (the default) brings back what still had a live agent after idle
+  housekeeping ran at quit. Unfinished and otherwise protected work remains in that set.
 - **Recently used** brings back the conversations you actually worked in inside a window you
-  set, most recent first, up to a limit you set (**1 day** and **at most 12** by default).
+  set, most recent first, up to a limit you set (**1 day** and **at most 4** by default).
   Unlike the rule above it does not depend on the quit, so it still works after a reboot, a
   force quit, or a launch that ended before it restored anything. "Recently used" means the last
   time a turn ran in the conversation, not the last time Threading opened it.
@@ -1104,6 +1103,13 @@ Whatever comes back resumes in the background: the last session you had selected
 as before, and the rest come up behind it, one per second. Their sidebar rows show them idle and
 ready, and opening one attaches a session that is already running instead of resuming it on the
 click. Archived sessions never come back, and after a crash nothing relaunches automatically.
+
+**Settled agents do not stay running forever.** By default, Threading keeps the four most recently
+used idle agents warm and stops one after a day without a submitted turn. The conversation and its
+transcript remain in the sidebar; opening it resumes the same conversation. A process is never
+stopped by this housekeeping while a turn or continuation is unfinished, it is awaiting you, it
+cannot be resumed safely, it has unsent input, it is visible, or somebody is viewing it remotely.
+Protected work can therefore make the live process count exceed four until it becomes safe.
 
 **A dormant session says why it is dormant.** Hovering a greyed-out row shows the usual card,
 and under **Dormant · resumable** it names the reason this launch did not bring that session
@@ -4738,8 +4744,9 @@ than borrowing an unrelated app translation.
 - **Bring back at launch** — nothing, the sessions that were running at the last quit, or the
   ones used recently; whatever comes back resumes in the background, one at a time, so each is
   already running when you open it; see [Resuming](#resuming)
-- **Counts as recently used** and **Sessions brought back** — the window and the ceiling for
-  the recently-used answer above; both are dimmed under the other two
+- **Stop idle agents after** and **Keep idle agents running** — the age window and warm-process
+  ceiling used while Threading is open and by the **Recently used** launch choice; unfinished,
+  unsafe-to-resume, visible, and remotely viewed work is protected
 - **Confirmations** — one switch per prompt, plus **Hidden extension messages ▸ Show All**;
   see [Confirmations](#confirmations)
 - **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)

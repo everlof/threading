@@ -149,6 +149,13 @@ Restore/Delete actions whose labels promise durable effects. Extensions may cont
 individual settings fields to the Archived page through the existing settings registry; they do
 not replace the archive rows, filter, or lifecycle controls.
 
+Idle process retention is host-only lifecycle policy. Threading alone combines provider turn
+truth, pending local input, checkout-move fences, remote viewers, durable resumability, and daemon
+process ownership before it may turn a live agent into a dormant conversation. Extensions may
+publish their existing session presentation and settings fields, but cannot replace the retention
+controls, claim a protected session is safe to stop, or issue the daemon deadline behind a label
+the host did not evaluate.
+
 Moving a chat between checkouts is the durable half of that same boundary, so its shared session
 menu, Tools policy and approval sheet remain host-only too. Threading owns canonical repository
 and worktree identity, the atomic session/project transaction, the active-turn input fence, the

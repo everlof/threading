@@ -107,6 +107,10 @@ final class PTYSession: @unchecked Sendable {
 
     var processSource: DispatchSourceProcess?
     var foregroundTimer: DispatchSourceTimer?
+    /// Armed only after an explicit idle handoff. Attaching cancels it; a connection that merely
+    /// disappears never invents an expiry for work whose state the daemon cannot know.
+    var idleExpiryTimer: DispatchSourceTimer?
+    var idleExpiresAt: Date?
     var lastForeground: pid_t?
     var pendingInputBytes = 0
     /// Set by `kill`, so an exit that follows is not reported as a surprise in the journal.

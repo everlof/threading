@@ -51,7 +51,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `input` | → | 2 | raw bytes, no envelope |
 | `resize` | → | 0 | `id`, `grid` (cols, rows, xpixel, ypixel) |
 | `resized` | ← | 0 | `id`, `grid` — the grid `TIOCSWINSZ` took, to the connection that asked |
-| `detach` | → | 0 | `id`, `screenSeed`, `modeSeed`, `ringOffset` |
+| `detach` | → | 0 | `id`, `screenSeed`, `modeSeed`, `ringOffset`, optional `idleExpiresAt` |
 | `closeInput` | → | 0 | `id` |
 | `kill` | → | 0 | `id`, `escalate` |
 | `exited` | ← | 0 | `id`, `status`, `signalled` |
@@ -999,7 +999,8 @@ launching picks them back up into the same conversations.
 
 `AppDelegate.applicationShouldTerminate` calls `AgentRuntime.detachHostBackedSessions()` **before**
 `terminateAll`, which would otherwise kill exactly these children. Each host-backed session sends
-one `detach` carrying three things only this process can produce:
+one `detach` carrying three terminal-state values only this process can produce, plus an optional
+retention deadline:
 
 - `screenSeed` — `RemoteScreenSeed.repaint(of:)` of the emulator's `.liveScreen` snapshot, so
   browsing scrollback on the Mac cannot displace the restored cursor from its prompt. The daemon cannot synthesise
@@ -1008,12 +1009,23 @@ one `detach` carrying three things only this process can produce:
 - `modeSeed` — `RemoteTerminalModeSeed.bytes(for:)` of the modes read off the same snapshot.
 - `ringOffset` — where this watcher had got to in the daemon's own `totalBytesWritten` units,
   tracked by `PTYHostTerminalLink` from the byte counts it has delivered.
+- `idleExpiresAt` — the app policy's absolute deadline for a settled, resumable conversation. It
+  is absent for unfinished or otherwise protected work. The daemon owns the process and timer but
+  does not infer activity or choose a retention policy.
 
 The whole set is bounded by **one** deadline (`PTYHostSessionDefaults.detachDrainSeconds`), not one
 per session: `DispatchIO` reports a write complete later and on this path the close is the process
 exiting, so the frames are drained before the app goes — and forty host-backed sessions must cost
 one wait rather than forty. Losing a `detach` is not losing the session: a close without one leaves
 the child running and clears the seed, so the next attach is a cut.
+
+An explicit detach replaces any earlier idle deadline; `nil` cancels one. `attach` cancels the
+timer before binding the watcher, so opening a conversation at the deadline cannot leave a stale
+timer aimed at its newly active child. If the deadline fires while the session is still detached,
+the daemon journals `idleExpired` and uses the ordinary process-group TERM-then-KILL path. A bare
+connection close carries no policy and schedules no deadline. This preserves the conservative
+failure direction: losing the app or the frame may retain a process, never stop work whose safety
+was not proved.
 
 `terminateAll` keeps the same guard for anything that reaches it another way, because tearing every
 session down must not become a way to kill a child nobody asked to stop. **An explicit stop still

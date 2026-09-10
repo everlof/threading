@@ -135,6 +135,79 @@ final class PTYHostSessionDaemonTests: XCTestCase {
         XCTAssertFalse(session.isRunning)
     }
 
+    func testDetachedIdleSessionStopsAtTheDeadlineOwnedByTheDaemon() throws {
+        let socketPath = try startDaemon()
+        let session = makeSession()
+        session.hostTransportFactory = { events in
+            let client = PTYHostClient(socketPath: socketPath, build: "test", events: events)
+            try client.connect()
+            return client
+        }
+
+        session.start(plan: AgentLaunchPlan(
+            executable: "/bin/sh",
+            arguments: ["-c", "sleep 30"],
+            resumeState: .unavailable
+        ))
+        XCTAssertTrue(
+            pump(until: { session.shellPid > 0 }, timeout: Fixture.childTimeout),
+            "the daemon never reported the child's pid"
+        )
+        let childPid = session.shellPid
+
+        XCTAssertTrue(session.detachFromHost(
+            by: Date().addingTimeInterval(2),
+            idleExpiresAt: Date().addingTimeInterval(0.2)
+        ))
+        XCTAssertFalse(session.isRunning, "the app gave ownership of the child back to the host")
+        XCTAssertTrue(
+            pump(until: { Darwin.kill(childPid, 0) != 0 }, timeout: Fixture.exitTimeout),
+            "pid \(childPid) survived its idle-retention deadline"
+        )
+    }
+
+    func testReattachingCancelsTheDetachedIdleDeadline() throws {
+        let socketPath = try startDaemon()
+        let session = makeSession()
+        session.hostTransportFactory = { events in
+            let client = PTYHostClient(socketPath: socketPath, build: "test", events: events)
+            try client.connect()
+            return client
+        }
+
+        session.start(plan: AgentLaunchPlan(
+            executable: "/bin/sh",
+            arguments: ["-c", "sleep 30"],
+            resumeState: .unavailable
+        ))
+        XCTAssertTrue(
+            pump(until: { session.shellPid > 0 }, timeout: Fixture.childTimeout),
+            "the daemon never reported the child's pid"
+        )
+        let childPid = session.shellPid
+        let dimensions = session.terminalView.terminalDimensions
+
+        XCTAssertTrue(session.detachFromHost(
+            by: Date().addingTimeInterval(2),
+            idleExpiresAt: Date().addingTimeInterval(0.2)
+        ))
+        XCTAssertTrue(session.attachToHost(grid: PTYHostGrid(
+            cols: dimensions.cols,
+            rows: dimensions.rows
+        )))
+        XCTAssertTrue(
+            pump(until: { session.shellPid == childPid }, timeout: Fixture.childTimeout),
+            "the reattached session did not recover its child identity"
+        )
+
+        _ = pump(until: { false }, timeout: Fixture.quietWindow)
+        XCTAssertEqual(
+            Darwin.kill(childPid, 0),
+            0,
+            "the stale idle timer stopped a child after a new watcher attached"
+        )
+    }
+
     /// A window size the transport refused still reaches the child.
     ///
     /// This is the bug, reproduced end to end: `resize` is fire-and-forget and has no retry of
