@@ -288,6 +288,16 @@ finger or deceleration before the host installs its destination; a jump is not a
 the gesture velocity that made the control appear. Neither feature constructs a second button or
 owns motion numbers.
 
+Its circle has one drawing owner: `UIButton.Configuration.cornerStyle = .capsule` supplies the
+silhouette for the opaque background, content clip and layer border. UIKit reapplies corner
+geometry during layout: setting the layer's radius and curve only in the initializer was
+overwritten by the plain configuration's 17-point continuous corner. Pairing that corner with a
+separately stroked `UIBezierPath` left wedges of background outside the border. State the shape
+in the configuration and keep the border on the same layer. The terminal-hosted pixel test
+in `RemoteTerminalLayoutViewTests` checks outside-circle paint and visible border ink at 2× and
+3×, including a theme change and the pressed state; the terminal-scrollback and
+conversation-away-from-latest evidence captures exercise both shipping hosts.
+
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
 far.** Each of them was two or three implementations, and each had already been "unified" by
 sharing constants — one radius, one type scale, one height, read from a common enum. It did not

@@ -34,8 +34,6 @@ final class MobileFloatingScrollToEndButton: UIButton {
 
     private(set) var isPresented = false
     private var hidingTask: Task<Void, Never>?
-    private var outlineColor = UIColor.clear
-    private var outlineWidth: CGFloat = 0
 
     init(accessibilityLabel: String, accessibilityIdentifier: String) {
         super.init(frame: .zero)
@@ -49,13 +47,14 @@ final class MobileFloatingScrollToEndButton: UIButton {
             )
         )
         configuration.contentInsets = .zero
+        // UIKit reapplies corner geometry during layout. State the circle in its configuration
+        // so the fill, clip and layer border keep one silhouette after every state update.
+        configuration.cornerStyle = .capsule
         self.configuration = configuration
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityIdentifier = accessibilityIdentifier
         accessibilityTraits.insert(.button)
         MobileButtonHaptics.install(on: self)
-        layer.cornerCurve = .continuous
-        layer.cornerRadius = MobileDesign.Size.floatingScrollTarget / 2
         clipsToBounds = true
         layer.opacity = 0
         layer.setAffineTransform(Self.concealedTransform)
@@ -68,22 +67,8 @@ final class MobileFloatingScrollToEndButton: UIButton {
     func applyTheme(_ theme: RemoteThemePalette) {
         backgroundColor = theme.uiFloatingSurface
         tintColor = theme.uiAccent
-        outlineColor = theme.uiBorder
-        outlineWidth = max(theme.borderWidth, 1)
-        setNeedsDisplay()
-    }
-
-    override func draw(_ rect: CGRect) {
-        super.draw(rect)
-        guard outlineWidth > 0 else { return }
-        outlineColor.setStroke()
-        let inset = outlineWidth / 2
-        let path = UIBezierPath(
-            roundedRect: bounds.insetBy(dx: inset, dy: inset),
-            cornerRadius: max(0, layer.cornerRadius - inset)
-        )
-        path.lineWidth = outlineWidth
-        path.stroke()
+        layer.borderColor = theme.uiBorder.cgColor
+        layer.borderWidth = max(theme.borderWidth, 1)
     }
 
     /// Moves between a small, lowered absence and the settled button.

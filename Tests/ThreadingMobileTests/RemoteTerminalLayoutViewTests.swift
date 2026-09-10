@@ -1,11 +1,68 @@
 import QuartzCore
 import SwiftTerm
+import ThreadingRemoteKit
 import UIKit
 import XCTest
 @testable import ThreadingMobile
 
 @MainActor
 final class RemoteTerminalLayoutViewTests: XCTestCase {
+    func testFloatingControlPaintStaysInsideItsCircularBorder() throws {
+        let fixture = makeFixture()
+        let button = fixture.host.scrollToEndButton
+        fixture.host.setScrollToEndPresented(true, animated: false)
+        fixture.host.layoutIfNeeded()
+
+        // Strongly separated inks expose the wedges that a dark fill on a dark terminal hides.
+        // Reapply on the same host to cover a live theme change and UIKit's pressed background.
+        for borderWidth in [CGFloat(1), 3] {
+            fixture.host.updateTheme(RemoteThemePalette(RemoteThemeDTO(
+                id: "circular-scroll-test", name: "Circular scroll test", mode: .dark,
+                colors: ["floating_surface": "#FF0000", "border": "#FFFFFF"],
+                material: .init(panelRadius: 20, controlRadius: 10, borderWidth: Double(borderWidth))
+            )))
+            for highlighted in [false, true] {
+                button.isHighlighted = highlighted
+                button.layoutIfNeeded()
+                for scale in [CGFloat(2), 3] {
+                    let format = UIGraphicsImageRendererFormat()
+                    format.scale = scale
+                    format.opaque = false
+                    let rendered = UIGraphicsImageRenderer(bounds: button.bounds, format: format)
+                        .image { button.layer.render(in: $0.cgContext) }
+                    let image = try XCTUnwrap(rendered.cgImage)
+                    var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+                    let context = try XCTUnwrap(CGContext(
+                        data: &pixels, width: image.width, height: image.height,
+                        bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                        space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    ))
+                    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                    let radius = CGFloat(image.width) / 2
+                    var escapedPixels = 0
+                    var borderPixels = 0
+                    for y in 0..<image.height {
+                        for x in 0..<image.width {
+                            let distance = hypot(CGFloat(x) + 0.5 - radius, CGFloat(y) + 0.5 - radius)
+                            let offset = (y * image.width + x) * 4
+                            // Exclude only the outer pixel's antialiasing footprint.
+                            if distance > radius + 1, pixels[offset + 3] > 0 {
+                                escapedPixels += 1
+                            }
+                            if abs(distance - (radius - borderWidth * scale / 2)) < 0.5,
+                               pixels[offset + 1] > 128 {
+                                borderPixels += 1
+                            }
+                        }
+                    }
+                    XCTAssertEqual(escapedPixels, 0, "Fill escaped the circle at \(scale)×, pressed=\(highlighted)")
+                    XCTAssertGreaterThan(borderPixels, Int(radius), "The circular border must also be visible")
+                }
+            }
+        }
+    }
+
     func testFloatingControlArrivalFadesRisesAndScalesToItsSettledState() throws {
         let button = makeFloatingButton()
 
