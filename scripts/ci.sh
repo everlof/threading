@@ -123,6 +123,9 @@ python3 "${repository_directory}/scripts/tests/test_workspace_navigator_schema.p
 say "Testing UI evidence tooling"
 python3 "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
 
+say "Testing the development launcher"
+python3 "${repository_directory}/scripts/tests/test_dev_launcher.py"
+
 say "Testing connectivity evidence tooling"
 python3 "${repository_directory}/scripts/tests/test_connectivity_diagnostics.py"
 

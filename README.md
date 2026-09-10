@@ -53,8 +53,10 @@ For the complete cloud-free development environment, run:
 That starts the loopback control plane, builds and opens an isolated Debug Mac app, then builds,
 installs and opens the iOS app in an available iPhone Simulator. It installs the control-plane
 Node dependencies when needed. Use `./dev --no-ios` for Mac-only work or `./dev --backend-only`
-for the service alone; `./dev --help` lists the remaining options. Ctrl-C stops the backend but
-leaves the apps open so an active local agent session is never terminated implicitly.
+for the service alone. `./dev --fresh --no-ios` launches the Mac app as a first-time user in a
+new empty home, without touching the normal development home or installed-app state.
+`./dev --help` lists the remaining options. Ctrl-C stops the backend but leaves the apps open so
+an active local agent session is never terminated implicitly.
 
 ```bash
 # The Mac app

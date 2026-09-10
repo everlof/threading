@@ -18,6 +18,7 @@ requested_simulator="${THREADING_DEV_SIMULATOR:-}"
 
 launch_mac=1
 launch_ios=1
+fresh_mac_home=0
 backend_pid=""
 backend_process_group=""
 
@@ -29,6 +30,7 @@ Start the complete cloud-free Threading development environment.
 
 Options:
   --backend-only       Start only the loopback control plane
+  --fresh              Open the Mac app with a new, completely empty home
   --no-mac             Do not build or open the macOS app
   --no-ios             Do not build or open the iOS Simulator app
   --simulator UDID     Use this available iPhone Simulator
@@ -56,6 +58,10 @@ while (($#)); do
       launch_ios=0
       shift
       ;;
+    --fresh)
+      fresh_mac_home=1
+      shift
+      ;;
     --no-mac)
       launch_mac=0
       shift
@@ -80,6 +86,13 @@ while (($#)); do
       ;;
   esac
 done
+
+if ((fresh_mac_home && !launch_mac)); then
+  fail "--fresh requires the macOS app; remove --no-mac or --backend-only"
+fi
+if ((fresh_mac_home)) && [[ -n "${THREADING_DEV_HOME:-}" ]]; then
+  fail "--fresh cannot be combined with THREADING_DEV_HOME"
+fi
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "required command is unavailable: $1"
@@ -135,7 +148,15 @@ if ((launch_mac || launch_ios)); then
   require_command open
 fi
 
-mkdir -p "${derived_data_directory}" "${mac_home_directory}"
+mkdir -p "${derived_data_directory}"
+if ((fresh_mac_home)); then
+  fresh_home_parent="${repository_directory}/.build/dev/fresh-homes"
+  mkdir -p "${fresh_home_parent}"
+  mac_home_directory="$(mktemp -d "${fresh_home_parent}/run.XXXXXX")"
+  printf 'Fresh macOS home: %s\n' "${mac_home_directory}"
+else
+  mkdir -p "${mac_home_directory}"
+fi
 
 installed_lock="${service_directory}/node_modules/.package-lock.json"
 if [[ ! -x "${service_directory}/node_modules/.bin/wrangler" \
@@ -191,12 +212,19 @@ if ((launch_mac)); then
   [[ -d "${mac_app}" ]] || fail "the built macOS app is missing: ${mac_app}"
 
   printf 'Opening the macOS app with isolated local state…\n'
-  open -n \
-    --env "CFFIXED_USER_HOME=${mac_home_directory}" \
-    --env "THREADING_CONTROL_PLANE_URL=${control_plane_url}" \
-    --env THREADING_CONTROL_PLANE_LOCAL_AUTH=1 \
-    --env "THREADING_REPORT_INTAKE_URL=${report_intake_url}" \
-    "${mac_app}"
+  mac_launch_environment=(
+    --env "CFFIXED_USER_HOME=${mac_home_directory}"
+    --env "THREADING_CONTROL_PLANE_URL=${control_plane_url}"
+    --env THREADING_CONTROL_PLANE_LOCAL_AUTH=1
+    --env "THREADING_REPORT_INTAKE_URL=${report_intake_url}"
+  )
+  if ((fresh_mac_home)); then
+    # CFFIXED_USER_HOME isolates Foundation state; HOME gives account discovery and every child
+    # process the same empty answer. Keep the directory after this launcher exits because the app
+    # is deliberately left running when the local control plane stops.
+    mac_launch_environment+=(--env "HOME=${mac_home_directory}")
+  fi
+  open -n "${mac_launch_environment[@]}" "${mac_app}"
 fi
 
 resolve_simulator() {
