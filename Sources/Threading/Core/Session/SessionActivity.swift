@@ -208,6 +208,10 @@ enum SessionActivityCause: String {
     case running
     case sessionStarted
 
+    /// The runtime's own transcript was adopted as a turn-boundary source — Codex's rollout,
+    /// once a validated one is being observed.
+    case transcriptAdopted
+
     /// Whether the agent said this, as against Threading inferring it from bytes, timers or the
     /// session's own transcript.
     ///
@@ -224,7 +228,7 @@ enum SessionActivityCause: String {
         // the same side of this line as `turnRefused`, which is read the same way.
         case .seen, .userInput, .output, .quiet, .turnStartedFromTranscript,
              .turnFinishedFromTranscript, .turnRefused, .limitParked, .limitCleared, .bell,
-             .dormant, .running, .sessionStarted:
+             .dormant, .running, .sessionStarted, .transcriptAdopted:
             return false
         }
     }
@@ -1235,6 +1239,39 @@ final class SessionActivityTracker {
             awaitsUser = false
         }
         settle(.sessionStarted)
+    }
+
+    /// Records that the runtime's own transcript is now a turn-boundary source — a validated
+    /// Codex rollout under observation.
+    ///
+    /// Codex writes `task_started`, `task_complete` and `turn_aborted` for every turn whether or
+    /// not any hook reports it, so once that rollout is being read, bytes have nothing to say
+    /// that the rollout will not say better. Reporting latches as it does for a hook. That is
+    /// also what lets the reader's first read do its job: `noteTurnStartedFromTranscript`
+    /// refuses a session that has not latched, and a reattach clears every latch.
+    ///
+    /// Measured on 10 September 2026: an app restart took 17 sessions back from the PTY host,
+    /// which restarts no CLI and so fires no `SessionStart`. The idle Codex chats among them
+    /// repainted their prompts, inference opened a turn on the first burst after the replay,
+    /// and their rows spun over idle programs while their rollouts ended in `task_complete`.
+    ///
+    /// A turn output inferred before the rollout was adopted is closed without flagging, for
+    /// the reason `noteSessionStarted` closes one: the reader's first read reopens it as a
+    /// declared turn if the rollout says it is running, and otherwise it was a repaint. A
+    /// continuation the one-shot grant opened is kept, because that grant is the runtime's own
+    /// reported finish speaking and the rollout is about to name it.
+    func noteTranscriptBoundarySourceAdopted() {
+        adoptOwnReports()
+        if turnInFlight, !turnWasDeclared, !outputInferredContinuationInFlight {
+            turnInFlight = false
+            reportedTurnID = nil
+            awaitsUser = false
+        }
+        // A reported finish inside its continuation grace is deliberately provisional: settling
+        // here would publish the idle state early and let the finish follow with a badge the
+        // grace exists to avoid. The commit or the continuation settles it soon enough.
+        guard pendingReportedTurnFinish == nil else { return }
+        settle(.transcriptAdopted)
     }
 
     /// Records that this session reports, the first time it reports anything.

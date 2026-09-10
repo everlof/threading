@@ -183,9 +183,23 @@ interruption reader match it by id.
 
 This reverses one line of [Seeding from the transcript](#after-a-reattach): there is now a reader
 that says a turn is open, because a runtime that opens its own turns produced the evidence for
-one. It is still not a second activity source — it keeps the fallback contract the two ending
-readers keep, cannot latch a session that never reports, and does not claim the runtime declares
-starts, so the next such turn is read the same way.
+one. It keeps the fallback contract the two ending readers keep and does not claim the runtime
+declares starts, so the next such turn is read the same way.
+
+**Adopting the rollout latches reporting.** The reader used to be unable to latch a session
+that never reported, which left a hole exactly where the reader was most needed. An app restart
+takes sessions back from the PTY host without restarting any CLI, so no `SessionStart` arrives
+and `markRunning` has cleared every latch; the reader's first read was then refused, and until a
+hook happened to fire the byte heuristic decided. Measured on 10 September 2026: 17 sessions
+taken back at 13:19, and the idle Codex chats among them repainted their prompts faster than the
+0.8-second quiet timer, so inference opened a turn on the first burst after the replay and their
+rows spun over idle programs whose rollouts ended in `task_complete`. Codex writes a boundary for
+every turn whether or not a hook reports it, so a validated rollout under observation is a report
+source: `noteTranscriptBoundarySourceAdopted` latches, closes a plain inferred turn the same way
+`SessionStart` does, keeps a granted continuation, and leaves the replay grace to end at its own
+boundary. The read scheduled at adoption then either recovers a running turn as a declared one or
+leaves the row idle. Claude reattaches keep the heuristic: Claude's transcript records no open
+turn, and its idle screen writes nothing.
 
 **A turn is ended by whatever kind of thing began it.** `turnWasDeclared` is that rule:
 a turn a hook or the rollout declared arms no quiet timer, because an agent waiting on the model

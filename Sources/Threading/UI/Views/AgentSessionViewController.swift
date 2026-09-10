@@ -597,8 +597,8 @@ final class AgentSessionViewController: NSViewController {
     /// read and stay on output inference, which is R7's accepted cost; no second reconciliation
     /// is invented here.
     ///
-    /// **Output inference is the only thing that can say a reattached session is busy**, and it
-    /// has to survive the replay to do it. A turn that began before the relaunch raised its
+    /// **For a runtime with no transcript source, output inference is the only thing that can
+    /// say a reattached session is busy**, and it has to survive the replay to do it. A turn that began before the relaunch raised its
     /// `turnStarted` hook into a socket nobody was listening on, so no report is coming to say
     /// the session is working and — before this — none was coming to end the launch grace either:
     /// `noteUnattendedLaunch` made every burst inert, and a Codex session visibly painting
@@ -608,8 +608,9 @@ final class AgentSessionViewController: NSViewController {
     /// `ClaudeTranscriptInterruption` recover a turn that *ended*, and Claude's transcript
     /// records no open one. Codex's rollout does, and `CodexTranscriptTurnBoundary` reads it, so
     /// a reattached Codex session recovers a running turn exactly rather than by inference once
-    /// its stored rollout resolves off-main. The grace covers that lookup and every runtime that
-    /// has no such durable boundary.
+    /// its stored rollout resolves off-main — adopting that rollout latches reporting, which is
+    /// what lets its first read be admitted at all. The grace covers that lookup and every
+    /// runtime that has no such durable boundary.
     @discardableResult
     func reattachToBackgroundHost(
         socketPath: String,
@@ -1138,6 +1139,11 @@ final class AgentSessionViewController: NSViewController {
             }
             if observer.start() {
                 codexTranscriptBoundaryObserver = observer
+                // The rollout is a turn-boundary source from here on, and the read scheduled
+                // below is what recovers a turn the CLI already has open. A reattach fires no
+                // `SessionStart` to latch on, and without this the reader refused that read
+                // while inference span idle prompts into work.
+                activityTracker.noteTranscriptBoundarySourceAdopted()
             } else {
                 ThreadingLogger.agent.error(
                     "Could not observe Codex rollout for \(self.sessionID.uuidString, privacy: .public)"
