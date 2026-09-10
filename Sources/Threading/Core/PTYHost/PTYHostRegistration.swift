@@ -219,8 +219,9 @@ struct PTYHostRegistrationRequest: Equatable, Sendable {
 
 // MARK: - Outcomes
 
-/// Why a registration attempt did not happen. Never a failure — every one of these leaves the app
-/// on today's in-process `forkpty`, which is the whole posture of the feature.
+/// Why a registration attempt did not happen. A session that did not select hosting remains on
+/// today's in-process path; a selected background session remains stopped until registration is
+/// ready.
 enum PTYHostRegistrationSkip: Equatable, Sendable {
     case disabled
     case recoveryMode
@@ -440,9 +441,9 @@ struct PTYHostRegistrationReceiptStore: Sendable {
 
 /// Registering, unregistering and surveying the launchd agent that starts `threading-ptyd`.
 ///
-/// **Attempted and never required.** Every refusal here is a `PTYHostUnavailability` and every
-/// unavailability is today's in-process `forkpty`, unchanged. Nothing in this type can fail a
-/// launch, and nothing in it runs on the main actor.
+/// Every refusal here becomes a `PTYHostUnavailability`. This type does not launch sessions and
+/// runs nothing on the main actor; the launch policy decides whether hosting was selected and
+/// preserves that ownership promise when it was.
 ///
 /// It journals at the edges only — registered, unregistered, left alone, refused, failed — because
 /// a status read happens on every launch and a journal that recorded them would be a journal of
@@ -550,7 +551,7 @@ final class PTYHostRegistration: Sendable {
             ThreadingLogger.ptyHost.error(
                 """
                 Could not register \(PTYHostRegistrationDefaults.label, privacy: .public): \
-                code \(error.code, privacy: .public); sessions run their PTY in-process
+                code \(error.code, privacy: .public)
                 """
             )
             return .failed(code: error.code)

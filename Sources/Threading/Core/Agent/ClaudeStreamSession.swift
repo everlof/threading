@@ -44,13 +44,14 @@ final class ClaudeStreamSession:
     ///
     /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
     /// dormant conversation reopened an hour later asks the current setting and the current
-    /// daemon rather than the ones that were true when the controller was built. Nil is today's
-    /// in-process child, which every unavailability degrades to.
-    private let hostPlan: () -> PTYHostChildPlan?
+    /// daemon rather than the ones that were true when the controller was built. Nil is the
+    /// deliberate local route; an unavailable selected host throws before any child starts.
+    private let hostPlan: () throws -> PTYHostChildPlan?
 
     /// Fired on the main queue for every parsed event.
     var onEvent: ((StreamEvent) -> Void)?
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
+    var onLaunchFailure: ((Error) -> Void)?
 
     /// Fired on the main queue for child-agent events. Forwarded child output is deliberately
     /// absent from `onEvent`, because it belongs to the child's drill-in transcript.
@@ -127,7 +128,7 @@ final class ClaudeStreamSession:
         sessionID: SessionID,
         effort: String? = nil,
         subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
-        hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
+        hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
@@ -163,7 +164,7 @@ final class ClaudeStreamSession:
                 arguments: plan.arguments,
                 environment: plan.launchEnvironment(),
                 sessionID: sessionID,
-                host: hostPlan()
+                host: try hostPlan()
             ) { [weak self] status in
                 Task { @MainActor [weak self] in
                     self?.handleTermination(status: status)
@@ -174,7 +175,9 @@ final class ClaudeStreamSession:
                 "Stream session failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             Task { @MainActor [weak self] in
-                self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+                guard let self else { return }
+                if let handler = self.onLaunchFailure { handler(error) }
+                else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
             }
             return
         }

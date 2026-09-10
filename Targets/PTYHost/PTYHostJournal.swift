@@ -25,6 +25,9 @@ enum PTYHostJournalEvent: String {
     case spawned
     case spawnRefused
     case spawnFailed
+    case replacementQueued
+    case replacementCancelled
+    case replacementStarted
     case attached
     case detached
     case resized

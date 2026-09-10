@@ -208,6 +208,40 @@ final class PTYHostFrameTests: XCTestCase {
         XCTAssertEqual(object["kind"] as? String, "sessionShell")
     }
 
+    func testReplacementAuthorityIsAnAdditiveSpawnField() throws {
+        let ordinary = PTYHostSpawnRequest(
+            id: identity,
+            channel: .pipes,
+            executable: "/bin/cat",
+            arguments: [],
+            environment: []
+        )
+        let ordinaryData = try encoder.encode(ordinary)
+        let ordinaryObject = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: ordinaryData) as? [String: Any]
+        )
+        XCTAssertNil(ordinaryObject["replaceExisting"], "an older app's shape stays unchanged")
+        XCTAssertNil(try decoder.decode(PTYHostSpawnRequest.self, from: ordinaryData).replaceExisting)
+
+        let replacement = PTYHostSpawnRequest(
+            id: identity,
+            channel: .pipes,
+            executable: "/bin/cat",
+            arguments: [],
+            environment: [],
+            replaceExisting: true
+        )
+        let replacementData = try encoder.encode(replacement)
+        let replacementObject = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: replacementData) as? [String: Any]
+        )
+        XCTAssertEqual(replacementObject["replaceExisting"] as? Bool, true)
+        XCTAssertEqual(
+            try decoder.decode(PTYHostSpawnRequest.self, from: replacementData),
+            replacement
+        )
+    }
+
     func testAMalformedSessionIdentityIsRefused() {
         let payload = Data(#"{"kind":"agentSession","id":"not-a-uuid"}"#.utf8)
         XCTAssertThrowsError(try decoder.decode(PTYHostSessionIdentity.self, from: payload)) { error in

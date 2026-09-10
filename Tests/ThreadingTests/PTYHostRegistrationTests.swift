@@ -762,7 +762,7 @@ final class PTYHostRegistrationTests: XCTestCase {
         XCTAssertEqual(refresh.requests.count, 1, "a completed handoff is exactly once")
     }
 
-    func testANewSessionCannotKeepAStaleGenerationBusyForever() {
+    func testACompatibleBusyGenerationKeepsNewSessionsDurableUntilItCanUpgrade() {
         let recording = RecordingUpgradeProbe(progress: [
             .settled(.leave(.holdsSessions(1))),
             .retirementConfirmed
@@ -774,9 +774,9 @@ final class PTYHostRegistrationTests: XCTestCase {
         )
 
         monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
-        XCTAssertFalse(
+        XCTAssertTrue(
             admission.current.permitsHostedSpawn,
-            "existing sessions may drain, but a new spawn must not extend the stale generation"
+            "a compatible old host is safer than silently launching new sessions in-process"
         )
 
         monitor.hostMayHaveDrained()
@@ -808,11 +808,7 @@ final class PTYHostRegistrationTests: XCTestCase {
 
         monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
 
-        XCTAssertEqual(
-            admission.current,
-            .withheld,
-            "the survey answered; the refusal is an upgrade waiting for work to drain"
-        )
+        XCTAssertEqual(admission.current, .allowed)
     }
 
     /// A survey that reaches the decision it reached last time is not news.

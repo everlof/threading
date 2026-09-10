@@ -267,6 +267,10 @@ public struct PTYHostSpawnRequest: Codable, Equatable, Sendable {
     /// `KEY=value` entries, complete. The daemon adds nothing to this and removes nothing.
     public let environment: [String]
     public let cwd: String?
+    /// This launch intentionally supersedes any live incarnation of the same durable identity.
+    /// Optional for additive compatibility: an older app omits it, and an older daemon ignores
+    /// it. A new daemon treats only `true` as replacement authority.
+    public let replaceExisting: Bool?
 
     public init(
         id: PTYHostSessionIdentity,
@@ -275,7 +279,8 @@ public struct PTYHostSpawnRequest: Codable, Equatable, Sendable {
         arguments: [String],
         execName: String? = nil,
         environment: [String],
-        cwd: String? = nil
+        cwd: String? = nil,
+        replaceExisting: Bool = false
     ) {
         self.id = id
         self.channel = channel
@@ -284,6 +289,7 @@ public struct PTYHostSpawnRequest: Codable, Equatable, Sendable {
         self.execName = execName
         self.environment = environment
         self.cwd = cwd
+        self.replaceExisting = replaceExisting ? true : nil
     }
 }
 
@@ -557,10 +563,24 @@ public struct PTYHostLost: Codable, Equatable, Sendable {
     public let ids: [PTYHostSessionIdentity]
     /// The last moment the daemon can vouch for them — its own previous journal write.
     public let since: Date
+    /// One recovery event, repeated on every connection for this daemon's lifetime. Optional so
+    /// a current app continues to understand a compatible daemon from before incident identity
+    /// was added to this additive frame.
+    public let incidentID: UUID?
+    /// When the replacement daemon detected the loss, distinct from `since`, which may be the
+    /// much earlier time the oldest lost child was spawned.
+    public let detectedAt: Date?
 
-    public init(ids: [PTYHostSessionIdentity], since: Date) {
+    public init(
+        ids: [PTYHostSessionIdentity],
+        since: Date,
+        incidentID: UUID? = nil,
+        detectedAt: Date? = nil
+    ) {
         self.ids = ids
         self.since = since
+        self.incidentID = incidentID
+        self.detectedAt = detectedAt
     }
 }
 

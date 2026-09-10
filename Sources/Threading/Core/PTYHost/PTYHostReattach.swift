@@ -35,7 +35,8 @@ struct PTYHostHoldings: Sendable, Equatable {
     let sessions: [PTYHostSessionSummary]
     /// What a `KeepAlive` restart could not account for. Reported after every `hello`, so a
     /// launch that connects at all learns it.
-    let lost: [PTYHostSessionIdentity]
+    let loss: PTYHostLost?
+    var lost: [PTYHostSessionIdentity] { loss?.ids ?? [] }
 
     init(
         socketPath: String,
@@ -44,7 +45,13 @@ struct PTYHostHoldings: Sendable, Equatable {
     ) {
         self.socketPath = socketPath
         self.sessions = sessions
-        self.lost = lost
+        loss = lost.isEmpty ? nil : PTYHostLost(ids: lost, since: .distantPast)
+    }
+
+    init(socketPath: String, sessions: [PTYHostSessionSummary], loss: PTYHostLost?) {
+        self.socketPath = socketPath
+        self.sessions = sessions
+        self.loss = loss
     }
 }
 
@@ -132,9 +139,9 @@ struct PTYHostHoldingsSurvey: Sendable {
                 client.close()
                 return nil
             }
-            let lost = client.reportedLoss?.ids ?? []
+            let loss = client.reportedLoss
             client.close()
-            return PTYHostHoldings(socketPath: socketPath, sessions: sessions, lost: lost)
+            return PTYHostHoldings(socketPath: socketPath, sessions: sessions, loss: loss)
         }
     }
 
@@ -224,9 +231,10 @@ extension PTYHostSessionSummary {
 /// conversation while the first went on working where nothing could reach it, so the relaunch
 /// plans only what the host does not hold.
 ///
-/// Every way the host can be missing degrades to exactly today's behaviour, and the commonest way
-/// — the hidden key being off — is answered on the calling turn without opening anything, so a
-/// launch with the feature off is byte-for-byte the launch it was before this existed.
+/// With the feature off, the survey is answered on the calling turn without opening anything, so
+/// an unselected launch is byte-for-byte the launch it was before this existed. With hosting
+/// selected, a missing host is left for the launch policy to surface as a refusal; restoration
+/// never silently changes the owner of a session that was meant to survive another app restart.
 @MainActor
 enum PTYHostReattach {
 
@@ -282,7 +290,7 @@ enum PTYHostReattach {
     /// Surveys the host, applies the plan, and answers which sessions the relaunch must skip.
     ///
     /// `completion` runs on the main actor exactly once. With the feature off it runs **on this
-    /// turn**, synchronously, so the degraded launch keeps today's ordering as well as today's
+    /// turn**, synchronously, so an unselected launch keeps today's ordering as well as today's
     /// behaviour; otherwise it runs after one bounded round trip on a background queue.
     static func run(
         decision: PTYHostDecision,
@@ -328,7 +336,8 @@ enum PTYHostReattach {
                     // a notice about what survived belongs in front of it rather than behind.
                     if let announcement = PTYHostLaunchNotice.forLaunch(
                         plan,
-                        pending: outcome.pending
+                        pending: outcome.pending,
+                        loss: holdings.loss
                     ) {
                         notice(announcement)
                     }

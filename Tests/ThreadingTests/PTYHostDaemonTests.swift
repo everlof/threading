@@ -388,6 +388,55 @@ final class PTYHostDaemonTests: XCTestCase {
         )
     }
 
+    /// A checkout move stops one incarnation and immediately starts the next with the same
+    /// logical identity. The daemon serializes that handoff: no refusal can push the replacement
+    /// back into Threading's process, and the two children never overlap.
+    func testAKilledSessionIsAtomicallyReplacedUnderTheSameIdentity() throws {
+        let daemon = try startDaemon()
+        let first = try connect(to: daemon)
+        let id = Self.newIdentity()
+        let original = try spawn(on: first, id: id, script: "printf FIRST; sleep 60")
+        try first.waitForOutput(containing: "FIRST", timeout: Fixture.childTimeout)
+
+        let replacement = try connect(to: daemon)
+        // The replacement deliberately arrives before any kill frame from the old connection.
+        // Its own intent must make the daemon order the stop and spawn atomically.
+        let spawned = try spawn(
+            on: replacement,
+            id: id,
+            script: "printf SECOND; sleep 60",
+            replaceExisting: true
+        )
+        XCTAssertNotEqual(spawned.pid, original.pid)
+        try replacement.waitForOutput(containing: "SECOND", timeout: Fixture.childTimeout)
+        XCTAssertEqual(try nextExit(on: first).id, id)
+    }
+
+    func testAHealthySessionStillRefusesASecondSpawnWithTheSameIdentity() throws {
+        let daemon = try startDaemon()
+        let first = try connect(to: daemon)
+        let id = Self.newIdentity()
+        _ = try spawn(on: first, id: id, script: "sleep 60")
+
+        let second = try connect(to: daemon)
+        second.send(.spawn(PTYHostSpawnRequest(
+            id: id,
+            channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24, xpixel: 0, ypixel: 0)),
+            executable: Fixture.shell,
+            arguments: ["-c", "sleep 60"],
+            environment: Self.childEnvironment,
+            cwd: NSTemporaryDirectory()
+        )))
+        let frame = try second.nextControl(timeout: Fixture.replyTimeout) {
+            if case .spawnRefused = $0 { return true }
+            return false
+        }
+        guard case .spawnRefused(let refusal) = frame else {
+            return XCTFail("expected a spawn refusal, got \(frame)")
+        }
+        XCTAssertEqual(refusal.reason, .alreadyExists)
+    }
+
     // MARK: - Surviving the client
 
     /// The whole feature, in one test: the client goes away mid-stream and the child does not.
@@ -644,9 +693,49 @@ final class PTYHostDaemonTests: XCTestCase {
 
         let lost = try nextLost(on: rejoined)
         XCTAssertEqual(lost.ids, [id], "the session the previous daemon never recorded an end for")
+        XCTAssertNotNil(lost.incidentID)
+        XCTAssertNotNil(lost.detectedAt)
+
+        let observer = try connect(to: restarted, greeting: false)
+        observer.send(.hello(PTYHostHello(build: "test", pid: getpid())))
+        _ = try nextHello(on: observer)
+        let repeated = try nextLost(on: observer)
+        XCTAssertEqual(repeated.incidentID, lost.incidentID)
+        XCTAssertEqual(repeated.detectedAt, lost.detectedAt)
 
         try waitUntil(timeout: Fixture.exitTimeout, "the orphaned child is reclaimed") {
             Darwin.kill(spawned.pid, 0) != 0 && errno == ESRCH
+        }
+    }
+
+    func testARestartReportsOneLossForSeveralIncarnationsOfOneIdentity() throws {
+        let daemon = try startDaemon()
+        let first = try connect(to: daemon)
+        let id = Self.newIdentity()
+        _ = try spawn(on: first, id: id, script: "exit 0")
+        _ = try nextExit(on: first)
+
+        let second = try connect(to: daemon)
+        try waitUntil(timeout: Fixture.replyTimeout, "the observed exit is released") {
+            second.send(.list)
+            return try nextSessions(on: second).isEmpty
+        }
+        let running = try spawn(on: second, id: id, script: "sleep 60")
+
+        daemon.crash()
+        first.hangUp()
+        second.hangUp()
+        try waitUntil(timeout: Fixture.exitTimeout, "the first daemon is gone") {
+            !daemon.isRunning
+        }
+
+        let restarted = try startDaemon(reusing: daemon)
+        let rejoined = try connect(to: restarted, greeting: false)
+        rejoined.send(.hello(PTYHostHello(build: "test", pid: getpid())))
+        _ = try nextHello(on: rejoined)
+        XCTAssertEqual(try nextLost(on: rejoined).ids, [id])
+        try waitUntil(timeout: Fixture.exitTimeout, "the orphaned replacement is reclaimed") {
+            Darwin.kill(running.pid, 0) != 0 && errno == ESRCH
         }
     }
 
@@ -746,7 +835,8 @@ final class PTYHostDaemonTests: XCTestCase {
         on client: PTYHostTestClient,
         id: PTYHostSessionIdentity,
         script: String,
-        grid: PTYHostGrid = PTYHostGrid(cols: 80, rows: 24)
+        grid: PTYHostGrid = PTYHostGrid(cols: 80, rows: 24),
+        replaceExisting: Bool = false
     ) throws -> PTYHostSpawned {
         client.send(.spawn(PTYHostSpawnRequest(
             id: id,
@@ -754,7 +844,8 @@ final class PTYHostDaemonTests: XCTestCase {
             executable: Fixture.shell,
             arguments: ["-c", script],
             environment: Self.childEnvironment,
-            cwd: NSTemporaryDirectory()
+            cwd: NSTemporaryDirectory(),
+            replaceExisting: replaceExisting
         )))
         let frame = try client.nextControl(timeout: Fixture.replyTimeout) {
             if case .spawned = $0 { return true }

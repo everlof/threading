@@ -857,6 +857,29 @@ final class AgentSessionViewController: NSViewController {
             return  // Retried from the sizeChanged callback once layout settles.
         }
 
+        // Resolve ownership before recording a launch. A session that requested durability is
+        // either handed to the background host or remains stopped with an actionable failure;
+        // it is never silently converted into an app-owned process.
+        let hostFactory: PTYHostTransportFactory?
+        switch PTYHostPolicy.launchRoute(
+            for: session.identity,
+            session: ProjectStore.shared.session(withID: sessionID)
+        ) {
+        case .local:
+            hostFactory = nil
+        case .hosted(let factory):
+            hostFactory = factory
+        case .unavailable(let failure):
+            pendingLaunchPlan = nil
+            recordLaunchRefusal(SessionLaunchFailure(
+                origin: .preflight,
+                summary: L10n.string("Couldn’t start this background session."),
+                detail: [failure.localizedDescription],
+                knownCause: "ptyHost.\(failure.cause)"
+            ))
+            return
+        }
+
         // Whatever the launch decided about this session stops being the reason it is dormant the
         // moment it runs. See `SessionRestorationLedger`.
         SessionRestorationLedger.shared.forget(sessionID: sessionID)
@@ -899,16 +922,11 @@ final class AgentSessionViewController: NSViewController {
             identifierLaunchDate = Date()
         }
 
-        // Whether this conversation's pty belongs in `threading-ptyd`, asked exactly once per
-        // launch and asked *here*, because this is the surface that holds the conversation
-        // record and the terminal has already been laid out — so the grid the daemon is handed
-        // is the real one rather than SwiftTerm's 2×1 clamp. Nil is today's in-process `forkpty`,
-        // which every unavailability degrades to. See `PTYHostPolicy`.
-        session.hostTransportFactory = PTYHostPolicy.transportFactory(
-            for: session.identity,
-            session: ProjectStore.shared.session(withID: sessionID)
-        )
+        // The route was resolved before the launch record above so an unavailable requested host
+        // remains a refusal rather than a launch that never happened.
+        session.hostTransportFactory = hostFactory
         session.start(plan: plan)
+        guard isRunning else { return }
         finishRecordedLaunch(plan: plan)
     }
 
@@ -1613,6 +1631,21 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     func terminalSessionDidStart(_ session: TerminalSession) {
         guard AppSettings.shared.remoteAccessEnabled else { return }
         RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
+    }
+
+    func terminalSession(_ session: TerminalSession, didFailToStart failure: PTYHostLaunchError) {
+        launchSurvivalWorkItem?.cancel()
+        launchSurvivalWorkItem = nil
+        processLaunchDate = nil
+        isRunning = false
+        activityTracker.markDormant()
+        resetTranscriptFallbackObservation()
+        recordLaunchRefusal(SessionLaunchFailure(
+            origin: .preflight,
+            summary: L10n.string("Couldn’t start this background session."),
+            detail: [failure.localizedDescription],
+            knownCause: "ptyHost.\(failure.cause)"
+        ))
     }
 
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {

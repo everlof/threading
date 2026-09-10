@@ -420,13 +420,9 @@ final class PTYHostSessionTests: XCTestCase {
         )
     }
 
-    /// A spawn the daemon refuses runs the launch in-process; it is not a conversation that died.
-    ///
-    /// `alreadyExists` is the case this exists for. The daemon keeps an exited session for a few
-    /// seconds so a late watcher can still be told how it ended, so a stop followed straight away
-    /// by a start lands inside that window — and reporting it as an exit would record a launch
-    /// failure against an agent that never started.
-    func testASpawnRefusalRunsTheLaunchInProcessRatherThanEndingIt() throws {
+    /// A selected host is an ownership promise. A refusal remains a launch failure instead of
+    /// silently creating an app-owned child that the next app restart would kill.
+    func testASpawnRefusalDoesNotFallBackToAnInProcessLaunch() throws {
         let session = makeSession()
         let recorder = Recorder()
         recorders.append(recorder)
@@ -445,19 +441,15 @@ final class PTYHostSessionTests: XCTestCase {
 
         transport.send(.spawnRefused(PTYHostSpawnRefused(
             id: PTYHostSessionIdentity(session.identity),
-            reason: .alreadyExists
+            reason: .capacity
         )))
         settle()
 
         XCTAssertTrue(recorder.exitCodes.isEmpty, "a refusal is not an ending")
         XCTAssertFalse(session.isHostBacked)
-        XCTAssertTrue(session.isRunning)
-        XCTAssertTrue(
-            session.terminalView.process.running,
-            "the launch still has to happen, in-process"
-        )
-        XCTAssertGreaterThan(session.shellPid, 0)
-        session.terminate()
+        XCTAssertFalse(session.isRunning)
+        XCTAssertFalse(session.terminalView.process.running)
+        XCTAssertEqual(recorder.launchFailures.map(\.cause), ["spawnRefused.capacity"])
     }
 
     /// A signalled child has no exit code, on both paths — `LocalProcess.exitCode(fromWaitStatus:)`
@@ -510,8 +502,8 @@ final class PTYHostSessionTests: XCTestCase {
 
     // MARK: - Degrading
 
-    /// A factory that refuses runs the PTY in-process, which is the only degradation there is.
-    func testAFactoryThatThrowsFallsBackToTheInProcessLaunch() throws {
+    /// A factory failure cannot silently change a durable launch into an app-owned one.
+    func testAFactoryThatThrowsRefusesTheLaunchWithoutFallingBack() throws {
         let session = makeSession()
         let recorder = Recorder()
         recorders.append(recorder)
@@ -522,11 +514,9 @@ final class PTYHostSessionTests: XCTestCase {
         // Asserted before the run loop turns: the shell is `exit 0` and the point is which path
         // started it, not how long it lived.
         XCTAssertFalse(session.isHostBacked)
-        XCTAssertTrue(
-            session.isRunning,
-            "the local launch is what every unavailability degrades to"
-        )
-        session.terminate()
+        XCTAssertFalse(session.isRunning)
+        XCTAssertFalse(session.terminalView.process.running)
+        XCTAssertEqual(recorder.launchFailures.map(\.cause), ["link.connectTimedOut"])
     }
 
     /// A session with no factory at all is byte-for-byte today's session.
@@ -587,21 +577,20 @@ final class PTYHostSessionTests: XCTestCase {
             .sessionShell(SessionID()),
             .ephemeral(UUID())
         ] {
-            XCTAssertNil(
-                PTYHostPolicy.transportFactory(
-                    for: identity,
-                    session: session,
-                    settings: settings,
-                    bundle: .main,
-                    probe: .unreachable()
-                ),
-                "\(identity) still polls a descriptor a host-backed session does not have"
-            )
+            guard case .local = PTYHostPolicy.launchRoute(
+                for: identity,
+                session: session,
+                settings: settings,
+                bundle: .main,
+                probe: .unreachable()
+            ) else {
+                return XCTFail("\(identity) still polls a descriptor a hosted session lacks")
+            }
         }
     }
 
-    /// An unavailable host is an in-process launch and a journal line, never a failure.
-    func testAnUnavailableHostDegradesAndSaysWhy() throws {
+    /// Not selecting hosting stays local; selecting it and finding no daemon is a typed refusal.
+    func testAnUnavailableRequestedHostRefusesInsteadOfChangingOwnership() throws {
         let suiteName = "PTYHostSessionTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -609,25 +598,26 @@ final class PTYHostSessionTests: XCTestCase {
 
         let session = AgentSession(kind: .claude, title: "t")
         // Off: decided before anything is opened, which is what makes asking on a launch cheap.
-        XCTAssertNil(PTYHostPolicy.transportFactory(
+        guard case .local = PTYHostPolicy.launchRoute(
             for: .agentSession(SessionID()),
             session: session,
             settings: settings,
             bundle: .main,
             probe: .unreachable()
-        ))
+        ) else { return XCTFail("an unselected host should preserve the local launch") }
 
         settings.ptyHostEnabled = true
-        XCTAssertNil(PTYHostPolicy.transportFactory(
+        guard case .unavailable(let failure) = PTYHostPolicy.launchRoute(
             for: .agentSession(SessionID()),
             session: session,
             settings: settings,
             bundle: .main,
             probe: .answering(.notRunning)
-        ))
+        ) else { return XCTFail("a requested unavailable host should refuse") }
+        XCTAssertEqual(failure.cause, "notRunning")
     }
 
-    func testANewSessionStaysLocalWhileAStaleDaemonDrains() throws {
+    func testANewSessionIsRefusedWhileAdmissionIsWithheld() throws {
         let suiteName = "PTYHostSessionTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -636,7 +626,7 @@ final class PTYHostSessionTests: XCTestCase {
         let admission = PTYHostNewSessionAdmission()
         admission.resolve(.withheld)
 
-        XCTAssertNil(PTYHostPolicy.transportFactory(
+        guard case .unavailable(let failure) = PTYHostPolicy.launchRoute(
             for: .agentSession(SessionID()),
             session: AgentSession(kind: .codex, title: "t"),
             settings: settings,
@@ -644,7 +634,8 @@ final class PTYHostSessionTests: XCTestCase {
             probe: .unreachable(),
             eventLog: EventLog(directory: FileManager.default.temporaryDirectory),
             newSessionAdmission: admission
-        ))
+        ) else { return XCTFail("a withheld durable route should refuse") }
+        XCTAssertEqual(failure.cause, "upgradePending")
     }
 
     // MARK: - The record
@@ -981,10 +972,15 @@ private final class Inbox: @unchecked Sendable {
 private final class Recorder: NSObject, TerminalSessionDelegate {
     var onOutputCount: ((Int) -> Void)?
     private(set) var exitCodes: [Int32?] = []
+    private(set) var launchFailures: [PTYHostLaunchError] = []
     private(set) var startCount = 0
 
     func terminalSessionDidStart(_ session: TerminalSession) {
         startCount += 1
+    }
+
+    func terminalSession(_ session: TerminalSession, didFailToStart failure: PTYHostLaunchError) {
+        launchFailures.append(failure)
     }
 
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {

@@ -2956,9 +2956,18 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
 
 extension TerminalContainerViewController: ConversationViewControllerDelegate {
     func conversation(_ controller: ConversationViewController, didExitWithCode code: Int32) {
-        // Unlike a terminal, the view is kept rather than swapped for the dormant placeholder:
-        // the conversation it is showing is the only record of the turn on screen, and the
-        // session can be resumed by selecting it again.
+        if code == AgentChildProcessDefaults.spawnFailureStatus,
+           controller.sessionID == currentSessionID,
+           let stored = ProjectStore.shared.session(withID: controller.sessionID),
+           let failure = stored.lastLaunchFailure
+        {
+            detachCurrentChild()
+            showLaunchFailureState(failure, session: stored)
+        }
+        // After an ordinary exit the view is kept rather than swapped for the dormant
+        // placeholder: the conversation it is showing is the only record of the turn on screen,
+        // and the session can be resumed by selecting it again. A launch failure has no turn to
+        // preserve and takes the shared launch-failure surface above.
         delegate?.terminalContainer(self, sessionDidExit: controller.sessionID, exitCode: code)
     }
 

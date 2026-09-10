@@ -7,10 +7,10 @@ import ThreadingPTYHostKit
 /// Two questions that are deliberately separate. The first is a **choice**: a per-conversation
 /// override over a hidden global, with the same three states `AgentSession.fastMode` and
 /// `AgentSession.remoteControl` established, and nothing about the machine in it. The second is a
-/// **fact**: whether a compatible daemon is actually listening, which is `PTYHostAvailability`
-/// and degrades to today's in-process `forkpty` in every one of its cases. Keeping them apart is
-/// what lets the Advanced page one day say "you asked for this and it is not happening, here is
-/// why" instead of showing a checkbox that silently means nothing.
+/// **fact**: whether a compatible daemon is actually listening, which is `PTYHostAvailability`.
+/// A session that did not ask for hosting still uses today's in-process launch. A session that
+/// did ask for it is either hosted or refused with the exact reason; silently changing ownership
+/// would make a later app restart kill work the user was promised would survive.
 ///
 /// **No new `AgentKind` capability, deliberately.** Whether a session has a pty at all is already
 /// `kind.supports(.terminalUI)`, withheld from exactly one runtime for a reason of its own; a
@@ -19,6 +19,26 @@ import ThreadingPTYHostKit
 /// a capability earns a member only when the difference is a *static fact about the runtime* —
 /// refuses it. Host-backing is a fact about the surface, and the surface clamp is the
 /// `TerminalInstanceIdentity` check below.
+struct PTYHostLaunchError: LocalizedError, Equatable, Sendable {
+    let cause: String
+
+    var errorDescription: String? {
+        L10n.string(
+            "The background session host is unavailable. Threading kept this session stopped "
+                + "so it would not be interrupted when the app closes."
+        )
+    }
+}
+
+enum PTYHostLaunchRoute: Sendable {
+    /// Hosting was not selected for this surface.
+    case local
+    /// Hosting was selected and this factory reaches the admitted daemon generation.
+    case hosted(PTYHostTransportFactory)
+    /// Hosting was selected, but its durability contract cannot currently be met.
+    case unavailable(PTYHostLaunchError)
+}
+
 enum PTYHostPolicy {
 
     // MARK: - The choice
@@ -29,11 +49,11 @@ enum PTYHostPolicy {
     /// boolean on the way, which is what keeps a later change of the global from being silently
     /// pinned by every record written before it.
     ///
-    /// A session that says `true` while the global is off still runs in-process, and not because
-    /// this function lies to it: `PTYHostAvailability` answers `.unavailable(.disabled)` first
-    /// and without touching anything, so the global is a master switch through *availability*
-    /// while staying an inheritable default here. That is the arrangement the feature needs while
-    /// it ships off by default.
+    /// A session that says `true` while the global is off remains stopped, and not because this
+    /// function lies to it: `PTYHostAvailability` answers `.unavailable(.disabled)` first and
+    /// without touching anything, so the global is a master switch through *availability* while
+    /// staying an inheritable default here. That is the arrangement the feature needs while it
+    /// ships off by default.
     static func hostsSession(_ preference: Bool?, whenEnabled isEnabled: Bool) -> Bool {
         preference ?? isEnabled
     }
@@ -48,22 +68,20 @@ enum PTYHostPolicy {
 
     /// Everything a launch has to decide before it knows whether to spawn locally, as one call.
     ///
-    /// Answers the factory a host-backed launch connects through, or **nil** meaning today's
-    /// in-process `forkpty`, unchanged. The order is the design rather than tidiness, and it is
-    /// the same argument `PTYHostAvailability.resolve` makes one level down: the surface clamp is
-    /// a pattern match, the choice is a `UserDefaults` read the app has already taken, and only
-    /// after both does anything open a socket.
+    /// Answers an explicit route. `local` means the surface did not request hosting;
+    /// `unavailable` means that it did, but Threading cannot currently honour the durability
+    /// contract. Keeping those answers distinct is what prevents an unavailable helper from
+    /// silently turning a durable session into one the app owns and kills at quit.
     ///
     /// **It can block, and it is bounded.** `PTYHostProbe.connecting()` connects and exchanges
     /// `hello`, so a launch with the feature switched on pays at most
-    /// `PTYHostDefaults.connectTimeout + helloTimeout` before degrading — which is why those two
-    /// numbers are stated as launch-path deadlines. With the feature off, which is every launch
-    /// until the hidden key is set, nothing is opened at all.
+    /// `PTYHostDefaults.connectTimeout + helloTimeout` before refusing — which is why those two
+    /// numbers are stated as launch-path deadlines. With hosting unselected, nothing is opened.
     ///
     /// Every dependency is the caller's, in `MCPBridgeDecision.live`'s shape, so a test can force
     /// each branch without process defaults, a real bundle or a daemon.
     @MainActor
-    static func transportFactory(
+    static func launchRoute(
         for identity: TerminalInstanceIdentity,
         session: AgentSession?,
         settings: AppSettings = .shared,
@@ -71,14 +89,14 @@ enum PTYHostPolicy {
         probe: PTYHostProbe = .connecting(),
         eventLog: EventLog = .shared,
         newSessionAdmission: PTYHostNewSessionAdmission = .shared
-    ) -> PTYHostTransportFactory? {
+    ) -> PTYHostLaunchRoute {
         // Version 1 hosts agent sessions only. A project terminal, a session shell and an
         // ephemeral terminal all poll `tcgetpgrp` on a descriptor a host-backed session does not
         // have, and the `foreground` frame that replaces it is only wired up for the one surface
         // that has been measured. The protocol spells all four out so hosting them later is a
         // daemon change rather than a protocol change.
-        guard case .agentSession = identity else { return nil }
-        guard let session, hostsSession(session, settings: settings) else { return nil }
+        guard case .agentSession = identity else { return .local }
+        guard let session, hostsSession(session, settings: settings) else { return .local }
         // The gate's own token, not one fixed token for both of its refusals.
         // `registrationRefreshing` means "a stale or ambiguous launchd association is being
         // replaced safely", and it was being written for a daemon that was merely a different
@@ -87,11 +105,11 @@ enum PTYHostPolicy {
         // to look at registration.
         let admission = newSessionAdmission.current
         guard admission.permitsHostedSpawn else {
-            eventLog.record(.session, "Session runs its PTY in-process", [
+            eventLog.record(.session, "Background-hosted session cannot start", [
                 "session": identity.historyFileStem,
                 "cause": admission.token
             ])
-            return nil
+            return .unavailable(PTYHostLaunchError(cause: admission.token))
         }
 
         let availability = PTYHostAvailability.live(
@@ -105,16 +123,18 @@ enum PTYHostPolicy {
             // a support report read.
             eventLog.record(
                 .session,
-                "Session runs its PTY in-process",
+                "Background-hosted session cannot start",
                 [
                     "session": identity.historyFileStem,
                     "cause": availability.unavailability?.token ?? "unknown"
                 ]
             )
-            return nil
+            return .unavailable(PTYHostLaunchError(
+                cause: availability.unavailability?.token ?? "unknown"
+            ))
         }
 
-        return attachingTransportFactory(socketPath: socketPath, bundle: bundle)
+        return .hosted(attachingTransportFactory(socketPath: socketPath, bundle: bundle))
     }
 
     /// A factory for a rendezvous somebody has already decided on.

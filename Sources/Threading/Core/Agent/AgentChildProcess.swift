@@ -102,17 +102,17 @@ final class AgentChildProcess {
         eventLog: EventLog = .shared,
         onExit: @escaping @Sendable (Int32) -> Void
     ) throws -> AgentChildProcess {
-        if let host, let hosted = launchInHost(
-            host,
-            executable: executable,
-            arguments: arguments,
-            environment: environment,
-            sessionID: sessionID,
-            ledger: ledger,
-            eventLog: eventLog,
-            onExit: onExit
-        ) {
-            return hosted
+        if let host {
+            return try launchInHost(
+                host,
+                executable: executable,
+                arguments: arguments,
+                environment: environment,
+                sessionID: sessionID,
+                ledger: ledger,
+                eventLog: eventLog,
+                onExit: onExit
+            )
         }
 
         let inputPipe = try ChildPipe()
@@ -249,14 +249,10 @@ final class AgentChildProcess {
 
     // MARK: - Private Methods — the host-backed launch
 
-    /// Starts the CLI in `threading-ptyd`, or answers nil having said why.
-    ///
-    /// **Nil is always "run it here instead".** Every way this can fail — no daemon, a version
-    /// gate that refused, a `spawnRefused`, a silence — is a degradation to exactly the launch
-    /// this app performed before the daemon existed, and every one of them is journalled with a
-    /// structural cause, because a feature that quietly stopped working cannot be explained from
-    /// a support report without that line. It never throws: a throw here would be a launch
-    /// failure on a conversation that has a perfectly good way to start.
+    /// Starts the CLI in `threading-ptyd`, or throws after journalling the structural reason.
+    /// Once the caller supplies a host plan, changing to an app-owned child is not a fallback: it
+    /// breaks the promise that the running turn survives an app restart. The ordinary local path
+    /// still exists unchanged when policy supplies no plan.
     ///
     /// **The three pipes are the same three pipes.** The transport is handed the identical ends
     /// it would have been handed by the local path — same `FileHandle`s, same
@@ -272,10 +268,11 @@ final class AgentChildProcess {
         ledger: AgentChildLedger,
         eventLog: EventLog,
         onExit: @escaping @Sendable (Int32) -> Void
-    ) -> AgentChildProcess? {
+    ) throws -> AgentChildProcess {
         guard let pipes = HostPipes() else {
-            journal(.descriptorsUnavailable(errno), sessionID: sessionID, eventLog: eventLog)
-            return nil
+            let refusal = PTYHostChildRefusal.descriptorsUnavailable(errno)
+            journal(refusal, sessionID: sessionID, eventLog: eventLog)
+            throw PTYHostLaunchError(cause: "child.\(refusal.token)")
         }
 
         let link = PTYHostPipeLink(identity: plan.identity)
@@ -285,8 +282,9 @@ final class AgentChildProcess {
         } catch {
             pipes.closeAll()
             let cause = (error as? PTYHostClientError)?.token ?? "unknown"
-            journal(.linkUnavailable(cause), sessionID: sessionID, eventLog: eventLog)
-            return nil
+            let refusal = PTYHostChildRefusal.linkUnavailable(cause)
+            journal(refusal, sessionID: sessionID, eventLog: eventLog)
+            throw PTYHostLaunchError(cause: "child.\(refusal.token)")
         }
         link.adopt(transport)
 
@@ -307,14 +305,19 @@ final class AgentChildProcess {
                 // depends on a dictionary's hash seed is a launch that cannot be compared with
                 // the one before it.
                 environment: environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" },
-                cwd: plan.workingDirectory
+                cwd: plan.workingDirectory,
+                // Like the terminal surface, this persistent conversation launch is the
+                // authoritative incarnation of its durable identity. The daemon owns the
+                // cross-socket stop/start ordering.
+                replaceExisting: true
             ))
         } catch {
             let cause = (error as? PTYHostClientError)?.token ?? "unknown"
             link.close()
             pipes.closeAll()
-            journal(.linkUnavailable(cause), sessionID: sessionID, eventLog: eventLog)
-            return nil
+            let refusal = PTYHostChildRefusal.linkUnavailable(cause)
+            journal(refusal, sessionID: sessionID, eventLog: eventLog)
+            throw PTYHostLaunchError(cause: "child.\(refusal.token)")
         }
 
         let spawned: PTYHostSpawned
@@ -325,7 +328,7 @@ final class AgentChildProcess {
             link.close()
             pipes.closeAll()
             journal(refusal, sessionID: sessionID, eventLog: eventLog)
-            return nil
+            throw PTYHostLaunchError(cause: "child.\(refusal.token)")
         }
 
         let process = AgentChildProcess(
@@ -362,7 +365,7 @@ final class AgentChildProcess {
             )
             link.terminate()
             link.close()
-            return nil
+            throw AgentChildLaunchError.ledgerWriteFailed(spawned.pid)
         }
 
         let executableIdentity = URL(fileURLWithPath: executable).lastPathComponent
@@ -386,13 +389,13 @@ final class AgentChildProcess {
         return process
     }
 
-    /// Why this launch is running in this process after all. One line, one structural cause.
+    /// Why the selected background host did not start this launch. One line, one structural cause.
     private static func journal(
         _ refusal: PTYHostChildRefusal,
         sessionID: SessionID,
         eventLog: EventLog
     ) {
-        eventLog.record(.session, "Conversation runs its CLI in-process", [
+        eventLog.record(.session, "Background-hosted conversation failed to start", [
             "session": sessionID.uuidString,
             "cause": refusal.token
         ])

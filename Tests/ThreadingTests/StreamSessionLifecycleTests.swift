@@ -45,6 +45,50 @@ final class StreamSessionLifecycleTests: XCTestCase {
         wait(for: [claudeExit, codexExit, grokExit], timeout: 1)
     }
 
+    func testHostPlanningFailureUsesTheLaunchFailureBoundaryWithoutReportingAnExit() {
+        let claudeFailure = expectation(description: "Claude host failure")
+        let codexFailure = expectation(description: "Codex host failure")
+        let grokFailure = expectation(description: "Grok host failure")
+        let exited = expectation(description: "a child exit")
+        exited.isInverted = true
+        var startReturned = false
+        let failure = PTYHostLaunchError(cause: "notRunning")
+
+        let claude = ClaudeStreamSession(
+            sessionID: SessionID(),
+            hostPlan: { throw failure }
+        ) { self.shellPlan("exit 0") }
+        let codex = CodexStreamSession(
+            sessionID: SessionID(),
+            hostPlan: { throw failure }
+        ) { self.shellPlan("exit 0") }
+        let grok = ACPStreamSession(
+            sessionID: SessionID(),
+            workingDirectory: "/tmp",
+            profile: .grok,
+            hostPlan: { throw failure }
+        ) { self.shellPlan("exit 0") }
+
+        func verify(_ error: Error, expectation: XCTestExpectation) {
+            XCTAssertTrue(startReturned)
+            XCTAssertEqual(error as? PTYHostLaunchError, failure)
+            expectation.fulfill()
+        }
+        claude.onLaunchFailure = { verify($0, expectation: claudeFailure) }
+        codex.onLaunchFailure = { verify($0, expectation: codexFailure) }
+        grok.onLaunchFailure = { verify($0, expectation: grokFailure) }
+        claude.onExit = { _ in exited.fulfill() }
+        codex.onExit = { _ in exited.fulfill() }
+        grok.onExit = { _ in exited.fulfill() }
+
+        claude.start()
+        codex.start()
+        grok.start()
+        startReturned = true
+
+        wait(for: [claudeFailure, codexFailure, grokFailure, exited], timeout: 0.25)
+    }
+
     func testClaudeSpawnFailureArrivesAsynchronouslyOnMain() {
         let exited = expectation(description: "spawn failure callback")
         var startReturned = false

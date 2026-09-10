@@ -218,7 +218,33 @@ final class PTYHostVisibilityTests: XCTestCase {
         XCTAssertEqual(notice?.actionTitle, "Resume")
         XCTAssertEqual(
             notice?.message,
-            "One session was lost while Threading was closed. Its conversation can be resumed."
+            "One session was lost when the background session host restarted. Its conversation "
+                + "can be resumed."
+        )
+    }
+
+    func testALossCarriesTheDaemonIncidentIntoTheLaunchNotice() throws {
+        let sessionID = SessionID()
+        let incidentID = UUID()
+        let detectedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let notice = try XCTUnwrap(PTYHostLaunchNotice.forLaunch(
+            plan(lost: [sessionID]),
+            pending: 0,
+            loss: PTYHostLost(
+                ids: [.agentSession(sessionID)],
+                since: Date(timeIntervalSince1970: 1_700_000_000),
+                incidentID: incidentID,
+                detectedAt: detectedAt
+            )
+        ))
+
+        XCTAssertEqual(
+            notice,
+            .lostIncident(
+                ids: [sessionID],
+                key: "incident:\(incidentID.uuidString)",
+                detectedAt: detectedAt
+            )
         )
     }
 
@@ -262,6 +288,32 @@ final class PTYHostVisibilityTests: XCTestCase {
         XCTAssertEqual(resumed, ids)
     }
 
+    /// The daemon reports one recovered loss on every connection for its lifetime. Remembering
+    /// the incident across app launches makes that one warning rather than one warning per open.
+    func testTheSameLossIncidentIsOfferedOnlyOnceAcrossLaunches() throws {
+        let suiteName = "PTYHostLaunchNoticeCenterTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var presented: [PTYHostLaunchNotice] = []
+        let actions = PTYHostLaunchNoticeCenter.Actions(
+            present: { notice, _ in presented.append(notice) },
+            reattach: {},
+            resume: { _ in }
+        )
+        let first = PTYHostLaunchNotice.lostIncident(
+            ids: [SessionID()],
+            key: "incident:first",
+            detectedAt: nil
+        )
+
+        XCTAssertTrue(PTYHostLaunchNoticeCenter(actions: actions, defaults: defaults).offer(first))
+        XCTAssertFalse(PTYHostLaunchNoticeCenter(actions: actions, defaults: defaults).offer(first))
+        XCTAssertTrue(PTYHostLaunchNoticeCenter(actions: actions, defaults: defaults).offer(
+            .lostIncident(ids: [SessionID()], key: "incident:second", detectedAt: nil)
+        ))
+        XCTAssertEqual(presented.count, 2)
+    }
+
     // MARK: - The Background Sessions list
 
     /// The daemon answers in its own vocabulary; the row is the app's join of that with a
@@ -295,8 +347,8 @@ final class PTYHostVisibilityTests: XCTestCase {
         XCTAssertTrue(rows[0].hasExited)
     }
 
-    /// Every unavailability degrades to the same behaviour and none of them is silent: a `Bool`
-    /// here is how a feature that quietly stopped working becomes unexplainable.
+    /// Every unavailability blocks a selected host-backed launch and none of them is silent: a
+    /// `Bool` here is how a feature that quietly stopped working becomes unexplainable.
     func testEveryUnavailabilityHasASentenceAndOnlyOneHasAnAction() {
         for reason in PTYHostUnavailability.allTokens {
             let status = PTYHostBackgroundSessionsStatus.unavailable(reason)

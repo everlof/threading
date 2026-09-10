@@ -2586,13 +2586,13 @@
         }
       }
     },
-    "%lld sessions were lost while Threading was closed. Their conversations can be resumed." : {
+    "%lld sessions were lost when the background session host restarted. Their conversations can be resumed." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld sessioner gick förlorade medan Threading var stängt. Deras konversationer kan återupptas."
+            "value" : "%lld sessioner gick förlorade när värdprocessen för bakgrundssessioner startade om. Deras konversationer kan återupptas."
           }
         }
       }
@@ -14446,6 +14446,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att starta agentuppdateringar"
+          }
+        }
+      }
+    },
+    "Couldn’t start this background session." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte starta den här bakgrundssessionen."
           }
         }
       }
@@ -28682,13 +28693,13 @@
         }
       }
     },
-    "One session was lost while Threading was closed. Its conversation can be resumed." : {
+    "One session was lost when the background session host restarted. Its conversation can be resumed." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "En session gick förlorad medan Threading var stängt. Dess konversation kan återupptas."
+            "value" : "En session gick förlorad när värdprocessen för bakgrundssessioner startade om. Dess konversation kan återupptas."
           }
         }
       }
@@ -43147,13 +43158,13 @@
         }
       }
     },
-    "The background host is being updated. New sessions run inside Threading until it is ready." : {
+    "The background host is being updated. New background sessions wait until it is ready." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bakgrundsvärden uppdateras. Nya sessioner körs inuti Threading tills den är klar."
+            "value" : "Bakgrundsvärden uppdateras. Nya bakgrundssessioner väntar tills den är klar."
           }
         }
       }
@@ -43231,6 +43242,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bakgrundsvärden väntar på ditt godkännande i Systeminställningar ▸ Allmänt ▸ Inloggningsobjekt."
+          }
+        }
+      }
+    },
+    "The background session host is unavailable. Threading kept this session stopped so it would not be interrupted when the app closes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdprocessen för bakgrundssessioner är inte tillgänglig. Threading lät sessionen förbli stoppad så att den inte avbryts när appen stängs."
           }
         }
       }
@@ -53624,6 +53646,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "avatar"
+          }
+        }
+      }
+    },
+    "backdrop gradient" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bakgrundstoning"
+          }
+        }
+      }
+    },
+    "backdrop image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bakgrundsbild"
           }
         }
       }

@@ -166,7 +166,6 @@ final class PTYHostState: @unchecked Sendable {
         guard let data = try? Data(contentsOf: url) else { return ([], 0) }
 
         var open: [PTYHostSessionIdentity: PTYHostUnaccountedSession] = [:]
-        var order: [PTYHostSessionIdentity] = []
         var skipped = 0
 
         for line in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
@@ -179,7 +178,6 @@ final class PTYHostState: @unchecked Sendable {
             }
             switch record.edge {
             case .spawned:
-                if open[record.id] == nil { order.append(record.id) }
                 open[record.id] = PTYHostUnaccountedSession(
                     id: record.id,
                     pid: record.pid,
@@ -192,6 +190,15 @@ final class PTYHostState: @unchecked Sendable {
             }
         }
 
-        return (order.compactMap { open[$0] }, skipped)
+        // A logical session may have several process incarnations in this append-only file.
+        // Ordering every historical `.spawned` edge used to return the final open incarnation
+        // once for every earlier incarnation of the same id. Recovery then reported and counted
+        // one lost session several times. The dictionary is the truth; sort only its current
+        // values so the answer is deterministic without retaining historical duplicates.
+        let sessions = open.values.sorted { lhs, rhs in
+            if lhs.since != rhs.since { return lhs.since < rhs.since }
+            return lhs.id.description < rhs.id.description
+        }
+        return (sessions, skipped)
     }
 }

@@ -42,6 +42,7 @@ final class CodexStreamSession:
     let sessionID: SessionID
 
     var onEvent: ((StreamEvent) -> Void)?
+    var onLaunchFailure: ((Error) -> Void)?
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
     var onSubagentEvent: ((SubagentEvent) -> Void)?
     var onSessionTitleChange: ((String) -> Void)?
@@ -77,9 +78,9 @@ final class CodexStreamSession:
     ///
     /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
     /// dormant conversation reopened an hour later asks the current setting and the current
-    /// daemon rather than the ones that were true when the controller was built. Nil is today's
-    /// in-process child, which every unavailability degrades to.
-    private let hostPlan: () -> PTYHostChildPlan?
+    /// daemon rather than the ones that were true when the controller was built. Nil is the
+    /// deliberate local route; an unavailable selected host throws before any child starts.
+    private let hostPlan: () throws -> PTYHostChildPlan?
 
     private var process: AgentChildProcess?
     private var transport: AgentStreamTransport<JSONRPCLineEnvelope>?
@@ -148,7 +149,7 @@ final class CodexStreamSession:
         sessionID: SessionID,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
-        hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
+        hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
@@ -188,7 +189,7 @@ final class CodexStreamSession:
                 arguments: launchPlan.arguments,
                 environment: launchPlan.launchEnvironment(),
                 sessionID: sessionID,
-                host: hostPlan()
+                host: try hostPlan()
             ) { [weak self] status in
                 Task { @MainActor [weak self] in
                     self?.handleTermination(status: status)
@@ -199,7 +200,9 @@ final class CodexStreamSession:
                 "Codex app-server failed to start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             Task { @MainActor [weak self] in
-                self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+                guard let self else { return }
+                if let handler = self.onLaunchFailure { handler(error) }
+                else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
             }
             return
         }

@@ -151,29 +151,35 @@ final class TerminalSession: NSObject {
 
     // MARK: - Background Host
 
-    /// How this session reaches `threading-ptyd`, or nil for today's in-process `forkpty`.
+    /// How this session reaches `threading-ptyd`, or nil when policy explicitly chose today's
+    /// in-process `forkpty`.
     ///
     /// Named by whoever launches the session rather than resolved here, because resolving it
     /// needs the conversation record and the app's settings, and a terminal that reached into the
     /// store for its own policy would be the dependency direction this file has never had. See
-    /// `PTYHostPolicy.transportFactory(for:session:…)`, which is the whole decision as one call.
+    /// `PTYHostPolicy.launchRoute(for:session:…)`, which is the whole decision as one call.
     var hostTransportFactory: PTYHostTransportFactory?
 
     /// The live link, while this session's child lives in the background host.
     private var hostLink: PTYHostTerminalLink?
+
+    /// The previous incarnation's watcher while a same-identity replacement starts. Keeping it
+    /// alive until `exited` matters for compatible daemons from before atomic replacement: an
+    /// observed exit is retained for five seconds; an unobserved one is retained for 30 minutes.
+    private var retiringHostLink: PTYHostTerminalLink?
 
     /// The transport-queue parser belonging to `hostLink`. Invalidated before the link is
     /// replaced or cleared so a late burst from an old child cannot enter the replacement's
     /// emulator.
     private var hostOutputParser: TerminalHostOutputParser?
 
-    /// The launch a host-backed spawn is still waiting on an answer for.
-    ///
-    /// Kept because a refusal is not an ending: the daemon may hold the previous incarnation of
-    /// this session for a few seconds after it exited, so a stop followed at once by a start is
-    /// answered `alreadyExists`. That launch has to *happen*, in-process, rather than be reported
-    /// as a conversation that died before it began.
+    /// The launch a host-backed spawn is still waiting on an answer for. It also survives the one
+    /// compatibility retry used when a pre-replacement daemon retains an observed ending for its
+    /// historical five-second grace.
     private var hostLaunchPlan: AgentLaunchPlan?
+
+    private var hostLaunchRetryWorkItem: DispatchWorkItem?
+    private var hostLaunchRetryCount = 0
 
     /// The process group the host last reported as owning the terminal.
     ///
@@ -558,8 +564,12 @@ final class TerminalSession: NSObject {
     }
 
     private func launchAgent(plan: AgentLaunchPlan) {
-        // The host-backed path first, and falling through to the local one on every refusal:
-        // there is exactly one behaviour to degrade to and it is the one below, unchanged.
+        hostLaunchRetryWorkItem?.cancel()
+        hostLaunchRetryWorkItem = nil
+        hostLaunchRetryCount = 0
+
+        // A non-nil factory is an ownership promise. Once policy selected it, every host failure
+        // is surfaced as a launch refusal rather than silently changing the child to app-owned.
         if launchAgentThroughHost(plan: plan) { return }
 
         terminalView.startProcess(
@@ -572,7 +582,8 @@ final class TerminalSession: NSObject {
         finishProcessStart()
     }
 
-    /// Starts the same command line in `threading-ptyd`, answering whether it did.
+    /// Starts the same command line in `threading-ptyd`, answering whether this was a hosted
+    /// launch attempt. A true answer includes a surfaced failure; it never means "fall back".
     ///
     /// The plan, the environment and the working directory are composed **exactly** as the local
     /// path composes them and handed over verbatim: the daemon inherits launchd's environment
@@ -588,10 +599,16 @@ final class TerminalSession: NSObject {
     private func launchAgentThroughHost(plan: AgentLaunchPlan) -> Bool {
         guard let hostTransportFactory else { return false }
         // Version 1 hosts agent sessions only; every other surface still polls a descriptor.
-        guard case .agentSession = identity else { return false }
+        guard case .agentSession = identity else {
+            hostDidFailToStart(PTYHostLaunchError(cause: "unsupportedSurface"))
+            return true
+        }
 
         let size = terminalView.getWindowSize()
-        guard size.ws_col > 0, size.ws_row > 0 else { return false }
+        guard size.ws_col > 0, size.ws_row > 0 else {
+            hostDidFailToStart(PTYHostLaunchError(cause: "terminalSizeUnavailable"))
+            return true
+        }
 
         let hostIdentity = PTYHostSessionIdentity(identity)
         let link = PTYHostTerminalLink(identity: hostIdentity)
@@ -612,25 +629,23 @@ final class TerminalSession: NSObject {
                 arguments: plan.arguments,
                 execName: (plan.executable as NSString).lastPathComponent,
                 environment: buildEnvironment(),
-                cwd: nil
+                cwd: nil,
+                // A persistent session launch is authoritative for its durable identity. The
+                // daemon serializes any old incarnation out before spawning this one, including
+                // when this request beats the old connection's kill frame to its queue.
+                replaceExisting: true
             ))
         } catch {
             let cause = (error as? PTYHostClientError)?.token ?? "unknown"
-            EventLog.shared.record(
-                .session,
-                "Session runs its PTY in-process",
-                ["session": identity.historyFileStem, "cause": cause]
-            )
             ThreadingLogger.ptyHost.error(
-                """
-                PTY host could not start this session: \(cause, privacy: .public); \
-                running the PTY in-process
-                """
+                "PTY host could not start this session: \(cause, privacy: .public)"
             )
-            return false
+            hostDidFailToStart(PTYHostLaunchError(cause: "link.\(cause)"))
+            return true
         }
 
         hostOutputParser?.invalidate()
+        if let hostLink { retiringHostLink = hostLink }
         hostLink = link
         hostOutputParser = outputParser
         hostLaunchPlan = plan
@@ -739,6 +754,8 @@ final class TerminalSession: NSObject {
         hostOutputParser?.invalidate()
         hostOutputParser = nil
         self.hostLink = nil
+        hostLaunchRetryWorkItem?.cancel()
+        hostLaunchRetryWorkItem = nil
         hostLaunchPlan = nil
         hostForegroundGroup = nil
         terminalView.hostTransport = nil
@@ -804,7 +821,13 @@ final class TerminalSession: NSObject {
             },
             ended: { [weak self, weak link] exitCode, cause in
                 MainActor.assumeIsolated {
-                    guard let self, let link, self.hostLink === link else { return }
+                    guard let self, let link else { return }
+                    if self.retiringHostLink === link {
+                        self.retiringHostLink = nil
+                        NotificationCenter.default.post(PTYHostMayHaveDrained())
+                        return
+                    }
+                    guard self.hostLink === link else { return }
                     self.hostDidEnd(exitCode: exitCode, cause: cause)
                 }
             },
@@ -821,6 +844,8 @@ final class TerminalSession: NSObject {
     /// `AgentRuntime.terminalRootProcessIdentifier` answering for a session whose pty moved.
     private func hostDidSpawn(pid: pid_t) {
         guard pid > 0 else { return }
+        hostLaunchRetryWorkItem?.cancel()
+        hostLaunchRetryWorkItem = nil
         hostLaunchPlan = nil
         shellPid = pid
         delegate?.terminalSessionDidStart(self)
@@ -839,42 +864,63 @@ final class TerminalSession: NSObject {
         delegate?.terminalSessionDidStart(self)
     }
 
-    /// The daemon would not start this child, so this launch runs in-process instead.
-    ///
-    /// The same degradation every other unavailability gets, arrived at one step later — and
-    /// emphatically not a termination: nothing started, so reporting an exit would record a
-    /// launch failure against a conversation that has not been launched. The common case is
-    /// `alreadyExists`, because the daemon keeps an exited session for a few seconds so a late
-    /// watcher can still be told how it ended, and a stop followed straight away by a start
-    /// arrives inside that window.
+    /// Handles a daemon that did not start the child. A current daemon queues a replacement
+    /// behind the killed incarnation atomically. A compatible older daemon can only retain the
+    /// observed exit for five seconds, so `alreadyExists` gets one bounded retry after that grace.
+    /// Every other refusal is a visible launch failure; none changes process ownership.
     private func hostDidRefuseSpawn(_ reason: PTYHostSpawnRefusal) {
-        EventLog.shared.record(
-            .session,
-            "Session runs its PTY in-process",
-            ["session": identity.historyFileStem, "cause": "spawnRefused.\(reason.rawValue)"]
-        )
-        ThreadingLogger.ptyHost.warning(
-            """
-            PTY host refused the spawn (\(reason.rawValue, privacy: .public)); \
-            running the PTY in-process
-            """
-        )
-
         hostOutputParser?.invalidate()
         hostOutputParser = nil
         hostLink = nil
         hostForegroundGroup = nil
         terminalView.hostTransport = nil
 
-        guard let plan = hostLaunchPlan else { return }
-        hostLaunchPlan = nil
-        terminalView.startProcess(
-            executable: plan.executable,
-            args: plan.arguments,
-            environment: buildEnvironment(),
-            execName: (plan.executable as NSString).lastPathComponent
+        if reason == .alreadyExists, hostLaunchRetryCount == 0, let plan = hostLaunchPlan {
+            hostLaunchRetryCount += 1
+            EventLog.shared.record(.session, "Waiting to replace retained hosted session", [
+                "session": identity.historyFileStem,
+                "cause": "spawnRefused.alreadyExists"
+            ])
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.isRunning, self.hostLaunchPlan != nil else { return }
+                self.hostLaunchRetryWorkItem = nil
+                guard self.launchAgentThroughHost(plan: plan) else {
+                    self.hostDidFailToStart(PTYHostLaunchError(
+                        cause: "replacementPrecondition"
+                    ))
+                    return
+                }
+            }
+            hostLaunchRetryWorkItem = work
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + PTYHostSessionDefaults.legacyReplacementRetryDelay,
+                execute: work
+            )
+            return
+        }
+
+        hostDidFailToStart(PTYHostLaunchError(cause: "spawnRefused.\(reason.rawValue)"))
+    }
+
+    private func hostDidFailToStart(_ failure: PTYHostLaunchError) {
+        EventLog.shared.record(.session, "Background-hosted session failed to start", [
+            "session": identity.historyFileStem,
+            "cause": failure.cause
+        ])
+        ThreadingLogger.ptyHost.error(
+            "PTY host launch failed: \(failure.cause, privacy: .public)"
         )
-        finishProcessStart()
+        hostLaunchRetryWorkItem?.cancel()
+        hostLaunchRetryWorkItem = nil
+        hostOutputParser?.invalidate()
+        hostOutputParser = nil
+        hostLink = nil
+        hostLaunchPlan = nil
+        hostForegroundGroup = nil
+        terminalView.hostTransport = nil
+        isRunning = false
+        shellPid = 0
+        delegate?.terminalSession(self, didFailToStart: failure)
     }
 
     private func hostDidEnd(exitCode: Int32?, cause: String?) {
@@ -912,6 +958,14 @@ final class TerminalSession: NSObject {
     func terminate() {
         // A second stop while an old child is being reaped cancels a queued rapid restart.
         pendingLaunch = nil
+        hostLaunchRetryWorkItem?.cancel()
+        hostLaunchRetryWorkItem = nil
+        if hostLink == nil, hostLaunchPlan != nil {
+            hostLaunchPlan = nil
+            isRunning = false
+            shellPid = 0
+            return
+        }
         guard isRunning else { return }
 
         if let hostLink {
@@ -1262,6 +1316,7 @@ extension TerminalSession {
 @MainActor
 protocol TerminalSessionDelegate: AnyObject {
     func terminalSessionDidStart(_ session: TerminalSession)
+    func terminalSession(_ session: TerminalSession, didFailToStart failure: PTYHostLaunchError)
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String)
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?)
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int)
@@ -1285,6 +1340,7 @@ protocol TerminalSessionDelegate: AnyObject {
 
 extension TerminalSessionDelegate {
     func terminalSessionDidStart(_ session: TerminalSession) {}
+    func terminalSession(_ session: TerminalSession, didFailToStart failure: PTYHostLaunchError) {}
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {}
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?) {}
     func terminalSession(_ session: TerminalSession, sizeChangedTo cols: Int, rows: Int) {}

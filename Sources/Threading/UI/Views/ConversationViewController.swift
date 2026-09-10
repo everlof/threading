@@ -1014,21 +1014,26 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
 
         // Whether this conversation's CLI belongs in `threading-ptyd`, asked exactly once per
-        // launch and asked *here*, because this is the surface that holds the conversation
-        // record — the same place `AgentSessionViewController` asks it for a terminal. Nil is
-        // today's in-process child, which every unavailability degrades to, and the working
-        // directory is stated rather than left to the daemon because a daemon started by launchd
-        // is somewhere else entirely. See `PTYHostPolicy`.
-        let hostPlan = { () -> PTYHostChildPlan? in
+        // launch and asked *here*, because this is the surface that owns the conversation record.
+        // A selected host that is unavailable throws into the stream's ordinary launch-failure
+        // path; only a deliberate local route supplies nil. The working directory is stated
+        // because a daemon started by launchd is somewhere else entirely.
+        let hostPlan = { () throws -> PTYHostChildPlan? in
             let identity = TerminalInstanceIdentity.agentSession(sessionID)
-            guard let factory = PTYHostPolicy.transportFactory(
+            switch PTYHostPolicy.launchRoute(
                 for: identity,
                 session: currentSessionProjection.session(for: sessionID)
-            ) else { return nil }
-            return PTYHostChildPlan(
-                identity: PTYHostSessionIdentity(identity),
-                factory: factory
-            )
+            ) {
+            case .local:
+                return nil
+            case .hosted(let factory):
+                return PTYHostChildPlan(
+                    identity: PTYHostSessionIdentity(identity),
+                    factory: factory
+                )
+            case .unavailable(let failure):
+                throw failure
+            }
         }
 
         switch agentSession.kind {
@@ -1548,6 +1553,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             self.handle(event)
         }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
+        stream.onLaunchFailure = { [weak self] error in self?.handleLaunchFailure(error) }
         stream.onInteractionAvailabilityChange = { [weak self] in
             guard let self else { return }
             self.submitPendingInitialPromptIfReady()
@@ -3281,6 +3287,22 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         promptContentContainer.isHidden = true
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         delegate?.conversation(self, didExitWithCode: status)
+    }
+
+    private func handleLaunchFailure(_ error: Error) {
+        let hostFailure = error as? PTYHostLaunchError
+        let failure = SessionLaunchFailure(
+            origin: .preflight,
+            summary: hostFailure == nil
+                ? L10n.string("Its agent could not be started.")
+                : L10n.string("Couldn’t start this background session."),
+            detail: [error.localizedDescription],
+            knownCause: hostFailure.map { "ptyHost.\($0.cause)" }
+        )
+        ProjectStore.shared.update(sessionID: sessionID) { stored in
+            stored.lastLaunchFailure = failure
+        }
+        handleExit(AgentChildProcessDefaults.spawnFailureStatus)
     }
 
     // MARK: - Mid-conversation Configuration

@@ -74,16 +74,16 @@ enum PTYHostDefaults {
     /// not of either feature, and two copies would be two places to get the off-by-one wrong.
     /// `pty/ptyd.sock` is shorter than `bridge/mcp.sock`, so a home directory that fits the MCP
     /// socket today fits this one — and a home directory long enough to fail must cost the
-    /// daemon and nothing else, which is what `.socketPathTooLong` degrading to an in-process
-    /// PTY means.
+    /// daemon and nothing else, which is what `.socketPathTooLong` refusing only a selected
+    /// background launch means.
     static let maximumSocketPathBytes = MCPBridgeDefaults.maximumSocketPathBytes
 
     /// How long a `connect()` to the rendezvous may take before the daemon counts as absent.
     ///
     /// Bounded because this runs on a session launch: a socket file left behind by a daemon that
-    /// is gone, or one whose backlog is full, must degrade to an in-process PTY promptly rather
-    /// than hold a launch open. A unix connect to a listening peer is immediate; anything that
-    /// is not immediate is already the degraded case.
+    /// is gone, or one whose backlog is full, must refuse promptly rather than hold a launch
+    /// open. A unix connect to a listening peer is immediate; anything else is already the
+    /// unavailable case.
     static let connectTimeout: TimeInterval = 2
 
     /// How long the daemon has to answer `hello` before the link is abandoned.
@@ -100,8 +100,8 @@ enum PTYHostDefaults {
     /// the caller hands over" is an unbounded allocation driven by an unresponsive peer. Four
     /// frames' worth of the 1 MiB wire maximum: large enough that no ordinary burst trips it,
     /// small enough that tripping it is a bug rather than a slow afternoon. Exceeding it closes
-    /// the connection with `PTYHostClientError.writeQueueOverflow`, and the session degrades to
-    /// an in-process PTY like every other unavailability.
+    /// the connection with `PTYHostClientError.writeQueueOverflow`; a selected background
+    /// session reports that failure without changing process ownership.
     static let maximumQueuedWriteBytes = 4 * PTYHostFramingDefaults.maximumPayloadBytes
 
     /// One blocking read during the handshake, before the `DispatchIO` pump owns the descriptor.
@@ -204,15 +204,14 @@ enum PTYHostLocation {
 
     /// The path if a unix socket can be addressed at it, or nil having said why.
     ///
-    /// Nil is a degradation, never a failure: the caller reports `.socketPathTooLong` and every
-    /// session runs its PTY in-process, exactly as it did before the daemon existed.
+    /// The caller reports `.socketPathTooLong`; policy keeps an unselected session local and
+    /// refuses a selected background launch.
     static func addressableSocketPath(_ path: String = PTYHostLocation.socketPath) -> String? {
         guard path.utf8.count <= PTYHostDefaults.maximumSocketPathBytes else {
             ThreadingLogger.ptyHost.error(
                 """
                 PTY host socket path is \(path.utf8.count, privacy: .public) bytes, over the \
-                \(PTYHostDefaults.maximumSocketPathBytes, privacy: .public)-byte limit; \
-                sessions run their PTY in-process
+                \(PTYHostDefaults.maximumSocketPathBytes, privacy: .public)-byte limit
                 """
             )
             return nil
@@ -225,7 +224,7 @@ enum PTYHostLocation {
     /// Deliberately a *candidate*, exactly as `MCPBridgeLocation.helperURL(in:)` is: existence is
     /// checked by the availability decision, so one place answers "can this launch use the host"
     /// rather than two that can disagree. `bundle` is injectable so a test can point at a
-    /// directory holding no helper and prove the app falls back to an in-process PTY.
+    /// directory holding no helper and prove the app preserves that unavailability reason.
     static func helperURL(in bundle: Bundle = .main) -> URL {
         bundle.bundleURL
             .appendingPathComponent(PTYHostDefaults.helpersDirectoryPath, isDirectory: true)

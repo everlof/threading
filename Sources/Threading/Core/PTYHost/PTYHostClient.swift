@@ -8,9 +8,9 @@ import ThreadingPTYHostKit
 /// Why a link to the background PTY host could not be made, or could not be kept.
 ///
 /// Structural tokens rather than sentences, and typed rather than a `Bool` or an `NSError`,
-/// because every one of them has a different consequence: three mean "run this session's PTY
-/// in-process", two mean "the caller has a bug", and the rest mean "the daemon is not the daemon
-/// we can talk to". A caller that cannot tell them apart cannot degrade correctly.
+/// because every one names a different cause: some mean the daemon is unavailable, two expose a
+/// caller bug, and the rest mean the peer is not a daemon this app can talk to. The launch layer
+/// preserves that distinction when it surfaces a selected host's refusal.
 enum PTYHostClientError: Error, Equatable, Sendable {
 
     /// The rendezvous path does not fit `sockaddr_un.sun_path`.
@@ -413,8 +413,8 @@ final class PTYHostClient: @unchecked Sendable {
     /// One connect-`hello`-close round trip, for `PTYHostAvailability`.
     ///
     /// The full client rather than a simplified dialect on purpose: a probe that spoke less than
-    /// the link does could admit a daemon the link then refuses, and the degrade would happen at
-    /// launch time instead of at decision time.
+    /// the link does could admit a daemon the link then refuses, moving the failure from the
+    /// decision boundary into the launch itself.
     static func probe(
         socketPath: String,
         build: String,
@@ -945,7 +945,7 @@ final class PTYHostClient: @unchecked Sendable {
 
         // Writing to a socket the daemon has already closed must be an error, not a signal.
         // Without this the app dies of SIGPIPE when a daemon exits mid-write — which is exactly
-        // the moment the feature is supposed to be degrading gracefully.
+        // the moment the feature is supposed to report one session's link failure safely.
         var suppressSignal: Int32 = 1
         _ = setsockopt(
             descriptor,

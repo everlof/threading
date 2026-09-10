@@ -95,10 +95,10 @@ struct PTYHostHeldSession: Equatable {
 
 /// What the Background Sessions section says about the host itself.
 ///
-/// Every unavailability degrades to the same behaviour — today's in-process PTY — but they are
-/// separate reasons because only some of them have a fix, and only one of them has a fix the
-/// user can press. A `Bool` here is how a feature that quietly stopped working becomes
-/// unexplainable, which is the argument `PTYHostAvailability` already makes one layer down.
+/// Every unavailability prevents newly requested background sessions, but they remain separate
+/// reasons because only some have a fix, and only one has a fix the user can press. A `Bool` here
+/// is how a feature that quietly stopped working becomes unexplainable, which is the argument
+/// `PTYHostAvailability` already makes one layer down.
 enum PTYHostBackgroundSessionsStatus: Equatable {
 
     /// Nothing has answered yet. The page draws immediately and gains the answer.
@@ -169,8 +169,8 @@ enum PTYHostBackgroundSessionsStatus: Equatable {
             )
         case .registrationRefreshing:
             return L10n.string(
-                "The background host is being updated. New sessions run inside Threading until "
-                    + "it is ready."
+                "The background host is being updated. New background sessions wait until it is "
+                    + "ready."
             )
         case .protocolMismatch:
             return L10n.string(

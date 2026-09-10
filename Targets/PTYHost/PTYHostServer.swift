@@ -38,6 +38,13 @@ final class PTYHostServer: @unchecked Sendable {
 
     private var connections: [UInt64: PTYHostConnection] = [:]
     private var sessions: [PTYHostSessionIdentity: PTYSession] = [:]
+    /// A replacement waiting for the deliberately stopped incarnation of the same logical
+    /// session to finish. The existing child remains the only child until its output and exit
+    /// have been delivered; only then is the request allowed to spawn.
+    private var pendingReplacements: [PTYHostSessionIdentity: (
+        request: PTYHostSpawnRequest,
+        connection: PTYHostConnection
+    )] = [:]
     private var connectionCount: UInt64 = 0
     private var sessionCount: UInt64 = 0
 
@@ -50,6 +57,8 @@ final class PTYHostServer: @unchecked Sendable {
     /// second Threading, or a support tool, is owed the same answer as the first.
     private var lostSessions: [PTYHostSessionIdentity] = []
     private var lostSince = Date()
+    private var lossIncidentID: UUID?
+    private var lossDetectedAt: Date?
 
     private var isRetiring = false
     private var ringBudget = PTYHostDefaults.aggregateRingBytes
@@ -75,8 +84,8 @@ final class PTYHostServer: @unchecked Sendable {
     /// Prepares the state directory, reads what the previous daemon left, and binds the socket.
     ///
     /// Answers false having said why. There is no degraded mode: a daemon that cannot be reached
-    /// is a daemon whose sessions nobody can attach to, and the app's whole availability decision
-    /// is built to fall back to in-process PTYs when the socket is not there.
+    /// is a daemon whose sessions nobody can attach to, and the app's availability decision keeps
+    /// a selected background session stopped when the socket is not there.
     func start() -> Bool {
         guard prepareStateDirectory() else {
             FileHandle.standardError.write(
@@ -177,8 +186,11 @@ final class PTYHostServer: @unchecked Sendable {
         }
         guard !unaccounted.isEmpty else { return }
 
+        lossIncidentID = UUID()
+        lossDetectedAt = Date()
         var earliest = Date()
-        for entry in unaccounted {
+        var recoveredIDs: Set<PTYHostSessionIdentity> = []
+        for entry in unaccounted where recoveredIDs.insert(entry.id).inserted {
             let stillRunning = PTYSpawn.exists(entry.pid)
                 && entry.startTime != nil
                 && PTYSpawn.startTime(of: entry.pid) == entry.startTime
@@ -314,6 +326,16 @@ final class PTYHostServer: @unchecked Sendable {
     /// over.
     private func forget(_ connection: PTYHostConnection) {
         connections.removeValue(forKey: connection.number)
+        let cancelled = pendingReplacements.compactMap { id, pending in
+            pending.connection === connection ? id : nil
+        }
+        for id in cancelled {
+            pendingReplacements.removeValue(forKey: id)
+            journal.record(.replacementCancelled, [
+                Field.session: id.description,
+                Field.reason: "connectionClosed"
+            ])
+        }
         if let id = connection.boundSession, let session = sessions[id] {
             unbind(connection, from: session, keepingSeed: false)
         }
@@ -477,7 +499,12 @@ final class PTYHostServer: @unchecked Sendable {
         connection.hasGreeted = true
         connection.send(.hello(PTYHostHello(build: build, pid: getpid())))
         if !lostSessions.isEmpty {
-            connection.send(.lost(PTYHostLost(ids: lostSessions, since: lostSince)))
+            connection.send(.lost(PTYHostLost(
+                ids: lostSessions,
+                since: lostSince,
+                incidentID: lossIncidentID,
+                detectedAt: lossDetectedAt
+            )))
         }
     }
 
@@ -531,9 +558,29 @@ final class PTYHostServer: @unchecked Sendable {
             refuseSpawn(request.id, .retiring, on: connection)
             return
         }
-        guard sessions[request.id] == nil else {
-            refuseSpawn(request.id, .alreadyExists, on: connection)
-            return
+        if let existing = sessions[request.id] {
+            if pendingReplacements[request.id] != nil {
+                refuseSpawn(request.id, .alreadyExists, on: connection)
+                return
+            } else if existing.exitDelivered {
+                release(existing)
+            } else if request.replaceExisting == true {
+                pendingReplacements[request.id] = (request, connection)
+                journal.record(.replacementQueued, [
+                    Field.session: request.id.description,
+                    Field.pid: String(existing.pid),
+                    Field.connection: String(connection.number)
+                ])
+                // The replacement request is itself the authority to stop the old incarnation.
+                // It may reach the serial daemon queue before the old connection's kill frame;
+                // making the handoff depend on cross-socket arrival order recreates the race this
+                // queue exists to remove.
+                if !existing.wasKilled { kill(existing, escalate: true) }
+                return
+            } else {
+                refuseSpawn(request.id, .alreadyExists, on: connection)
+                return
+            }
         }
         let session: PTYSession
         switch request.channel {
@@ -1074,6 +1121,25 @@ final class PTYHostServer: @unchecked Sendable {
             )))
         }
         if session.isAttached { session.exitObserved = true }
+        if let pending = pendingReplacements.removeValue(forKey: session.id) {
+            release(session)
+            guard !pending.connection.isClosed, !isRetiring else {
+                if !pending.connection.isClosed {
+                    refuseSpawn(session.id, .retiring, on: pending.connection)
+                }
+                journal.record(.replacementCancelled, [
+                    Field.session: session.id.description,
+                    Field.reason: isRetiring ? "retiring" : "connectionClosed"
+                ])
+                return
+            }
+            journal.record(.replacementStarted, [
+                Field.session: session.id.description,
+                Field.connection: String(pending.connection.number)
+            ])
+            spawn(pending.request, from: pending.connection)
+            return
+        }
         scheduleRelease(of: session)
     }
 
@@ -1146,6 +1212,16 @@ final class PTYHostServer: @unchecked Sendable {
         }
         unlink(socketPath)
         journal.record(.retiring, [Field.session: String(sessions.count)])
+
+        let replacements = pendingReplacements
+        pendingReplacements.removeAll()
+        for (id, pending) in replacements {
+            refuseSpawn(id, .retiring, on: pending.connection)
+            journal.record(.replacementCancelled, [
+                Field.session: id.description,
+                Field.reason: "retiring"
+            ])
+        }
 
         // Sessions that have already ended are the ones nothing is waiting for.
         for session in Array(sessions.values) where session.exitDelivered { release(session) }

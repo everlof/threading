@@ -19,9 +19,10 @@ enum PTYHostPipeDefaults {
     /// `isRunning` on the line after it returns. So the host-backed path has to answer the same
     /// question before it returns, and the only way to answer it is to wait for `spawned` or
     /// `spawnRefused`. The daemon sends one of them straight out of `posix_spawn`, so this is a
-    /// millisecond in practice; the bound exists so a daemon that has stopped answering costs a
-    /// launch a fallback rather than a hang.
-    static let spawnTimeout: TimeInterval = 2
+    /// millisecond in practice. Three seconds also covers the daemon's two-second escalation and
+    /// half-second output drain when this is an atomic same-identity replacement; the bound still
+    /// turns a daemon that stopped answering into a launch failure rather than a hang.
+    static let spawnTimeout: TimeInterval = 3
 
     /// How long the quit path waits for one conversation's `detach` to leave.
     ///
@@ -29,6 +30,11 @@ enum PTYHostPipeDefaults {
     /// same shared deadline: a `DispatchIO` write is reported complete later, and on this path
     /// the close that follows the frame is the process exiting.
     static let detachDrainSeconds: TimeInterval = PTYHostSessionDefaults.detachDrainSeconds
+
+    /// Keeps a deliberately stopped link alive long enough for a compatible older daemon to
+    /// observe the kill and report the exit. Without it, discarding a native controller closes
+    /// the socket behind the queued kill and the old daemon retains that identity for 30 minutes.
+    static let terminationRetentionSeconds: TimeInterval = 5
 
     /// What may be queued towards the transport's own end of a pipe before bytes are dropped.
     ///
@@ -86,11 +92,11 @@ struct PTYHostChildPlan: Sendable {
     }
 }
 
-/// Why a host-backed launch did not happen, as a token for the journal.
+/// Why a host-backed launch did not happen, as a token for the journal and launch failure.
 ///
-/// Every one of them means the same thing to the caller — run this child in this process, as it
-/// always did — and they are told apart only so that a feature which quietly stopped working can
-/// be explained from a support report.
+/// They are told apart so the refusal can be explained from a support report. None is permission
+/// to change ownership and run the child in-process; only a policy decision that did not select
+/// hosting takes that path.
 enum PTYHostChildRefusal: Error, Equatable, Sendable {
     /// The link could not be made or the daemon refused the version gate.
     case linkUnavailable(String)
@@ -158,6 +164,11 @@ final class PTYHostPipeLink: @unchecked Sendable {
     private var outputChannel: DispatchIO?
     private var errorChannel: DispatchIO?
     private var pendingChildBytes = 0
+
+    /// A native surface switch releases its controller immediately after asking the child to
+    /// stop. Retain the link itself until the exit arrives (or a bounded backstop expires), so
+    /// the kill frame and ending cannot be discarded with that controller.
+    private var terminationRetainer: PTYHostPipeLink?
 
     /// The spawn answer, and the latch a synchronous launch waits on.
     private let spawnLatch = PTYHostLatch<Result<PTYHostSpawned, PTYHostChildRefusal>>()
@@ -290,8 +301,8 @@ final class PTYHostPipeLink: @unchecked Sendable {
     /// Blocks until the daemon has said whether the child exists.
     ///
     /// **Blocking, and bounded.** `AgentChildProcess.launch` is synchronous, so this answer has
-    /// to be in hand before it returns; a refusal or a silence is the caller's cue to run the
-    /// child in this process instead, which it can only do while it still owns the launch.
+    /// to be in hand before it returns; a refusal or silence becomes a launch failure without
+    /// changing process ownership.
     func awaitSpawn(
         timeout: TimeInterval = PTYHostPipeDefaults.spawnTimeout
     ) -> Result<PTYHostSpawned, PTYHostChildRefusal> {
@@ -346,7 +357,19 @@ final class PTYHostPipeLink: @unchecked Sendable {
     /// still arrives — a watcher is owed the ending, and the ending is what the transport's own
     /// teardown runs on.
     func terminate() {
-        guard let transport = currentTransport() else { return }
+        lock.lock()
+        guard !hasEnded, let transport = transportStorage else {
+            lock.unlock()
+            return
+        }
+        terminationRetainer = self
+        lock.unlock()
+
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + PTYHostPipeDefaults.terminationRetentionSeconds
+        ) { [weak self] in
+            self?.releaseTerminationRetention()
+        }
         do {
             try transport.kill(PTYHostKill(id: identity, escalate: true))
         } catch {
@@ -512,6 +535,7 @@ final class PTYHostPipeLink: @unchecked Sendable {
         outputChannel = nil
         errorChannel = nil
         inputChannel = nil
+        terminationRetainer = nil
         let delivery = deliveryStorage
         lock.unlock()
 
@@ -527,6 +551,12 @@ final class PTYHostPipeLink: @unchecked Sendable {
         spawnLatch.complete(.failure(.linkUnavailable("closed")))
 
         DispatchQueue.main.async { delivery.ended(status) }
+    }
+
+    private func releaseTerminationRetention() {
+        lock.lock()
+        terminationRetainer = nil
+        lock.unlock()
     }
 }
 

@@ -9,6 +9,9 @@ import Foundation
 protocol ConversationStreamSession: AnyObject {
     var onEvent: ((StreamEvent) -> Void)? { get set }
     var onExit: ((Int32) -> Void)? { get set }
+    /// A process that never started. Separate from `onExit` so the surface can persist the
+    /// reason before it crosses the ordinary dormant-session exit boundary.
+    var onLaunchFailure: ((Error) -> Void)? { get set }
 
     /// Fired whenever an interaction gated by live transport state may have changed.
     ///
@@ -47,8 +50,9 @@ protocol ConversationStreamSession: AnyObject {
     /// process, and can therefore outlive it.
     ///
     /// A fact about the running child rather than about the runtime: the same transport answers
-    /// yes on one launch and no on the next, because every way the host can be missing degrades
-    /// to an in-process child. See [`pty-host.md`](../../../../docs/architecture/pty-host.md).
+    /// yes on one launch and no on the next. A supplied plan is an ownership promise: if the host
+    /// cannot start it, the stream reports a launch failure instead of creating an app-owned
+    /// child. See [`pty-host.md`](../../../../docs/architecture/pty-host.md).
     var isHostBacked: Bool { get }
 
     func start()

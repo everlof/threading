@@ -50,7 +50,7 @@ enum PTYHostUpgradeDecision: Equatable, Sendable {
 
     /// Say nothing further to it at all. Distinct from `leave` because the two are different
     /// promises: `leave` is "this daemon is fine where it is", `refuse` is "this link is over and
-    /// the app is falling back to in-process PTYs".
+    /// a session that selected hosting cannot start through it".
     case refuse(PTYHostCompatibility)
 
     var retires: Bool { self == .retire }
@@ -191,7 +191,7 @@ final class PTYHostNewSessionAdmission: @unchecked Sendable {
     /// a token whose documented meaning is "a stale or ambiguous launchd association is being
     /// replaced safely". Nothing was being replaced: a compatible daemon of another build was
     /// holding thirty agents and would go on holding them for the rest of the day. Every new
-    /// conversation degraded to an in-process PTY with a reason that was not the reason.
+    /// conversation became an in-process PTY with a reason that was not the reason.
     enum State: Equatable, Sendable {
         /// This launch has not had an answer from the daemon yet. The only state that means
         /// "ask again in a moment", and the only one `registrationRefreshing` describes.
@@ -726,8 +726,8 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
     /// bundle currently on disk.
     func begin(_ request: PTYHostUpgradeRequest) {
         // Unresolved rather than withheld: this launch has not heard from the daemon yet, and a
-        // launch that lands in this window is degrading because nobody has asked, not because
-        // the answer was no.
+        // launch that lands in this window is refused because nobody has asked, not because the
+        // answer was no.
         setNewSessionAdmission(.unresolved)
         pending = request
         observedProcess = nil
@@ -771,7 +771,12 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
     ) {
         switch progress(of: request) {
         case .settled(.leave(.holdsSessions)):
-            setNewSessionAdmission(.withheld)
+            // A compatible daemon remains a durable host even when its binary is from the
+            // previous app generation. Withholding new sessions here made every later launch
+            // silently in-process for as long as one old session lived — often the whole day.
+            // Remember the upgrade and retire only after the host naturally drains; durability
+            // takes precedence over installing the newest helper immediately.
+            setNewSessionAdmission(.allowed)
             pending = request
             observedProcess = nil
         case .noAnswer where request.requiresRegistrationRefresh:
@@ -857,7 +862,8 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
         } else {
             setNewSessionAdmission(.withheld)
             // `SMAppService` can fail transiently. With no old daemon left, the next backstop
-            // retries only the bounded registration handoff; sessions meanwhile use in-process.
+            // retries only the bounded registration handoff; selected sessions meanwhile remain
+            // stopped rather than changing ownership.
             pending = request
             observedProcess = nil
         }

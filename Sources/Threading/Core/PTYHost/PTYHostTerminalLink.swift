@@ -30,6 +30,11 @@ enum PTYHostSessionDefaults {
     /// can hold, and a Mac terminal that is about to render the session in full can hold all of
     /// it. `PTYHostAttach.normalizedReplayBudget` reads nil as "no statement".
     static let reattachReplayBudget: Int? = nil
+
+    /// One retry for a compatible daemon from before atomic same-identity replacement existed.
+    /// The bound covers its two-second escalation and five-second observed-exit retention, plus
+    /// scheduling margin. Current daemons queue the replacement directly and never pay it.
+    static let legacyReplacementRetryDelay: TimeInterval = 7.5
 }
 
 // MARK: - Transport
@@ -170,8 +175,7 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         ///
         /// Deliberately not `ended`: an agent that was refused a pty did not exit, and reporting
         /// it as an exit would put a launch failure on a conversation that has not been launched
-        /// yet. The caller's answer is the same one every other unavailability gets — run this
-        /// launch in-process.
+        /// yet. The caller surfaces a launch failure without changing process ownership.
         var refused: @Sendable (PTYHostSpawnRefusal) -> Void = { _ in }
     }
 
@@ -319,7 +323,7 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         converge()
     }
 
-    /// Starts the child. Throwing means nothing was sent, so the caller may still run in-process.
+    /// Starts the child. Throwing means nothing was sent; the caller surfaces a launch failure.
     ///
     /// A spawned session's ring starts empty, so this watcher is at offset zero and every byte it
     /// is given afterwards is a byte the daemon wrote — which is what makes its `detach` offset

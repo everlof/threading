@@ -23,6 +23,7 @@ final class ACPStreamSession:
 
     var onEvent: ((StreamEvent) -> Void)?
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
+    var onLaunchFailure: ((Error) -> Void)?
     var onExit: ((Int32) -> Void)?
     var onInteractionAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
@@ -51,9 +52,9 @@ final class ACPStreamSession:
     ///
     /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
     /// dormant conversation reopened an hour later asks the current setting and the current
-    /// daemon rather than the ones that were true when the controller was built. Nil is today's
-    /// in-process child, which every unavailability degrades to.
-    private let hostPlan: () -> PTYHostChildPlan?
+    /// daemon rather than the ones that were true when the controller was built. Nil is the
+    /// deliberate local route; an unavailable selected host throws before any child starts.
+    private let hostPlan: () throws -> PTYHostChildPlan?
 
     private var process: AgentChildProcess?
     private var transport: AgentStreamTransport<JSONRPCLineEnvelope>?
@@ -103,7 +104,7 @@ final class ACPStreamSession:
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
         commandCatalogTimeout: TimeInterval = ACPDefaults.commandCatalogTimeout,
         mcpBinding: MCPServerBinding? = nil,
-        hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
+        hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
@@ -130,7 +131,7 @@ final class ACPStreamSession:
                 arguments: launchPlan.arguments,
                 environment: launchPlan.launchEnvironment(),
                 sessionID: sessionID,
-                host: hostPlan()
+                host: try hostPlan()
             ) { [weak self] status in
                 Task { @MainActor [weak self] in self?.handleTermination(status: status) }
             }
@@ -143,7 +144,9 @@ final class ACPStreamSession:
             // Match every other native transport: start never calls an external lifecycle
             // callback re-entrantly before its caller has finished installing the surface.
             Task { @MainActor [weak self] in
-                self?.onExit?(AgentChildProcessDefaults.spawnFailureStatus)
+                guard let self else { return }
+                if let handler = self.onLaunchFailure { handler(error) }
+                else { self.onExit?(AgentChildProcessDefaults.spawnFailureStatus) }
             }
             return
         }

@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingPTYHostKit
 
 // MARK: - Launch Notice
 
@@ -31,6 +32,10 @@ enum PTYHostLaunchNotice: Equatable {
     /// what `Resume` does; only the turn in flight is lost, which is exactly today's cost.
     case lost([SessionID])
 
+    /// The same loss with the daemon recovery event that owns it. Kept separate from the legacy
+    /// case so tests and callers that construct a notice directly remain source-compatible.
+    case lostIncident(ids: [SessionID], key: String, detectedAt: Date?)
+
     // MARK: - Deriving
 
     /// The band a launch owes, or nil when it owes none.
@@ -38,8 +43,18 @@ enum PTYHostLaunchNotice: Equatable {
     /// **A loss outranks a survival**, and only one band fits: the kept-running sentence is good
     /// news that needs nothing done about it, while the lost one names work that is not coming
     /// back on its own. A launch that saw both says the second, and the journal has both counts.
-    static func forLaunch(_ plan: PTYHostReattachPlan, pending: Int) -> PTYHostLaunchNotice? {
-        if !plan.lost.isEmpty { return .lost(plan.lost) }
+    static func forLaunch(
+        _ plan: PTYHostReattachPlan,
+        pending: Int,
+        loss: PTYHostLost? = nil
+    ) -> PTYHostLaunchNotice? {
+        if !plan.lost.isEmpty {
+            guard let loss else { return .lost(plan.lost) }
+            let key = loss.incidentID.map { "incident:\($0.uuidString)" }
+                ?? "legacy:\(loss.since.timeIntervalSince1970):"
+                    + plan.lost.map(\.uuidString).sorted().joined(separator: ",")
+            return .lostIncident(ids: plan.lost, key: key, detectedAt: loss.detectedAt)
+        }
         // A conversation the daemon kept working counts as recovered too. It is not being taken
         // back — its transport cannot be rejoined mid-stream — but it *did* keep running and this
         // launch resumes it from the transcript it wrote, so there is nothing left to press for
@@ -56,7 +71,8 @@ enum PTYHostLaunchNotice: Equatable {
     var count: Int {
         switch self {
         case .keptRunning(let count, _): return count
-        case .lost(let sessionIDs): return sessionIDs.count
+        case .lost(let sessionIDs), .lostIncident(let sessionIDs, _, _):
+            return sessionIDs.count
         }
     }
 
@@ -80,15 +96,15 @@ enum PTYHostLaunchNotice: Equatable {
                 ? L10n.string("One session could not be taken back.")
                 : L10n.format("%lld sessions could not be taken back.", Int64(pending))
             return count > 0 ? "\(recovered) \(held)" : held
-        case .lost(let sessionIDs):
+        case .lost(let sessionIDs), .lostIncident(let sessionIDs, _, _):
             return sessionIDs.count == 1
                 ? L10n.string(
-                    "One session was lost while Threading was closed. Its conversation can be "
-                        + "resumed."
+                    "One session was lost when the background session host restarted. Its "
+                        + "conversation can be resumed."
                 )
                 : L10n.format(
-                    "%lld sessions were lost while Threading was closed. Their conversations can "
-                        + "be resumed.",
+                    "%lld sessions were lost when the background session host restarted. Their "
+                        + "conversations can be resumed.",
                     Int64(sessionIDs.count)
                 )
         }
@@ -99,7 +115,7 @@ enum PTYHostLaunchNotice: Equatable {
         switch self {
         case .keptRunning(_, let pending):
             return pending > 0 ? L10n.string("Reattach") : nil
-        case .lost:
+        case .lost, .lostIncident:
             return L10n.string("Resume")
         }
     }
@@ -109,8 +125,13 @@ enum PTYHostLaunchNotice: Equatable {
     var isAttention: Bool {
         switch self {
         case .keptRunning: return false
-        case .lost: return true
+        case .lost, .lostIncident: return true
         }
+    }
+
+    var persistentIncidentKey: String? {
+        guard case .lostIncident(_, let key, _) = self else { return nil }
+        return key
     }
 }
 
@@ -123,8 +144,9 @@ enum PTYHostLaunchNotice: Equatable {
 /// launch's* survey has nothing to add the second time — a later survey, run because the user
 /// pressed Reattach, is answering a question they just asked rather than announcing one.
 ///
-/// Held in memory only. Nothing about it goes on disk: the fact it reports is the daemon's own
-/// list, which the next launch asks for again.
+/// The per-launch offer stays in memory. A loss incident's identity is also remembered in
+/// preferences, because a surviving daemon reports the same recovery fact on every connection
+/// and reopening Threading must not turn one daemon restart into a fresh warning each time.
 @MainActor
 final class PTYHostLaunchNoticeCenter {
 
@@ -146,14 +168,18 @@ final class PTYHostLaunchNoticeCenter {
     // MARK: - Properties
 
     private let actions: Actions
+    private let defaults: UserDefaults
+
+    private static let presentedIncidentKey = "PTYHostLastPresentedLossIncident"
 
     /// Whether this launch has already said its piece.
     private(set) var hasOffered = false
 
     // MARK: - Initialization
 
-    init(actions: Actions) {
+    init(actions: Actions, defaults: UserDefaults = .standard) {
         self.actions = actions
+        self.defaults = defaults
     }
 
     // MARK: - Public Methods
@@ -166,6 +192,10 @@ final class PTYHostLaunchNoticeCenter {
     func offer(_ notice: PTYHostLaunchNotice?) -> Bool {
         guard let notice, !hasOffered else { return false }
         hasOffered = true
+        if let key = notice.persistentIncidentKey {
+            guard defaults.string(forKey: Self.presentedIncidentKey) != key else { return false }
+            defaults.set(key, forKey: Self.presentedIncidentKey)
+        }
         actions.present(notice) { [weak self] in
             self?.perform(notice)
         }
@@ -178,7 +208,7 @@ final class PTYHostLaunchNoticeCenter {
         switch notice {
         case .keptRunning:
             actions.reattach()
-        case .lost(let sessionIDs):
+        case .lost(let sessionIDs), .lostIncident(let sessionIDs, _, _):
             actions.resume(sessionIDs)
         }
     }

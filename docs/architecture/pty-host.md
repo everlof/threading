@@ -10,7 +10,9 @@ what they missed where it can, does not reflow an agent that kept working, and r
 conversation from what its CLI wrote while nobody was watching. Three surfaces report it: the quit
 question, a once-per-launch band, and the Background Sessions list on the Advanced page.
 `AppSettings.ptyHostEnabled` ships off, so every session runs in-process exactly as before unless
-somebody turns it on. The feature it serves — sessions that outlive the app — is
+somebody turns it on. Once selected, hosting is an ownership contract: an unavailable host leaves
+the session stopped with a launch failure instead of silently creating an app-owned child. The
+feature it serves — sessions that outlive the app — is
 `docs/feature-drafts/durable-sessions.md` §4.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
@@ -19,8 +21,8 @@ The daemon will be one process per user, registered through `SMAppService.agent`
 session's `forkpty` child, its raw output ring, its last window size, its exit status and its
 launch record — and owning nothing else. No projects, no themes, no transcripts, no accounts, no
 policy, no settings, no SQLite store, no `EventLog`, and no terminal emulation of any kind. It
-parses nothing. Registration is attempted and never required: every way it can be unavailable
-degrades to today's in-process `forkpty` behaviour, unchanged.
+parses nothing. Registration is attempted and never required for ordinary local sessions; a
+session that explicitly requires the host is refused when that contract cannot be met.
 
 **§6 of the draft is not a promise.** `ScheduledMessageScheduler`, `LimitRecoveryCoordinator` and
 `UsageWindowPoker` are `@MainActor` singletons in the app; a daemon *unlocks* scheduled work
@@ -234,8 +236,9 @@ and therefore bumps nothing. `PTYHostProtocolTests` pins both numbers so a bump 
 deliberately.
 
 On a protocol mismatch the app **refuses to attach and refuses to spawn**. When the daemon is the
-outdated peer, the handshake sends `retire` and new sessions fall back to in-process PTYs; when
-the app is outdated, it never signals the newer daemon.
+outdated peer, the handshake sends `retire` and a requested hosted launch waits for a compatible
+host rather than falling back to an in-process PTY; when the app is outdated, it never signals the
+newer daemon.
 `PTYHostCompatibility.updateTarget(evaluatedBy:)` names which side has to move, and takes the
 evaluator as a parameter because `peerTooOld` means the app when the daemon evaluates and the
 daemon when the app evaluates — a fixed mapping would be right on one side and exactly backwards
@@ -314,9 +317,13 @@ placeholder, for the 2×1 reason above — using `executable`, `arguments`, `exe
 and `cwd` **verbatim**. The daemon adds nothing and removes nothing: it inherits launchd's
 environment rather than the user's, and the composition rules stay in the app where the measured
 leakage list and the login-shell command line already live. `.pipes` forks the same way through
-`posix_spawn` — see [Pipes](#pipes); a duplicate id is `alreadyExists`; a missing or
-non-executable file is `executableUnavailable`, checked before the fork so the answer is a refusal
-rather than an exit status. `unsupportedChannel` survives with no channel to refuse, because the
+`posix_spawn` — see [Pipes](#pipes). A healthy duplicate id is `alreadyExists`. When the existing
+incarnation has already been deliberately killed, the daemon queues exactly one replacement for
+that identity and starts it only after the old child's final output and exit have been delivered;
+the two processes never overlap. Closing the requesting connection or retiring the daemon cancels
+the queued replacement. A missing or non-executable file is `executableUnavailable`, checked
+before the fork so the answer is a refusal rather than an exit status. `unsupportedChannel`
+survives with no channel to refuse, because the
 refusal is the rule rather than the case: an unimplemented channel is always a refusal and never a
 substitution, since a conversation transport quietly given a pseudo-terminal would look like a
 working session producing unparseable output.
@@ -437,6 +444,19 @@ learning anything about the byte stream.
 2-second grace when asked to escalate. The group rather than the process, because an agent CLI's
 own children are in it and signalling the leader alone is how orphans are made.
 
+**A persistent launch declares `replaceExisting`.** A surface switch or checkout move can send the
+new spawn on one socket immediately after sending the old kill on another, and the daemon is free
+to service the spawn first. The replacement bit makes that request the authority: on the daemon's
+single queue it records the replacement, kills the old incarnation if necessary, waits until its
+last output and `exited` frame have been delivered, releases it, and only then spawns the new child.
+There is never an overlap and no cross-socket arrival order to guess. A spawn without replacement
+authority still receives `alreadyExists` for a healthy duplicate. The optional field is additive:
+an older app omits it and an older daemon ignores it; the current app retains the old watcher and
+performs one bounded retry for that compatible-daemon terminal transition. A native pipe link also
+self-retains for a bounded five seconds after an explicit stop, long enough for an older daemon to
+receive the queued kill and mark the ending observed instead of retaining the identity for its
+30-minute unattended-exit window.
+
 An exit is noticed through `EVFILT_PROC`/`NOTE_EXIT` and reaped with a non-blocking `waitpid`,
 retried on the queue rather than waited for. **The `exited` frame waits for the output that
 preceded it**: the child's last write is usually still in the terminal buffer when the kernel
@@ -507,28 +527,27 @@ than one that ended. It is R4 in the design's risk register, answered.
   `.jsonl` it finds in its own directory, and two processes appending to one file has damaged a
   journal here before.
 
-## Availability and degradation
+## Availability and launch ownership
 
-Registration is attempted and never required, so **every way the host can be missing has to be a
-value the app can act on**, and there is exactly one of them: `PTYHostAvailability`, either
-`.available(socketPath:)` or `.unavailable(PTYHostUnavailability)`. Every unavailable case
-degrades to the same thing — today's in-process `forkpty`, unchanged — which is what makes §7's
-"removing it must degrade to today's behaviour rather than to a broken app" structural rather than
-a promise. The reasons are separate anyway, because a journal, the Advanced page and a support
-report all need to *say* which one it was, and a `Bool` is how a feature that quietly stopped
-working becomes unexplainable.
+**Every way the host can be missing is a value the app can act on**, and there is exactly one of
+them: `PTYHostAvailability`, either `.available(socketPath:)` or
+`.unavailable(PTYHostUnavailability)`. `PTYHostLaunchRoute` keeps policy and availability from
+collapsing into one optional: `.local` means hosting was not selected, `.hosted(factory)` means the
+daemon owns the launch, and `.unavailable(error)` means hosting was selected but cannot be
+honoured. Only `.local` starts an in-process child. The reasons remain separate because a launch
+failure, the Advanced page and a support report all need to say which one it was.
 
-| Reason | What it means | Degrades to |
+| Reason | What it means | Requested hosted launch |
 |---|---|---|
-| `disabled` | `AppSettings.ptyHostEnabled` is off | in-process PTY |
-| `socketPathTooLong(bytes:)` | the rendezvous does not fit `sockaddr_un.sun_path` | in-process PTY |
-| `helperMissing` | no `Contents/Helpers/threading-ptyd` in the bundle | in-process PTY |
-| `notRunning` | no socket file, or the kernel refused the connect | in-process PTY |
-| `protocolMismatch(_)` | a daemon answered and the gate refused it | in-process PTY |
-| `notRegistered` | launchd knows the label and the service is off | in-process PTY |
-| `notFound` | launchd has never seen the label | in-process PTY |
-| `requiresApproval` | registered, and waiting for the user in System Settings ▸ Login Items | in-process PTY |
-| `registrationRefreshing` | a stale or ambiguous launchd association is being replaced safely | in-process PTY |
+| `disabled` | `AppSettings.ptyHostEnabled` is off | refuse before spawn |
+| `socketPathTooLong(bytes:)` | the rendezvous does not fit `sockaddr_un.sun_path` | refuse before spawn |
+| `helperMissing` | no `Contents/Helpers/threading-ptyd` in the bundle | refuse before spawn |
+| `notRunning` | no socket file, or the kernel refused the connect | refuse before spawn |
+| `protocolMismatch(_)` | a daemon answered and the gate refused it | refuse before spawn |
+| `notRegistered` | launchd knows the label and the service is off | refuse before spawn |
+| `notFound` | launchd has never seen it | refuse before spawn |
+| `requiresApproval` | registered, and waiting in System Settings ▸ General ▸ Login Items | refuse before spawn |
+| `registrationRefreshing` | an incompatible or ambiguous association is being replaced safely | refuse before spawn |
 
 The last three are **set by registration, not by the probe**. `PTYHostAvailability.resolve` has no
 `SMAppService` and deliberately none — a launch-path call into a framework that can block is not
@@ -612,8 +631,9 @@ because once a length or a `kind` is wrong there is no resynchronisation point t
 given and reports completion later, so how much is unwritten is a number only the caller can keep;
 without it, a daemon that stopped reading would drive an unbounded allocation in the app from
 outside. Past `PTYHostDefaults.maximumQueuedWriteBytes` — four frames of the 1 MiB wire maximum —
-the connection closes with `writeQueueOverflow`, and the session degrades like any other
-unavailability. A queue that grows quietly is the failure this refuses.
+the connection closes with `writeQueueOverflow`. A selected background session reports the
+resulting launch failure or ending; it never changes ownership. A queue that grows quietly is the
+failure this refuses.
 
 `EventLog` sees lifecycle edges only, in `.session`: connected (with the peer's build), the
 compatibility answer and whether the daemon was retired, a reported `lost` set, a framing refusal,
@@ -629,7 +649,8 @@ and speaks the real codec: no daemon binary, no `SMAppService`, no PTY, no windo
 
 ## Registration and retirement
 
-The daemon starts itself, or it does not and every PTY runs in-process. Registration is
+The daemon starts itself, or it does not. A session that did not select hosting still runs
+in-process; a selected background session remains stopped with the exact refusal. Registration is
 `SMAppService.agent(plistName:)` against
 `Contents/Library/LaunchAgents/codes.threading.ptyd.plist`, which the app bundle ships through a
 **Copy Files** phase and seals as an ordinary resource — it is not nested code and is not signed
@@ -751,21 +772,20 @@ same-generation, absent, incompatible, retired or cancelled daemon schedules non
 Turning the feature off cancels the pending replacement; turning it on again starts a fresh survey
 immediately and reuses any harmless delayed callback that was already outstanding.
 
-While any replacement is pending, `PTYHostNewSessionAdmission` keeps **new** conversations on the
-in-process path. Existing hosted links and the reattach/stop clients do not consult that gate, so
-old work remains usable and can drain. This prevents a stream of new launches from keeping a stale
-generation busy forever, and closes the launchd-restart race between a retiring process exiting
-and its registration being refreshed.
+An incompatible or ambiguous replacement withholds new hosted launches until one daemon can own
+them safely. A **compatible** daemon from an older app generation remains admitted while it is
+busy: it already satisfies the durability contract, and changing new launches to app-owned work
+for the possibly hours-long drain lost that work at the next app restart. The pending upgrade is
+remembered and retried after exit edges and on the bounded backstop; installing the newest helper
+waits behind keeping every selected session durable.
 
 **The gate has three states, not two, and a re-survey that changes nothing changes nothing.**
-`PTYHostNewSessionAdmission.State` is `unresolved` / `allowed` / `withheld`, and only the first
-means `registrationRefreshing` — "a stale or ambiguous launchd association is being replaced
-safely", which is a condition that lasts a moment. Measured on 2026-08-26: a compatible daemon of
-another build held thirty agents for the whole life of the app, the gate stayed shut for the whole
-of it, and **every** new conversation was journalled as running in-process because a registration
-was refreshing. Nothing was. So `withheld` has its own cause token, `upgradePending`, and
-`resolve(_:)` is idempotent — availability during a refresh is whatever the last survey settled on,
-and only the *first* survey of a launch may leave a launch degrading with nobody having asked yet.
+`PTYHostNewSessionAdmission.State` is `unresolved` / `allowed` / `withheld`. Measured on
+2026-08-26: a compatible daemon of another build held thirty agents for the whole life of the app,
+the gate stayed shut for the whole of it, and every new conversation silently ran in-process. The
+monitor now resolves that settled `holdsSessions` answer to `allowed`; `withheld` is reserved for
+a host that cannot safely accept the launch. `resolve(_:)` remains idempotent so an unchanged
+survey produces no new state or journal noise.
 
 **The `holdsSessions` re-check is event-driven with a backing-off backstop, and the decision is
 journalled only when it changes.** A host-owned child ending posts `PTYHostMayHaveDrained` and
@@ -920,9 +940,8 @@ that has neither.
 `AgentSession.fastMode` and `remoteControl` established: nil inherits, and it survives to the JSON
 rather than collapsing into a boolean on the way, so a record written before the field existed
 reads as "no opinion" rather than as a decision to stay in-process. `PTYHostPolicy.hostsSession`
-resolves session → `AppSettings.ptyHostEnabled` → false. A session that says yes while the
-hidden global is off still runs in-process, and not because the policy lies to it:
-`PTYHostAvailability` answers `.disabled` first and without touching anything, so the global is a
+resolves session → `AppSettings.ptyHostEnabled` → false. A session that explicitly says yes while
+the hidden global is off receives `.unavailable(.disabled)` and remains stopped; the global is a
 master switch *through availability* while staying an inheritable default in the policy.
 
 **No new `AgentKind` capability.** Whether a session has a pty at all is already
@@ -935,10 +954,12 @@ a fact about the surface.
 The composition happens once per launch, in `AgentSessionViewController.startIfTerminalIsSized` —
 the surface that holds the conversation record, and the point at which the deferred-launch gate
 has already laid the terminal out, so the grid the daemon is handed is a real one rather than
-SwiftTerm's 2×1 clamp. Policy first (a `UserDefaults` read), then `PTYHostAvailability.live`, and
-anything short of `.available` is an in-process launch and one journal line naming the
-unavailability token. `TerminalSession` itself never reaches for the store or the settings: it is
-handed a factory or it is not.
+SwiftTerm's 2×1 clamp. Policy first (a `UserDefaults` read), then `PTYHostAvailability.live`. An
+unselected route is local; an unavailable selected route records a preflight
+`SessionLaunchFailure` before any launch record is written. `TerminalSession` itself never reaches
+for the store or settings: it is handed a factory only after the route promised hosting. A later
+link or spawn refusal comes back through `TerminalSessionDelegate` as the same launch failure
+instead of falling through to `forkpty`.
 
 ### What degrades, and what does not
 
@@ -1344,17 +1365,17 @@ handshake deadlines, malformed-line counters and exactly-once exit callbacks eac
 untouched. That is the property the whole slice rests on, and it is a property of the construction
 rather than a claim.
 
-**Nil is always "run it here instead".** No daemon, a version gate that refused, a `spawnRefused`,
-a silence — each is a degradation to the launch this app performed before the daemon existed, each
-is journalled with a structural cause, and none of them throws: a throw would be a launch failure
-on a conversation that has a perfectly good way to start.
+**Nil is only "policy selected the local route".** Once `host` is non-nil, no daemon, a version
+gate refusal, `spawnRefused` or silence is a typed launch failure after being journalled with its
+structural cause. It never falls through to `posix_spawn` in the app, because doing so would change
+who owns the child without changing the promise made to the user.
 
 **The spawn is awaited, and the wait is bounded.** `AgentChildProcess.launch` is synchronous by
 contract — the transports set `isRunning` on the line after it returns — so the host-backed path
 has to know whether the child exists before it returns, which means waiting for `spawned` or
 `spawnRefused`. The daemon answers straight out of `posix_spawn`, so this is a millisecond in
 practice; `PTYHostPipeDefaults.spawnTimeout` exists so that a daemon which has stopped answering
-costs a launch a fallback rather than a hang.
+costs a launch a bounded refusal rather than a hang.
 
 **One ending, delivered once.** An `exited` frame and the connection dropping under it are the same
 fact seen twice. `PTYHostPipeLink.end(status:)` is guarded, closes the two output channels with
@@ -1427,14 +1448,17 @@ prompt must never do is pick the destructive branch on their behalf.
 running-sessions record is written: a session the user stopped at the quit is still a session the
 next launch should offer to bring back.
 
-### A launch band, once per launch
+### A launch band, once per recovery incident
 
 `PaneNoticeView` — the component `LaunchRestoration` already uses for the post-crash band, and for
 its reason: this is a standing condition rather than a receipt, so it is explicitly not a
 `ToastView`. `PTYHostLaunchNotice` is the decision as a value, so what the band says can be
-asserted without a window, and `PTYHostLaunchNoticeCenter` holds the one-shot rule in memory.
-Nothing goes on disk: the fact it reports is the daemon's own list, which the next launch asks for
-again.
+asserted without a window. Recovery assigns one `incidentID` and `detectedAt`, repeats that
+identity on every connection for the daemon's lifetime, and the app stores the last presented
+identity in preferences. `PTYHostLaunchNoticeCenter` therefore offers one warning per actual host
+restart, not once per app launch. The append-only state reader also reduces records through its
+current open-session dictionary before sorting; several process incarnations of one logical
+session can produce only one lost identity and one count.
 
 Two sentences and two answers:
 
@@ -1452,8 +1476,8 @@ Two sentences and two answers:
   for it; a launch that recovered nothing says only that sentence, because "0 sessions kept
   running" is the same overstatement pointed the other way. `Reattach` is the answer to the second
   sentence and to nothing else.
-- **"2 sessions were lost while Threading was closed."** The daemon restarted and its children went
-  with it (`KeepAlive` restores the service, not the work). `Resume` puts them back through the
+- **"2 sessions were lost when the background session host restarted."** The daemon restarted and
+  its children went with it (`KeepAlive` restores the service, not the work). `Resume` puts them back through the
   ordinary staggered relaunch, bypassing `sessionRestorePolicy` on purpose: the policy answers
   "what should come back on its own", and this is somebody pressing a button.
 

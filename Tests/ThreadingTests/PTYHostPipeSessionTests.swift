@@ -25,11 +25,11 @@ final class PTYHostPipeSessionTests: XCTestCase {
         /// One dispatch hop plus a pipe write. Generous, because the point of each assertion is
         /// that the bytes arrive at all.
         static let timeout: TimeInterval = 5
-        /// The bound `AgentChildProcess.launch` degrades on. Waited out deliberately in one test.
+        /// The bound `AgentChildProcess.launch` refuses on. Waited out deliberately in one test.
         static let silence: TimeInterval = PTYHostPipeDefaults.spawnTimeout + 3
         static let hostPid: pid_t = 4242
-        /// A child that reads its standard input and never ends on its own, for the local
-        /// fallback: the assertion is that a real child exists, not what it prints.
+        /// A child that reads its standard input and never ends on its own, for the deliberate
+        /// local route: the assertion is that a real child exists, not what it prints.
         static let localExecutable = "/bin/cat"
     }
 
@@ -103,27 +103,26 @@ final class PTYHostPipeSessionTests: XCTestCase {
         )
     }
 
-    /// Every refusal is "run it here instead", and the launch that follows is the one this app
-    /// performed before the daemon existed.
-    func testASpawnRefusalRunsTheChildInThisProcessInstead() throws {
-        let process = try launch(answering: .refused, into: TransportBox())
-
-        XCTAssertFalse(process.isHostBacked)
-        XCTAssertTrue(process.isRunning, "a refusal is a degradation, never a launch failure")
-        XCTAssertNotEqual(process.processIdentifier, Fixture.hostPid)
+    /// A selected host cannot silently become an app-owned process after a daemon refusal.
+    func testASpawnRefusalDoesNotFallBackToThisProcess() throws {
+        XCTAssertThrowsError(try launch(answering: .refused, into: TransportBox())) { error in
+            XCTAssertEqual(
+                (error as? PTYHostLaunchError)?.cause,
+                "child.refused.capacity"
+            )
+        }
     }
 
-    /// A daemon that stops answering costs a launch a fallback rather than a hang.
+    /// A daemon that stops answering costs a launch a bounded refusal rather than a hang.
     ///
     /// `AgentChildProcess.launch` is synchronous by contract — the transports set `isRunning` on
     /// the line after it returns — so the host-backed path has to answer the same question before
     /// it returns, and silence has to be one of the answers.
-    func testASilentDaemonDegradesRatherThanHoldingTheLaunch() throws {
+    func testASilentDaemonRefusesRatherThanHoldingOrFallingBack() throws {
         let started = Date()
-        let process = try launch(answering: .silence, into: TransportBox())
-
-        XCTAssertFalse(process.isHostBacked)
-        XCTAssertTrue(process.isRunning)
+        XCTAssertThrowsError(try launch(answering: .silence, into: TransportBox())) { error in
+            XCTAssertEqual((error as? PTYHostLaunchError)?.cause, "child.timedOut")
+        }
         XCTAssertLessThan(
             Date().timeIntervalSince(started),
             Fixture.silence,
@@ -202,7 +201,7 @@ final class PTYHostPipeSessionTests: XCTestCase {
     /// signal that ends Threading.
     func testStandardInputRefusesSignalsOnBothPaths() throws {
         let hosted = try launch(answering: .spawned, into: TransportBox())
-        let local = try launch(answering: .refused, into: TransportBox())
+        let local = try launchLocally()
 
         XCTAssertEqual(fcntl(hosted.standardInput.fileDescriptor, F_GETNOSIGPIPE), 1)
         XCTAssertEqual(
@@ -452,6 +451,20 @@ final class PTYHostPipeSessionTests: XCTestCase {
             ledger: ledger,
             host: plan,
             onExit: onExit
+        )
+        launched.append(process)
+        return process
+    }
+
+    private func launchLocally() throws -> AgentChildProcess {
+        let process = try AgentChildProcess.launch(
+            executable: Fixture.localExecutable,
+            arguments: ["-u"],
+            environment: ["B": "2", "A": "1"],
+            sessionID: SessionID(),
+            ledger: ledger,
+            host: nil,
+            onExit: { _ in }
         )
         launched.append(process)
         return process

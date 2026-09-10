@@ -5,11 +5,12 @@ import ThreadingPTYHostKit
 
 /// Why this launch is not using the background PTY host.
 ///
-/// Every case degrades to the same behaviour — today's in-process `forkpty`, unchanged — so the
-/// distinction is never a branch in feature code. It exists because "the daemon is off", "the
-/// daemon is not installed", "the daemon is not running" and "the daemon is the wrong one" are
-/// four different things to *say*, in a journal and in the Advanced settings page, and collapsing
-/// them into a `Bool` is how a feature that quietly stopped working becomes unexplainable.
+/// Every case refuses a launch that explicitly requested background hosting, while a launch that
+/// did not request it still uses today's in-process path. The distinction exists because "the
+/// daemon is off", "the daemon is not installed", "the daemon is not running" and "the daemon is
+/// the wrong one" are four different things to *say*, in a journal and in the Advanced settings
+/// page, and collapsing them into a `Bool` is how a feature that quietly stopped working becomes
+/// unexplainable.
 ///
 /// Structural tokens rather than sentences, for the reason
 /// [`reliability-and-type-safety.md`](../../../../docs/architecture/reliability-and-type-safety.md)
@@ -35,8 +36,8 @@ enum PTYHostUnavailability: Equatable, Sendable {
     /// because the daemon that left the file behind is gone.
     case notRunning
 
-    /// Registration or daemon replacement is in progress. Existing hosted sessions may reattach,
-    /// but new sessions stay in-process so they cannot race into the daemon being drained.
+    /// Registration or an incompatible daemon replacement is in progress. Existing hosted
+    /// sessions may reattach, but a new session is refused until one durable host can own it.
     case registrationRefreshing
 
     /// A daemon answered and the protocol pair does not admit it. The app refuses to attach,
@@ -91,11 +92,9 @@ enum PTYHostUnavailability: Equatable, Sendable {
 
 /// Whether this launch may put a session's PTY in the background host, as one value.
 ///
-/// One value rather than a scattering of checks because the *degrade* is the feature: §7 of the
-/// draft asks that removing the daemon degrade to today's behaviour rather than to a broken app,
-/// and that is structural only if there is a single place that answers the question and a single
-/// answer that carries the reason with it. It is `Sendable` so the answer can be resolved off the
-/// main actor — the probe connects to a socket — and applied on it.
+/// One value rather than a scattering of checks because the refusal must preserve the structural
+/// reason all the way to the launch surface. It is `Sendable` so the answer can be resolved off
+/// the main actor — the probe connects to a socket — and applied on it.
 enum PTYHostAvailability: Equatable, Sendable {
 
     /// A compatible daemon is listening here.
@@ -156,7 +155,7 @@ struct PTYHostProbeRequest: Sendable {
 /// length, the helper's presence — is decided from values the caller already holds, so a test can
 /// force each of those branches with no daemon, no socket and no filesystem; and the branch that
 /// *does* need a peer is one closure, so a test can force that one too. Without the split, half
-/// the degrade paths would only be reachable by arranging a real daemon to be absent in the
+/// the refusal paths would only be reachable by arranging a real daemon to be absent in the
 /// right way.
 struct PTYHostProbe: Sendable {
 
@@ -306,9 +305,7 @@ extension PTYHostAvailability {
         }
 
         guard fileManager.fileExists(atPath: decision.helperURL.path) else {
-            ThreadingLogger.ptyHost.info(
-                "PTY host helper is not in the bundle; sessions run their PTY in-process"
-            )
+            ThreadingLogger.ptyHost.info("PTY host helper is not in the bundle")
             return .unavailable(.helperMissing)
         }
 
