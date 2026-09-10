@@ -656,6 +656,16 @@ is written **on the keystroke, not on a timer** — the opposite of `ProjectStor
 saves, and for the opposite reason: the file exists *for* the crash that lands between two
 keystrokes, so a coalescing window is the one interval it cannot afford.
 
+New-session launch choices have a different commit boundary. The provider becomes
+`AppSettings.defaultAgentKind`, and model/reasoning becomes
+`AccountPreference.newSessionRunChoice` for the provider-qualified login, only after the
+composer's delegate says it created the session (or a scheduled session was durably reserved).
+A refused or abandoned form writes neither. The provider value uses `PreferenceStore` for the
+shared app instance: in production that is the existing standard-defaults key; in a hosted test
+it is the per-process scratch suite, so a render exercising OpenCode cannot change what the
+developer's next real composer opens on. Injected `AppSettings` instances keep using their
+injected defaults for the same key.
+
 Submitting records the prompt to the journal *before* clearing the draft. Clearing first
 would reopen the original hole — the prompt would live only in memory and in a command line,
 which is precisely where it was when the crash took one.

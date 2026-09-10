@@ -49,8 +49,8 @@ final class AccountEnablementTests: XCTestCase {
         XCTAssertEqual(reloaded.preference(for: id), AccountPreference())
     }
 
-    /// The switch is one of three things stored per account, and it must not take the other two
-    /// with it in either direction.
+    /// The switch is one of several things stored per account, and it must not take the
+    /// presentation choices with it in either direction.
     func testTheSwitchAndThePresentationAreIndependent() {
         let id = AccountID(provider: .codex, handle: .named("codex-alt"))
 
@@ -168,6 +168,35 @@ final class AccountEnablementTests: XCTestCase {
         XCTAssertFalse(store.isEnabled(id))
     }
 
+    func testNewSessionModelChoicePersistsPerProviderQualifiedLogin() {
+        let work = AccountID(provider: .claude, handle: .named("claude-work"))
+        let personal = AccountID(provider: .claude, handle: .standard)
+        let choice = NewSessionRunChoice(model: "sonnet", reasoningEffort: "high")
+
+        store.setNewSessionRunChoice(choice, for: work)
+
+        let reloaded = AccountPreferencesStore(defaults: defaults)
+        XCTAssertEqual(reloaded.newSessionRunChoice(for: work), choice)
+        XCTAssertNil(reloaded.newSessionRunChoice(for: personal))
+    }
+
+    func testChoosingAutomaticClearsAnOlderNewSessionModelChoice() {
+        let id = AccountID(provider: .codex, handle: .named("codex-work"))
+        store.setEmoji("🌀", for: id)
+        store.setNewSessionRunChoice(
+            NewSessionRunChoice(model: "gpt-5.6-sol", reasoningEffort: "xhigh"),
+            for: id
+        )
+
+        store.setNewSessionRunChoice(
+            NewSessionRunChoice(model: nil, reasoningEffort: nil),
+            for: id
+        )
+
+        XCTAssertNil(store.newSessionRunChoice(for: id))
+        XCTAssertEqual(store.emoji(for: id), "🌀")
+    }
+
     /// Preferences stored before the switch existed carry no such key, and a decoder that
     /// treated the absence as a failure would drop every icon and name the user had set.
     func testPreferencesWrittenBeforeTheSwitchStillDecodeAsOn() throws {
@@ -178,6 +207,7 @@ final class AccountEnablementTests: XCTestCase {
         XCTAssertEqual(decoded.displayNameOverride, "Nova")
         XCTAssertNil(decoded.isDisabled)
         XCTAssertNil(decoded.hiddenModelIDs)
+        XCTAssertNil(decoded.newSessionRunChoice)
         XCTAssertFalse(decoded.isEmpty)
     }
 

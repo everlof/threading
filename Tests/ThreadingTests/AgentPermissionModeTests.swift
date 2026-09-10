@@ -15,7 +15,8 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
 
     override func setUp() {
         super.setUp()
-        // The app-wide default is one of the inputs under test, and it is real user state.
+        // Both app-wide defaults are inputs under test and both are process singletons. The
+        // permission mode is real user state; the provider choice is redirected in this host.
         defaultMode = AppSettings.shared.defaultPermissionMode
         defaultKind = AppSettings.shared.defaultAgentKind
         AppSettings.shared.defaultPermissionMode = nil

@@ -471,15 +471,18 @@ Claude Code, Codex, Grok, OpenCode and Cursor together — each with the agent's
 left of it underneath (see [Usage when picking an account](#usage-when-picking-an-account)).
 Picking one sets the agent *and* the login at once, so moving to another agent's account is a
 single click rather than two. An agent appears as a row of its own only when it has no login to
-offer — either it does not use accounts, or none was found. Whichever row you pick, the model and
-reasoning effort go back to that login's own defaults, since a model pinned on one account is not
-necessarily offered on another.
+offer — either it does not use accounts, or none was found. The model and reasoning effort return
+to what that exact login last started successfully, while those choices are still offered; on a
+new or changed catalogue they fall back to that login's own defaults. A model from one account is
+never carried into another merely because both accounts use the same agent.
 
 A fresh composer starts on the enabled login that agent used most recently. If a chat was moved
 to another account after its model ran out, the next chat follows that account instead of jumping
 back to the exhausted one. A half-written composer is left exactly as you set it when you look
 away and return. With no usable history, the standard login is used when enabled, then the first
-enabled login.
+enabled login. Once a session starts successfully, its agent also becomes the agent future
+composers open on, and its per-login model and reasoning choice is remembered. A failed start does
+not change either default. Choosing Auto successfully clears an older explicit model choice.
 
 **The prompt is focused the moment the composer appears**, however you got there, so the
 first message can be typed straight away without clicking the field. If a draft is waiting,
@@ -4704,7 +4707,8 @@ requests; a missing extension translation falls back to that extension's base st
 than borrowing an unrelated app translation.
 
 ### General
-- **New sessions use** — the agent the composer opens on; any other can be picked there
+- **New sessions use** — the agent the composer opens on; any other can be picked there, and a
+  successfully started session makes its chosen agent the new value
 - **Conversation Speed** — choose Agent's Setting, Standard, or Fast independently for Claude
   and Codex; applies to Terminal and Native sessions on their next launch
 - **Opening Message** — optional standing text sent once with every new chat's first turn,

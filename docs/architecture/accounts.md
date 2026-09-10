@@ -180,6 +180,14 @@ first enters a project or returns after a successful start. An ordinary detour k
 form whole; usage readings remain decision evidence in its menus and do not silently switch an
 unfinished draft on the strength of a cached or unknown value.
 
+The model-specific half is explicit preference rather than session recency.
+`AccountPreference.newSessionRunChoice` holds the model and reasoning effort last accepted from
+the Mac composer, keyed by the same provider-qualified `AccountID` as visibility and appearance.
+Only a successful immediate start or reserved scheduled start writes it. Auto/Auto clears an
+older pin; a model no longer published or now hidden is ignored, and an effort no longer offered
+by the effective model is dropped. `lastReportedModel` remains evidence about what an unpinned
+runtime resolved and is never reused as this configuration.
+
 **Who a session runs as is one decision, so the composer's identity menu is one list.** It used
 to be two sections — the selected runtime's logins, a separator, then the other runtimes — which
 made every login of every *other* runtime two trips away: one to change runtime, another to pick
@@ -189,9 +197,9 @@ every runtime one row deep, and a runtime appears as a row of its own only where
 login to name (it routes no accounts, or none were discovered). A row's represented value is a
 `ComposerIdentity` — runtime *and* handle together — rather than one or the other: a menu that
 returned a bare handle would let a Codex login set a Claude session's account, which is the shape
-of bug the two-section menu could not have and this one could. Choosing any row resets the model
-and the reasoning effort, whether or not the runtime changed, because both are properties of a
-catalog the new login may not publish.
+of bug the two-section menu could not have and this one could. Choosing any row resolves the
+model and reasoning effort anew for that exact identity: its last successful choice wins while
+still published, otherwise its own live defaults do.
 
 Two invariants matter:
 

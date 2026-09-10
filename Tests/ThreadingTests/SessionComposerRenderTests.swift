@@ -23,10 +23,9 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         }
     }
 
-    /// Which runtime a new session starts on is a *user's* choice, and `AppSettings` is a
-    /// behavioural store — under a hosted test bundle that is the developer's own
-    /// `UserDefaults.standard`. A test that picks an agent to assert what its chips offer has to
-    /// put the old one back, or the app they run next opens on a runtime they never chose.
+    /// Which runtime a new session starts on is a *user's* choice. `AppSettings.shared` routes
+    /// that one value through the hosted scratch store, but it remains a process singleton: a
+    /// test that picks an agent still puts it back so later tests start from their own premise.
     private var savedAgentKind: AgentKind?
     private var savedPermissionMode: AgentPermissionMode?
 
@@ -1514,6 +1513,68 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             alternate,
             "the consumed composer kept the account from before the latest session moved"
         )
+    }
+
+    /// Provider/model defaults cross the same boundary as clearing the form: only the
+    /// delegate's successful answer says that the choice became a session. A failed attempt must
+    /// remain editable and must not become the next composer's answer.
+    func testSuccessfulStartPersistsProviderAndPerAccountModelButFailureDoesNot() throws {
+        let suite = "SessionComposerRunChoiceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let accountPreferences = AccountPreferencesStore(defaults: defaults)
+        let handle = AccountHandle.named("remembered-claude")
+        let accountID = AccountID(provider: .claude, handle: handle)
+        settings.defaultAgentKind = .openCode
+
+        let composer = SessionComposerViewController(
+            newSessionAccountHandle: { _ in handle },
+            appSettings: settings,
+            accountPreferences: accountPreferences
+        )
+        _ = composer.view
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: fixtureFolder()))
+        defer {
+            ProjectStore.shared.removeProject(id: project.id)
+            DraftStore.shared.setDraft("", for: project.id)
+        }
+        composer.show(projectID: project.id)
+        XCTAssertEqual(composer.selectedAgent, .openCode)
+
+        composer.selectedAgent = .claude
+        composer.selectedAccountHandle = handle
+        composer.selectedModel = "sonnet"
+        composer.selectedReasoningEffort = "high"
+        let recorder = StartRecorder()
+        recorder.starts = false
+        composer.delegate = recorder
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        prompt.stringValue = "Keep my launch choices"
+        try startButton(in: composer.view).performClick()
+
+        XCTAssertEqual(settings.defaultAgentKind, .openCode)
+        XCTAssertNil(accountPreferences.newSessionRunChoice(for: accountID))
+
+        recorder.starts = true
+        try startButton(in: composer.view).performClick()
+        XCTAssertEqual(settings.defaultAgentKind, .claude)
+        XCTAssertEqual(
+            accountPreferences.newSessionRunChoice(for: accountID),
+            NewSessionRunChoice(model: "sonnet", reasoningEffort: "high")
+        )
+
+        let fresh = SessionComposerViewController(
+            newSessionAccountHandle: { _ in handle },
+            appSettings: settings,
+            accountPreferences: AccountPreferencesStore(defaults: defaults)
+        )
+        _ = fresh.view
+        fresh.show(projectID: project.id)
+        XCTAssertEqual(fresh.selectedAgent, .claude)
+        XCTAssertEqual(fresh.selectedAccountHandle, handle)
+        XCTAssertEqual(fresh.selectedModel, "sonnet")
+        XCTAssertEqual(fresh.selectedReasoningEffort, "high")
     }
 
     /// The other half of keeping the composer: what has been sent must not still be sitting in

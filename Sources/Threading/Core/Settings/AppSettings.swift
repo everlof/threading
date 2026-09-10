@@ -65,7 +65,8 @@ final class AppSettings {
     // MARK: - Singleton
 
     static let shared = AppSettings(
-        legacyPreferences: legacyPreferencesForSharedProcess
+        legacyPreferences: legacyPreferencesForSharedProcess,
+        userChoiceDefaults: PreferenceStore.shared
     )
 
     /// A hosted XCTest bundle runs inside the shipping app and sees the developer's real
@@ -83,6 +84,10 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+    /// The small subset of General settings that are direct user choices rather than app
+    /// behaviour. Production still resolves this to `.standard`; hosted tests get the same
+    /// per-process scratch suite as every other recorded choice.
+    private let userChoiceDefaults: UserDefaults
     /// A distributed channel currently withholds Remote Access. Keep that policy beside the
     /// persisted master switch as well as in Settings: a developer may install a release over a
     /// dev build whose switch was already on, and hiding the page cannot make that stored `true`
@@ -95,7 +100,8 @@ final class AppSettings {
     init(
         defaults: UserDefaults = .standard,
         legacyPreferences: [String: Any] = [:],
-        remoteAccessIsOffered: Bool = AppInfo.buildChannel.offersRemoteAccess
+        remoteAccessIsOffered: Bool = AppInfo.buildChannel.offersRemoteAccess,
+        userChoiceDefaults: UserDefaults? = nil
     ) {
         let workspaceNavigatorPersistence =
             RecoverableDefaultsStore<WorkspaceNavigatorSelection>(
@@ -105,6 +111,7 @@ final class AppSettings {
                 sizePolicy: .compactMetadata
             )
         self.defaults = defaults
+        self.userChoiceDefaults = userChoiceDefaults ?? defaults
         self.remoteAccessIsOffered = remoteAccessIsOffered
         self.workspaceNavigatorPersistence = workspaceNavigatorPersistence
         self.cachedWorkspaceNavigatorSelection = workspaceNavigatorPersistence.load(
@@ -124,12 +131,12 @@ final class AppSettings {
     /// Agent used when creating a session without naming one explicitly.
     var defaultAgentKind: AgentKind {
         get {
-            guard let raw = AppSettingDefinitions.defaultAgentKind.read(from: defaults),
+            guard let raw = AppSettingDefinitions.defaultAgentKind.read(from: userChoiceDefaults),
                   let kind = AgentKind(rawValue: raw) else { return AgentDefaults.defaultKind }
             return kind
         }
         set {
-            AppSettingDefinitions.defaultAgentKind.write(newValue.rawValue, to: defaults)
+            AppSettingDefinitions.defaultAgentKind.write(newValue.rawValue, to: userChoiceDefaults)
         }
     }
 

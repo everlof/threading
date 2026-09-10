@@ -26,9 +26,17 @@ final class SessionComposerViewController: NSViewController {
     /// this flag, so a half-written draft and the choices beside it remain untouched.
     private var shouldResolveNewSessionAccount = false
 
+    /// A persisted model is validated against the catalogue `refreshChips()` already projects.
+    /// Keeping the marker separate avoids a second provider-sized catalogue pass during arrival.
+    private var shouldValidateRestoredRunChoice = false
+
     /// Injected so the account-default lifecycle can be exercised without scanning real homes or
     /// manufacturing a global project store. Production resolves from durable session history.
     private let newSessionAccountHandle: NewSessionAccountHandle
+    /// Owns the two durable answers a successful start changes. Injected together so composer
+    /// tests exercise persistence without touching the running app's defaults or real accounts.
+    private let appSettings: AppSettings
+    private let accountPreferences: AccountPreferencesStore
 
     /// The hero: the mark above a greeting that knows what day it is. It fills the room the
     /// bottom-flush composer leaves, and hides when a short pane leaves none.
@@ -435,10 +443,14 @@ final class SessionComposerViewController: NSViewController {
                 for: kind,
                 recentlyUsedIn: ProjectStore.shared.projects.lazy.flatMap { $0.sessions }
             )
-        }
+        },
+        appSettings: AppSettings = .shared,
+        accountPreferences: AccountPreferencesStore = .shared
     ) {
         self.customizationLookup = customizationLookup
         self.newSessionAccountHandle = newSessionAccountHandle
+        self.appSettings = appSettings
+        self.accountPreferences = accountPreferences
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -881,6 +893,7 @@ final class SessionComposerViewController: NSViewController {
                     self.createWorktree()
                 }
                 self.refreshChips()
+                self.returnTypingFocusAfterChoosing(from: self.locationChip)
             case let id as ProjectID:
                 guard id != self.projectID else { return }
                 self.delegate?.sessionComposer(self, didSelectProject: id)
@@ -907,13 +920,12 @@ final class SessionComposerViewController: NSViewController {
             // switched off.
             self.selectedAccountHandle = identity.account
                 ?? AgentAccountDiscovery.preferredHandle(for: identity.agent)
-            // Everything the login decided is reset, whether or not the runtime changed: a model
-            // pinned on one account is not necessarily offered on another, and an effort is a
-            // property of the model's own published catalog.
-            self.selectedModel = nil
-            self.selectedReasoningEffort = nil
+            // Model and effort are scoped to this exact provider-qualified login. A remembered
+            // model is restored only while that login still publishes it.
+            self.restoreNewSessionRunChoice()
             self.selectedFastMode = nil
             self.refreshChips()
+            self.returnTypingFocusAfterChoosing(from: self.identityChip)
         }
 
         roleChip.itemsProvider = { [weak self] in self?.roleItems() ?? [] }
@@ -921,6 +933,7 @@ final class SessionComposerViewController: NSViewController {
             guard let self, let role = item.representedValue as? SessionRole else { return }
             self.selectedRole = role
             self.refreshChips()
+            self.returnTypingFocusAfterChoosing(from: self.roleChip)
         }
 
         modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
@@ -933,28 +946,59 @@ final class SessionComposerViewController: NSViewController {
             self.discardUnsupportedEffort()
             self.discardUnsupportedFastMode()
             self.refreshChips()
+            self.returnTypingFocusAfterChoosing(from: self.modelChip)
         }
 
         speedChip.itemsProvider = { [weak self] in self?.speedItems() ?? [] }
         speedChip.onSelect = { [weak self] item in
-            guard let choice = item.representedValue as? ConversationSpeedChoice else { return }
-            self?.selectedFastMode = choice.fastMode
-            self?.refreshChips()
+            guard let self,
+                  let choice = item.representedValue as? ConversationSpeedChoice else { return }
+            self.selectedFastMode = choice.fastMode
+            self.refreshChips()
+            self.returnTypingFocusAfterChoosing(from: self.speedChip)
         }
 
         modeChip.itemsProvider = { [weak self] in self?.permissionModeItems() ?? [] }
         modeChip.onSelect = { [weak self] item in
+            guard let self else { return }
             // Nil is a real answer here — the row marked as the default, or Use Agent's
             // Setting where there is none — so this reads "not a mode" as inherit rather than
             // falling back to one.
-            self?.selectedPermissionMode = item.representedValue as? AgentPermissionMode
-            self?.refreshChips()
+            self.selectedPermissionMode = item.representedValue as? AgentPermissionMode
+            self.refreshChips()
+            self.returnTypingFocusAfterChoosing(from: self.modeChip)
         }
 
         surfaceChip.itemsProvider = { [weak self] in self?.surfaceItems() ?? [] }
         surfaceChip.onSelect = { [weak self] item in
-            self?.usesNativeUI = (item.representedValue as? Bool) ?? false
-            self?.refreshChips()
+            guard let self else { return }
+            self.usesNativeUI = (item.representedValue as? Bool) ?? false
+            self.refreshChips()
+            self.returnTypingFocusAfterChoosing(from: self.surfaceChip)
+        }
+    }
+
+    /// Launch settings qualify the brief; they are not a second place to type it. The shared
+    /// menu contract correctly restores its source for ordinary controls, but in this form that
+    /// leaves subsequent characters on a chip and makes the focused-looking editor feel inert.
+    /// An ordinary menu has already torn down when it reports its choice; a rich transient can
+    /// finish closing just after it, so retry once on the next turn. Take the caret only if that
+    /// same chip still owns focus — a file panel, another pane, or a newer click must win.
+    private func returnTypingFocusAfterChoosing(from chip: ChipView) {
+        if !view.isHidden,
+           let window = view.window,
+           window.firstResponder === chip {
+            promptView.focus()
+            return
+        }
+        DispatchQueue.main.async { [weak self, weak chip] in
+            guard let self,
+                  let chip,
+                  !self.view.isHidden,
+                  let window = self.view.window,
+                  window.firstResponder === chip
+            else { return }
+            self.promptView.focus()
         }
     }
 
@@ -1022,15 +1066,14 @@ final class SessionComposerViewController: NSViewController {
         self.projectID = projectID
         updatePromptCustomization(for: projectID)
 
-        selectedAgent = AppSettings.shared.defaultAgentKind
+        selectedAgent = appSettings.defaultAgentKind
         // Follow the most recently used enabled login for this runtime. Besides matching the
         // user's last deliberate account choice, this carries a limit escape forward: moving a
         // session after its model runs out updates that same latest session record. The resolver
         // falls back to the standard/first enabled login when there is no usable history.
         selectedAccountHandle = newSessionAccountHandle(selectedAgent)
         shouldResolveNewSessionAccount = false
-        selectedModel = nil
-        selectedReasoningEffort = nil
+        restoreNewSessionRunChoice()
         selectedFastMode = nil
         selectedBranch = nil
         selectedPermissionMode = nil
@@ -1083,15 +1126,57 @@ final class SessionComposerViewController: NSViewController {
     /// Re-resolves only the login-dependent part of a consumed composer.
     ///
     /// If the latest session moved accounts, its old explicit model and catalog-specific effort
-    /// cannot safely cross with it. This is the same reset the identity chip performs for a
-    /// direct account choice. A matching account keeps the previous quick-repeat configuration.
+    /// cannot safely cross with it. Restore what that exact login last launched instead. A
+    /// matching account keeps the previous quick-repeat configuration.
     private func resolveNewSessionAccount() {
         let resolved = newSessionAccountHandle(selectedAgent)
         guard resolved != selectedAccountHandle else { return }
         selectedAccountHandle = resolved
+        restoreNewSessionRunChoice()
+        selectedFastMode = nil
+    }
+
+    /// Applies only a choice today's exact login can still honour. Provider catalogues change;
+    /// stale stored identifiers are harmless history, not launch arguments.
+    private func restoreNewSessionRunChoice() {
         selectedModel = nil
         selectedReasoningEffort = nil
-        selectedFastMode = nil
+        let accountID = AccountID(provider: selectedAgent, handle: selectedAccountHandle)
+        guard let choice = accountPreferences.newSessionRunChoice(for: accountID) else {
+            shouldValidateRestoredRunChoice = false
+            return
+        }
+        selectedModel = choice.model
+        selectedReasoningEffort = choice.reasoningEffort
+        shouldValidateRestoredRunChoice = true
+    }
+
+    /// Repairs only the value just loaded from persistence. An in-progress draft may preserve a
+    /// hidden model until its owner chooses another; a fresh composer must not revive one.
+    private func validateRestoredRunChoice(against models: [String]) {
+        guard shouldValidateRestoredRunChoice else { return }
+        shouldValidateRestoredRunChoice = false
+        guard let selectedModel else { return }
+        let accountID = AccountID(provider: selectedAgent, handle: selectedAccountHandle)
+        if !models.contains(selectedModel)
+            || accountPreferences.hiddenModelIDs(for: accountID).contains(selectedModel) {
+            self.selectedModel = nil
+            selectedReasoningEffort = nil
+        }
+    }
+
+    /// The delegate's `true` is the commit boundary: before it, the form may still fail or be
+    /// abandoned. After it, this provider becomes the global new-session answer and the
+    /// model-specific values belong to this exact login.
+    func rememberSuccessfulNewSessionChoice() {
+        appSettings.defaultAgentKind = selectedAgent
+        accountPreferences.setNewSessionRunChoice(
+            NewSessionRunChoice(
+                model: selectedModel,
+                reasoningEffort: selectedReasoningEffort
+            ),
+            for: AccountID(provider: selectedAgent, handle: selectedAccountHandle)
+        )
     }
 
     /// Restates the hero from the line this composer is holding, morphing in place when a
@@ -1302,6 +1387,7 @@ final class SessionComposerViewController: NSViewController {
         refreshRolePresentation()
 
         let models = AgentModels.available(for: selectedAgent, account: account)
+        validateRestoredRunChoice(against: models)
         modelChip.isHidden = models.isEmpty
         // Effort is a property of the selected model's published catalog, not an assumption
         // about the provider. No reasoning catalog means no effort suffix or launch value.
@@ -2075,11 +2161,12 @@ final class SessionComposerViewController: NSViewController {
         popover.behavior = .transient
         popover.contentViewController = controller
         popover.initialFirstResponder = controller.matrixView
-        popover.onClose = { [weak self, weak popover] in
+        popover.onClose = { [weak self, weak popover, weak chip] in
             if let popover, self?.modelEffortPopover === popover {
                 self?.modelEffortPopover = nil
             }
             didDismiss()
+            if let chip { self?.returnTypingFocusAfterChoosing(from: chip) }
         }
         modelEffortPopover = popover
         popover.show(relativeTo: chip.bounds, of: chip, preferredEdge: .maxY)
@@ -2282,6 +2369,7 @@ final class SessionComposerViewController: NSViewController {
         // Only once a session actually exists: a start that failed leaves the words where the
         // user can still use them, which is also why `DraftStore` is cleared on the same answer.
         guard started else { return }
+        rememberSuccessfulNewSessionChoice()
         shouldResolveNewSessionAccount = true
         promptView.clear()
     }

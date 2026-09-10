@@ -18,9 +18,11 @@ import Foundation
 /// whole startup on the same signal, for the same reason: a hosted test must not act on the
 /// user's state.
 ///
-/// Only the stores that record a *choice* come through here. Behavioural settings still read
-/// `.standard` directly, because several tests set one of those keys and then assert that the
-/// app read it — a seam under those would be a second bug, not a fix.
+/// Only values that record a *choice* come through here. Operational behavioural settings still
+/// read `.standard` directly, because several tests set one of those keys and then assert that
+/// the app read it. A General-tab value may still be a recorded choice: the provider a new
+/// session opens on is changed by the composer itself, so hosted picker tests must not answer it
+/// for the developer.
 enum PreferenceStore {
 
     /// The family every hosted test bundle's scratch suite belongs to. `scripts/test.sh` sweeps

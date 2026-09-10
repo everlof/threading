@@ -225,6 +225,10 @@ extension SessionComposerViewController {
                 return false
             }
 
+            // A reserved scheduled conversation is an accepted start just as an immediate one
+            // is; its frozen provider/model choice should seed the next fresh composer too.
+            rememberSuccessfulNewSessionChoice()
+
             var fields = details
             fields.merge([
                 "project": projectID.uuidString,

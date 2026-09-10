@@ -1,6 +1,19 @@
 import Foundation
 import ThreadingRemoteKit
 
+// MARK: - New-Session Run Choice
+
+/// The model-specific part of the last new session this login started successfully.
+///
+/// Provider and login are the `AccountID` key around this value. Keeping the choice there avoids
+/// carrying a model between two accounts whose catalogues only happen to share a provider. Nil
+/// values retain the runtime's automatic/default semantics rather than pinning today's resolved
+/// defaults.
+struct NewSessionRunChoice: Codable, Equatable, Sendable {
+    let model: String?
+    let reasoningEffort: String?
+}
+
 // MARK: - Account Preference
 
 /// User customisation for a discovered agent account.
@@ -28,6 +41,10 @@ struct AccountPreference: Codable, Equatable {
     /// running the user's explicit pick says nothing about what the default would have been.
     var lastReportedModel: String?
 
+    /// What the user last launched explicitly from the new-session composer on this login.
+    /// This is configuration, unlike `lastReportedModel`, which is runtime evidence.
+    var newSessionRunChoice: NewSessionRunChoice?
+
     /// The user's own limits on this account — the lines their quota is measured against, ahead
     /// of the provider's.
     ///
@@ -52,6 +69,7 @@ struct AccountPreference: Codable, Equatable {
             && displayNameOverride == nil
             && isDisabled == nil
             && lastReportedModel == nil
+            && newSessionRunChoice == nil
             && customLimits == nil
             && hiddenModelIDs == nil
     }
@@ -171,6 +189,25 @@ final class AccountPreferencesStore {
         update(accountID) { $0.lastReportedModel = normalisedModel }
     }
 
+    // MARK: - New-Session Defaults
+
+    func newSessionRunChoice(for accountID: AccountID) -> NewSessionRunChoice? {
+        preferences[accountID.rawValue]?.newSessionRunChoice
+    }
+
+    /// Records an accepted composer start. An all-automatic choice clears an older explicit one,
+    /// which is how choosing Auto becomes just as durable as choosing a named model.
+    func setNewSessionRunChoice(_ choice: NewSessionRunChoice, for accountID: AccountID) {
+        let model = normalized(choice.model)
+        let effort = normalized(choice.reasoningEffort)
+        guard model?.utf8.count ?? 0 <= NewSessionChoice.maximumIdentifierBytes,
+              effort?.utf8.count ?? 0 <= NewSessionChoice.maximumIdentifierBytes else { return }
+        let normalizedChoice = model == nil && effort == nil
+            ? nil
+            : NewSessionRunChoice(model: model, reasoningEffort: effort)
+        update(accountID) { $0.newSessionRunChoice = normalizedChoice }
+    }
+
     // MARK: - Model Visibility
 
     /// Models hidden from new-session choice surfaces for this provider-qualified login.
@@ -279,5 +316,9 @@ final class AccountPreferencesStore {
     private enum ModelVisibility {
         static let maximumHiddenModels = 256
         static let maximumIdentifierBytes = 512
+    }
+
+    private enum NewSessionChoice {
+        static let maximumIdentifierBytes = 1_024
     }
 }

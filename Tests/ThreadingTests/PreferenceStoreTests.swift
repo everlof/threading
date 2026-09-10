@@ -22,6 +22,34 @@ final class PreferenceStoreTests: XCTestCase {
         XCTAssertFalse(PreferenceStore.shared === UserDefaults.standard)
     }
 
+    /// The composer makes the provider of an accepted start the next new-session provider. Its
+    /// render tests deliberately exercise every runtime, so this choice needs the redirect just
+    /// as much as a theme does — otherwise an interrupted test run can leave the real app opening
+    /// on OpenCode even when the developer never uses it.
+    @MainActor
+    func testAComposerProviderChoiceDoesNotTouchTheStandardDefaults() {
+        let key = "defaultAgentKind"
+        let previousScratchValue = PreferenceStore.shared.object(forKey: key)
+        defer {
+            if let previousScratchValue {
+                PreferenceStore.shared.set(previousScratchValue, forKey: key)
+            } else {
+                PreferenceStore.shared.removeObject(forKey: key)
+            }
+        }
+        let standardValue = UserDefaults.standard.string(forKey: key)
+        let sentinel: AgentKind = standardValue == AgentKind.claude.rawValue ? .codex : .claude
+
+        AppSettings.shared.defaultAgentKind = sentinel
+
+        XCTAssertEqual(PreferenceStore.shared.string(forKey: key), sentinel.rawValue)
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: key),
+            standardValue,
+            "a hosted composer test changed the provider the real app opens on"
+        )
+    }
+
     /// An origin grant controls access to a browser carrying the user's signed-in state. A bare
     /// production store is constructed by both the browser coordinator and Tools settings, so its
     /// default must follow the same redirect as every other recorded choice.
