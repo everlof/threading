@@ -80,6 +80,92 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
 
     // MARK: - The pinned door
 
+    func testAPinnedClientReceivesAnImagePreviewAfterItsThumbnail() throws {
+        try assertAttachmentTransfer(side: 218)
+    }
+
+    func testAPinnedClientReceivesAnImageAboveTheWebSocketBacklogLimit() throws {
+        try assertAttachmentTransfer(side: 1_024)
+    }
+
+    func testAPinnedClientReceivesAnImagePreviewOverASlowLink() throws {
+        try assertAttachmentTransfer(side: 218, throttled: true)
+    }
+
+    func testAPinnedClientReceivesALargeImageOverASlowLink() throws {
+        try assertAttachmentTransfer(side: 1_024, throttled: true)
+    }
+
+    /// Exercise the shipping attachment route over TLS: the cleartext loopback test cannot
+    /// detect a connection retired before TLS has finished delivering the response body.
+    private func assertAttachmentTransfer(side: Int, throttled: Bool = false) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "tls-attachment-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, title: "TLS attachment"
+        ))
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side,
+            bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let pixels = try XCTUnwrap(bitmap.bitmapData)
+        var state: UInt64 = 0x2545_F491_4F6C_DD1D
+        for index in 0..<(bitmap.bytesPerRow * side) {
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
+            pixels[index] = UInt8(truncatingIfNeeded: state)
+        }
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let file = directory.appendingPathComponent("preview.png")
+        try png.write(to: file)
+        let attachment = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            url: file, sessionID: session.id, projectRoot: directory
+        ))
+        let authority = RemoteAuthorityStore()
+        authority.set(
+            RemoteAuthorization(shareID: "test", capability: .interact, scope: .allSessions),
+            forToken: "attachment-test-token"
+        )
+        server.authorizer = authority
+        defer { withExtendedLifetime(authority) {} }
+        let port = try startWithLanDoor()
+        let proxy = try throttled ? AttachmentTransferProxy(upstreamPort: port) : nil
+        defer { proxy?.stop() }
+        let client = pinnedClient(fingerprint: try XCTUnwrap(identityStore.snapshot.fingerprint))
+
+        for route in ["attachment-thumbnail", "attachment"] {
+            var request = URLRequest(url: url(
+                port: proxy?.port ?? port,
+                path: "/api/session/\(session.id)/\(route)?id=\(attachment.id)"
+            ))
+            request.setValue("Bearer attachment-test-token", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 10
+            let received = expectation(description: "received \(route)")
+            let result = OSAllocatedUnfairLock<Result<(Data, URLResponse), Error>?>(initialState: nil)
+            client.session.dataTask(with: request) { data, response, error in
+                result.withLock {
+                    if let error { $0 = .failure(error) }
+                    else if let data, let response { $0 = .success((data, response)) }
+                }
+                received.fulfill()
+            }.resume()
+            wait(for: [received], timeout: 15)
+            let (data, response) = try XCTUnwrap(result.withLock { $0 }).get()
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            XCTAssertNotNil(NSImage(data: data), "\(route) must return a decodable image")
+            if route == "attachment" {
+                XCTAssertEqual(data.count, png.count)
+                XCTAssertEqual(data, png, "TLS must deliver every byte before retiring the connection")
+            }
+        }
+    }
+
     func testAPinnedClientReachesTheLanDoorWhileLoopbackStaysCleartext() throws {
         let port = try startWithLanDoor()
         let fingerprint = try XCTUnwrap(identityStore.snapshot.fingerprint)

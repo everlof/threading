@@ -577,6 +577,28 @@ A lost thumbnail now leaves an `attachmentPreviewFailed` record with `kind: thum
 transport and origin it was lost on, and `detail: transient` or `terminal`, where before it
 reached only the unified log.
 
+**A closing response must finish its stream before the socket is retired.** An iPhone report on
+10 Sep 2026 showed six `url.-1005` image failures while the terminal stayed connected. The matching
+Mac LAN logs showed successful TLS handshakes followed by cancellation 1–2 ms later, with response
+bytes still in flight. Both ordinary and throttled loopback TLS downloads passed, so neither is
+proof that an immediate cancellation is safe on the LAN path. `RemoteConnection` had treated
+`NWConnection.SendCompletion.contentProcessed` as permission to cancel the entire connection.
+That completion releases the submitted buffer; it does not prove that the reader has the response.
+
+Closing HTTP writes now use `NWConnection.ContentContext.finalMessage` and leave the read side
+alive until peer EOF or the existing HTTP deadline. This is the staged teardown described by
+[RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6). During that drain, incoming
+bytes are discarded without accumulating or routing another request, and no further writes are
+admitted. The 24 MB attachment cap, send backlog caps and connection admission cap still apply;
+there is one receive chunk and one deadline per connection, with no additional retry, timer or
+body copy. WebSocket close behavior is unchanged.
+
+`RemoteConnectionIdleTests` pins the lifecycle over real sockets: the write stream ends while the
+read side remains alive, pipelined and late requests are not routed, a peer close releases the
+socket, and a peer that never closes still reaches the deadline. `RemoteListenerTLSTests` also
+checks exact, decodable thumbnail and full-image bytes near the reported 140 KB size and above the
+WebSocket backlog ceiling, directly and through a bounded 4 KiB-at-a-time TLS tunnel.
+
 **A page stops asking for its bytes only once it holds them** — never because an attempt is
 already running. `RemoteAttachmentPreviewLoad.shouldRequestBytes` is the whole rule, and it
 takes no in-flight flag, because the page shipped with one and it was how a preview could

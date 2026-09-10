@@ -78,6 +78,9 @@ final class RemoteConnection: @unchecked Sendable {
     private var buffer = Data()
     private var isHandling = false
     private var isClosed = false
+    /// A final HTTP response has ended our write stream. Keep reading (without routing or
+    /// buffering) until the peer closes, so cancelling cannot cut off the response in flight.
+    private var isDrainingHTTP = false
 
     private var reassembler = RemoteWebSocket.Reassembler(maximumBytes: RemoteAccessDefaults.maximumFrameBytes)
 
@@ -183,6 +186,12 @@ final class RemoteConnection: @unchecked Sendable {
     }
 
     private func received(_ data: Data?, isComplete: Bool, error: NWError?) {
+        guard !isClosed else { return }
+        if isDrainingHTTP {
+            if isComplete || error != nil { close() }
+            else { receive() }
+            return
+        }
         if let data, !data.isEmpty {
             buffer.append(data)
             guard buffer.count <= RemoteAccessDefaults.maximumRequestBytes else {
@@ -354,7 +363,7 @@ final class RemoteConnection: @unchecked Sendable {
         thenClose shouldClose: Bool,
         limit: Int = RemoteAccessDefaults.outboundHighWaterBytes
     ) {
-        guard !isClosed else { return }
+        guard !isClosed, !isDrainingHTTP else { return }
 
         // Drop a consumer whose unsent backlog has grown past the high-water mark: a live
         // terminal must never back-pressure the mirror that feeds every other viewer.
@@ -370,12 +379,26 @@ final class RemoteConnection: @unchecked Sendable {
             return
         }
 
+        let drainsHTTP = shouldClose && mode == .http
+        if drainsHTTP {
+            isDrainingHTTP = true
+            buffer.removeAll()
+        }
         pendingSendBytes += data.count
-        connection.send(content: data, completion: .contentProcessed { [weak self] _ in
-            guard let self else { return }
-            self.pendingSendBytes = max(0, self.pendingSendBytes - data.count)
-            if shouldClose { self.close() }
-        })
+        // `contentProcessed` releases a send buffer; it is not proof that the peer has read
+        // the response. Mark the final HTTP write explicitly, then let receive-side EOF or the
+        // existing HTTP deadline retire the socket (RFC 9112 §9.6). Cancelling here truncated
+        // image previews on the LAN TLS path even though loopback transfers passed.
+        connection.send(
+            content: data,
+            contentContext: drainsHTTP ? .finalMessage : .defaultMessage,
+            isComplete: true,
+            completion: .contentProcessed { [weak self] error in
+                guard let self else { return }
+                self.pendingSendBytes = max(0, self.pendingSendBytes - data.count)
+                if error != nil || (shouldClose && !drainsHTTP) { self.close() }
+            }
+        )
     }
 
     // MARK: - Timers

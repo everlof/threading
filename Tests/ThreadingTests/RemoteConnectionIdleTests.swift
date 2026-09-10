@@ -108,6 +108,36 @@ final class RemoteConnectionIdleTests: XCTestCase {
 
     // MARK: - Silence is still bounded
 
+    func testAClosingResponseDrainsUntilThePeerClosesWithoutRoutingMoreRequests() throws {
+        delegate.closesResponses = true
+        client.send(Self.request(path: "/attachment") + Self.request(path: "/pipelined"))
+        let response = try XCTUnwrap(client.nextResponse(timeout: Self.responseTimeout))
+        XCTAssertTrue(response.contains("Connection: close"))
+        XCTAssertTrue(response.hasSuffix("/attachment"))
+        XCTAssertTrue(client.waitForEnd(timeout: Self.responseTimeout), "the response ends the write stream")
+        XCTAssertFalse(
+            delegate.waitForClose(timeout: 0),
+            "processing the send is not permission to cancel both directions before the peer finishes"
+        )
+
+        client.send(Self.request(path: "/late"))
+        client.finishWriting()
+        XCTAssertTrue(delegate.waitForClose(timeout: Self.responseTimeout))
+        XCTAssertEqual(delegate.requestCount, 1, "pipelined and draining input must not be routed")
+    }
+
+    func testAClosingResponseStillReleasesAPeerThatNeverCloses() throws {
+        delegate.closesResponses = true
+        client.send(Self.request(path: "/attachment"))
+        XCTAssertNotNil(client.nextResponse(timeout: Self.responseTimeout))
+        XCTAssertTrue(client.waitForEnd(timeout: Self.responseTimeout))
+        XCTAssertFalse(delegate.waitForClose(timeout: 0))
+        XCTAssertTrue(
+            delegate.waitForClose(timeout: Self.closeTimeout),
+            "the existing HTTP deadline also bounds the final drain"
+        )
+    }
+
     func testASocketThatSaysNothingIsClosedAfterOneInterval() {
         let opened = Date()
         XCTAssertTrue(client.waitForEnd(timeout: Self.closeTimeout), "a silent probe is closed")
@@ -141,8 +171,25 @@ final class RemoteConnectionIdleTests: XCTestCase {
     /// Answers every request with a 200 after a configurable delay, off the connection's queue
     /// the way the server's main-actor hop does, or not at all.
     private final class ScriptedDelegate: RemoteConnection.Delegate, @unchecked Sendable {
-        private struct Script { var delay: TimeInterval = 0; var answers = true }
+        private struct Script {
+            var delay: TimeInterval = 0
+            var answers = true
+            var closesResponses = false
+            var requestCount = 0
+        }
         private let script = OSAllocatedUnfairLock(initialState: Script())
+        private let closed = DispatchSemaphore(value: 0)
+
+        var closesResponses: Bool {
+            get { script.withLock { $0.closesResponses } }
+            set { script.withLock { $0.closesResponses = newValue } }
+        }
+
+        var requestCount: Int { script.withLock { $0.requestCount } }
+
+        func waitForClose(timeout: TimeInterval) -> Bool {
+            closed.wait(timeout: .now() + timeout) == .success
+        }
 
         var responseDelay: TimeInterval {
             get { script.withLock { $0.delay } }
@@ -159,22 +206,27 @@ final class RemoteConnectionIdleTests: XCTestCase {
             from connection: RemoteConnection,
             respond: @escaping @Sendable (RemoteRouteDecision) -> Void
         ) {
-            let script = script.withLock { $0 }
+            let script = script.withLock {
+                $0.requestCount += 1
+                return $0
+            }
             guard script.answers else { return }
-            let response = HTTPResponse(
+            var response = HTTPResponse(
                 status: 200,
                 reason: "OK",
                 contentType: "text/plain",
                 body: Data(request.path.utf8)
             )
+            response.closesConnection = script.closesResponses
+            let answer = response
             DispatchQueue.global().asyncAfter(deadline: .now() + script.delay) {
-                respond(.respond(response))
+                respond(.respond(answer))
             }
         }
 
         func handleMessage(_ message: RemoteWebSocket.Message, from connection: RemoteConnection) {}
 
-        func didClose(_ connection: RemoteConnection) {}
+        func didClose(_ connection: RemoteConnection) { closed.signal() }
     }
 
     /// A raw HTTP/1.1 client over one TCP socket: sends request text, frames responses by
@@ -221,6 +273,11 @@ final class RemoteConnectionIdleTests: XCTestCase {
 
         func send(_ request: String) {
             connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+        }
+
+        func finishWriting() {
+            connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                            completion: .contentProcessed { _ in })
         }
 
         func nextResponse(timeout: TimeInterval) -> String? {
