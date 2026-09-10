@@ -310,6 +310,19 @@ Three things shape it, and each was wrong first or would have been:
   noisy after its turn ends while the CLI redraws its footer. Falling back per-event would
   flicker between them. `markRunning` clears the latch, because the settings file is written per
   launch and can fail — a latched tracker with no reports coming would sit idle forever.
+- **`SessionStart` latches too.** It used to be the one report that did not, on the reasoning
+  that a start announcement does not claim turn boundaries will be declared. But both providers
+  register their turn hooks in the same file as `SessionStart`, so its arrival proves theirs can
+  arrive, and the idle-prompt `Notification` already latched on exactly those grounds. The
+  exception was measured on 10 September 2026: a Codex chat resumed with no prompt repainted its
+  idle input box and status line faster than the 0.8-second quiet timer, and nothing had latched
+  because no turn had been reported since the resume. Off screen, the attention episode refused
+  to reopen a turn from those repaints, so the row sat unread; the moment the chat was selected
+  the episode re-armed, one burst opened an inferred turn, and the quiet timer never fired again.
+  The row spun over a CLI sitting at its prompt for as long as the chat stayed selected, and every
+  other resumed Codex chat did the same once looked at. A turn output inferred before the
+  announcement is boot paint and is closed without flagging; a turn the rollout declared is kept;
+  the launch grace is untouched, because a start announcement is neither input nor a turn.
 
 **The turn and the question are separate facts, and collapsing them cost a whole run.** The
 tracker used to hold one enum and let each report assign the state it thought followed, which

@@ -308,9 +308,9 @@ final class SessionMessageDeliveryTests: XCTestCase {
             tracker.hasHeardFromProcess,
             "SessionStart is the earliest proof the CLI is up — dropped, every session idle since an app relaunch read as still-booting"
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             tracker.reportsOwnActivity,
-            "Hearing a boot must not switch off the output heuristic; only turn reports may"
+            "A boot announcement proves the hooks reach this process, which is what the output heuristic stands in for"
         )
 
         tracker.markRunning()

@@ -342,13 +342,16 @@ final class SessionActivityTracker {
     private(set) var reportsTurnEnds = false
 
     /// Whether this process has been heard from at all — its `SessionStart` hook, or any
-    /// later lifecycle report. Deliberately weaker than `reportsOwnActivity`: hearing a
-    /// SessionStart proves the CLI is up and the hook path works, without yet claiming turn
-    /// boundaries will be declared — which is why it must not switch off the output
-    /// heuristic. It exists for delivery: typing into a PTY whose `isRunning` flipped at
-    /// spawn lands text in a login shell, and this is the earliest honest "the composer
-    /// exists now". Without it, every session idle since an app relaunch read as
+    /// later lifecycle report. It exists for delivery: typing into a PTY whose `isRunning`
+    /// flipped at spawn lands text in a login shell, and this is the earliest honest "the
+    /// composer exists now". Without it, every session idle since an app relaunch read as
     /// still-booting forever, because SessionStart was the one report nothing latched.
+    ///
+    /// It used to be deliberately weaker than `reportsOwnActivity`, on the reasoning that a
+    /// start announcement does not claim turn boundaries will be declared. That exception was
+    /// measured to cost more than it protected — see `noteSessionStarted` — and the two now
+    /// latch together; this one stays a separate fact because delivery asks a narrower
+    /// question than activity does.
     private(set) var hasHeardFromProcess = false
 
     /// Whether a turn is open: begun, and not yet reported finished.
@@ -1197,10 +1200,40 @@ final class SessionActivityTracker {
         return id
     }
 
-    /// Records the process announcing itself — the `SessionStart` hook. Proof the CLI is up;
-    /// not yet a turn boundary, so the output heuristic stays on.
+    /// Records the process announcing itself — the `SessionStart` hook.
+    ///
+    /// Proof that this process's hooks reach Threading, which is the very fact the output
+    /// heuristic exists to stand in for — so it latches reporting like any other report, and
+    /// from here on turn boundaries come from hooks and the provider's own transcript while
+    /// bytes may neither open nor end a turn. Both providers register their turn hooks in the
+    /// same file as this one, so its arrival proves theirs can arrive too; the idle-prompt
+    /// `Notification` already latched on the same grounds while claiming nothing more.
+    ///
+    /// Measured on 10 September 2026 on a Codex chat resumed with no prompt: its idle screen
+    /// repainted the input box and status line faster than the 0.8-second quiet timer, and
+    /// nothing had latched because no turn had been reported since the resume. Off screen the
+    /// attention episode refused to reopen a turn from those repaints, so the row sat unread;
+    /// the moment the chat was selected the episode re-armed, one burst opened an inferred
+    /// turn, and the quiet timer never fired again. The row spun for as long as the chat stayed
+    /// selected, over a CLI sitting at its prompt, and every other resumed Codex chat did the
+    /// same once looked at.
+    ///
+    /// A turn output inferred before this arrived is boot paint, not work: a process that has
+    /// just announced its start has nothing in flight. It is closed without raising attention,
+    /// because nobody's result is waiting to be read. A turn the rollout declared is kept — the
+    /// reader that admitted it is stronger evidence than a start announcement is.
+    ///
+    /// The launch grace is left alone. It ends at the first input or the first turn, and a
+    /// start announcement is neither; a relaunched session must still not flag its own boot.
     func noteSessionStarted() {
         hasHeardFromProcess = true
+        adoptOwnReports()
+        if turnInFlight, !turnWasDeclared {
+            turnInFlight = false
+            outputInferredContinuationInFlight = false
+            reportedTurnID = nil
+            awaitsUser = false
+        }
         settle(.sessionStarted)
     }
 
