@@ -153,6 +153,53 @@ final class SessionAttachmentComparisonTests: XCTestCase {
         )
     }
 
+    /// The full-size picture is the same attachment as its selected chronology row, so it must
+    /// enter through the same action builder instead of growing a second file menu in Design.
+    func testTheSelectedImagePreviewOffersItsHostsContextMenu() throws {
+        let pane = try laidOutPane(showing: [try writePNG(named: "preview.png")])
+        let window = NSWindow(
+            contentRect: pane.view.bounds,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = pane
+        defer { window.close() }
+        let preview = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.first,
+            "the selected image grew no preview"
+        )
+
+        XCTAssertTrue(
+            preview.onContextMenu?(.control) == true,
+            "the chronology row had actions but the displayed picture did not open them"
+        )
+        XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+        let titles = try XCTUnwrap(window.contentView).subviews
+            .flatMap { [$0] + descendants(of: $0) }
+            .compactMap { $0.accessibilityTitle() }
+        XCTAssertTrue(titles.contains("Reveal in Finder"))
+        XCTAssertTrue(titles.contains("Copy Image"))
+        XCTAssertTrue(titles.contains("Copy Path"))
+
+        XCTAssertTrue(window.makeFirstResponder(preview))
+        let escape = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: 53
+        ))
+        NSApp.sendEvent(escape)
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+    }
+
     /// A session holding one picture has nothing to hold it against, and a parent item opening an
     /// empty submenu is a dead row in a menu somebody opened for something else.
     func testALonePictureIsOfferedNoComparisonAtAll() throws {

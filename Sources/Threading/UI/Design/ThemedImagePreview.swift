@@ -70,6 +70,14 @@ final class ThemedImagePreview: ThemedControl {
     /// display-pane image leaves this nil and receives the ordinary one-item inspector.
     var inspectorSelectionProvider: (() -> MediaInspectorSelection?)?
 
+    /// Reports a secondary-click request to the host that owns the file actions.
+    ///
+    /// The preview knows how to inspect a picture, but it does not know whether the file also
+    /// belongs to an attachment chronology, a comparison, or a chat handoff. Reporting a
+    /// semantic anchor keeps those decisions with that host while every caller still receives
+    /// the app-owned themed menu and the pointerless accessibility route.
+    var onContextMenu: ((ThemedMenuAnchor) -> Bool)?
+
     private var isTrackingPress = false
     private var isPressArmed = false
 
@@ -265,6 +273,20 @@ final class ThemedImagePreview: ThemedControl {
         if shouldInspect { _ = performPrimaryAction() }
     }
 
+    /// Secondary click asks the host for the actions belonging to this picture and anchors the
+    /// menu where the pointer landed. A host that supplies no menu leaves AppKit's responder
+    /// chain untouched.
+    override func rightMouseDown(with event: NSEvent) {
+        guard isEnabled, image != nil, let onContextMenu else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        window?.makeFirstResponder(self)
+        if !onContextMenu(.pointer(event.locationInWindow)) {
+            super.rightMouseDown(with: event)
+        }
+    }
+
     /// The trackpad's preview gesture — three-finger tap, or a force click — follows the same
     /// in-window route as click and Space.
     override func quickLook(with event: NSEvent) {
@@ -305,6 +327,14 @@ final class ThemedImagePreview: ThemedControl {
 
     override func accessibilityPerformPress() -> Bool {
         performPrimaryAction()
+    }
+
+    /// The pointerless twin of secondary click hangs the same menu from the picture itself.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard isEnabled, image != nil, let onContextMenu else {
+            return super.accessibilityPerformShowMenu()
+        }
+        return onContextMenu(.control)
     }
 
     // MARK: - Private Methods

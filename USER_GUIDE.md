@@ -3604,12 +3604,12 @@ dragging any selected row carries the whole batch, so a handful of screenshots c
 composer, a terminal, or Finder in one gesture. Right-clicking inside the selection keeps it and
 aims the menu at the row under the pointer.
 
-Right-click a row for the same actions aimed at the row you pointed at — **Open**, **Open in
-Browser** for HTML, **Open in** your installed editors, **Reveal in Finder**, **Copy Image** (or
-**Copy File** for anything that is not a picture) and **Copy Path** — plus **Compare with**, which
-names every other picture the session holds and opens the two of them in a **Compare** tab.
-Right-clicking also selects the row, so the preview underneath is always showing the file the menu
-is about.
+Right-click a row or the large image preview for the same actions aimed at that attachment —
+**Open**, **Open in Browser** for HTML, **Open in** your installed editors, **Reveal in Finder**,
+**Copy Image** (or **Copy File** for anything that is not a picture) and **Copy Path** — plus
+**Compare with**, which names every other picture the session holds and opens the two of them in a
+**Compare** tab. Right-clicking a row also selects it, so the preview underneath is always showing
+the file the menu is about.
 
 **Comparing two pictures.** Drag one row onto another and drop it: the row under the pointer says
 **Drop to compare**, and releasing opens the pair in the Compare tab with the wipe, crossfade,

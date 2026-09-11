@@ -791,12 +791,15 @@ owns a continuing panel session.
 
 **The picture is a control.** An image the agent just produced is the thing the user most wants
 to inspect, so a click, Space/Return, the trackpad's preview gesture, VoiceOver's press, and the
-`⋯` menu's first item all open `MediaInspectorView` inside the current window. The app-owned
-inspector begins fitted, toggles Fit/100% on double-click or Z, magnifies around the pointer,
-pans, and walks the source collection with arrows, swipes, or its thumbnail rail. Space, Escape, or
-a click on the dimmed window around it closes and restores the source's focus — the surface opens
-on a scrim over the whole content view, because the app's own header band is the one strip a
-full-height inspector cannot cover and lit it read as the same chrome (see
+`⋯` menu's first item all open `MediaInspectorView` inside the current window. Secondary click
+and Accessibility's Show Menu action report a semantic menu anchor to the host: in Attachments,
+the large preview therefore presents the exact same Open, Finder, Copy, comparison, and chat
+entries as its selected chronology row rather than owning a second file-action list in Design.
+The app-owned inspector begins fitted, toggles Fit/100% on double-click or Z, magnifies around the
+pointer, pans, and walks the source collection with arrows, swipes, or its thumbnail rail. Space,
+Escape, or a click on the dimmed window around it closes and restores the source's focus — the
+surface opens on a scrim over the whole content view, because the app's own header band is the
+one strip a full-height inspector cannot cover and lit it read as the same chrome (see
 [`window-chrome.md`](window-chrome.md)). The same route serves prompt thumbnails and the session
 Attachments pane, so the interaction does not depend on first finding a row and invoking a
 separate system panel.

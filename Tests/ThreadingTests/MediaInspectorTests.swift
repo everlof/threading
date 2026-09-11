@@ -107,6 +107,32 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertFalse(preview.isHovered)
     }
 
+    /// The picture reports the gesture rather than manufacturing file actions in Design: its
+    /// host knows whether this is an attachment, a comparison candidate, or a plain image.
+    func testImageSourceReportsContextMenuFromPointerAndAccessibility() throws {
+        let preview = ThemedImagePreview(frame: NSRect(x: 0, y: 0, width: 360, height: 220))
+        preview.image = solidImage(size: NSSize(width: 120, height: 80), color: .systemTeal)
+        var anchors: [ThemedMenuAnchor] = []
+        preview.onContextMenu = { anchor in
+            anchors.append(anchor)
+            return true
+        }
+
+        let point = NSPoint(x: 187, y: 96)
+        preview.rightMouseDown(with: try mouseEvent(.rightMouseDown, at: point, in: preview))
+        XCTAssertEqual(anchors.count, 1)
+        guard case .pointer(let pointer) = anchors[0] else {
+            return XCTFail("secondary click did not preserve its pointer anchor")
+        }
+        XCTAssertEqual(pointer, preview.convert(point, to: nil))
+
+        XCTAssertTrue(preview.accessibilityPerformShowMenu())
+        XCTAssertEqual(anchors.count, 2)
+        guard case .control = anchors[1] else {
+            return XCTFail("the accessibility route did not anchor to the image")
+        }
+    }
+
     /// A picture drawn flush inside a panel is clipped by the panel's corner, so the silhouette it
     /// draws has to *be* that corner.
     ///

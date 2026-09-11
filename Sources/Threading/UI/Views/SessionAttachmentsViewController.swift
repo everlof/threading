@@ -1545,6 +1545,13 @@ final class SessionAttachmentsViewController: NSViewController {
             guard let self else { return nil }
             return self.mediaInspectorSelection(forRow: self.tableView.selectedRow)
         }
+        image.onContextMenu = { [weak self, weak image] anchor in
+            guard let self, let image, let attachment = self.selectedAttachment,
+                  attachment.kind == .image,
+                  image.fileURL?.standardizedFileURL == attachment.url.standardizedFileURL
+            else { return false }
+            return self.presentContextMenu(for: attachment, from: image, anchor: anchor)
+        }
         image.isHidden = true
         image.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
@@ -2090,6 +2097,19 @@ final class SessionAttachmentsViewController: NSViewController {
         // Anchored to the row itself where there is one, so the menu belongs to what it is about
         // rather than to a list that scrolls under it.
         let source = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) ?? tableView
+        return presentContextMenu(for: attachment, from: source, anchor: anchor)
+    }
+
+    /// Presents one attachment's actions from either its chronology row or the large preview.
+    /// Both routes pass the same captured attachment through `contextMenuEntries`, so the image
+    /// cannot gain a second, subtly different definition of Copy, Finder, comparison, or chat.
+    @discardableResult
+    private func presentContextMenu(
+        for attachment: SessionAttachment,
+        from source: NSView,
+        anchor: ThemedMenuAnchor
+    ) -> Bool {
+        guard contextMenuSession == nil else { return true }
         contextMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(
                 entries: contextMenuEntries(for: attachment),
