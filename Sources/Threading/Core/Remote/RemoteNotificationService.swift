@@ -325,6 +325,21 @@ final class RemoteNotificationService {
         turnDeliveryCoordinator.macInteracted(at: uptime)
     }
 
+    /// Installs the probe that says how long ago this Mac was last used, in any application.
+    func configureMacInputAge(_ probe: @escaping @MainActor () -> TimeInterval?) {
+        notificationActivity.systemInputAge = probe
+    }
+
+    /// The screen locked or unlocked, the display slept or woke, or the login session moved.
+    func setMacAvailable(_ isAvailable: Bool) {
+        if isAvailable {
+            turnDeliveryCoordinator.macBecameAvailable()
+        } else {
+            turnDeliveryCoordinator.macBecameUnavailable()
+        }
+        responseDeliveryCoordinator.presenceChanged()
+    }
+
     /// The application came to the front, with `sessionID` on screen if any chat is.
     ///
     /// Deliberately not `recordMacInteraction`: activation is presence, not an answer for every

@@ -3095,9 +3095,12 @@ Routine completion alerts are activity-aware per participant. A foreground authe
 a follow-up from any authorized device, or another accepted remote interaction suppresses or
 cancels that participant's obsolete completion across this Mac's shared chats without affecting
 anyone else. The owner can also choose **Settings → Remote Access → Notification Delivery → Mac
-activity window**: Off, 1, 2, 5 or 10 minutes, with 2 minutes as the default. Deliberate Mac
-clicking, typing or scrolling defers the owner's completion until that window expires; another
-interaction cancels it as already seen. Permission and question pushes also wait while their
+activity window**: Off, 1, 2, 5 or 10 minutes, with 2 minutes as the default. While the Mac is in
+use — any clicking, typing or scrolling, in whichever app is in front — the owner's completion
+waits until that long after the last input; a keystroke or click in Threading itself cancels it as
+already seen. Locking the screen or sleeping the display sends a waiting completion at once, since
+the Mac can no longer show it; merely switching to another app does not. Permission and question
+pushes also wait while their
 recipient is active; they remain pending until answered or until that person leaves or goes idle.
 Mac activity applies only to the owner. Direct human requests and notifications explicitly
 requested from an agent or extension remain immediate.

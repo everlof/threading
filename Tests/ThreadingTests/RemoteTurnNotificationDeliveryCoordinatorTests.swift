@@ -421,6 +421,107 @@ final class RemoteTurnNotificationDeliveryCoordinatorTests: XCTestCase {
         XCTAssertEqual(refusal?.fields[.result], "refused")
     }
 
+    // MARK: - The Mac In Use, Whichever App Is In Front
+
+    /// Measured 11 September 2026: a prompt submitted in Threading, a switch to another app,
+    /// the turn finishing sixteen seconds later with Threading in the background, and the
+    /// completion pushed at once — retracted seven seconds later by the next keystroke. The
+    /// owner was at the Mac the whole time.
+    func testInputAnywhereOnTheMacDefersACompletionWithThreadingInTheBackground() {
+        let harness = Harness(window: 120)
+        harness.activity.setMacApplicationActive(false)
+        harness.activity.systemInputAge = { 5 }
+
+        harness.coordinator.completed(harness.completion())
+
+        XCTAssertTrue(harness.pushes.isEmpty)
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+        let deferred = harness.diagnostics.last { $0.fields[.phase] == "deferred" }
+        XCTAssertEqual(deferred?.fields[.reason], "activeMac")
+        XCTAssertEqual(deferred?.fields[.delayMS], "115000")
+    }
+
+    func testLeavingThreadingDoesNotFlushWhileTheMacIsStillInUse() {
+        let harness = Harness(window: 120)
+        harness.activity.setMacApplicationActive(true)
+        harness.activity.systemInputAge = { 5 }
+        harness.coordinator.completed(harness.completion())
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+
+        harness.coordinator.setMacApplicationActive(false)
+
+        XCTAssertTrue(harness.pushes.isEmpty, "the Mac is in use; only its screen going away flushes")
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+    }
+
+    /// Without a probe the app-local monitor is all there is, and leaving the app is the only
+    /// evidence of leaving the Mac — the rule this Mac had before the probe.
+    func testWithoutAProbeLeavingThreadingStillFlushes() {
+        let harness = Harness(window: 120)
+        harness.activity.setMacApplicationActive(true)
+        harness.activity.recordMacInteraction(at: harness.clock.uptime)
+        harness.coordinator.completed(harness.completion())
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+
+        harness.coordinator.setMacApplicationActive(false)
+
+        XCTAssertEqual(harness.pushes.count, 1)
+        XCTAssertEqual(harness.coordinator.pendingCount, 0)
+    }
+
+    func testLockingTheScreenFlushesADeferredCompletionAtOnce() {
+        let harness = Harness(window: 120)
+        harness.activity.systemInputAge = { 5 }
+        harness.coordinator.completed(harness.completion())
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+
+        harness.coordinator.macBecameUnavailable()
+
+        XCTAssertEqual(harness.pushes.count, 1)
+        XCTAssertEqual(harness.coordinator.pendingCount, 0)
+        let flushed = harness.diagnostics.first { $0.fields[.reason] == "macUnavailable" }
+        XCTAssertNotNil(flushed)
+    }
+
+    func testTheDeadlineKeepsDeferringWhileTheMacStaysInUseAndSendsWhenItStops() {
+        let harness = Harness(window: 120)
+        var age: TimeInterval = 5
+        harness.activity.systemInputAge = { age }
+        harness.coordinator.completed(harness.completion())
+
+        harness.clock.uptime += 115
+        harness.scheduler.fireDue(now: harness.clock.uptime)
+        XCTAssertTrue(harness.pushes.isEmpty, "still typing somewhere on this Mac")
+        XCTAssertEqual(harness.coordinator.pendingCount, 1)
+
+        age = 130
+        harness.clock.uptime += 115
+        harness.scheduler.fireDue(now: harness.clock.uptime)
+        XCTAssertEqual(harness.pushes.count, 1)
+        XCTAssertEqual(harness.coordinator.pendingCount, 0)
+    }
+
+    func testAnIdleMacSendsAtOnceEvenWithThreadingInFront() {
+        let harness = Harness(window: 120)
+        harness.activity.setMacApplicationActive(true)
+        harness.activity.recordMacInteraction(at: harness.clock.uptime)
+        harness.activity.systemInputAge = { 600 }
+
+        harness.coordinator.completed(harness.completion())
+
+        XCTAssertEqual(harness.pushes.count, 1, "no input for ten minutes is away, whatever is in front")
+    }
+
+    func testAnUnavailableMacIsNeverInUse() {
+        let harness = Harness(window: 120)
+        harness.activity.systemInputAge = { 1 }
+        harness.activity.setMacAvailable(false)
+
+        harness.coordinator.completed(harness.completion())
+
+        XCTAssertEqual(harness.pushes.count, 1, "a locked screen keeps its last keystroke recent")
+    }
+
     func testBrokerRejectionKeepsHTTPStatusAndMachineCodeInDiagnostics() {
         let harness = Harness(window: 0)
         harness.completesPushesImmediately = false

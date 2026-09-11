@@ -73,8 +73,21 @@ and the sender re-reads the authoritative subscription immediately before beginn
 An APNs result is revalidated again before it enters the accepted-delivery ledger.
 
 Activity is participant-scoped. Authenticated foreground-device counts cover that participant
-across this Mac's sessions. Only the owner also inherits deliberate Mac interaction, bounded by
-the configured Off/1/2/5/10-minute window. The AppKit callback mutates scalar state and schedules
+across this Mac's sessions. Only the owner also inherits Mac presence, bounded by the configured
+Off/1/2/5/10-minute window. Presence is whether the Mac is in use, not whether Threading is in
+front: `CGEventSource.secondsSinceLastEventType` answers for the whole login session without an
+Accessibility or Input Monitoring grant, and the activity source reads it whenever it decides or
+schedules a deadline. Measured on 11 September 2026: a prompt submitted in Threading at 13:53:01,
+a switch to another app, the turn finishing at 13:53:17 with Threading in the background, and the
+completion pushed at once, then retracted seven seconds later by the next keystroke in Threading.
+Leaving the app therefore no longer flushes deferred work; the screen locking, the display
+sleeping or the login session moving does, because a locked screen keeps its last keystroke
+recent for a whole window. A flush while the Mac is still in use would reach the sender's own
+activity check, which cancels rather than defers, so the coordinator flushes only when the Mac is
+not in use. Deliberate input in Threading keeps its stronger meaning — the owner has seen what is
+on screen — while input elsewhere only defers. Without the probe, in the test host, the app-local
+monitor remains the fallback and leaving the app is the only evidence of leaving the Mac. The
+AppKit callback mutates scalar state and schedules
 one coalesced main-actor job; it never walks sessions or writes diagnostics synchronously.
 Pending and accepted-delivery collections are bounded to 256 entries each.
 

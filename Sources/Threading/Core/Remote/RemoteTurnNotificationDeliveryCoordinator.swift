@@ -126,9 +126,21 @@ final class RemoteNotificationParticipantActivitySource {
 
     private let macWindowSeconds: @MainActor () -> TimeInterval
     private var macApplicationIsActive = false
+    private var macIsAvailable = true
     private var lastMacInteractionUptime: TimeInterval?
     private var foregroundConnectionCounts: [DeviceKey: Int] = [:]
     private var foregroundParticipantCounts: [RemoteNotificationParticipantID: Int] = [:]
+
+    /// Seconds since the last keyboard, pointer or scroll input anywhere on this Mac, or `nil`
+    /// where nothing can say — the test host, or a build with no probe installed.
+    ///
+    /// The owner is at the Mac when the Mac is in use, not when Threading happens to be the
+    /// frontmost application. Measured on 11 September 2026: a prompt submitted in Threading at
+    /// 13:53:01, a switch to another app, the turn finishing at 13:53:17 with Threading in the
+    /// background, and the completion pushed to the phone at once — retracted seven seconds
+    /// later by the next keystroke in Threading. With the probe installed the app-local
+    /// monitor no longer decides presence; without it, that monitor remains the fallback.
+    var systemInputAge: @MainActor () -> TimeInterval? = { nil }
 
     init(macWindowSeconds: @escaping @MainActor () -> TimeInterval) {
         self.macWindowSeconds = macWindowSeconds
@@ -141,6 +153,14 @@ final class RemoteNotificationParticipantActivitySource {
 
     func setMacApplicationActive(_ isActive: Bool) {
         macApplicationIsActive = isActive
+    }
+
+    /// Whether this Mac can be used at all right now: false while the screen is locked, the
+    /// display is asleep, or another user's login session is in front. Input age keeps looking
+    /// recent for a whole window after the screen locks, and that is exactly when the owner has
+    /// left.
+    func setMacAvailable(_ isAvailable: Bool) {
+        macIsAvailable = isAvailable
     }
 
     func attachForegroundDevice(
@@ -187,22 +207,31 @@ final class RemoteNotificationParticipantActivitySource {
         if foregroundParticipantCounts[participantID] != nil {
             return .phone
         }
-        guard participantID == .owner,
-              macApplicationIsActive,
-              let lastMacInteractionUptime else { return nil }
-        let window = macWindowSeconds()
-        guard window > 0 else { return nil }
-        let age = nowUptime - lastMacInteractionUptime
-        return age >= 0 && age < window ? .mac : nil
+        guard participantID == .owner, macDeadline(nowUptime: nowUptime) != nil else {
+            return nil
+        }
+        return .mac
     }
 
+    /// When the current window of Mac use runs out, or `nil` when the Mac is not in use.
     func macDeadline(nowUptime: TimeInterval) -> TimeInterval? {
-        guard macApplicationIsActive,
-              let lastMacInteractionUptime else { return nil }
+        guard macIsAvailable else { return nil }
         let window = macWindowSeconds()
-        guard window > 0 else { return nil }
-        let deadline = lastMacInteractionUptime + window
-        return deadline > nowUptime ? deadline : nil
+        guard window > 0, let age = macInputAge(nowUptime: nowUptime), age < window else {
+            return nil
+        }
+        return nowUptime + (window - age)
+    }
+
+    /// Seconds since the owner last used this Mac: the system-wide probe where one is installed,
+    /// otherwise the app-local monitor, which can only see input while Threading is active.
+    private func macInputAge(nowUptime: TimeInterval) -> TimeInterval? {
+        if let age = systemInputAge(), age >= 0 {
+            return age
+        }
+        guard macApplicationIsActive, let lastMacInteractionUptime else { return nil }
+        let age = nowUptime - lastMacInteractionUptime
+        return age >= 0 ? age : nil
     }
 }
 
@@ -410,7 +439,25 @@ final class RemoteTurnNotificationDeliveryCoordinator {
     func setMacApplicationActive(_ isActive: Bool) {
         activity.setMacApplicationActive(isActive)
         guard !isActive else { return }
-        flush(where: { $0.participantID == .owner }, reason: "macInactive")
+        flushIfMacIsNotInUse(reason: "macInactive")
+    }
+
+    /// The screen locked, the display slept, or another login session came to the front.
+    func macBecameUnavailable() {
+        activity.setMacAvailable(false)
+        flushIfMacIsNotInUse(reason: "macUnavailable")
+    }
+
+    func macBecameAvailable() {
+        activity.setMacAvailable(true)
+    }
+
+    /// Leaving Threading is not leaving the Mac. A flush while the Mac is still in use would
+    /// reach `sendPushes`, whose activity check cancels rather than defers, so pending work stays
+    /// on its timers until a deadline finds the Mac idle or the screen goes away.
+    private func flushIfMacIsNotInUse(reason: String) {
+        guard activity.activeReason(for: .owner, nowUptime: clock.uptime) == nil else { return }
+        flush(where: { $0.participantID == .owner }, reason: reason)
     }
 
     func foregroundDeviceAttached(

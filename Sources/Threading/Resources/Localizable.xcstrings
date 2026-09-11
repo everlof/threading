@@ -5640,17 +5640,6 @@
         }
       }
     },
-    "After deliberate interaction, routine turn-completion alerts stay off your paired devices for this long. Off never uses Mac activity to suppress them." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Efter avsiktlig interaktion hålls vanliga aviseringar om slutförda turer borta från dina parkopplade enheter så här länge. Av använder aldrig Mac-aktivitet för att undertrycka dem."
-          }
-        }
-      }
-    },
     "After the task you write" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52364,6 +52353,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När konversationens statuskort är på frågar Threading GitHub eller GitLab efter grenens öppna ändringsförfrågan och kontroller. GitHub använder din tillgängliga anslutning eller anonym åtkomst för ett offentligt arkiv; GitLab använder glab. Om du stänger av kortet stoppas dessa uppslagningar."
+          }
+        }
+      }
+    },
+    "While this Mac is in use, in any app, routine turn-completion alerts stay off your paired devices for this long after its last input. Locking the screen ends that at once. Off never uses Mac activity to suppress them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medan den här Macen används, i vilken app som helst, hålls vanliga aviseringar om slutförda turer borta från dina parkopplade enheter så här länge efter dess senaste inmatning. Att låsa skärmen avslutar det direkt. Av använder aldrig Mac-aktivitet för att undertrycka dem."
           }
         }
       }

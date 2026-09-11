@@ -972,9 +972,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         SettingsCard(rows: [
             SettingsUI.row(
                 title: "Mac activity window",
-                subtitle: "After deliberate interaction, routine turn-completion alerts stay "
-                    + "off your paired devices for this long. Off never uses Mac activity to "
-                    + "suppress them.",
+                subtitle: "While this Mac is in use, in any app, routine turn-completion alerts "
+                    + "stay off your paired devices for this long after its last input. Locking "
+                    + "the screen ends that at once. Off never uses Mac activity to suppress "
+                    + "them.",
                 control: macActivityWindowPopUp
             )
         ])

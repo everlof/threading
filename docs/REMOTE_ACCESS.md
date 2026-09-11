@@ -1593,13 +1593,15 @@ consume the live event without leaving an APNs alert queued for later. Activity 
 participant never suppresses another participant, and activity on this Mac never becomes hosted
 presence for another Mac.
 
-For the owner, activating Threading or deliberately clicking, typing or scrolling also marks the
-Mac active. **Settings → Remote Access → Notification Delivery → Mac activity window** controls
-how long: Off, 1 minute, 2 minutes, 5 minutes or 10 minutes; 2 minutes is the default. Off means
-Mac input never suppresses paired-device notifications. Leaving the app, locking the session or
-sleeping the display makes it inactive immediately. A recently active Mac defers the owner's
-routine completion, permission and question pushes. A later Mac interaction cancels a completion
-as seen. An unanswered question or permission request remains pending until answered or until
+For the owner, the Mac counts as active while it is in use: any keyboard, pointer or scroll
+input anywhere on this Mac, in whichever application is in front. **Settings → Remote Access →
+Notification Delivery → Mac activity window** controls how long after the last input that lasts:
+Off, 1 minute, 2 minutes, 5 minutes or 10 minutes; 2 minutes is the default. Off means Mac input
+never suppresses paired-device notifications. Locking the screen, sleeping the display or
+switching to another login session makes the Mac inactive immediately; merely leaving Threading
+for another app does not. A recently used Mac defers the owner's routine completion, permission
+and question pushes. Deliberate input *in Threading* also cancels a deferred completion as seen;
+input in another app only keeps deferring it. An unanswered question or permission request remains pending until answered or until
 the owner leaves or becomes inactive, when delivery is revalidated. Mac activity never delays a
 guest's notifications, a person's explicit request for input, an explicit extension notification
 or an agent update the user asked for. Pointer movement alone is not activity, and deliberate-input handling is constant-time;
