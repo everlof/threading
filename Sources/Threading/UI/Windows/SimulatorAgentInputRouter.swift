@@ -119,6 +119,8 @@ enum SimulatorAgentInputRouter {
             case .home: return .button(.home)
             case .lock: return .button(.lock)
             case .side: return .button(.side)
+            case .volumeUp: return .button(.volumeUp)
+            case .volumeDown: return .button(.volumeDown)
             }
         }
     }

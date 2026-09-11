@@ -24,6 +24,8 @@ enum SimulatorAgentCommandService {
         case home
         case lock
         case side
+        case volumeUp
+        case volumeDown
     }
 
     struct LaunchRequest {
