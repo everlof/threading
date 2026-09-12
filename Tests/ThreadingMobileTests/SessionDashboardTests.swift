@@ -1151,6 +1151,7 @@ final class MobileDemoSceneTests: XCTestCase {
             case .conversationStreaming: expected = ("conversation-streaming", .conversation)
             case .conversationToolExpanded: expected = ("conversation-tool-expanded", .conversation)
             case .attentionRequest: expected = ("attention-request", .attentionRequest)
+            case .pairingStorageRecovery: expected = ("pairing-storage-recovery", .pairingStorageRecovery)
             case .pairing: expected = ("pairing", .pairing)
             case .welcome: expected = ("welcome", .welcome)
             case .welcomeBrowser: expected = ("welcome-browser", .welcome)

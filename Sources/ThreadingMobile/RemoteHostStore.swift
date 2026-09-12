@@ -469,11 +469,12 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
 }
 
 /// Capability links are credentials, so paired Macs live in Keychain rather than UserDefaults.
+@MainActor
 final class RemoteHostStore {
-    private let service = "codes.threading.mobile.remote-hosts"
-    private let account = "paired-hosts-v1"
+    private nonisolated static let service = "codes.threading.mobile.remote-hosts"
+    private nonisolated static let account = "paired-hosts-v1"
 
-    enum StoreError: LocalizedError {
+    enum StoreError: LocalizedError, Sendable {
         case keychain(OSStatus)
         case unreadable
         case encoding
@@ -490,38 +491,68 @@ final class RemoteHostStore {
         }
     }
 
-    private(set) var writesAllowed = true
+    typealias Reader = @Sendable () -> Result<Data?, StoreError>
+    private let reader: Reader
+    private(set) var writesAllowed = false
 
-    func load() -> Result<[PairedRemoteHost], StoreError> {
+    init(reader: @escaping Reader = { RemoteHostStore.readKeychain() }) {
+        self.reader = reader
+    }
+
+    /// One Keychain item, decoded off-main. Callers coalesce lifecycle recovery attempts.
+    func reload() async -> Result<[PairedRemoteHost], StoreError> {
+        let reader = reader
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.decode(reader())
+        }.value
+        return accept(result)
+    }
+
+    private func accept(_ result: Result<[PairedRemoteHost], StoreError>) -> Result<[PairedRemoteHost], StoreError> {
+        switch result {
+        case .success:
+            writesAllowed = true
+        case let .failure(error):
+            writesAllowed = false
+            switch error {
+            case let .keychain(status):
+                MobileDiagnostics.logFailure(.hostStorage, domain: .keychain, code: Int(status))
+            case .unreadable, .encoding:
+                MobileDiagnostics.logFailure(.hostStorage, code: .decode)
+            }
+        }
+        return result
+    }
+
+    private nonisolated static func decode(_ result: Result<Data?, StoreError>) -> Result<[PairedRemoteHost], StoreError> {
+        result.flatMap { data in
+            guard let data else { return .success([]) }
+            do {
+                return .success(try JSONDecoder().decode([PairedRemoteHost].self, from: data))
+            } catch {
+                // Preserve corrupt/future data. Only a subsequent validated read can reopen writes.
+                return .failure(.unreadable)
+            }
+        }
+    }
+
+    private nonisolated static func readKeychain() -> Result<Data?, StoreError> {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return .success([]) }
-        guard status == errSecSuccess, let data = result as? Data else {
-            MobileDiagnostics.logFailure(
-                .hostStorage,
-                domain: .keychain,
-                code: Int(status)
-            )
-            writesAllowed = false
-            return .failure(.keychain(status))
-        }
-        do {
-            return .success(try JSONDecoder().decode([PairedRemoteHost].self, from: data))
-        } catch {
-            MobileDiagnostics.logFailure(.hostStorage, error: error)
-            // Keychain is already the protected recovery copy. Refuse future writes so an
-            // ordinary pairing cannot replace bytes a newer/older build may still understand.
-            writesAllowed = false
-            return .failure(.unreadable)
-        }
+        if status == errSecItemNotFound { return .success(nil) }
+        guard status == errSecSuccess else { return .failure(.keychain(status)) }
+        guard let data = result as? Data else { return .failure(.unreadable) }
+        return .success(data)
     }
+
+    func suspendWrites() { writesAllowed = false }
 
     func save(_ hosts: [PairedRemoteHost]) throws {
         guard writesAllowed else {
@@ -534,8 +565,8 @@ final class RemoteHostStore {
         }
         let match: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: Self.service,
+            kSecAttrAccount as String: Self.account,
         ]
         let attributes: [String: Any] = [
             kSecValueData as String: data,

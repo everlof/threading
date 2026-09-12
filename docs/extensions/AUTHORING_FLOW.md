@@ -85,7 +85,7 @@ a package, the package is installed, the installed copy runs. The loop is edit �
 reload, and a UI that hid that would produce "I changed it and nothing happened" as the standard
 experience.
 
-### 3. Installing is proposed, never performed
+### 3. Installation authority belongs to the user
 
 An MCP tool that installs an extension is an arbitrary code-execution primitive: it takes a
 directory and makes the app run what is in it. The codebase already has the right precedent —
@@ -93,15 +93,24 @@ directory and makes the app run what is in it. The codebase already has the righ
 the gate that makes it safe is that the agent cannot name anything the host has not already
 vetted.
 
-The same shape applies: `extension_propose_install` shows the manifest, the
-identifier, and — most importantly — **the capabilities it is asking for**, and installs only on
-approval. Capabilities are the thing being approved; the packaging item in `HANDOFF.md` already
-requires that a capability change be visible before an update is enabled, and a first install is
-the same question asked for the first time.
+`extension_propose_install` inspects the package and shows its identifier, runtime and
+capabilities. The user can approve this installation once, cancel, or choose **Allow all installs
+from this agent**. That last choice grants persistent install/update authority to the authenticated
+calling `AgentSession.id`, not to its provider, account, project, selected sidebar row, or descendants.
+It survives app and agent restarts. Other chats still ask, even when they use the same provider.
 
-Nothing auto-installs. Nothing auto-enables. An agent that could quietly grant itself
-`network.client` and `storage.secrets` by writing a manifest would make every other boundary in
-this platform decorative.
+The grant includes future packages and capability changes, as the prompt explicitly states.
+**Settings ▸ Extensions ▸ Trusted agents** names each granted chat and offers **Revoke**; revocation
+affects subsequent proposals and does not undo packages already installed. The name is a bounded
+label captured at approval, with a short chat ID beside it to distinguish identical names.
+The agent cannot create this grant through tool arguments. An unknown/deleted calling chat is
+refused. `AgentExtensionInstallTrustStore` records these user choices through `PreferenceStore`.
+
+Every proposal still runs package inspection, and an update still uses `ExtensionUpdatePlan` with
+the existing digest recheck and stop/swap/restart path. Trust changes who has already authorized
+the action; it does not bypass package validity. New installs remain disabled, while updates
+preserve enablement. Native plugin approval is a separate path and does not read this grant.
+Manual Settings imports retain their ordinary package review.
 
 ### 4. Reload is a development mode, not a free action
 
@@ -115,8 +124,8 @@ each time, and which is visibly marked as such wherever it appears. That matches
 `HANDOFF.md`'s existing line that source-only execution stays a developer workflow, and it keeps
 the ordinary install path — where the user approves a package, not a directory — unchanged.
 
-A capability *change* re-prompts even in development mode. That is the one thing the mode
-cannot be allowed to smooth over.
+A development watcher alone grants no new capabilities. Agent-driven proposals may use the
+separate explicit per-chat install trust described above.
 
 ### 5. Two views of one thing
 
@@ -171,8 +180,8 @@ The read-only authoring tools — `extension_list_components`,
 `extension_describe_component`, `extension_preview_component_patch`,
 `extension_validate_component_patch` — let an agent design against the real contracts before a
 single line compiles. `extension_propose_install` then inspects the assembled package, shows its
-local/unsigned origin, runtime, and complete capability set, and copies it only after the user
-chooses **Install Disabled**. The manual Settings import uses the same proposal.
+local/unsigned origin, runtime, and complete capability set, and copies it after one-time approval or existing persistent trust for the calling chat.
+The manual Settings import uses the same package disclosure with **Install Disabled**.
 
 An opt-in hosted dogfood test executes that exact generated path against the official
 Swift 6.3.2 WebAssembly SDK: app-shipped snapshot → scaffold → policy plugin → Wasm compile →

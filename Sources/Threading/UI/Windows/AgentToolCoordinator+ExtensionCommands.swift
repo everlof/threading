@@ -16,123 +16,34 @@ extension AgentToolCoordinator {
 
     func extensionProposeInstall(
         _ arguments: ExtensionProposeInstallArguments,
+        for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        guard let directory = arguments.directory, !directory.isEmpty else {
-            completion(.failure("Missing required argument: directory"))
-            return
-        }
-        guard NSString(string: directory).isAbsolutePath else {
-            completion(.failure("directory must be an absolute path"))
-            return
-        }
-
-        let packageURL = URL(fileURLWithPath: directory, isDirectory: true)
-        Task { @MainActor [weak self] in
-            let inspection = await Task.detached(priority: .userInitiated) {
-                Result {
-                    try ExtensionBundleInspector.inspect(at: packageURL)
-                }
-            }.value
-            guard let self else {
-                completion(.failure("Threading’s window closed before the package was reviewed."))
-                return
-            }
-            switch inspection {
-            case .failure(let error):
-                completion(.failure(error.localizedDescription))
-            case .success(let bundle):
-                // A package whose identifier is already installed is an *update*, and it goes
-                // through the same plan and wording as Settings ▸ Extensions ▸ Update… — the
-                // capability delta is what the user approves, not merely "a newer file". This
-                // is the dogfood round trip: build, propose, approve, iterate, without a file
-                // picker in the middle.
-                let isInstalled = dependencies.extensions.installedExtensions
-                    .contains { $0.identifier == bundle.manifest.identifier }
-                if isInstalled {
-                    self.proposeUpdate(
-                        of: bundle,
-                        from: packageURL,
-                        completion: completion
-                    )
-                    return
-                }
-                let proposal = ExtensionInstallProposal(bundle: bundle)
-                let request = ExtensionInstallConfirmation.request(
-                    for: proposal,
-                    prompt: .approveAgentExtensionInstall
+        dependencies.extensionInstallation.propose(arguments, for: sessionID, review: { [weak self] review, name, decided in
+            guard let self else { decided(nil); return }
+            let request: ConfirmationRequest
+            switch review {
+            case .install(let proposal):
+                request = ExtensionInstallConfirmation.request(
+                    for: proposal, prompt: .approveAgentExtensionInstall
                 )
-
-                ConfirmationAlert.ask(request, in: self.windowProvider()) { approved in
-                    guard approved else {
-                        completion(.success("The user declined the extension installation."))
-                        return
-                    }
-                    self.dependencies.extensions.install(from: packageURL) { result in
-                        switch result {
-                        case .failure(let error):
-                            completion(.failure(error.localizedDescription))
-                        case .success(let installed):
-                            completion(.success(
-                                "Installed \(installed.name) \(installed.version ?? "") "
-                                    + "as a disabled extension. The user can enable it in "
-                                    + "Settings → Extensions."
-                            ))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @MainActor
-    func proposeUpdate(
-        of bundle: ThreadingExtensionBundle,
-        from packageURL: URL,
-        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
-    ) {
-        let name = bundle.manifest.name
-        dependencies.extensions.updatePlan(from: packageURL) { [weak self] result in
-            guard let self else {
-                completion(.failure("Threading’s window closed before the update was reviewed."))
-                return
-            }
-            switch result {
-            case .failure(let error):
-                completion(.failure(error.localizedDescription))
-            case .success(let plan):
+            case .update(let name, let plan):
                 let confirmation = plan.confirmation(name: name)
-                let request = ConfirmationRequest(
+                request = ConfirmationRequest(
                     prompt: .updateExtensionCapabilities,
                     title: confirmation.title,
                     message: confirmation.message,
                     confirmTitle: confirmation.acceptTitle,
                     style: plan.requiresApproval ? .warning : .informational
                 )
-                ConfirmationAlert.ask(request, in: self.windowProvider()) { approved in
-                    guard approved else {
-                        completion(.success("The user declined the extension update."))
-                        return
-                    }
-                    self.dependencies.extensions.update(
-                        from: packageURL,
-                        approving: plan
-                    ) { result in
-                        switch result {
-                        case .failure(let error):
-                            completion(.failure(error.localizedDescription))
-                        case .success(let updated):
-                            completion(.success(
-                                "Updated \(updated.name) to version "
-                                    + "\(plan.candidateVersion). Enablement was preserved: "
-                                    + "an extension that was running is running again on "
-                                    + "the new code."
-                            ))
-                        }
-                    }
-                }
             }
-        }
+            let choice = AgentExtensionInstallConfirmation.request(from: request, agentName: name)
+            if let extensionInstallDecision {
+                extensionInstallDecision(choice, decided)
+            } else {
+                ConfirmationAlert.choose(choice, in: windowProvider(), completion: decided)
+            }
+        }, completion: completion)
     }
 
     func extensionDescribeComponent(

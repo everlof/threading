@@ -125,6 +125,12 @@ final class SessionSnoozeTests: XCTestCase {
         activity = .working
         center.snooze(sessionID, until: now.addingTimeInterval(3_600))
         center.record(.turnCompleted, for: sessionID)
+        XCTAssertTrue(center.isSnoozed(sessionID), "a renderer callback cannot close an open outcome")
+        activity = .readyWithBackgroundWork
+        center.record(.turnCompleted, for: sessionID)
+        XCTAssertTrue(center.isSnoozed(sessionID), "foreground completion cannot finish a continuation")
+        activity = .idle
+        center.record(.turnCompleted, for: sessionID)
         XCTAssertEqual(store.session(withID: sessionID)?.wake?.reason, .turnCompleted)
     }
 

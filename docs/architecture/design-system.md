@@ -863,6 +863,12 @@ wrapper yet gets one in `UI/Design/` first.
 
 ### Confirmations
 
+Agent extension installation offers an explicit second affirmative choice granting persistent
+install/update authority to one authenticated chat. This uses `ConfirmationAlert.choose`, not
+suppression: the scope and future capability changes are disclosed, and each grant is revocable
+under Extensions settings' Trusted agents section. The ordinary one-time answer remains first and
+owns Return. See [the authoring flow](../extensions/AUTHORING_FLOW.md#3-installation-authority-belongs-to-the-user).
+
 `ThemedAlert` owns presentation, but *asking the user a question* still requires a semantic
 policy. Every app confirmation goes through `ConfirmationAlert` in `UI/Alerts/`, and every one
 names a case in `ConfirmationPrompt`. The web delegate's JavaScript dialogs are the narrow

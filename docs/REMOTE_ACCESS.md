@@ -131,6 +131,11 @@ Settings. Pairing therefore survives a Threading restart and also survives turni
 off and back on. Settings
 lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
 deletes the Mac-side owner credentials. A browser owner pairing deliberately remains tab-scoped.
+On iOS, a locked background launch defers reading pairings until unlock or foreground activation.
+Temporary Keychain failures recover without restarting or pairing again. Until the read succeeds,
+the app shows credential recovery with Retry, preserves the selected Mac and widget association,
+and refuses replacement pairing. A corrupt store remains protected and unavailable.
+
 Any number of named iPhones and iPads can be paired with the same Mac. They use independent
 device-bound credentials, can connect at the same time, and appear separately in Sharing and
 diagnostics; revoking one does not disturb the others.

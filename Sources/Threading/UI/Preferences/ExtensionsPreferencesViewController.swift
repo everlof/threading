@@ -48,6 +48,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
     /// AppKit creates controls only for rows intersecting the viewport.
     private enum PresentationRow {
         case note
+        case trustedAgentsCaption
+        case trustedAgent(Int)
         case firstPartyProblem
         case firstPartyCaption
         case firstPartyEntry(Int)
@@ -61,6 +63,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case extensionField(section: Int, field: Int)
     }
 
+    private let installTrust: AgentExtensionInstallTrustStore
+    private var trustedAgents: [AgentExtensionInstallTrustStore.Grant] = []
     private let manager: ExtensionManager
     private let firstPartyCatalog: FirstPartyExtensionCatalog
     private let identityRegistry: ExtensionIdentityResolverRegistry
@@ -128,8 +132,10 @@ final class ExtensionsPreferencesViewController: NSViewController {
         manager: ExtensionManager? = nil,
         firstPartyCatalog: FirstPartyExtensionCatalog? = nil,
         identityRegistry: ExtensionIdentityResolverRegistry? = nil,
-        componentRegistry: ComponentCustomizationRegistry? = nil
+        componentRegistry: ComponentCustomizationRegistry? = nil,
+        installTrust: AgentExtensionInstallTrustStore? = nil
     ) {
+        self.installTrust = installTrust ?? .shared
         self.manager = manager ?? .shared
         self.firstPartyCatalog = firstPartyCatalog ?? .appOwned()
         self.identityRegistry = identityRegistry ?? .shared
@@ -151,6 +157,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
         view = root
         render()
+        appEvents.observe(AgentExtensionInstallTrustDidChange.self) { [weak self] _ in
+            self?.refreshTrustedAgents()
+        }
         appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
             self?.render()
         }
@@ -226,6 +235,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         ) ?? []
         extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .extensions)
         expandedExtensions.formIntersection(installedExtensions.map(\.identifier))
+        trustedAgents = installTrust.grants
         presentationRows = makePresentationRows()
         updateCardDecorations()
 
@@ -257,6 +267,10 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
     private func makePresentationRows() -> [PresentationRow] {
         var rows: [PresentationRow] = [.note]
+        if !trustedAgents.isEmpty {
+            rows.append(.trustedAgentsCaption)
+            rows.append(contentsOf: trustedAgents.indices.map { .trustedAgent($0) })
+        }
         if firstPartyCatalog.problem != nil {
             rows.append(.firstPartyProblem)
         }
@@ -298,6 +312,40 @@ final class ExtensionsPreferencesViewController: NSViewController {
             })
         }
         return rows
+    }
+
+    /// Only the trust section changes when a grant is added or revoked; package controls and
+    /// their expanded state stay mounted. Rows remain value models until AppKit asks for them.
+    private func refreshTrustedAgents() {
+        let previous = trustedAgents
+        let oldKeys = previous.isEmpty ? [] : ["caption"] + previous.map { $0.sessionID.uuidString }
+        trustedAgents = installTrust.grants
+        let newKeys = trustedAgents.isEmpty ? [] : ["caption"] + trustedAgents.map { $0.sessionID.uuidString }
+        let oldSet = Set(oldKeys)
+        let newSet = Set(newKeys)
+        let removed = IndexSet(oldKeys.indices.filter { !newSet.contains(oldKeys[$0]) }.map { $0 + 1 })
+        let inserted = IndexSet(newKeys.indices.filter { !oldSet.contains(newKeys[$0]) }.map { $0 + 1 })
+        let rows: [PresentationRow] = trustedAgents.isEmpty ? [] : [.trustedAgentsCaption]
+            + trustedAgents.indices.map { .trustedAgent($0) }
+        presentationRows.replaceSubrange(1..<(1 + oldKeys.count), with: rows)
+        tableView.beginUpdates()
+        tableView.removeRows(at: removed, withAnimation: [])
+        tableView.insertRows(at: inserted, withAnimation: [])
+        tableView.endUpdates()
+        let oldNames = Dictionary(uniqueKeysWithValues: previous.map { ($0.sessionID, $0.name) })
+        let changed = IndexSet(trustedAgents.indices.filter { index in
+            oldNames[trustedAgents[index].sessionID].map { $0 != trustedAgents[index].name } ?? false
+        }.map { $0 + 2 })
+        if !changed.isEmpty {
+            tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
+        }
+        updateCardDecorations()
+    }
+
+    @objc private func revokeInstallTrust(_ sender: ThemedButton) {
+        guard let rawID = sender.identifier?.rawValue,
+              let sessionID = SessionID(uuidString: rawID) else { return }
+        installTrust.revoke(sessionID)
     }
 
     private func identityResolverSection() -> NSView? {
@@ -1066,8 +1114,27 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return SettingsUI.note(
                 "Install an extension included with Threading, or import a "
                     + ".threadingextension package or unpacked development directory. Every "
-                    + "package is reviewed before it is copied and remains disabled until you "
+                    + "new package remains disabled until you "
                     + "enable it; Git source links are for inspection, never cloned or built."
+            )
+        case .trustedAgentsCaption:
+            return SettingsUI.caption("Trusted agents")
+        case .trustedAgent(let index):
+            guard trustedAgents.indices.contains(index) else { return NSView() }
+            let grant = trustedAgents[index]
+            let button = SettingsUI.button("Revoke", target: self, action: #selector(revokeInstallTrust(_:)))
+            button.setAccessibilityIdentifier(
+                "settings.extensions.revoke-trust.\(grant.sessionID.uuidString)"
+            )
+            button.identifier = NSUserInterfaceItemIdentifier(grant.sessionID.uuidString)
+            return SettingsUI.row(
+                title: grant.name,
+                subtitle: L10n.format(
+                    "Chat %@ · Installs and updates allowed until revoked",
+                    String(grant.sessionID.uuidString.prefix(8))
+                ),
+                control: button,
+                localizes: false
             )
         case .firstPartyProblem:
             return SettingsUI.section(
@@ -1301,7 +1368,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .firstPartyProblem, .firstPartyCaption, .installedCaption,
+            case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem, .firstPartyCaption, .installedCaption,
                  .identityResolvers,
                  .inventoryProblem, .emptyInventory, .extensionCaption:
                 break
@@ -1351,7 +1418,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return extensionSections[sectionIndex].visibleTitle == nil
                 ? Design.Spacing.large
                 : 0
-        case .note, .firstPartyProblem, .firstPartyCaption, .installedCaption,
+        case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem, .firstPartyCaption, .installedCaption,
              .identityResolvers, .inventoryProblem, .emptyInventory, .packageHeader,
              .extensionCaption:
             return Design.Spacing.large

@@ -1072,7 +1072,7 @@
       "priority": "important",
       "title": "Extensions settings",
       "description": "The real virtualized Extensions page with app-included Storm, an installed disabled local package, source/install controls, and no network discovery.",
-      "states": ["First-party package available", "Local package installed and disabled"],
+      "states": ["First-party package available", "Local package installed and disabled", "Trusted chat with revocation"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["System light/dark", "Authored fixed-theme appearances"],
@@ -1417,8 +1417,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Extension agent-tool installation consent",
-      "description": "The real disabled-install confirmation names every statically inspected agent-facing tool and explains that extension tools are not pre-approved.",
-      "states": ["Two declared agent-facing tools"],
+      "description": "The installation sheet in the real main-window shell names every statically inspected agent-facing tool and offers explicit persistent install trust for the calling chat, with its scope and revocation path.",
+      "states": ["Two declared agent-facing tools", "Persistent trust for one calling chat"],
       "matrix": {
         "themes": ["System", "Cyberpunk"],
         "appearances": ["Light", "Dark", "Theme-authored"],

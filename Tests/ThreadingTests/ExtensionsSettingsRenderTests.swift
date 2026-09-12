@@ -80,7 +80,12 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
         let render = {
             let manager = ExtensionManager(store: store)
             defer { manager.terminateAll() }
-            let controller = ExtensionsPreferencesViewController(manager: manager)
+            let suite = "\(PreferenceStore.hostedTestSuitePrefix).extension-trust-render.\(UUID())"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let trust = AgentExtensionInstallTrustStore(defaults: defaults)
+            trust.allow(SessionID(uuidString: "00000000-0000-0000-0000-000000000001")!, name: "Build Tools development")
+            let controller = ExtensionsPreferencesViewController(manager: manager, installTrust: trust)
             let host = self.laidOut(controller.view)
             host.appearance = appearance
             controller.view.appearance = appearance

@@ -58,6 +58,12 @@ The host projects `RemoteSessionAttentionDTO` into every authorization-specific 
 row retains both the display activity and the receipt knowledge, so a client never needs to derive
 reader-specific truth from a transient event.
 
+The legacy activity wire vocabulary represents a ready prompt with background work as `idle`;
+the additive `RemoteSessionContinuation` qualifier must therefore include host-owned waits, not
+only the provider's background-task field. `sessionDependency` names that fact explicitly. Older
+clients retain it as a non-nil unknown continuation and keep their existing background-work mark.
+`SessionDependencyProjectionTests` pins the composed runtime mapping and lossless wire round trip.
+
 Each authenticated dashboard event connection receives:
 
 1. `catalogueHello(streamID, revision)` after registration;

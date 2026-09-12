@@ -179,6 +179,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         currentSessionProjection: .projectStore(ProjectStore.shared)
     )
 
+    private let sessionDependency: @MainActor (SessionID) -> SessionDependencyState
     private let currentSessionProjection: CurrentSessionProjection
     private let readReceipts: SessionReadReceiptStore
     private let remotelyViewingParticipantIDs: @MainActor (SessionID) -> Set<String>
@@ -187,6 +188,9 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     init(
         currentSessionProjection: CurrentSessionProjection,
+        sessionDependency: @escaping @MainActor (SessionID) -> SessionDependencyState = {
+            SessionWatchCenter.shared.dependencyState(for: $0)
+        },
         readReceipts: SessionReadReceiptStore = .shared,
         remotelyViewingParticipantIDs: @escaping @MainActor (SessionID) -> Set<String> = {
             RemoteSessionMirrorRegistry.shared.viewingParticipantIDs(for: $0)
@@ -198,6 +202,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             RemoteSessionMirrorRegistry.shared.localSessionVisibilityChanged($0)
         }
     ) {
+        self.sessionDependency = sessionDependency
         self.currentSessionProjection = currentSessionProjection
         self.readReceipts = readReceipts
         self.remotelyViewingParticipantIDs = remotelyViewingParticipantIDs
@@ -551,15 +556,16 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     }
 
     private func sharedActivity(sessionID: SessionID) -> SessionActivity {
-        controllers[sessionID]?.activity ?? conversations[sessionID]?.activity ?? .dormant
+        runtimeSnapshot(sessionID: sessionID).activity
     }
 
     /// The operational value used by policy. Presentation and read receipts are deliberately
     /// absent from this lookup.
     func runtimeSnapshot(sessionID: SessionID) -> SessionRuntimeSnapshot {
-        controllers[sessionID]?.activityTracker.runtimeSnapshot
+        let provider = controllers[sessionID]?.activityTracker.runtimeSnapshot
             ?? conversations[sessionID]?.runtimeSnapshot
             ?? .dormant
+        return provider.awaiting(sessionDependency(sessionID))
     }
 
     /// A live process and every already-known fact needed by the bounded retention policy.
@@ -611,9 +617,28 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         }
     }
 
+    /// Host receipt ownership can finish after a very short response turn already ended.
+    /// That turn suppressed its unread result while confirmation was outstanding, so this
+    /// final dependency edge owns the receipt instead. An ordinary handoff during a turn does
+    /// not allocate attention; the provider's eventual finish still does that exactly once.
+    func sessionDependencyChanged(sessionID: SessionID) {
+        let previous = runtimeSnapshots[sessionID] ?? .dormant
+        publishRuntimeChange(sessionID: sessionID)
+        let current = runtimeSnapshot(sessionID: sessionID)
+        let transition = SessionRuntimeTransition(previous: previous, current: current)
+        if previous.dependency.isPending, transition.completedPendingOutcome,
+           current.isPromptReady {
+            noteSessionAttention(sessionID)
+        }
+    }
+
     /// Opens one unread generation and spends it immediately for participants who already have
     /// this conversation on screen. Socket presence is reduced to stable person identities here.
     func noteSessionAttention(_ sessionID: SessionID) {
+        let runtime = runtimeSnapshot(sessionID: sessionID)
+        // Provider Stop/idle-prompt attention is not a result while a host dependency remains.
+        // A real question still owns its attention independently of the pending outcome.
+        guard !runtime.dependency.isPending || runtime.blocker == .awaitingUser else { return }
         var viewers = remotelyViewingParticipantIDs(sessionID)
         if visibleSessionID == sessionID {
             viewers.insert(SessionReadReceiptStore.ownerParticipantID)
@@ -727,7 +752,8 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         // lets Snooze ignore a request that was already pending when the action was chosen.
         switch report.event {
         case .turnFinished:
-            SessionSnoozeCenter.shared.record(.turnCompleted, for: report.sessionID)
+            // Snooze completion belongs to the composed pending-outcome transition below.
+            // A provider Stop alone cannot settle host watches or provider background work.
             // The turn's own boundary is where this session's observed work catches up. A hook
             // per tool call would be exact and would spend a spawned process on every `Read`;
             // the transcript already holds every call, and the turn end is when it is complete.
@@ -737,7 +763,9 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             // always a request for input — an idle prompt on a session paused on its own child
             // is the CLI stating that nothing is being asked — and ending a snooze for one is
             // the same misreading the sidebar already refuses. One rule, one answer.
-            if tracker.honoursAwaitingUserNotice(report.notification) {
+            if tracker.honoursAwaitingUserNotice(report.notification),
+               report.notification != .idlePrompt
+                || !runtimeSnapshot(sessionID: report.sessionID).dependency.isPending {
                 SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
             }
         case .blockingAskOpened:

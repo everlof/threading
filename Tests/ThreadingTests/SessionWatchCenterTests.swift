@@ -90,6 +90,121 @@ final class SessionWatchCenterTests: XCTestCase {
         wait(for: [settled], timeout: interval + 5)
     }
 
+    func testWatchIntentSeparatesExistingResultFromFutureObservation() {
+        let center = makeCenter()
+        center.arm(watcher: watcher, target: target)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        let observer = SessionID()
+        activities[target] = .idle
+        center.arm(watcher: observer, target: target)
+        XCTAssertEqual(center.dependencyState(for: observer), .none)
+    }
+
+    func testResultRemainsPendingThroughHeldAndAcceptedNoticeUntilNextTurnStarts() {
+        let center = makeCenter()
+        center.arm(watcher: watcher, target: target)
+        deliveryOutcome = .busyTerminal
+        reportActivity(.idle)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        // An unrelated turn while the notice is still held does not consume its result.
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        deliveryOutcome = .sentNow
+        reportActivity(.idle, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .none)
+    }
+
+    func testOneResultResponseDoesNotConsumeOtherOutstandingSiblings() {
+        let center = makeCenter()
+        let sibling = SessionID()
+        activities[sibling] = .working
+        center.arm(watcher: watcher, target: target)
+        center.arm(watcher: watcher, target: sibling)
+        reportActivity(.idle)
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        reportActivity(.idle, of: sibling)
+        reportActivity(.idle, of: watcher)
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .none)
+    }
+
+    func testAcceptedNoticesShareTheWatchCapacityUntilTheirResponseStarts() {
+        let center = makeCenter()
+        for _ in 0..<ControlWatchDefaults.maximumPerWatcher {
+            let sibling = SessionID()
+            activities[sibling] = .working
+            center.arm(watcher: watcher, target: sibling)
+            reportActivity(.idle, of: sibling)
+        }
+        XCTAssertEqual(center.arm(watcher: watcher, target: target),
+                       .watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher))
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.arm(watcher: watcher, target: target),
+                       .armed(awaiting: .turnSettled, expiresAfter: nil))
+    }
+
+    func testQueuedNoticeWaitsForTheNextTurnAndAmbiguousDeliveryIsNotCompletion() {
+        for outcome in [SessionMessageDelivery.Outcome.queuedBehindTurn, .typedUnconfirmed] {
+            activities[target] = .working
+            activities[watcher] = .working
+            delivered = []
+            let center = makeCenter()
+            center.arm(watcher: watcher, target: target)
+            deliveryOutcome = outcome
+            reportActivity(.idle)
+            reportActivity(.idle, of: watcher)
+            XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+            XCTAssertEqual(delivered.count, 1)
+            reportActivity(.working, of: watcher)
+            XCTAssertEqual(center.dependencyState(for: watcher), .none)
+        }
+    }
+
+    func testARefusedReceiptAfterAnUnrelatedTurnKeepsItsNoticePending() {
+        var receipt: (@MainActor (SessionMessageDelivery.Outcome) -> Void)?
+        let center = SessionWatchCenter(
+            center: notifications,
+            dependencies: .init(
+                activity: { [self] in activities[$0] ?? .dormant },
+                runtime: { [self] in .test(activity: activities[$0] ?? .dormant) },
+                sessionTitle: { _ in "Sibling" },
+                deliverNotice: { _, _, completion in receipt = completion }
+            )
+        )
+        center.arm(watcher: watcher, target: target)
+        reportActivity(.idle)
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        receipt?(.notTaken)
+        reportActivity(.idle, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult)
+        reportActivity(.working, of: watcher)
+        receipt?(.sentNow)
+        XCTAssertEqual(center.dependencyState(for: watcher), .none)
+    }
+
+    func testEachQueuedSiblingNoticeStillOwesItsOwnResponseTurn() {
+        let center = makeCenter()
+        let sibling = SessionID()
+        activities[sibling] = .working
+        activities[watcher] = .working
+        deliveryOutcome = .queuedBehindTurn
+        center.arm(watcher: watcher, target: target)
+        center.arm(watcher: watcher, target: sibling)
+        reportActivity(.idle)
+        reportActivity(.idle, of: sibling)
+        reportActivity(.idle, of: watcher)
+        reportActivity(.working, of: watcher)
+        reportActivity(.idle, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .awaitingSessionResult,
+                       "the first response must not consume the second queued notice")
+        reportActivity(.working, of: watcher)
+        XCTAssertEqual(center.dependencyState(for: watcher), .none)
+    }
+
     // MARK: - Held Notices
 
     /// The common shape in practice: the watcher is itself mid-turn at a terminal when its

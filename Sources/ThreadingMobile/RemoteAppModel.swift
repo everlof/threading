@@ -3,6 +3,7 @@ import Network
 import ThreadingGlanceKit
 import ThreadingPeerTransport
 import ThreadingRemoteKit
+import UIKit
 
 struct RemoteNotificationOpenRequest: Equatable, Identifiable {
     let eventID: String
@@ -444,7 +445,16 @@ final class RemoteAppModel: ObservableObject {
     /// draft is the same navigation subject as one opened from its row.
     @Published private(set) var startedDrafts: [UUID: MobileStartedDraft] = [:]
 
-    private let store = RemoteHostStore()
+    private let store: RemoteHostStore
+    private let protectedDataAvailable: () -> Bool
+    @Published private(set) var needsHostStorageRecovery = false
+    private var hostStorageRecoveryTask: Task<Bool, Never>?
+    private enum DeferredHostOpen {
+        case widget(URL)
+        case notification(RemoteNotificationEventDTO, RemoteNotificationOpenOrigin)
+    }
+    private var deferredHostOpen: DeferredHostOpen?
+
     private let hostedConnections = HostedRemoteConnectionManager()
     /// Browses for paired Macs on this network while the app is in front of somebody.
     private let discovery = RemoteHostDiscovery()
@@ -568,8 +578,12 @@ final class RemoteAppModel: ObservableObject {
         continuity: MobileSessionContinuityStore = MobileSessionContinuityStore(),
         newSessionDefaults: MobileNewSessionDefaultsStore = MobileNewSessionDefaultsStore(),
         themeCache: MobileThemeCacheStore = MobileThemeCacheStore(),
-        dashboardCache: MobileDashboardCacheStore = MobileDashboardCacheStore()
+        dashboardCache: MobileDashboardCacheStore = MobileDashboardCacheStore(),
+        hostStore: RemoteHostStore = RemoteHostStore(),
+        protectedDataAvailable: @escaping () -> Bool = { UIApplication.shared.isProtectedDataAvailable }
     ) {
+        self.store = hostStore
+        self.protectedDataAvailable = protectedDataAvailable
         self.continuity = continuity
         self.newSessionDefaults = newSessionDefaults
         self.themeCache = themeCache
@@ -707,35 +721,12 @@ final class RemoteAppModel: ObservableObject {
                 return
             }
         #endif
-        let loaded: [PairedRemoteHost]
-        switch store.load() {
-        case let .success(hosts):
-            loaded = hosts
-        case let .failure(error):
-            loaded = []
-            storageIssue = error.localizedDescription
-        }
-        hosts = loaded
-        // Before anything is fetched: the first request after a relaunch is the one that needs
-        // the pin, so the record's own fingerprints are in force ahead of it.
-        RemoteHostTrust.register(loaded)
-        let restoredHostID = continuity.activeHostID.flatMap { candidate in
-            loaded.contains(where: { $0.id == candidate }) ? candidate : nil
-        }
-        activeHostID = restoredHostID ?? loaded.first?.id
-        continuity.setActiveHostID(activeHostID)
+        // Background notification launches must not read an unlocked-only Keychain item.
+        // The first foreground/unlock restores off-main before any host refresh or pairing.
+        needsHostStorageRecovery = true
+        hosts = []
         MobileDiagnosticsIncidentRecorder.shared.attach(self)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let loaded = await self.dashboardCache.loadCatalogues()
-            for (identity, catalogue) in loaded
-                where self.cachedDashboardCatalogues[identity] == nil
-                    && !self.discardedDashboardCacheIdentities.contains(identity)
-                    && self.hosts.contains(where: { $0.id == identity }) {
-                self.cachedDashboardCatalogues[identity] = catalogue
-            }
-            await self.dashboardCache.removeExpired()
-        }
+
     }
 
     // MARK: - The demo
@@ -748,6 +739,8 @@ final class RemoteAppModel: ObservableObject {
     func startDemo() {
         guard !isDemo else { return }
         isDemo = true
+        needsHostStorageRecovery = false
+        deferredHostOpen = nil
         isPairing = false
         navigationPath = []
         // The same hygiene as `selectHost`: a half-open theme-events socket for the real Mac
@@ -780,24 +773,68 @@ final class RemoteAppModel: ObservableObject {
         navigationPath = []
         discardHostedConnection()
         me = nil
-        let loaded: [PairedRemoteHost]
-        switch store.load() {
-        case let .success(hosts):
-            loaded = hosts
-        case let .failure(error):
-            loaded = []
-            storageIssue = error.localizedDescription
-        }
-        hosts = loaded
-        RemoteHostTrust.register(loaded)
+        hosts = []
+        activeHostID = nil
+        needsHostStorageRecovery = true
+        storageIssue = nil
+        store.suspendWrites()
         hostedProvisioningRetryAfter.removeAll(keepingCapacity: false)
-        activeHostID = loaded.first?.id
-        continuity.setActiveHostID(activeHostID)
         phase = .idle
-        if let host = activeHost {
-            ensureThemeEvents(for: host)
-            Task { await refresh(reason: .hostChanged) }
+        Task { await refresh(reason: .hostChanged) }
+    }
+
+    /// Unlock and foreground refresh share one read. A failed read is never an empty pairing
+    /// set: keep continuity, widgets and the Keychain recovery copy until validation succeeds.
+    @discardableResult
+    func restorePairedHostsIfNeeded() async -> Bool {
+        guard !isDemo, !isEphemeralTerminalWireFixture, needsHostStorageRecovery else { return true }
+        if let task = hostStorageRecoveryTask { return await task.value }
+        guard protectedDataAvailable() else {
+            storageIssue = "Unlock your iPhone to restore your saved Macs."
+            return false
         }
+        let task = Task { @MainActor [weak self] () -> Bool in
+            guard let self else { return false }
+            let result = await store.reload()
+            guard protectedDataAvailable() else {
+                store.suspendWrites()
+                return false
+            }
+            guard !isDemo else { return false }
+            switch result {
+            case let .failure(error):
+                storageIssue = error.localizedDescription
+                return false
+            case let .success(loaded):
+                RemoteHostTrust.register(loaded)
+                hosts = loaded
+                let remembered = continuity.activeHostID
+                activeHostID = loaded.first(where: { $0.id == remembered })?.id ?? loaded.first?.id
+                continuity.setActiveHostID(activeHostID)
+                storageIssue = nil
+                needsHostStorageRecovery = false
+                if let publisher = usageGlance { installUsageGlancePublisher(publisher) }
+                let deferred = deferredHostOpen
+                deferredHostOpen = nil
+                switch deferred {
+                case let .widget(url): _ = open(url)
+                case let .notification(event, origin): _ = openSessionFromNotification(event, origin: origin)
+                case nil: break
+                }
+                let catalogues = await dashboardCache.loadCatalogues()
+                for (identity, catalogue) in catalogues
+                    where hosts.contains(where: { $0.id == identity })
+                        && !discardedDashboardCacheIdentities.contains(identity) {
+                    cachedDashboardCatalogues[identity] = catalogue
+                }
+                await dashboardCache.removeExpired()
+                return true
+            }
+        }
+        hostStorageRecoveryTask = task
+        let restored = await task.value
+        hostStorageRecoveryTask = nil
+        return restored
     }
 
     var activeHost: PairedRemoteHost? {
@@ -979,7 +1016,8 @@ final class RemoteAppModel: ObservableObject {
             self?.widgetIssue = issue
             self?.widgetHostID = publisher?.pairingID
         }
-        if storageIssue == nil, let pinned = publisher.pairingID, !hosts.contains(where: { $0.id == pinned }) {
+        if !needsHostStorageRecovery, storageIssue == nil,
+           let pinned = publisher.pairingID, !hosts.contains(where: { $0.id == pinned }) {
             publisher.choose(nil)
             widgetHostID = nil
         }
@@ -1022,6 +1060,11 @@ final class RemoteAppModel: ObservableObject {
     @discardableResult
     func open(_ url: URL) -> Bool {
         if let route = UsageGlanceRoute(url: url) {
+            if needsHostStorageRecovery {
+                deferredHostOpen = .widget(url)
+                Task { await restorePairedHostsIfNeeded() }
+                return true
+            }
             guard hosts.contains(where: { $0.id == route.pairingID }) else { return true }
             selectHost(route.pairingID)
             navigationPath.removeAll()
@@ -1070,6 +1113,7 @@ final class RemoteAppModel: ObservableObject {
         transport: RemoteHostEndpointKind,
         recordsStart: Bool = true
     ) async throws {
+        guard await restorePairedHostsIfNeeded() else { throw RemoteHostStore.StoreError.unreadable }
         phase = .connecting
         let startedAt = MobileDiagnostics.monotonicNow()
         let pairingFields: [RemoteDiagnosticField: String] = [
@@ -1259,6 +1303,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     func pair(_ hostedLink: HostedPairingLink, displayName: String) async throws {
+        guard await restorePairedHostsIfNeeded() else { throw RemoteHostStore.StoreError.unreadable }
         guard !hostedLink.isExpired else { throw PeerControlPlaneError.invalidCredential }
         phase = .connecting
         let endpoint = try PeerControlPlaneServiceEndpoint(hostedLink.serviceURL)
@@ -1404,6 +1449,7 @@ final class RemoteAppModel: ObservableObject {
     /// journal can attribute the refresh and the policy can decline or cheapen it.
     func refresh(reason: MobileRefreshReason = .userCheck) async {
         guard !isDemo else { return }
+        guard await restorePairedHostsIfNeeded() else { return }
         guard let host = activeHost else {
             discardPendingSessionDeltas()
             invalidateRefreshes()
@@ -2384,6 +2430,16 @@ final class RemoteAppModel: ObservableObject {
         _ event: RemoteNotificationEventDTO,
         origin: RemoteNotificationOpenOrigin
     ) -> Bool {
+        if needsHostStorageRecovery {
+            if case let .notification(previous, previousOrigin) = deferredHostOpen,
+               previous.id == event.id, previous.hostID == event.hostID {
+                deferredHostOpen = .notification(event, previousOrigin.merged(with: origin))
+                return false
+            }
+            deferredHostOpen = .notification(event, origin)
+            Task { await restorePairedHostsIfNeeded() }
+            return true
+        }
         let candidate = hosts.first {
             ($0.hostID ?? $0.id) == event.hostID && $0.isOwnerDevice
         } ?? hosts.first { ($0.hostID ?? $0.id) == event.hostID }

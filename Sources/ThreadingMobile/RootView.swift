@@ -32,6 +32,7 @@ enum MobileDemoScene: Equatable {
     case conversation
     case pairing
     case welcome
+    case pairingStorageRecovery
     case settings
     case connectionProgressLab
     case connectionStatus
@@ -120,6 +121,7 @@ extension MobileDemoScene {
         case let id where terminalFixtureIDs.contains(id): return .terminal
         case "attention-request": return .attentionRequest
         case let id where id.hasPrefix("conversation"): return .conversation
+        case "pairing-storage-recovery": return .pairingStorageRecovery
         case "pairing": return .pairing
         case let id where id.hasPrefix("welcome"): return .welcome
         case "settings", "marketing-settings": return .settings
@@ -223,6 +225,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case pairing = "pairing"
 
     /// The welcome screen; the suffix focuses one feature card.
+    case pairingStorageRecovery = "pairing-storage-recovery"
     case welcome = "welcome"
     case welcomeBrowser = "welcome-browser"
     case welcomeUsage = "welcome-usage"
@@ -468,6 +471,8 @@ struct RootView: View {
         case .pairing:
             PairingView()
                 .environmentObject(model)
+        case .pairingStorageRecovery:
+            NavigationStack { PairingStorageRecoveryView(retry: {}) }
         case .welcome:
             NavigationStack {
                 WelcomeView(openSettings: { showsSettings = true })
@@ -955,7 +960,11 @@ struct RootView: View {
     private var standardRoot: some View {
         NavigationStack(path: $model.navigationPath) {
             Group {
-                if model.hosts.isEmpty {
+                if model.needsHostStorageRecovery {
+                    PairingStorageRecoveryView(isLoading: model.storageIssue == nil) {
+                        Task { await model.refresh(reason: .userCheck) }
+                    }
+                } else if model.hosts.isEmpty {
                     WelcomeView(openSettings: { showsSettings = true })
                 } else {
                     SessionDashboard(
@@ -1137,6 +1146,34 @@ private struct ShareChatDemoHost: View {
     }
 }
 #endif
+
+/// Credential recovery is host-owned: unavailable storage must never offer replacement pairing.
+private struct PairingStorageRecoveryView: View {
+    var isLoading = false
+    @Environment(\.remoteTheme) private var theme
+    let retry: () -> Void
+
+    var body: some View {
+        ZStack {
+            theme.ground.ignoresSafeArea()
+            VStack(spacing: MobileDesign.Spacing.pane) {
+                Image(systemName: "lock.shield")
+                    .font(.largeTitle)
+                    .foregroundStyle(theme.secondaryLabel)
+                Text(MobileL10n.string(isLoading ? "Restoring saved Macs" : "Saved Macs are unavailable"))
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(theme.label)
+                Text(MobileL10n.string(isLoading ? "Reading your protected pairing credentials." : "Threading couldn’t read your saved pairings. Unlock your iPhone to try again automatically, or tap Retry. Your saved credentials have not been replaced."))
+                    .font(.body)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .multilineTextAlignment(.center)
+                Button("Retry", action: retry)
+                    .buttonStyle(MobileThemedActionButtonStyle(kind: .primary, theme: theme))
+            }
+            .padding(MobileDesign.Spacing.pane)
+        }
+    }
+}
 
 private struct WelcomeView: View {
     @EnvironmentObject private var model: RemoteAppModel

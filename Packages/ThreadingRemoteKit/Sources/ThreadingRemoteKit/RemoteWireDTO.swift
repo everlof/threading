@@ -424,12 +424,15 @@ public struct RemoteSessionAttentionDTO: Codable, Equatable, Sendable {
 public enum RemoteSessionContinuation: RawRepresentable, Codable, Equatable, Hashable, Sendable {
     case delegated
     case standing
+    /// Threading is waiting for a sibling result or its notice's follow-up response.
+    case sessionDependency
     case unknown(String)
 
     public init(rawValue: String) {
         switch rawValue {
         case "delegated": self = .delegated
         case "standing": self = .standing
+        case "sessionDependency": self = .sessionDependency
         default: self = .unknown(rawValue)
         }
     }
@@ -438,6 +441,7 @@ public enum RemoteSessionContinuation: RawRepresentable, Codable, Equatable, Has
         switch self {
         case .delegated: "delegated"
         case .standing: "standing"
+        case .sessionDependency: "sessionDependency"
         case .unknown(let value): value
         }
     }

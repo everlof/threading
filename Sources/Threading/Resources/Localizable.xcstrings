@@ -6433,6 +6433,28 @@
         }
       }
     },
+    "Allow all installs from this agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt alla installationer från den här agenten"
+          }
+        }
+      }
+    },
+    "Allow all installs from this agent trusts only the chat “%@” to install and update extensions, including future capability changes, without asking again. This lasts across restarts until you revoke it in Settings → Extensions → Trusted agents. New extensions remain disabled." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt alla installationer från den här agenten ger endast chatten ”%@” rätt att installera och uppdatera tillägg, inklusive framtida ändringar av behörigheter, utan att fråga igen. Tillståndet gäller även efter omstarter tills du återkallar det i Inställningar → Tillägg → Betrodda agenter. Nya tillägg förblir inaktiverade."
+          }
+        }
+      }
+    },
     "Allow approving agent requests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10207,6 +10229,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chatt"
+          }
+        }
+      }
+    },
+    "Chat %@ · Installs and updates allowed until revoked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatt %@ · Installationer och uppdateringar tillåts tills tillståndet återkallas"
           }
         }
       }
@@ -22463,6 +22496,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installera lägger till %@, så att threading-ptyd kan köras i vilken terminal som helst och fortsätter fungera efter att Threading uppdaterats eller flyttats."
+          }
+        }
+      }
+    },
+    "Install an extension included with Threading, or import a .threadingextension package or unpacked development directory. Every new package remains disabled until you enable it; Git source links are for inspection, never cloned or built." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera ett tillägg som ingår i Threading, eller importera ett .threadingextension-paket eller en uppackad utvecklingsmapp. Varje nytt paket förblir inaktiverat tills du aktiverar det; Git-länkar till källkoden är till för granskning och klonas eller byggs aldrig."
           }
         }
       }
@@ -50546,6 +50590,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utlösare"
+          }
+        }
+      }
+    },
+    "Trusted agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Betrodda agenter"
           }
         }
       }

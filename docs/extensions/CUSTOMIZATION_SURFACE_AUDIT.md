@@ -47,6 +47,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | iOS usage widgets | — | host-only | pinned pairing/account identity, owner authorization, snapshot freshness, reset meaning and validated deep links; account selection is user-configurable and WidgetKit owns system chrome | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
 | Mobile connection details panel | — | host-only | active-route and address truth, endpoint ordering, certificate verdict, bounded network inspection, refresh authority and device-local clipboard policy | Host-only |
+| iOS saved-pairing recovery | — | host-only | protected-data availability, credential validation and custody, retry, write authority, selected Mac and deferred notification/widget navigation | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
@@ -521,3 +522,11 @@ Before adding a component:
 6. Exercise the real product shell, not only the semantic renderer.
 7. Add the contract to the generated catalogue and authoring tools.
 8. Add new host data independently and only when a real extension cannot work without it.
+
+## Agent extension installation trust
+
+The install/update approval choice and Extensions settings' Trusted agents rows are deliberately
+host-only security surfaces. Threading owns authenticated chat attribution, the scope and lifetime
+of consent, persistence, revocation, package validation, and disabled-first installation. Extensions
+cannot supply or replace the approval actions or grant themselves trust. Existing themed alert and
+virtual settings table components present these values; no new public component contract is added.

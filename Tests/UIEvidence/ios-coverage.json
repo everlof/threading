@@ -31,6 +31,7 @@
     "vaporwave": "dark"
   },
   "captures": [
+    {"id": "pairing-storage-recovery-custom-dark", "entryID": "ios-pairing", "demo": "pairing-storage-recovery", "appearance": "dark", "theme": "custom"},
     {"id": "welcome-custom-light", "entryID": "ios-welcome", "demo": "welcome", "appearance": "light", "theme": "custom-light"},
     {"id": "welcome-custom-dark", "entryID": "ios-welcome", "demo": "welcome", "appearance": "dark", "theme": "custom"},
     {"id": "welcome-browser-custom-dark", "entryID": "ios-welcome", "demo": "welcome-browser", "appearance": "dark", "theme": "custom"},
@@ -281,7 +282,7 @@
       "priority": "critical",
       "title": "Pair a Mac",
       "description": "The camera/link pairing flow with secure-link guidance and the complete compact-phone layout.",
-      "states": ["Custom light theme", "Custom dark theme", "Keyboard open", "Keyboard dismissed and geometry restored"],
+      "states": ["Custom light theme", "Custom dark theme", "Saved pairing storage unavailable", "Keyboard open", "Keyboard dismissed and geometry restored"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/pairing-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}

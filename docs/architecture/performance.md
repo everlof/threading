@@ -5195,3 +5195,21 @@ encoded-body lookup measured 0.004 ms at both sizes. These fixtures exercise sna
 `SidebarRowAnimationTests` drives a completion through the actual event and outline without a
 manual reload. The complete validation record is in
 [`session-time-audit-2026-09-12.md`](../research/session-time-audit-2026-09-12.md).
+
+### Agent extension install trust
+
+The expected set is 1–10 trusted chats; stress is 1,000. Install calls check an in-memory dictionary
+in O(1), without scanning sessions or grants. User grant/revoke events are rare and persist a
+property-list dictionary through PreferenceStore; package inspection, update planning and copying
+remain on existing bounded workers. The Settings section stores grant values, truncates captured
+names at 160 characters, and materializes only viewport rows in the existing table. Revocation
+removes only the affected trust rows without remounting sibling or installed package controls.
+`AgentExtensionInstallTrustTests/testStressTrustListKeepsOnlyViewportControls` exercises 1,000
+grants when `THREADING_STRESS=1`. No grant count determines
+how many AppKit controls are built at page mount.
+
+A Debug stress run on 2026-09-12 retained nine Revoke controls for 1,000 grants, mounted the
+settings fixture in 40 ms and revoked one grant in 11 ms. The two-grant case retained two
+controls and revoked in 2 ms; its first mount included cold framework initialization (118 ms),
+so those mount timings are not a before/after speed comparison. The regression boundary is
+viewport-sized control ownership and exact per-chat revocation, not a machine-specific timing.

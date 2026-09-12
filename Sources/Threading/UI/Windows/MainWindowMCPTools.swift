@@ -152,6 +152,7 @@ struct AgentToolDependencies {
   let notificationTargets: NotificationTargetRegistry
   let archiveScheduler: SessionArchiveScheduler
   let sessionCommands: AgentSessionCommandService
+  let extensionInstallation: AgentExtensionInstallService
   let extensionAuthoring: ExtensionAuthoringCommandService
   let browserStorage: BrowserStorageCommandService
   let settingsCatalogue: SettingsCatalogueService
@@ -178,6 +179,9 @@ struct AgentToolDependencies {
       projects: .shared,
       archiveScheduler: .shared,
       usesAgentTitleInSidebar: { AppSettings.usesAgentTitleInSidebar }
+    ),
+    extensionInstallation: AgentExtensionInstallService(
+      projects: .shared, extensions: .shared, trust: .shared
     ),
     extensionAuthoring: ExtensionAuthoringCommandService(
       projects: .shared,
@@ -230,6 +234,7 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
   let playwrightRunner: PlaywrightAutomationRunner
   let chromeAutomationProfile: ChromeAutomationProfile
   let dependencies: AgentToolDependencies
+  var extensionInstallDecision: ((ChoiceRequest, @escaping @MainActor (Int?) -> Void) -> Void)?
   let browserAccessStore = BrowserAccessStore()
   var temporaryBrowserOrigins: [SessionID: Set<BrowserOrigin>] = [:]
 

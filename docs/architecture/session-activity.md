@@ -12,6 +12,16 @@ background continuation, blocker, and turn authority are orthogonal typed facts.
 `readyWithBackgroundWork` means the prompt accepts input while an earlier turn's work can still
 re-enter the conversation; it is neither a spinner nor a completed outcome.
 
+Host-owned sibling waits are a separate `SessionDependencyState`, composed by `AgentRuntime`
+with either provider surface. A provider can report its foreground turn finished while Threading
+still owes it a watch notice. Such a session remains `readyWithBackgroundWork`, with no completed
+receipt or alert, until the notice hands off to a follow-up turn and that turn finishes. Passive
+watches for future starts do not hold outcomes open. See [control-plane.md](control-plane.md#watch-as-one-activity-edge-instead-of-polling)
+for the typed intent, delivery ownership and bounded lifetime. Snooze completion follows that
+same composed runtime edge; an early provider Stop must not wake it before the host result.
+An idle-prompt hook also remains quiet during the dependency, while permission/unknown notices
+retain their request semantics.
+
 Five guards and one interaction boundary keep it honest:
 
 - A **byte threshold** (`workingByteThreshold`), so the terminal echoing typed characters is

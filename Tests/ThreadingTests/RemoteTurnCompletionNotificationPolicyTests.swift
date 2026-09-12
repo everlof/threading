@@ -41,6 +41,24 @@ final class RemoteTurnCompletionNotificationPolicyTests: XCTestCase {
         ))
     }
 
+    func testHostDependencyPreservesOperationalBlockersAndPromptReadiness() {
+        let waiting = SessionRuntimeSnapshot.test(activity: .needsAttention)
+            .awaiting(.awaitingSessionResult)
+        XCTAssertEqual(waiting.activity, .readyWithBackgroundWork)
+        XCTAssertTrue(waiting.isPromptReady)
+        XCTAssertTrue(waiting.hasPendingOutcome)
+        XCTAssertTrue(waiting.awaitsConversationOutcome)
+        XCTAssertFalse(RemoteTurnCompletionNotificationPolicy.shouldNotify(
+            .init(previous: .test(activity: .working), current: waiting)
+        ))
+        for activity in [SessionActivity.awaitingUser, .limitReached, .working, .dormant] {
+            let snapshot = SessionRuntimeSnapshot.test(activity: activity)
+                .awaiting(.awaitingSessionResult)
+            XCTAssertEqual(snapshot.activity, activity)
+            XCTAssertFalse(snapshot.isPromptReady)
+        }
+    }
+
     func testQuestionRefusalAndTeardownAreNotCompletions() {
         for new in [
             SessionActivity.working,

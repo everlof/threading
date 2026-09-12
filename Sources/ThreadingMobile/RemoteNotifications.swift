@@ -306,6 +306,13 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         return true
     }
 
+    func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
+        Task { @MainActor [model] in
+            guard model.needsHostStorageRecovery else { return }
+            await model.refresh(reason: .foreground)
+        }
+    }
+
     func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],

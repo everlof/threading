@@ -65,6 +65,139 @@ final class RemoteResponseNotificationServiceTests: HostedStoreTestCase {
         withExtendedLifetime(observer) {}
     }
 
+    func testSessionDependencyAcrossRepliesNotifiesOnlyAfterNoticeResponse() async throws {
+        try await assertSessionDependencyCompletion(delaysReceipt: false)
+    }
+
+    func testSessionDependencyReceiptAfterResponseStillNotifiesExactlyOnce() async throws {
+        try await assertSessionDependencyCompletion(delaysReceipt: true)
+    }
+
+    private func assertSessionDependencyCompletion(delaysReceipt: Bool) async throws {
+        let sessionID = try makeSession()
+        var watches: SessionWatchCenter?
+        var deliveryReceipt: (@MainActor (SessionMessageDelivery.Outcome) -> Void)?
+        let runtime = AgentRuntime(
+            currentSessionProjection: .projectStore(ProjectStore.shared),
+            sessionDependency: { watches?.dependencyState(for: $0) ?? .none }
+        )
+        let target = SessionID()
+        var targetRuntime = SessionRuntimeSnapshot.test(activity: .working)
+        watches = SessionWatchCenter(dependencies: .init(
+            activity: { _ in targetRuntime.activity },
+            runtime: { id in id == target ? targetRuntime : runtime.runtimeSnapshot(sessionID: id) },
+            sessionTitle: { _ in "Dependency" },
+            deliverNotice: { _, _, completion in
+                if delaysReceipt { deliveryReceipt = completion }
+                else { completion(.sentNow) }
+            },
+            dependencyChanged: { runtime.sessionDependencyChanged(sessionID: $0) }
+        ))
+        defer { watches = nil }
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markRunning()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
+        defer { service.reset() }
+        let completed = expectation(description: "Session result delivered")
+        var kinds: [RemoteNotificationKind] = []
+        service.configureHostedPushSender(
+            serviceURL: { URL(string: "https://example.test")! }, isAvailable: { true }
+        ) { event, _, _ in
+            kinds.append(event.kind)
+            completed.fulfill()
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        register(service, enabledKinds: [.agentQuestion, .turnCompleted])
+        service.setMacApplicationActive(false)
+        var macPosts: [AttentionAlert] = []
+        let observer = AttentionAlertRuntimeObserver(
+            appIsActive: { false }, isSnoozed: { _ in false },
+            currentSnapshot: { runtime.runtimeSnapshot(sessionID: $0) }
+        ) { event, action in
+            guard event.sessionID == sessionID else { return }
+            if case .post(let alert) = action { macPosts.append(alert) }
+        }
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        XCTAssertEqual(watches?.arm(watcher: sessionID, target: target),
+                       .armed(awaiting: .turnSettled, expiresAfter: nil))
+
+        // Neither interim replies nor provider idle reminders finish a host-owned dependency.
+        for turn in 0..<3 {
+            terminal.activityTracker.noteTurnStarted()
+            runtime.publishRuntimeChange(sessionID: sessionID)
+            terminal.activityTracker.noteTurnFinished()
+            runtime.publishRuntimeChange(sessionID: sessionID)
+            XCTAssertEqual(runtime.activity(sessionID: sessionID), .readyWithBackgroundWork)
+            XCTAssertEqual(runtime.runtimeSnapshot(sessionID: sessionID).dependency, .awaitingSessionResult)
+            terminal.activityTracker.noteAwaitingUser(.idlePrompt)
+            runtime.publishRuntimeChange(sessionID: sessionID)
+            let drained = expectation(description: "Watch reply \(turn) drained")
+            Task { @MainActor in drained.fulfill() }
+            await fulfillment(of: [drained], timeout: 2)
+            XCTAssertTrue(kinds.isEmpty, "a sibling result is still outstanding")
+            XCTAssertTrue(macPosts.isEmpty, "Mac alerts follow the same pending outcome")
+        }
+
+        let previous = targetRuntime
+        targetRuntime = .test(activity: .idle)
+        NotificationCenter.default.post(SessionRuntimeDidChange(
+            sessionID: target,
+            transition: .init(previous: previous, current: targetRuntime), cause: .turnFinished
+        ))
+        XCTAssertEqual(runtime.activity(sessionID: sessionID), .readyWithBackgroundWork,
+                       "notice delivery is not the agent's response")
+        XCTAssertTrue(kinds.isEmpty)
+
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteTurnFinished()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        if delaysReceipt {
+            XCTAssertTrue(kinds.isEmpty, "the response cannot finish before its receipt")
+            XCTAssertEqual(runtime.activity(sessionID: sessionID), .readyWithBackgroundWork)
+            deliveryReceipt?(.sentNow)
+        }
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(kinds, [.turnCompleted])
+        XCTAssertEqual(macPosts, [.unread])
+        withExtendedLifetime(observer) {}
+    }
+
+    func testHostWaitStopAndIdlePromptDoNotWakeSnoozedSession() throws {
+        let sessionID = try makeSession()
+        let runtime = AgentRuntime(
+            currentSessionProjection: .projectStore(ProjectStore.shared),
+            sessionDependency: { _ in .awaitingSessionResult }
+        )
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markRunning()
+        terminal.activityTracker.noteTurnStarted()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        let snooze = SessionSnoozeCenter(
+            runtime: { runtime.runtimeSnapshot(sessionID: $0) }
+        )
+        snooze.snooze(sessionID, until: Date().addingTimeInterval(60))
+        defer { snooze.unsnooze(sessionID) }
+        runtime.applyLifecycle(try XCTUnwrap(HookLifecycleReport(
+            sessionID: sessionID, event: .turnFinished, payload: [:]
+        )))
+        XCTAssertTrue(snooze.isSnoozed(sessionID), "Stop is not the pending outcome's end")
+        runtime.applyLifecycle(try XCTUnwrap(HookLifecycleReport(
+            sessionID: sessionID, event: .awaitingUser,
+            payload: ["notification_type": "idle_prompt"]
+        )))
+        XCTAssertTrue(snooze.isSnoozed(sessionID), "an idle reminder does not request input")
+        runtime.applyLifecycle(try XCTUnwrap(HookLifecycleReport(
+            sessionID: sessionID, event: .awaitingUser,
+            payload: ["notification_type": "permission_prompt"]
+        )))
+        XCTAssertFalse(snooze.isSnoozed(sessionID), "a real permission still wakes the chat")
+    }
+
     func testMacObserverDoesNotReannounceRestoredUnreadReceipts() async throws {
         let sessionID = try makeSession()
         let runtime = AgentRuntime.shared

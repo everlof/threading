@@ -5,7 +5,7 @@ import XCTest
 
 /// The inspected package metadata in the same confirmation sheet used by both installation paths.
 @MainActor
-final class ExtensionInstallConfirmationRenderTests: XCTestCase {
+final class ExtensionInstallConfirmationRenderTests: HostedStoreTestCase {
     func testRendersAgentFacingToolDisclosureInTheShippingInstallSheet() throws {
         let savedTheme = AppThemePalette.current
         Design.Motion.reduceMotionOverrideForTesting = true
@@ -26,10 +26,15 @@ final class ExtensionInstallConfirmationRenderTests: XCTestCase {
 
         for (name, theme, appearanceName) in fixtures {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
-            let png = try XCTUnwrap(renderSheet(theme: theme, appearance: appearance))
-            try png.write(
-                to: directory.appendingPathComponent("extension-install-confirmation-\(name).png")
-            )
+            for agentTrust in [false, true] {
+                let png = try XCTUnwrap(renderSheet(
+                    theme: theme, appearance: appearance, agentTrust: agentTrust
+                ))
+                let suffix = agentTrust ? "-agent" : ""
+                try png.write(to: directory.appendingPathComponent(
+                    "extension-install-confirmation-\(name)\(suffix).png"
+                ))
+            }
         }
     }
 
@@ -42,15 +47,14 @@ final class ExtensionInstallConfirmationRenderTests: XCTestCase {
             .appendingPathComponent("ThreadingRenders", isDirectory: true)
     }
 
-    private func renderSheet(theme: AppTheme, appearance: NSAppearance) -> Data? {
+    private func renderSheet(
+        theme: AppTheme, appearance: NSAppearance, agentTrust: Bool
+    ) -> Data? {
         AppThemePalette.set(theme)
 
-        let parent = NSWindow(
-            contentRect: NSRect(x: 120, y: 120, width: 900, height: 640),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
+        let shell = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        guard let parent = shell.window else { return nil }
+        parent.setContentSize(NSSize(width: 1100, height: 800))
         parent.appearance = appearance
         parent.isReleasedWhenClosed = false
         parent.animationBehavior = .none
@@ -59,9 +63,17 @@ final class ExtensionInstallConfirmationRenderTests: XCTestCase {
 
         let request = ExtensionInstallConfirmation.request(
             for: proposal(),
-            prompt: .installUnsignedExtension
+            prompt: agentTrust ? .approveAgentExtensionInstall : .installUnsignedExtension
         )
-        let alert = ConfirmationAlert.makeAlert(request)
+        let alert = agentTrust
+            ? ConfirmationAlert.makeAlert(AgentExtensionInstallConfirmation.request(
+                from: request, agentName: "Build Tools development"
+            ))
+            : ConfirmationAlert.makeAlert(request)
+        XCTAssertEqual(alert.buttons.count, agentTrust ? 3 : 2)
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r")
+        XCTAssertNotEqual(alert.buttons[1].keyEquivalent, "\r")
+        XCTAssertFalse(alert.showsSuppressionButton)
         alert.beginSheetModal(for: parent)
         defer { alert.dismiss() }
 

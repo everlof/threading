@@ -43,6 +43,7 @@ final class SessionWatchCenter {
         let deliverNotice: (
             String, SessionID, @escaping @MainActor (SessionMessageDelivery.Outcome) -> Void
         ) -> Void
+        var dependencyChanged: (SessionID) -> Void = { _ in }
     }
 
     // MARK: - Arming
@@ -68,7 +69,8 @@ final class SessionWatchCenter {
             activity: { AgentRuntime.shared.activity(sessionID: $0) },
             runtime: { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) },
             sessionTitle: { ProjectStore.shared.session(withID: $0)?.displayTitle },
-            deliverNotice: { SessionMessageDelivery.deliver($0, to: $1, completion: $2) }
+            deliverNotice: { SessionMessageDelivery.deliver($0, to: $1, completion: $2) },
+            dependencyChanged: { AgentRuntime.shared.sessionDependencyChanged(sessionID: $0) }
         )
     )
 
@@ -77,14 +79,46 @@ final class SessionWatchCenter {
         let target: SessionID
     }
 
+    /// Waiting for an existing result holds the caller's outcome open. Watching an idle
+    /// sibling for a future restart is only observation and must not prevent completion.
+    private enum WatchIntent {
+        case awaitResult
+        case observeNextStart
+
+        var edge: ControlWatchEdge {
+            switch self {
+            case .awaitResult: .turnSettled
+            case .observeNextStart: .turnStarted
+            }
+        }
+    }
+
+    /// Ownership passes from the watch to its notice, then to the next foreground turn.
+    /// Removing a fired watch is not completion: delivery may still be held or queued.
+    private enum ResultPhase {
+        case awaitingTarget
+        case noticeHeld
+        case delivering(followupStarted: Bool)
+        case awaitingFollowupTurn
+    }
+
+    private struct Notice {
+        let id: UUID
+        let text: String
+    }
+
     private struct Watch {
+        let id: UUID
         let armedAt: Date
-        let awaiting: ControlWatchEdge
+        let intent: WatchIntent
+        var awaiting: ControlWatchEdge { intent.edge }
         let expiresAfter: TimeInterval?
         let timer: Timer?
     }
 
     private var watches: [WatchKey: Watch] = [:]
+    private var keysByWatcher: [SessionID: Set<WatchKey>] = [:]
+    private var keysByTarget: [SessionID: Set<WatchKey>] = [:]
 
     /// Notices that fired while the watcher could not take them — mid-turn at its own
     /// terminal, most commonly, which is exactly when a manager's worker settles. Held rather
@@ -92,7 +126,26 @@ final class SessionWatchCenter {
     /// settle edge is already on the one event stream this type observes. Only an *ambiguous*
     /// delivery is never retried: `.typedUnconfirmed` means the first copy may have landed,
     /// and a manager handed the same conclusion twice will act on it twice.
-    private var heldNotices: [SessionID: [String]] = [:]
+    private var heldNotices: [SessionID: [Notice]] = [:]
+    private var pendingResults: [SessionID: [UUID: ResultPhase]] = [:]
+
+    /// O(1) for runtime, receipt and notification hot paths; never scans other sessions.
+    func dependencyState(for watcher: SessionID) -> SessionDependencyState {
+        pendingResults[watcher]?.isEmpty == false ? .awaitingSessionResult : .none
+    }
+
+    private func setPhase(_ phase: ResultPhase?, id: UUID, watcher: SessionID) {
+        let previous = dependencyState(for: watcher)
+        if let phase {
+            pendingResults[watcher, default: [:]][id] = phase
+        } else {
+            pendingResults[watcher]?[id] = nil
+            if pendingResults[watcher]?.isEmpty == true { pendingResults[watcher] = nil }
+        }
+        if previous != dependencyState(for: watcher) {
+            dependencies.dependencyChanged(watcher)
+        }
+    }
 
     private let observations: AppEventObservations
     private let dependencies: Dependencies
@@ -137,30 +190,40 @@ final class SessionWatchCenter {
             return .invalidTimeout
         }
 
-        let held = watches.keys.filter { $0.watcher == watcher }.count
-        guard held < ControlWatchDefaults.maximumPerWatcher else {
+        // Count each watch/result once across handoff phases. This bounds armed watches,
+        // in-flight receipts and held notices together, rather than just the returned list.
+        let armedIDs = (keysByWatcher[watcher] ?? []).compactMap { watches[$0]?.id }
+        let outstanding = Set(armedIDs).union(pendingResults[watcher]?.keys.map { $0 } ?? [])
+        guard outstanding.count < ControlWatchDefaults.maximumPerWatcher else {
             return .watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher)
         }
 
         // Main-actor isolation makes this snapshot and the insertion below atomic with respect
         // to `activityChanged`. An edge can happen before the read or after the insertion, never
         // in the gap — the fail-closed property a wait-for-all caller depends on.
-        let awaiting: ControlWatchEdge = dependencies.runtime(target).hasPendingOutcome
-            ? .turnSettled
-            : .turnStarted
+        let intent: WatchIntent = dependencies.runtime(target).hasPendingOutcome
+            ? .awaitResult
+            : .observeNextStart
 
         let timer = timeout.map { timeout in
             Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.expire(key) }
             }
         }
+        let id = UUID()
         watches[key] = Watch(
+            id: id,
             armedAt: now(),
-            awaiting: awaiting,
+            intent: intent,
             expiresAfter: timeout,
             timer: timer
         )
-        return .armed(awaiting: awaiting, expiresAfter: timeout)
+        keysByWatcher[watcher, default: []].insert(key)
+        keysByTarget[target, default: []].insert(key)
+        if case .awaitResult = intent {
+            setPhase(.awaitingTarget, id: id, watcher: watcher)
+        }
+        return .armed(awaiting: intent.edge, expiresAfter: timeout)
     }
 
     func isWatching(watcher: SessionID, target: SessionID) -> Bool {
@@ -176,13 +239,34 @@ final class SessionWatchCenter {
         let target = event.sessionID
         let runtime = event.transition.current
 
+        // A delivered notice owes a response, not merely successful typing. Transfer that
+        // obligation only once a new turn exists, so there is never an idle completion gap.
+        if event.transition.beganTurn {
+            let pending = pendingResults[target] ?? [:]
+            // One queued notice starts one response turn. Consuming every accepted notice
+            // here would finish the caller after the first of several native queued replies.
+            // A synchronous delivery gets first claim on its own start, before older queued
+            // notices; its receipt still decides whether that handoff actually succeeded.
+            if let delivering = pending.first(where: {
+                if case .delivering(followupStarted: false) = $0.value { return true }
+                return false
+            }) {
+                setPhase(.delivering(followupStarted: true), id: delivering.key, watcher: target)
+            } else if let accepted = pending.first(where: {
+                if case .awaitingFollowupTurn = $0.value { return true }
+                return false
+            }) {
+                setPhase(nil, id: accepted.key, watcher: target)
+            }
+        }
+
         // Drain before anything else: a dormant or limit-parked session cannot take a
         // delivery, so those states hold rather than spend an attempt that must fail.
         if runtime.isPromptReady {
             drainHeldNotices(for: target)
         }
 
-        for key in watches.keys.filter({ $0.target == target }) {
+        for key in keysByTarget[target] ?? [] {
             // A watch whose timer has not been serviced — the run loop was blocked, the machine
             // slept — is retired rather than spent on an edge it has already outlived.
             guard let watch = watches[key] else { continue }
@@ -209,8 +293,13 @@ final class SessionWatchCenter {
     /// delivery that synchronously moves the watcher's own activity must not re-enter here and
     /// find the same watch still armed.
     private func fire(_ key: WatchKey, notice: String) {
-        watches.removeValue(forKey: key)?.timer?.invalidate()
-        attemptDelivery(notice, to: key.watcher)
+        guard let watch = watches.removeValue(forKey: key) else { return }
+        watch.timer?.invalidate()
+        keysByWatcher[key.watcher]?.remove(key)
+        if keysByWatcher[key.watcher]?.isEmpty == true { keysByWatcher[key.watcher] = nil }
+        keysByTarget[key.target]?.remove(key)
+        if keysByTarget[key.target]?.isEmpty == true { keysByTarget[key.target] = nil }
+        attemptDelivery(Notice(id: watch.id, text: notice), to: key.watcher)
     }
 
     private func expire(_ key: WatchKey) {
@@ -230,14 +319,25 @@ final class SessionWatchCenter {
     /// its input held — gets the notice held for its own settle edge. Only `.typedUnconfirmed`
     /// ends the story with a ledger record: the first copy may have landed, and the one thing
     /// worse than a manager not hearing a conclusion is a manager acting on it twice.
-    private func attemptDelivery(_ notice: String, to watcher: SessionID) {
-        dependencies.deliverNotice(notice, watcher) { [weak self] outcome in
+    private func attemptDelivery(_ notice: Notice, to watcher: SessionID) {
+        // Install before delivery: a native send or a terminal receipt can synchronously
+        // publish the follow-up turn. Its beginning must see and consume this exact token.
+        setPhase(.delivering(followupStarted: false), id: notice.id, watcher: watcher)
+        dependencies.deliverNotice(notice.text, watcher) { [weak self] outcome in
+            guard let self else { return }
             switch outcome {
-            case .sentNow, .queuedBehindTurn:
-                return
+            case .sentNow:
+                if case .delivering(followupStarted: true) = self.pendingResults[watcher]?[notice.id] {
+                    self.setPhase(nil, id: notice.id, watcher: watcher)
+                } else {
+                    self.setPhase(.awaitingFollowupTurn, id: notice.id, watcher: watcher)
+                }
+            case .queuedBehindTurn:
+                self.setPhase(.awaitingFollowupTurn, id: notice.id, watcher: watcher)
             case .busyTerminal, .noLiveSurface, .notTaken:
-                self?.hold(notice, for: watcher, after: outcome)
+                self.hold(notice, for: watcher, after: outcome)
             case .typedUnconfirmed:
+                self.setPhase(.awaitingFollowupTurn, id: notice.id, watcher: watcher)
                 EventLog.shared.record(.session, "Session watch notice was not delivered", [
                     "watcher": watcher.uuidString.lowercased(),
                     "outcome": String(describing: outcome),
@@ -246,7 +346,8 @@ final class SessionWatchCenter {
         }
     }
 
-    private func hold(_ notice: String, for watcher: SessionID, after outcome: SessionMessageDelivery.Outcome) {
+    private func hold(_ notice: Notice, for watcher: SessionID, after outcome: SessionMessageDelivery.Outcome) {
+        setPhase(.noticeHeld, id: notice.id, watcher: watcher)
         var held = heldNotices[watcher, default: []]
         guard held.count < ControlWatchDefaults.maximumHeldNotices else {
             EventLog.shared.record(.session, "Session watch notice was dropped — held queue full", [

@@ -22,6 +22,9 @@ struct ThreadingMobileHostedRoot: View {
                 // so the first foreground is this one.
                 model.startDiscovery()
                 model.startNetworkPathWatch()
+                if model.needsHostStorageRecovery {
+                    await model.refresh(reason: .foreground)
+                }
                 if !model.isEphemeralTerminalWireFixture {
                     await notifications.clearTurnCompletionsOnApplicationActivation()
                     await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)

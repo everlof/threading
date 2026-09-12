@@ -2,8 +2,8 @@ import Foundation
 
 /// Executes noninteractive extension-authoring commands without a window or confirmation UI.
 ///
-/// Installation and visual preview remain UI adapters. Catalog/schema validation, project
-/// scaffolding, and commit-before-success project registration are application behavior.
+/// Installation belongs to AgentExtensionInstallService; visual preview remains a UI adapter.
+/// Catalog/schema validation, scaffolding and durable project registration are application behavior.
 @MainActor
 final class ExtensionAuthoringCommandService {
     private let projects: ProjectStore

@@ -303,6 +303,7 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func extensionScaffoldProject(_ arguments: ExtensionScaffoldProjectArguments) -> MCPToolResult
   func extensionProposeInstall(
     _ arguments: ExtensionProposeInstallArguments,
+    for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
   func extensionDescribeComponent(

@@ -246,7 +246,7 @@ sibling can only call `list_sessions` again and again — each call spending a t
 usage to learn nothing, and the polling interval deciding how late the answer arrives.
 
 **The boundary is the one the app already has, in both directions.** `SessionWatchCenter`
-(Core/Control) watches `SessionActivityDidChange` across `hasTurnInFlight`: the agent's own turn
+(Core/Control) watches `SessionRuntimeDidChange` across `hasPendingOutcome`: the agent's own turn
 report where a runtime gives one, the output heuristic where it does not. A watched turn also
 settles on the two endings that are not a finished answer and are just as final for someone
 waiting on it: `.dormant` (the agent exited) and `.limitReached` (nothing runs there until the
@@ -254,7 +254,7 @@ window resets). A watch that ignored those would leave an agent waiting on a ses
 never speak again.
 
 **Arming is the fail-closed seam.** The centre is main-actor isolated; it reads the target's
-`hasTurnInFlight` value and inserts a watch for the opposite edge without an `await` or queue hop
+`hasPendingOutcome` value and inserts a watch for the opposite edge without an `await` or queue hop
 between them. An edge can therefore happen before the snapshot or after the guard exists, never
 in the gap. The arm outcome says which edge it captured. A repeated arm returns the edge already
 held rather than inferring from a newer overview.
@@ -265,6 +265,32 @@ restart while the other chats finish, and a chat that just restarted is guarded 
 If it changed twice before the caller re-armed, the fresh atomic snapshot captures its current
 phase; for the all-settled predicate, current phase is the fact that matters. Silence is never
 interpreted as continued idleness without a watch on that edge.
+
+**The watcher also owes an outcome.** `WatchIntent.awaitResult` means a sibling already has
+unfinished work; `observeNextStart` only guards an idle sibling against restarting. The former
+adds a host-owned `SessionDependencyState.awaitingSessionResult` to the watcher's runtime; the
+latter does not hold completion open. Provider background task arrays cannot describe host
+watches, so `AgentRuntime` composes this independent fact with both terminal and native snapshots.
+A ready prompt with that dependency uses `readyWithBackgroundWork`, suppresses completed-result
+receipts and alerts, and still accepts input. Genuine questions and usage limits keep precedence.
+
+`ResultPhase` transfers ownership from `awaitingTarget` through `noticeHeld`,
+`delivering(followupStarted:)` and `awaitingFollowupTurn` into the next foreground turn. Spending a watch, reaching its timeout,
+queueing its notice, or confirming the paste does **not** complete the caller's outcome. A held
+notice survives unrelated turns; an accepted notice transfers its obligation only when the next
+turn begins. Each accepted notice owns one response turn: the first of several queued native
+notices must not consume all their obligations. Other outstanding siblings remain pending. A start during an unconfirmed delivery is recorded,
+not consumed: a later refusal still holds its notice. If a confirmed response finishes before
+its delivery receipt returns, the final dependency edge owns its single unread receipt.
+Ambiguous typing is never retried and
+retains its obligation until another turn supplies evidence of progress.
+
+The eight-entry admission budget covers armed watches and all notice/result phases together.
+Runtime reads are O(1); arming and follow-up processing examine at most eight caller entries.
+Target edges use an index and visit only watches affected by that target, never all project
+sessions. Typical callers hold 1–4 dependencies; capacity and multi-result regression tests cover
+the bound. This is host-owned operational policy, using the existing background-work presentation;
+extensions do not decide when a host dependency has completed.
 
 **One-shot, in memory, bounded.** The watch is spent when it fires; re-arming is another call, and
 it lives only with the app run. With no `timeout_minutes`, the watch has no wall-clock expiry: it

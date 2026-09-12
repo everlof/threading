@@ -7809,6 +7809,17 @@
         }
       }
     },
+    "Reading your protected pairing credentials." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser dina skyddade parkopplingsuppgifter."
+          }
+        }
+      }
+    },
     "Reads the chat, writes nothing." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8359,6 +8370,17 @@
         }
       }
     },
+    "Restoring saved Macs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återställer sparade Mac-datorer"
+          }
+        }
+      }
+    },
     "Resume the agent’s own TUI with colors, scrollback, and mobile terminal keys intact." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8377,6 +8399,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återupptar på din Mac…"
+          }
+        }
+      }
+    },
+    "Retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök igen"
           }
         }
       }
@@ -8553,6 +8586,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Körs på %@"
+          }
+        }
+      }
+    },
+    "Saved Macs are unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparade Mac-datorer är inte tillgängliga"
           }
         }
       }
@@ -11602,6 +11646,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kunde inte nå rapporttjänsten. Rapporten är säkert sparad på enheten och skickas igen när appen är aktiv."
+          }
+        }
+      }
+    },
+    "Threading couldn’t read your saved pairings. Unlock your iPhone to try again automatically, or tap Retry. Your saved credentials have not been replaced." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte läsa dina sparade parkopplingar. Lås upp din iPhone för att försöka igen automatiskt, eller tryck på Försök igen. Dina sparade inloggningsuppgifter har inte ersatts."
           }
         }
       }

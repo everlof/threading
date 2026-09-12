@@ -719,7 +719,7 @@ final class RemoteSessionMirrorRegistry {
                 sessionID: session.id,
                 participantID: participantID
             )),
-            continuation: RemoteSessionContinuation(runtime.continuation),
+            continuation: RemoteSessionContinuation(runtime),
             projectName: projectName,
             projectID: projectID.uuidString,
             isAvailable: available,
@@ -3900,10 +3900,14 @@ private extension RemoteSessionAttentionDTO {
     }
 }
 
-private extension RemoteSessionContinuation {
-    init?(_ continuation: SessionContinuationState) {
-        switch continuation {
-        case .none: return nil
+extension RemoteSessionContinuation {
+    /// The legacy activity field flattens ready-with-background-work to idle. This additive,
+    /// lossless discriminator preserves the host dependency on both current and older clients.
+    init?(_ runtime: SessionRuntimeSnapshot) {
+        switch runtime.continuation {
+        case .none:
+            guard runtime.dependency.isPending else { return nil }
+            self = .sessionDependency
         case .delegated: self = .delegated
         case .standing: self = .standing
         }

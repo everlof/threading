@@ -2904,6 +2904,10 @@ Sessions; Pair and Forget live under Macs. Appearance opens the same scrollable 
 page as Settings. Keeping those choices behind their named destination means the menu itself never
 depends on iOS's over-height menu scrolling.
 
+If your saved Macs are temporarily unavailable after the iPhone was locked, Threading restores
+them automatically when you unlock and open the app. The recovery screen also offers **Retry**.
+It preserves your saved pairing credentials; you do not need to pair again.
+
 **Most recent** orders chats by when work last happened, with pinned chats first. Starting a turn,
 steering an ongoing turn, and finishing work update that time. The age beside each chat uses the
 same time. Restarting an idle agent process alone does not move a chat up the list. Older records
@@ -4034,6 +4038,11 @@ arrives as an ordinary visible message in the waiting session's conversation, so
 what it was told and when. Each watch is one-shot; re-arming after each notice keeps a guard on a
 finished sibling while other chats are still running, so a restart cannot be mistaken for an
 all-finished project.
+
+While a chat waits for a sibling's existing result, it remains ready for input with background
+work outstanding. Interim replies and idle reminders do not announce it as finished. The wait
+continues through delivery of the notice until the chat handles it; observing an already-finished
+sibling for a possible restart does not by itself keep the observing chat unfinished.
 
 The canonical use is a side chat reporting its conclusion back to the session it was forked
 from — ask a side chat to "report back when done" and it can, or use **Send Result to
@@ -5492,6 +5501,12 @@ This covers extensions as well. An extension's own settings page and every field
 as are the fields an extension adds to one of Threading's pages — those name their owner in the path
 ("Tools › Marketeer — Capture"). Each installed extension is itself a result: type its name to land
 on it under **Settings ▸ Extensions**.
+
+When an agent proposes an extension installation or update, choose **Allow all installs from this
+agent** to trust that specific chat until you revoke it. It can then install and update extensions,
+including capability changes, without repeated prompts—even after restarts. Other chats still ask.
+Manage these grants under **Settings ▸ Extensions ▸ Trusted agents**, where **Revoke** restores
+prompts for that chat. New extensions are still installed disabled; updates preserve enablement.
 
 ## Keyboard Shortcuts
 

@@ -155,6 +155,14 @@ only a later turn boundary without that shell can complete its outcome. The ship
 regression drives parsed hook reports through `AgentRuntime`, the Mac alert observer and the phone
 push sender, proving silence through repeated yields and one alert after the result.
 
+Host session watches participate in that same outcome. A watch waiting for a sibling's existing
+result adds an independent typed dependency to the caller's runtime, while a watch observing a
+future restart does not. The dependency survives repeated replies, idle-prompt reminders, held
+notice delivery and accepted queueing, then hands off to the next foreground turn. Completion
+and read-receipt consumers see the composed runtime rather than the provider's empty background
+array. The shipping-service regression drives watch registration, runtime composition, Mac alert
+policy and the phone sender through three interim replies and one final response.
+
 ## One notification tap is one navigation transaction
 
 iOS can describe the same response in two lifecycle places: the user-notification-center

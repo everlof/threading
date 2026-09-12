@@ -866,6 +866,17 @@ Keychain. Both Mac stores use the data-protection Keychain when the signed build
 under the same shared probe as the browser vault below. An ad-hoc build falls back to the login
 Keychain and Settings states that weaker boundary rather than claiming the Release guarantee.
 
+The iPhone defers pairing reads until protected data is available. Notification-only background
+launches leave the pairing inventory unresolved, rather than treating locked Keychain storage as
+an empty list. Unlock, initial foreground, foreground refresh and explicit Retry share one
+asynchronous read; decoding stays off-main. Only a validated read (including a genuinely missing
+item) enables writes. Failed reads preserve the selected Mac, widget association and credential
+bytes; a relock during the read discards its publication and keeps writes disabled. Corrupt or
+unsupported data remains unavailable and cannot be replaced by a pairing attempt. Healthy
+foregrounds do not reread the store. One latest notification/widget navigation intent waits for
+restoration; duplicate notification callbacks retain their existing deduplication contract. The
+recovery screen is host-owned credential custody UI.
+
 APNs registrations use a third, separate versioned Keychain item under the same storage policy.
 It contains only device-bound delivery metadata — share id, device id, APNs token, environment,
 and enabled/sounding kinds — never a bearer or authorization. On every Remote Access start the

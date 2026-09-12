@@ -96,7 +96,12 @@ final class SessionSnoozeCenter {
               session.isSnoozed(at: date),
               let snoozedAt = session.snoozedAt,
               date >= snoozedAt else { return }
-        if reason == .turnCompleted, !session.hadTurnInFlightWhenSnoozed { return }
+        if reason == .turnCompleted {
+            // Renderer callbacks can announce a foreground Stop before their composed runtime
+            // settles. Only the outcome boundary may spend a completion wake.
+            guard session.hadTurnInFlightWhenSnoozed,
+                  !runtime(sessionID).hasPendingOutcome else { return }
+        }
 
         projectStore.wakeSnoozedSession(sessionID, reason: reason, at: date)
         deadlines[sessionID] = nil

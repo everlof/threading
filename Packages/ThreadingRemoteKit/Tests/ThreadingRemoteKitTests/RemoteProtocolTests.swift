@@ -460,6 +460,7 @@ final class RemoteProtocolTests: XCTestCase {
         for continuation in [
             RemoteSessionContinuation.delegated,
             .standing,
+            .sessionDependency,
             .unknown("future-continuation")
         ] {
             let summary = RemoteSessionSummaryDTO(

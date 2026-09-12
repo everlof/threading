@@ -7645,16 +7645,18 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        handler.extensionProposeInstall(arguments, completion: completion)
+        handler.extensionProposeInstall(arguments, for: sessionID, completion: completion)
       },
       description: """
         Inspect a built .threadingextension package or unpacked package directory, show \
         its runtime and complete capability request to the user, and install it only \
-        after explicit approval. A fresh installation is always left disabled. When \
+        after explicit approval or an existing user-granted trust for this calling chat. \
+        A fresh installation is always left disabled. When \
         the package's identifier is already installed this becomes an update \
-        proposal: the user approves the capability delta, the running generation is \
+        proposal: approval (or that chat’s persistent install trust) covers the capability \
+        delta, the running generation is \
         stopped before the swap, and enablement is preserved. This tool cannot \
-        enable a new extension or grant capabilities silently.
+        enable a new extension. Only the user can grant or revoke persistent install trust.
         """,
       inputSchema: MCPInputSchema(
         properties: [
