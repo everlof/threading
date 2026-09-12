@@ -161,6 +161,15 @@ struct BrowserAnnotationTargetProbe: Decodable, Equatable {
     }
 }
 
+/// Live geometry only; note text never crosses into WebKit.
+struct BrowserAnnotationAnchorPosition: Decodable {
+    let token: String
+    let anchored: Bool
+    let visible: Bool
+    let x: Double?
+    let y: Double?
+}
+
 struct BrowserActionOutcome: Decodable, Equatable {
     let ok: Bool
     let message: String
@@ -931,7 +940,7 @@ enum BrowserAgentScripts {
         function visitElement(element, depth) {
           if (!element || nodes.length >= limit || seenElements.has(element)) return;
           seenElements.add(element);
-          if (!hasWorkBudget() || !visible(element)) return;
+          if (!hasWorkBudget() || !ancestorsAllowVisibility(element)) return;
 
           const rect = element.getBoundingClientRect();
           const offset = frameOffset(element);
@@ -941,10 +950,14 @@ enum BrowserAgentScripts {
             right: rect.right + offset.x,
             bottom: rect.bottom + offset.y
           };
-          if (viewportMode && (
-            globalRect.right <= 0 || globalRect.bottom <= 0
-              || globalRect.left >= innerWidth || globalRect.top >= innerHeight
-          )) return;
+          // A wrapper's box is not a clipping boundary. display:contents, zero-size portals
+          // and offscreen ancestors can all contain fixed/absolute children on screen.
+          // Suppress only this node; still traverse its children within the same work budget.
+          const hasVisibleBox = rect.width > 0 && rect.height > 0;
+          const includeElement = hasVisibleBox && (!viewportMode || (
+            globalRect.right > 0 && globalRect.bottom > 0
+              && globalRect.left < innerWidth && globalRect.top < innerHeight
+          ));
 
           const role = roleOf(element);
           const isDragTarget = element.matches(
@@ -956,9 +969,9 @@ enum BrowserAgentScripts {
             || element.matches(
               'button,a[href],input,select,textarea,[contenteditable="true"],[tabindex]'
             );
-          const name = nameOf(element, role);
-          const meaningful = isInteractive || semanticRoles.has(role)
-            || (name && element.children.length === 0);
+          const name = includeElement ? nameOf(element, role) : '';
+          const meaningful = includeElement && (isInteractive || semanticRoles.has(role)
+            || (name && element.children.length === 0));
           const nextDepth = meaningful ? depth + 1 : depth;
 
           if (meaningful) {
@@ -991,7 +1004,7 @@ enum BrowserAgentScripts {
 
         function visit(root, depth) {
           if (!root || nodes.length >= limit || truncationReason) return;
-          for (const element of Array.from(root.children || [])) {
+          for (const element of root.children || []) {
             if (nodes.length >= limit || truncationReason) return;
             visitElement(element, depth);
           }
@@ -1516,10 +1529,27 @@ enum BrowserAgentScripts {
         });
         """#
 
+    private static let annotationPickingPrelude = targetPrelude + #"""
+        function annotationComponent(element, precise) {
+          if (precise) return element;
+          let candidate = element;
+          for (let depth = 0; candidate && depth < 32; depth += 1) {
+            if (candidate.matches('html,body,iframe')) break;
+            const role = roleOf(candidate);
+            if ((role && !['generic', 'group', 'region', 'presentation', 'none'].includes(role))
+                || candidate.matches('p,h1,h2,h3,h4,h5,h6,li,td,th,img,pre,blockquote,label')
+                || ['data-testid', 'data-test-id', 'data-test', 'data-qa'].some(
+                  key => candidate.hasAttribute(key))) return candidate;
+            candidate = candidate.parentElement || candidate.getRootNode?.()?.host;
+          }
+          return element;
+        }
+        """#
+
     /// A bounded, snapshot-independent hit test for the native annotation overlay.
     /// Ordinary picking promotes to a nearby control or text element; precision keeps the
     /// deepest hit. Never mint refs, read form values, or scan a whole page for a hover label.
-    static let annotationTargetProbe = targetPrelude + #"""
+    static let annotationTargetProbe = annotationPickingPrelude + #"""
         const missed = JSON.stringify({
           ok: false, ref: null, tag: null, role: null, name: null,
           x: 0, y: 0, width: 0, height: 0
@@ -1527,27 +1557,10 @@ enum BrowserAgentScripts {
         const point = resolvePointTarget();
         if (!point || point.message || !point.element) return missed;
 
-        const maximumAncestors = 32;
         const maximumLabelNodes = 128;
         const maximumLabelCharacters = 80;
         const boundedClean = value => clean(String(value || '').slice(0, 512), maximumLabelCharacters);
-        function component(candidate) {
-          const role = roleOf(candidate);
-          return (role && !['generic', 'group', 'region', 'presentation', 'none'].includes(role))
-            || candidate.matches('p,h1,h2,h3,h4,h5,h6,li,td,th,img,pre,blockquote,label')
-            || ['data-testid', 'data-test-id', 'data-test', 'data-qa'].some(
-              key => candidate.hasAttribute(key)
-            );
-        }
-        let chosen = point.element;
-        if (!precise) {
-          let candidate = chosen;
-          for (let depth = 0; candidate && depth < maximumAncestors; depth += 1) {
-            if (candidate.matches('html,body,iframe')) break;
-            if (component(candidate)) { chosen = candidate; break; }
-            candidate = candidate.parentElement || candidate.getRootNode?.()?.host;
-          }
-        }
+        const chosen = annotationComponent(point.element, precise);
 
         function boundedText(element) {
           if (!element) return '';
@@ -1590,6 +1603,92 @@ enum BrowserAgentScripts {
           width: rect.width * point.scaleX,
           height: rect.height * point.scaleY
         });
+        """#
+
+    /// Frame notes retain a weak DOM target in the isolated client world. Resolving a pin
+    /// walks only its own frame chain (at most 12), never the page's collection of frames.
+    private static let annotationAnchorPrelude = annotationPickingPrelude + #"""
+        const anchors = globalThis.__threadingAnnotationAnchors ||= new Map();
+        function anchorPosition(token) {
+          const anchor = anchors.get(token);
+          const result = { token, anchored: !!anchor, visible: false, x: null, y: null };
+          if (!anchor) return result;
+          const element = anchor.element.deref();
+          if (!element?.isConnected) return result;
+          let doc = element.ownerDocument;
+          const rect = element.getBoundingClientRect();
+          if (!(rect.width > 0 && rect.height > 0)) return result;
+          let px = rect.left + rect.width * anchor.u;
+          let py = rect.top + rect.height * anchor.v;
+          let hit = deepestElementFromPoint(doc, px, py);
+          let visible = false;
+          for (let depth = 0; hit && depth < 32; depth += 1) {
+            if (hit === element) { visible = true; break; }
+            hit = hit.parentElement || hit.getRootNode?.()?.host;
+          }
+          for (let depth = 0; doc !== document && depth < 12; depth += 1) {
+            let frame = null;
+            try { frame = doc.defaultView?.frameElement; } catch (_) {}
+            // A replaced frame document must not inherit the previous document's note.
+            if (!frame?.isConnected || frame.contentDocument !== doc) return result;
+            const frameRect = frame.getBoundingClientRect();
+            const sx = frameRect.width / frame.offsetWidth;
+            const sy = frameRect.height / frame.offsetHeight;
+            if (!(sx > 0 && sy > 0)) return result;
+            visible &&= px >= 0 && py >= 0 && px < frame.clientWidth && py < frame.clientHeight;
+            px = frameRect.left + (frame.clientLeft + px) * sx;
+            py = frameRect.top + (frame.clientTop + py) * sy;
+            doc = frame.ownerDocument;
+            visible &&= deepestElementFromPoint(doc, px, py) === frame;
+          }
+          if (doc !== document) return result;
+          return { token, anchored: true, visible, x: px + scrollX, y: py + scrollY };
+        }
+        """#
+
+    static let captureAnnotationAnchor = annotationAnchorPrelude + #"""
+        const point = resolvePointTarget();
+        const element = point?.element ? annotationComponent(point.element, precise) : null;
+        // Ordinary page notes retain their existing document-coordinate behavior. An opaque
+        // cross-origin frame is a region of the outer page; never read its private contents.
+        if (element && (element.ownerDocument !== document || element.matches('iframe'))) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            anchors.set(token, {
+              element: new WeakRef(element),
+              u: (point.clientX - rect.left) / rect.width,
+              v: (point.clientY - rect.top) / rect.height
+            });
+            // Observe only documents that actually own a note or one of its frame ancestors.
+            // The callback consumes no mutation list, and shares the scroll observer's RAF.
+            const tracking = globalThis.__threadingAnnotationTracking ||= {
+              observer: new MutationObserver(() => globalThis.__threadingAnnotationViewportChanged?.()),
+              documents: new WeakSet()
+            };
+            let doc = element.ownerDocument;
+            for (let depth = 0; doc && depth < 13; depth += 1) {
+              if (!tracking.documents.has(doc)) {
+                tracking.documents.add(doc);
+                tracking.observer.observe(doc, {
+                  subtree: true, childList: true, characterData: true,
+                  attributes: true, attributeFilter: ['style', 'class', 'hidden']
+                });
+              }
+              if (doc === document) break;
+              doc = doc.defaultView?.frameElement?.ownerDocument;
+            }
+          }
+        }
+        return JSON.stringify(anchorPosition(token));
+        """#
+
+    static let annotationAnchorPositions = annotationAnchorPrelude + #"""
+        for (const token of releasedTokens) anchors.delete(token);
+        if (!anchors.size && globalThis.__threadingAnnotationTracking) {
+          globalThis.__threadingAnnotationTracking.observer.disconnect();
+          delete globalThis.__threadingAnnotationTracking;
+        }
+        return JSON.stringify(tokens.map(anchorPosition));
         """#
 
     /// Focuses one exact password field for visible user takeover without reading or accepting
@@ -1871,7 +1970,11 @@ enum BrowserAgentScripts {
       if (!handler) return;
 
       let scheduled = false;
+      let frameRequest = 0;
+      let fallbackTimer = 0;
       const report = () => {
+        globalThis.cancelAnimationFrame(frameRequest);
+        globalThis.clearTimeout(fallbackTimer);
         scheduled = false;
         handler.postMessage({
           scroll_x: Number(globalThis.scrollX || 0),
@@ -1881,9 +1984,13 @@ enum BrowserAgentScripts {
       const schedule = () => {
         if (scheduled) return;
         scheduled = true;
-        globalThis.requestAnimationFrame(report);
+        frameRequest = globalThis.requestAnimationFrame(report);
+        // Occluded/locked displays can suspend RAF while agents still change the page.
+        // One event-triggered fallback keeps geometry current without permanent polling.
+        fallbackTimer = globalThis.setTimeout(report, 100);
       };
 
+      globalThis.__threadingAnnotationViewportChanged = schedule;
       globalThis.addEventListener("scroll", schedule, { passive: true, capture: true });
       globalThis.addEventListener("resize", schedule, { passive: true });
       if (document.readyState === "loading") {

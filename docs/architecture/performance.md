@@ -5070,3 +5070,28 @@ WebKit execution timed separately from IPC. At 100 nodes both name paths had a 0
 read into the same production probe. These are warm Debug hover measurements, not launch or
 Release results. The regression also holds snapshot-independent picking, precise shadow targets,
 scaled-frame geometry and non-disclosure of form values.
+
+
+### Iframe annotation geometry, 2026-09-11
+
+The native pin model previously subtracted only the outer document's scroll offset. In the live
+WebKit fixture, scrolling a nested iframe by 60 CSS pixels under scales 0.75 and 0.8 left the pin
+at y=222 instead of y=186; the baseline regression failed. Frame notes now retain weak targets in
+WebKit's isolated world and resolve their own bounded ancestor chain (12 frames, 32 component
+ancestors), without searching the page's frame or DOM collections. Native state is still scalar
+pin geometry and one editor; no per-note view trees or note text enter WebKit.
+
+The contract is 5–10 ordinary notes and a 200-note stress batch. Scroll, resize and relevant DOM
+mutations share one event-triggered RAF invalidation, with a single 100 ms timeout fallback for
+occluded renderers. This matters for agent use too: a locked display paused RAF, and the first
+native tests retained old coordinates until another operation forced a refresh. The fallback
+fixed that reproduction without introducing a repeating poll. One native geometry call runs at a
+time, with one pending invalidation. Deleting the last anchor disconnects mutation observation.
+
+`BrowserAnnotationEditingTests.testIframeAnchorResolutionHandlesTwoHundredPins` resolves 200
+pins through two scaled frames and an open shadow root, then proves anchor and observer cleanup.
+Five Debug WebKit samples on macOS 26.5 measured 1 ms median / 1 ms maximum in the final focused
+run (an earlier run was 1 / 2 ms). This measures JavaScript geometry resolution, excluding fixture
+construction, bridge transport, native drawing and compositor latency. The shipping native
+scroll/edit/clip/replacement tests passed with the display locked; keyboard activation and live
+compositor timing require an unlocked display and are separate checks.

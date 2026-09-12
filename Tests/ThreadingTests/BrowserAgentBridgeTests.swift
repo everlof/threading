@@ -3759,6 +3759,27 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             viewport.agentText
         )
 
+        // Layout wrappers are not visibility boundaries: fixed controls and display:contents
+        // children can paint even when their parent's own box is empty or off the viewport.
+        _ = try await browser.evaluate(
+            #"""
+            document.body.innerHTML = `
+              <div style="width:0;height:0"><button style="position:fixed;left:20px;top:20px">Zero wrapper</button></div>
+              <div style="display:contents"><button style="position:fixed;left:20px;top:70px">Contents wrapper</button></div>
+              <div style="position:absolute;top:5000px;width:10px;height:10px"><button style="position:fixed;left:20px;top:120px">Offscreen wrapper</button></div>
+              <div hidden><button>Hidden decoy</button></div>
+              <div aria-hidden="true"><button>ARIA decoy</button></div>`;
+            window.scrollTo(0, 0); true
+            """#
+        )
+        for viewportOnly in [false, true] {
+            let wrappers = try await browser.agentSnapshot(maximumNodes: 30, viewportOnly: viewportOnly)
+            for name in ["Zero wrapper", "Contents wrapper", "Offscreen wrapper"] {
+                XCTAssertTrue(wrappers.nodes.contains { $0.name == name }, wrappers.agentText)
+            }
+            XCTAssertFalse(wrappers.nodes.contains { ($0.name ?? "").contains("decoy") }, wrappers.agentText)
+        }
+
         _ = try await browser.evaluate(
             """
             document.body.replaceChildren();

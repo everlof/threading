@@ -25,11 +25,8 @@ final class BrowserAnnotationOverlay: ThemedControl {
 
     @MainActor
     private enum Layout {
+        static let editorMaximumWidth: CGFloat = 360
         static let markerDiameter: CGFloat = Design.Size.chipHeight
-        /// Computed, not stored: a `static let` resolves once and keeps the weight of whichever
-        /// theme happened to be current at first draw — for the rest of the process, not merely
-        /// until the next layout. The diameter and the inset above are fixed tokens and may store.
-        static var markerBorderWidth: CGFloat { Design.Radius.border }
         static let markerHitInset: CGFloat = Design.Spacing.tight
 
         /// The target outline is drawn at the focus ring's weight, and for the focus ring's
@@ -48,6 +45,59 @@ final class BrowserAnnotationOverlay: ThemedControl {
         static let modeBadgePadding: CGFloat = Design.Spacing.small
         static let modeBadgeGlyphGap: CGFloat = Design.Spacing.tight
         static var modeBadgeGlyphSize: CGFloat { Design.Symbol.control }
+    }
+
+    private(set) var editor: BrowserAnnotationEditor?
+    private var editorPoint: CGPoint = .zero
+
+    func showEditor(_ editor: BrowserAnnotationEditor, at point: CGPoint) {
+        removeEditor()
+        self.editor = editor
+        editorPoint = point
+        hoveredTarget = nil
+        // Size the detached form before AppKit installs autoresizing constraints for it.
+        // Mounting a zero-sized form first makes its real field/buttons fight a 0×0 parent.
+        placeEditor()
+        addSubview(editor)
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        editor.focusNote()
+        NSAccessibility.post(element: editor, notification: .layoutChanged)
+    }
+
+    func moveEditor(to point: CGPoint) {
+        guard editorPoint != point else { return }
+        editorPoint = point
+        needsLayout = true
+    }
+
+    func removeEditor() {
+        guard let editor else { return }
+        // End field editing before removing its owner from the responder chain.
+        if editor.noteField.currentEditor() != nil
+            || (window?.firstResponder as? NSView)?.isDescendant(of: editor) == true {
+            window?.makeFirstResponder(self)
+        }
+        editor.removeFromSuperview()
+        self.editor = nil
+    }
+
+    override func layout() {
+        super.layout()
+        placeEditor()
+    }
+
+    private func placeEditor() {
+        guard let editor else { return }
+        let inset = Design.Spacing.medium
+        let width = min(Layout.editorMaximumWidth, max(0, bounds.width - inset * 2))
+        let height = editor.fittingSize.height
+        let x = min(max(inset, editorPoint.x), max(inset, bounds.width - inset - width))
+        let below = editorPoint.y + Design.Size.chipHeight
+        let preferredY = below + height <= bounds.height - inset
+            ? below : editorPoint.y - height - Design.Spacing.small
+        let y = min(max(inset, preferredY), max(inset, bounds.height - inset - height))
+        editor.frame = CGRect(x: x, y: y, width: width, height: height)
     }
 
     var markers: [BrowserAnnotationMarker] = [] {
@@ -127,8 +177,9 @@ final class BrowserAnnotationOverlay: ThemedControl {
            dispatchWindow === window {
             return nil
         }
-        guard isAnnotating, bounds.contains(point) else { return nil }
-        return self
+        guard isAnnotating else { return nil }
+        // AppKit converts from the superview's coordinates and routes through the native editor.
+        return super.hitTest(point)
     }
 
     /// **Nothing at rest while the overlay is only watching.** It is a transparent sheet over a
@@ -142,7 +193,8 @@ final class BrowserAnnotationOverlay: ThemedControl {
     /// used to be left to AppKit, which documents overlapping rectangles as undefined.
     override var pointerClaims: [PointerClaim] {
         guard isAnnotating else { return [] }
-        return markers.map { marker in
+        let editorClaim = editor.map { [PointerClaim($0.frame, .arrow)] } ?? []
+        return editorClaim + markers.map { marker in
             PointerClaim(
                 markerRect(for: marker)
                     .insetBy(dx: -Layout.markerHitInset, dy: -Layout.markerHitInset),
@@ -185,13 +237,18 @@ final class BrowserAnnotationOverlay: ThemedControl {
     /// under the pointer has changed.
     var pointerLocation: CGPoint? {
         guard isAnnotating, isPointerInside, let window else { return nil }
-        return convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return editor?.frame.contains(point) == true ? nil : point
     }
 
     override func mouseMoved(with event: NSEvent) {
         // A position under an open dropdown is the menu's, not the page's — see
         // `NSView.uncoveredPointerLocation(in:)`.
         guard isAnnotating, let point = uncoveredPointerLocation(in: event) else { return }
+        if editor?.frame.contains(point) == true {
+            onTargetProbe?(nil)
+            return
+        }
         selectsDeepestElement = event.modifierFlags.contains(.option)
         onTargetProbe?(point)
     }
@@ -228,6 +285,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
 
     override func keyDown(with event: NSEvent) {
         if isAnnotating, event.keyCode == 53 {
+            if let editor { editor.onCancel?(); return }
             onDismiss?()
             return
         }
@@ -238,32 +296,26 @@ final class BrowserAnnotationOverlay: ThemedControl {
         performPrimaryAction()
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityRole() -> NSAccessibility.Role? { editor == nil ? .button : .group }
+    override func accessibilityChildren() -> [Any]? {
+        editor?.accessibilityChildren() ?? super.accessibilityChildren()
+    }
     override func accessibilityLabel() -> String? {
         L10n.string("Browser Annotation Canvas")
     }
 
     // MARK: - Drawing
 
-    /// Accent and its measured opposite make a two-tone edge on arbitrary page pixels.
-    /// The same ink labels the opaque badges; selection ink assumes an AppKit selection ground.
-    var annotationInk: NSColor { Design.Text.on(Design.Surface.accent).label }
+    /// Text is measured against the opaque face; the independent light/dark edge protects
+    /// the silhouette even when the website happens to match that face.
+    var annotationInk: NSColor { Design.Text.on(Design.Annotation.fill).label }
 
     private func strokeAnnotation(_ path: NSBezierPath, width: CGFloat) {
-        annotationInk.setStroke()
-        path.lineWidth = width + Design.Spacing.hairline * 2
-        path.stroke()
-        Design.Surface.accent.setStroke()
-        path.lineWidth = width
-        path.stroke()
+        BrowserAnnotationChrome.stroke(path, width: width)
     }
 
     private func fillAnnotationBadge(_ path: NSBezierPath) {
-        Design.Surface.accent.setFill()
-        path.fill()
-        annotationInk.setStroke()
-        path.lineWidth = Design.Spacing.hairline
-        path.stroke()
+        BrowserAnnotationChrome.fill(path)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -307,11 +359,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
     private func draw(_ marker: BrowserAnnotationMarker) {
         let rect = markerRect(for: marker)
         let path = NSBezierPath(ovalIn: rect)
-        Design.Surface.accent.setFill()
-        path.fill()
-        annotationInk.setStroke()
-        path.lineWidth = Layout.markerBorderWidth
-        path.stroke()
+        BrowserAnnotationChrome.fill(path)
 
         let value = "\(marker.id)"
         let attributes: [NSAttributedString.Key: Any] = [
@@ -340,7 +388,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         let shape = ThemedSurface.Shape(
             rect: bounds,
             radius: Design.Radius.control(fitting: bounds.size)
-        ).inset(by: width / 2)
+        ).inset(by: BrowserAnnotationChrome.outerWidth(for: width) / 2)
         strokeAnnotation(shape.path, width: width)
     }
 
@@ -404,7 +452,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         let shape = ThemedSurface.Shape(
             rect: visible,
             radius: Design.Radius.control(fitting: visible.size)
-        ).inset(by: width / 2)
+        ).inset(by: BrowserAnnotationChrome.outerWidth(for: width) / 2)
         strokeAnnotation(shape.path, width: width)
 
         drawLabel(target.label, above: visible)

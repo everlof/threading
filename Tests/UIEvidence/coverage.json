@@ -897,6 +897,27 @@
         "appearances": ["Dark"],
         "sizes": ["960×640-point product shell"]
       },
+    {
+      "id": "browser-inline-annotations",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Inline browser annotations",
+      "description": "The native note editor over a live WebKit page in the shipping detached-browser tab host.",
+      "states": ["New note", "Existing note with delete", "Empty note with disabled save", "Compact viewport", "Live theme switch", "Scrolled nested iframe", "Matching page colour", "Saturated page", "Checkerboard and busy artwork"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["430 points", "760 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/BrowserAnnotationEditingTests.swift",
+        "test": "ThreadingTests/BrowserAnnotationEditingTests/testRendersInlineEditorInBrowserHostAcrossThemesAndWidths"
+      },
+      "capture": {
+        "glob": "browser-inline-annotation-*.png"
+      }
+    },
       "source": {
         "path": "Tests/ThreadingTests/MediaInspectorTests.swift",
         "test": "ThreadingTests/MediaInspectorTests/testRendersLongCollectionRailOnFirstLayout"

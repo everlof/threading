@@ -3699,9 +3699,16 @@ Esc or the toolbar button to leave. The component under the pointer is outlined 
 pointing at the word inside a button highlights the button. Hold **Option (⌥)** to target the
 innermost element instead. You can scroll while annotating. Highlights use contrasting edges
 without tinting the selected content. Same-origin previews and open shadow roots can be inspected;
-cross-origin frames and closed shadow roots remain opaque. Notes stay in
+cross-origin frames and closed shadow roots remain opaque. Pins and outlines have light-and-dark edges to stay recognizable over matching colours and busy
+images, and the note editor has an opaque background. Notes stay in
 Threading's native UI rather than entering the page DOM, so the site cannot read or alter them.
-Click an existing pin while annotation mode is active to edit or delete it. The agent can read the
+Click to open a small note editor beside the pin, directly over the page. **Enter** or **Save**
+saves the note; **Esc** or the close button cancels that edit. You can keep scrolling while writing.
+Notes inside same-origin iframes follow their target as the frame scrolls, including nested frames.
+Pins hide when clipped or when their frame loads a different document, while the note is kept.
+Cross-origin frames can be annotated as visible regions; their internal content remains opaque.
+Clicking another point, leaving annotation mode, or navigating saves nonempty text against its
+original page. Click an existing pin to edit or delete it. The agent can read the
 notes for the currently authorized page with their document-space coordinates, clearly labelled as
 user-authored context; it cannot create or change them.
 

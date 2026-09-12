@@ -145,7 +145,11 @@ grant or evaluation retries against the replacement document, and the final snap
 again before it is returned.
 Checkable controls expose `checked`, `unchecked`, or `checked=mixed`; `browser_set_checked` is
 idempotent and uses the page's own click behavior, so an already-correct control is never inverted.
-Every mutating action returns a fresh snapshot.
+Every mutating action returns a fresh snapshot. Snapshot traversal distinguishes a node's own
+visible box from its descendants: zero-size portals, `display:contents`, and offscreen wrappers
+still get traversed because fixed or absolutely positioned children can be visible. Hidden/ARIA-hidden
+ancestors still prune their subtrees. Both document and viewport snapshots retain the same element,
+time and output caps; walking children does not first materialize an unbounded sibling array.
 `browser_history` gives the agent the same back, forward, reload, and reload-from-origin
 affordances as the native chrome. The last uses public `WKWebView.reloadFromOrigin()` to perform
 end-to-end revalidation with cache-validating conditionals when WebKit can, matching the current
@@ -372,7 +376,7 @@ and CSS-query output carry the same boundary in their own results.
 User annotations take the opposite trust path. A themed native overlay above the active WebKit
 surface owns numbered pins and note text keyed to the page URL without its fragment. It declines
 all hit testing outside annotation mode, so visible pins cannot block the page or agent actions.
-Only a scroll-coordinate observer runs in WebKit's isolated client world; no note text is injected
+Scroll observation and weak iframe target anchors run in WebKit's isolated client world; no note text is injected
 into the DOM or exposed to page JavaScript. `browser_annotations` returns the current authorized
 page's notes separately from the untrusted DOM snapshot, with explicit `user_authored` provenance
 and document-space CSS-pixel coordinates. The agent cannot create, edit, or delete them. Annotation
@@ -405,18 +409,56 @@ testing. AppKit therefore chooses WebKit once and keeps its stable recipient thr
 event is replayed and annotation mode keeps keyboard focus so Option and Escape work before the
 first pin. A dispatch-scoped context brackets only `NSApplication.sendEvent`, because AppKit's
 `currentEvent` remains the last dequeued event afterward and would make later pointer or
-accessibility hit tests pass through by mistake. The clicked document position is captured before
-the note-entry dialog runs, so movement while typing cannot relocate the new note. Notes still
-record document coordinates rather than durable DOM anchors; scrolling an inner container or
-reflowing a page can move content away from an existing pin.
+accessibility hit tests pass through by mistake. The clicked document position and page key are captured before the native inline editor opens,
+so movement while typing cannot relocate or reassign the note. One editor sits beside the selected
+pin, clamped inside the viewport without resizing WebKit or running a modal loop. Enter/Save commits;
+Escape/close cancels only that draft. Selecting another pin, leaving annotation mode, navigation,
+or changing the active pop-up saves nonempty text against the captured page before dismissing.
+Empty new drafts are discarded; unfinished text never enters `browser_annotations`. Editing and
+deleting existing notes use stable IDs rather than array positions. Focus returns to the canvas
+when the editor owned it; closing the editor never steals focus from another control.
 
-The overlay remains deliberately host-only: Threading owns picking, note provenance, focus,
-scroll routing and the origin boundary. Its routing fixture asserts the exact dispatch-scoped
+An iframe note also captures a weak target and the clicked fraction of its bounding box in the
+isolated client world. It composes up to 12 frame borders, scales and viewport translations when
+resolving the pin, so inner-frame/container scrolling, page zoom and frame movement keep the pin
+on its content. Open shadow roots inside accessible frames use the same hit test. Each containing
+frame clips its pin; occluded, detached or replaced targets hide the marker without deleting the
+native note. A live editor follows its visible pin and stays reachable when the pin is clipped.
+Agent coordinates resolve to the current top-document CSS pixels; an unavailable target retains
+its last saved coordinates. Cross-origin/sandboxed frames are opaque regions anchored to the frame
+element itself, so their internal scrolling cannot be followed. No child DOM or note text crosses
+that origin boundary. Ordinary top-page notes keep document coordinates. Anchors are runtime-only:
+a main-document navigation discards live geometry, and a later visit retains the saved position.
+
+Geometry refresh is O(notes × frame depth), expected 5–10 notes and stress-tested at 200, with no
+DOM/frame enumeration. Scroll/resize and mutations in documents containing an anchored target or
+one of its frames share a requestAnimationFrame invalidation, with one event-triggered 100 ms
+fallback when an occluded renderer suspends animation frames; the native bridge keeps one geometry
+batch in flight and one pending invalidation. The mutation callback never walks its record list.
+Deleting/cancelling the last anchored note releases its weak handles and disconnects observation.
+Page identity rejects late replies; UUID tokens prevent a cancelled draft from attaching to the
+next draft that reuses its numeric pin ID.
+
+The overlay and inline editor remain deliberately host-only: Threading owns picking, note provenance, focus,
+scroll routing and the origin boundary. The editor is a constant-size, one-note form (expected
+5–10 pins, stress 200); typing does not rebuild the pin list or allocate a row per note. The existing
+pin drawing and page-local storage remain browser-owned. Its routing fixture asserts the exact dispatch-scoped
 hit-test policy; an unwindowed synthetic `NSEvent` cannot exercise WebKit's native asynchronous
 compositor path, so real application input verifies that last boundary. Theme roles supply its
-accent, with ink measured against that actual fill for every label and pin. A second contrasting
-stroke keeps the outline visible on arbitrary light/dark page pixels; the element interior is left
-unpainted so its content and contrast remain available for review.
+accent, with ink measured against an opaque accent face for every label and pin.
+`BrowserAnnotationChrome` gives pins, badges, target/mode outlines and the editor boundary the same
+opaque black-and-white edge. Accent plus its text ink alone could both be close to a midtone page;
+fixed light/dark bands keep a 21:1 internal boundary and at least one polarity above 4.5:1 against
+any uniform sRGB ground. This does not promise that every edge pixel contrasts with arbitrary
+imagery, but keeps the shape recognizable without sampling the page or flickering its colours.
+The bands inherit Increase Contrast's stroke weight. The editor face stays opaque, and outline
+interiors remain unpainted so the page's own content and contrast remain available for review.
+The contrast fixture covers matching accent colours, saturated gradients, checkerboards and busy
+artwork in the shipping browser host; component raster tests also check both edge bands directly.
+Like the existing target-probe evidence, those captures combine WebKit's page snapshot with the
+shipping host and native overlay at their actual view frames. This avoids accepting a blank remote
+layer when WindowServer pauses its commits; it verifies appearance/layout, while native keyboard
+activation and live compositor timing remain separate checks.
 
 Password fields refuse agent typing and reveal the browser for user takeover. Form submissions,
 including Enter on a focused form control, require an app-owned confirmation whose description

@@ -75,8 +75,9 @@ struct BrowserPageIdentity: Equatable {
 struct BrowserAnnotation: Equatable {
     let id: Int
     let note: String
-    let documentPoint: CGPoint
+    var documentPoint: CGPoint
     let url: String
+    var anchorID: String? = nil
 }
 
 // MARK: - Browser Chrome
@@ -546,6 +547,11 @@ final class BrowserViewController: NSViewController {
     private var annotationViewportOffsets: [ObjectIdentifier: CGPoint] = [:]
     private var annotationsByPage: [String: [BrowserAnnotation]] = [:]
     private var nextAnnotationID = 1
+    private var annotationDraft: BrowserAnnotation?
+    private var annotationAnchorPositions: [ObjectIdentifier: [String: BrowserAnnotationAnchorPosition]] = [:]
+    private var capturedAnnotationAnchorTokens: [ObjectIdentifier: Set<String>] = [:]
+    private var annotationAnchorRefreshRunning = false
+    private var annotationAnchorRefreshPending = false
     private var isAnnotating = false
     /// The pointer position a target probe is running for, and the newest one waiting behind it.
     ///
@@ -1004,6 +1010,7 @@ final class BrowserViewController: NSViewController {
     }
 
     private func activateWebView(_ candidate: WKWebView) {
+        if candidate !== webView { setAnnotationMode(false) }
         webView = candidate
         chromeBar.setPasswordFieldFocused(
             passwordFocusedFrameTokens[ObjectIdentifier(candidate)]?.isEmpty == false
@@ -1014,6 +1021,7 @@ final class BrowserViewController: NSViewController {
         updateNavButtons()
         updateProgress(candidate.isLoading ? candidate.estimatedProgress : 1)
         updateAnnotationOverlay()
+        refreshAnnotationAnchors()
         onPageChange?()
     }
 
@@ -1252,7 +1260,7 @@ final class BrowserViewController: NSViewController {
     var emulatedMediaType: BrowserMediaType { agentMediaType }
     var annotationsForActivePage: [BrowserAnnotation] {
         guard isViewLoaded, let key = annotationPageKey(for: webView.url) else { return [] }
-        return annotationsByPage[key] ?? []
+        return (annotationsByPage[key] ?? []).map(annotationWithCurrentPosition)
     }
     var passwordFieldHasFocus: Bool {
         guard isViewLoaded else { return false }
@@ -2526,7 +2534,8 @@ final class BrowserViewController: NSViewController {
         setAnnotationMode(!isAnnotating)
     }
 
-    private func setAnnotationMode(_ active: Bool) {
+    func setAnnotationMode(_ active: Bool) {
+        if !active { finishAnnotationEditing(save: true) }
         isAnnotating = active
         annotationOverlay.isAnnotating = active
         chromeBar.setAnnotating(active)
@@ -2629,74 +2638,70 @@ final class BrowserViewController: NSViewController {
         }
     }
 
-    private func addAnnotation(atViewportPoint point: CGPoint) {
+    func addAnnotation(atViewportPoint point: CGPoint) {
         guard isAnnotating,
               let key = annotationPageKey(for: webView.url) else { return }
-        // Capture the clicked document position before the modal prompt runs its event loop;
-        // a live page can scroll, zoom or navigate while the user is writing the note.
+        finishAnnotationEditing(save: true)
+        // Capture page and document coordinates once. Scroll/zoom/navigation while editing must
+        // never move the note or assign it to the replacement page.
         let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
-        let documentPoint = CGPoint(
-            x: point.x / browserPageZoom + offset.x,
-            y: point.y / browserPageZoom + offset.y
-        )
-        let request = TextPromptRequest(
-            title: L10n.string("Add Browser Annotation"),
-            message: L10n.string(
-                "This user-authored note stays outside the page and will be available to the agent."
-            ),
-            confirmTitle: L10n.string("Add Annotation"),
-            placeholder: L10n.string("What should the agent notice?")
-        )
-        guard case .text(let note)? = TextPromptAlert.ask(request) else { return }
-
         let annotation = BrowserAnnotation(
             id: nextAnnotationID,
-            note: note,
-            documentPoint: documentPoint,
-            url: key
+            note: "",
+            documentPoint: CGPoint(
+                x: point.x / browserPageZoom + offset.x,
+                y: point.y / browserPageZoom + offset.y
+            ),
+            url: key,
+            anchorID: UUID().uuidString
         )
-        nextAnnotationID += 1
-        annotationsByPage[key, default: []].append(annotation)
-        updateAnnotationOverlay()
-        // The prompt was modal, so nothing tracked the pointer while it was up.
-        refreshAnnotationTargetUnderPointer()
+        showAnnotationEditor(annotation, at: point, isExisting: false)
+        captureAnnotationAnchor(annotation, at: point)
     }
 
-    private func editAnnotation(identifier: Int) {
-        guard let key = annotationPageKey(for: webView.url),
-              let index = annotationsByPage[key]?.firstIndex(where: { $0.id == identifier }),
-              let annotation = annotationsByPage[key]?[index] else { return }
+    func editAnnotation(identifier: Int) {
+        finishAnnotationEditing(save: true)
+        guard let annotation = annotationsForActivePage.first(where: { $0.id == identifier }) else { return }
+        let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
+        showAnnotationEditor(annotation, at: CGPoint(
+            x: (annotation.documentPoint.x - offset.x) * browserPageZoom,
+            y: (annotation.documentPoint.y - offset.y) * browserPageZoom
+        ), isExisting: true)
+    }
 
-        let request = TextPromptRequest(
-            title: L10n.format("Edit Annotation %lld", Int64(identifier)),
-            message: L10n.string(
-                "The note stays in Threading and is never exposed to the web page."
-            ),
-            confirmTitle: L10n.string("Save Annotation"),
-            clearTitle: L10n.string("Delete Annotation"),
-            current: annotation.note,
-            placeholder: L10n.string("What should the agent notice?")
-        )
-        // Saving is the only thing this sheet does, so both affirmatives mean it. A page
-        // annotation is *pulled* — the agent reads it through `browser_annotations` when it
-        // looks, rather than being handed a turn — so there is no "send it now" for a second
-        // affirmative to mean. The request asks for no accelerated button and `.immediate`
-        // cannot arrive here; it is written out rather than defaulted so this reads as a
-        // decision about page annotations instead of as a case nobody thought about.
-        switch TextPromptAlert.ask(request) {
-        case .text(let note), .immediate(let note):
-            annotationsByPage[key]?[index] = BrowserAnnotation(
-                id: annotation.id,
-                note: note,
-                documentPoint: annotation.documentPoint,
-                url: annotation.url
-            )
-        case .cleared:
-            annotationsByPage[key]?.remove(at: index)
-        case nil:
-            return
+    private func showAnnotationEditor(_ annotation: BrowserAnnotation, at point: CGPoint, isExisting: Bool) {
+        annotationDraft = annotation
+        let editor = BrowserAnnotationEditor(identifier: annotation.id, note: annotation.note, isExisting: isExisting)
+        editor.onSave = { [weak self] in self?.finishAnnotationEditing(save: true) }
+        editor.onCancel = { [weak self] in self?.finishAnnotationEditing(save: false) }
+        editor.onDelete = { [weak self] in
+            guard let self, let draft = self.annotationDraft else { return }
+            self.annotationsByPage[draft.url]?.removeAll { $0.id == draft.id }
+            self.finishAnnotationEditing(save: false)
         }
+        annotationOverlay.showEditor(editor, at: point)
         updateAnnotationOverlay()
+    }
+
+    func finishAnnotationEditing(save: Bool) {
+        guard let draft = annotationDraft else { return }
+        if save, let note = annotationOverlay.editor?.note, !note.isEmpty {
+            let annotation = BrowserAnnotation(
+                id: draft.id, note: note,
+                documentPoint: annotationWithCurrentPosition(draft).documentPoint,
+                url: draft.url, anchorID: draft.anchorID
+            )
+            if let index = annotationsByPage[draft.url]?.firstIndex(where: { $0.id == draft.id }) {
+                annotationsByPage[draft.url]?[index] = annotation
+            } else {
+                annotationsByPage[draft.url, default: []].append(annotation)
+                nextAnnotationID += 1
+            }
+        }
+        annotationDraft = nil
+        annotationOverlay.removeEditor()
+        updateAnnotationOverlay()
+        refreshAnnotationAnchors()
         refreshAnnotationTargetUnderPointer()
     }
 
@@ -2710,14 +2715,98 @@ final class BrowserViewController: NSViewController {
     private func updateAnnotationOverlay() {
         guard isViewLoaded else { return }
         let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
-        annotationOverlay.markers = annotationsForActivePage.map {
-            BrowserAnnotationMarker(
-                id: $0.id,
+        var visibleAnnotations = annotationsForActivePage
+        if let draft = annotationDraft,
+           draft.url == annotationPageKey(for: webView.url),
+           !visibleAnnotations.contains(where: { $0.id == draft.id }) {
+            visibleAnnotations.append(draft)
+        }
+        let positions = annotationAnchorPositions[ObjectIdentifier(webView)] ?? [:]
+        annotationOverlay.markers = visibleAnnotations.compactMap { annotation in
+            if let token = annotation.anchorID, let position = positions[token],
+               position.anchored && !position.visible { return nil }
+            let annotation = annotationWithCurrentPosition(annotation)
+            return BrowserAnnotationMarker(
+                id: annotation.id,
                 point: CGPoint(
-                    x: ($0.documentPoint.x - offset.x) * browserPageZoom,
-                    y: ($0.documentPoint.y - offset.y) * browserPageZoom
+                    x: (annotation.documentPoint.x - offset.x) * browserPageZoom,
+                    y: (annotation.documentPoint.y - offset.y) * browserPageZoom
                 )
             )
+        }
+        if let draft = annotationDraft,
+           let marker = annotationOverlay.markers.first(where: { $0.id == draft.id }) {
+            annotationOverlay.moveEditor(to: marker.point)
+        }
+    }
+
+    private func annotationWithCurrentPosition(_ annotation: BrowserAnnotation) -> BrowserAnnotation {
+        guard let token = annotation.anchorID,
+              let position = annotationAnchorPositions[ObjectIdentifier(webView)]?[token],
+              let x = position.x, let y = position.y else { return annotation }
+        var resolved = annotation
+        resolved.documentPoint = CGPoint(x: x, y: y)
+        return resolved
+    }
+
+    private var activeAnnotationAnchorTokens: [String] {
+        var tokens = annotationsForActivePage.compactMap(\.anchorID)
+        if let token = annotationDraft?.anchorID, !tokens.contains(token) { tokens.append(token) }
+        return tokens
+    }
+
+    private func captureAnnotationAnchor(_ annotation: BrowserAnnotation, at point: CGPoint) {
+        guard let token = annotation.anchorID, let identity = agentPageIdentity else { return }
+        var arguments = pointArguments(x: point.x / browserPageZoom, y: point.y / browserPageZoom)
+        arguments["token"] = token
+        arguments["precise"] = annotationOverlay.selectsDeepestElement
+        Task { @MainActor [weak self] in
+            guard let self, self.agentPageIdentity == identity else { return }
+            let position: BrowserAnnotationAnchorPosition? = try? await self.callAgentScript(
+                BrowserAgentScripts.captureAnnotationAnchor, arguments: arguments
+            )
+            guard self.agentPageIdentity == identity, let position, position.anchored else { return }
+            self.capturedAnnotationAnchorTokens[identity.webView, default: []].insert(token)
+            self.annotationAnchorPositions[identity.webView, default: [:]][token] = position
+            self.updateAnnotationOverlay()
+            self.refreshAnnotationAnchors()
+        }
+    }
+
+    /// Scroll/resize messages can arrive from many frames in one compositor turn. One request
+    /// runs at a time and one invalidation waits; work is O(notes × frame depth), not O(page DOM).
+    private func refreshAnnotationAnchors() {
+        annotationAnchorRefreshPending = true
+        guard !annotationAnchorRefreshRunning else { return }
+        annotationAnchorRefreshPending = false
+        guard let identity = agentPageIdentity,
+              !(capturedAnnotationAnchorTokens[identity.webView] ?? []).isEmpty else { return }
+        annotationAnchorRefreshRunning = true
+        let tokens = activeAnnotationAnchorTokens
+        let retained = Set(tokens)
+        let released = Array((capturedAnnotationAnchorTokens[identity.webView] ?? []).subtracting(retained))
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.annotationAnchorRefreshRunning = false
+                if self.annotationAnchorRefreshPending { self.refreshAnnotationAnchors() }
+            }
+            guard self.agentPageIdentity == identity else { return }
+            let positions: [BrowserAnnotationAnchorPosition]? = try? await self.callAgentScript(
+                BrowserAgentScripts.annotationAnchorPositions,
+                arguments: self.pointArguments(x: 0, y: 0).merging([
+                    "tokens": tokens, "releasedTokens": released
+                ]) { _, new in new }
+            )
+            guard self.agentPageIdentity == identity, let positions else { return }
+            self.capturedAnnotationAnchorTokens[identity.webView]?.subtract(released)
+            let retained = Set(self.activeAnnotationAnchorTokens)
+            for position in positions where retained.contains(position.token) {
+                self.annotationAnchorPositions[identity.webView, default: [:]][position.token] = position
+            }
+            self.annotationAnchorPositions[identity.webView] = self.annotationAnchorPositions[identity.webView]?
+                .filter { retained.contains($0.key) }
+            self.updateAnnotationOverlay()
         }
     }
 
@@ -2823,6 +2912,7 @@ final class BrowserViewController: NSViewController {
         // Pins are held in the document's CSS pixels, so a zoom change moves every one of them
         // on screen without the document having scrolled.
         updateAnnotationOverlay()
+        refreshAnnotationAnchors()
         refreshAnnotationTargetUnderPointer()
     }
 
@@ -3448,6 +3538,9 @@ final class BrowserViewController: NSViewController {
             return
         }
         let wasActive = popup === webView
+        if wasActive { setAnnotationMode(false) }
+        annotationAnchorPositions.removeValue(forKey: ObjectIdentifier(popup))
+        capturedAnnotationAnchorTokens.removeValue(forKey: ObjectIdentifier(popup))
         webViewStack.remove(at: index)
         documentSequences.removeValue(forKey: ObjectIdentifier(popup))
         passwordFocusedFrameTokens.removeValue(forKey: ObjectIdentifier(popup))
@@ -3556,8 +3649,10 @@ extension BrowserViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         passwordFocusedFrameTokens[ObjectIdentifier(webView)] = []
         annotationViewportOffsets[ObjectIdentifier(webView)] = .zero
+        if webView === self.webView { setAnnotationMode(false) }
+        annotationAnchorPositions[ObjectIdentifier(webView)] = nil
+        capturedAnnotationAnchorTokens[ObjectIdentifier(webView)] = nil
         guard webView === self.webView else { return }
-        setAnnotationMode(false)
         if isFindBarVisible {
             hideFindBar()
         }
@@ -3571,6 +3666,8 @@ extension BrowserViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         let identifier = ObjectIdentifier(webView)
         documentSequences[identifier, default: 0] += 1
+        annotationAnchorPositions[identifier] = nil
+        capturedAnnotationAnchorTokens[identifier] = nil
         if webView === self.webView {
             recordAgentNavigationTrace("commit")
             // A filled value is retained only to scrub it back out of this origin's pages. Once
@@ -4174,6 +4271,7 @@ extension BrowserViewController: WKScriptMessageHandler {
             }
             if messageWebView === webView {
                 updateAnnotationOverlay()
+                refreshAnnotationAnchors()
                 refreshAnnotationTargetUnderPointer()
                 // The baseline overlay reads the same channel: it carries scroll coordinates and
                 // nothing else, so there is no reason for a second observer inside the page.
