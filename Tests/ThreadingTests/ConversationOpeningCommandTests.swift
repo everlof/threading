@@ -6,6 +6,14 @@ import XCTest
 @MainActor
 final class ConversationOpeningCommandTests: HostedStoreTestCase {
     func testCodexOpeningReviewWaitsForTheCatalogAndUsesReviewStart() throws {
+        try verifyAdmission(queued: false)
+    }
+
+    func testQueuedPromptRecordsWorkOnlyWhenTheTransportAcceptsIt() throws {
+        try verifyAdmission(queued: true)
+    }
+
+    private func verifyAdmission(queued: Bool) throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-opening-command-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -61,11 +69,21 @@ final class ConversationOpeningCommandTests: HostedStoreTestCase {
         _ = controller.view
         defer { controller.terminate(preservingViewport: false) }
 
+        var workEdges: [SessionWorkDidChange.Kind] = []
+        let events = AppEventObservations()
+        events.observe(SessionWorkDidChange.self) { event in
+            if event.sessionID == session.id { workEdges.append(event.kind) }
+        }
+        if queued {
+            XCTAssertTrue(controller.enqueue(ConversationPrompt(text: "Queued work")))
+            XCTAssertNil(store.session(withID: session.id)?.lastTurnAt)
+        }
         controller.launch()
-        controller.sendInitialPrompt("/review focus on authentication")
+        if !queued { controller.sendInitialPrompt("/review focus on authentication") }
 
+        let expectedMethod = queued ? "turn/start" : "review/start"
         let didStartReview = waitUntil {
-            self.recordedMethods(in: capture).contains("review/start")
+            self.recordedMethods(in: capture).contains(expectedMethod)
         }
         let capturedRequests = try String(contentsOf: capture, encoding: .utf8)
         XCTAssertTrue(
@@ -82,19 +100,26 @@ final class ConversationOpeningCommandTests: HostedStoreTestCase {
             )
         }
         let review = try XCTUnwrap(requests.first {
-            $0["method"] as? String == "review/start"
+            $0["method"] as? String == expectedMethod
         })
         let parameters = try XCTUnwrap(review["params"] as? [String: Any])
-        let target = try XCTUnwrap(parameters["target"] as? [String: Any])
-        XCTAssertEqual(target["type"] as? String, "custom")
-        XCTAssertEqual(target["instructions"] as? String, "focus on authentication")
-        XCTAssertFalse(requests.contains { $0["method"] as? String == "turn/start" })
+        if !queued {
+            let target = try XCTUnwrap(parameters["target"] as? [String: Any])
+            XCTAssertEqual(target["type"] as? String, "custom")
+            XCTAssertEqual(target["instructions"] as? String, "focus on authentication")
+            XCTAssertFalse(requests.contains { $0["method"] as? String == "turn/start" })
+        }
         XCTAssertTrue(waitUntil { controller.stream.canSend })
         XCTAssertTrue(waitUntil {
             GitTurnBaselineStore.shared.latestCheckpoint(forSessionID: session.id)?.status
                 == .complete
         })
 
+        let finished = try XCTUnwrap(store.session(withID: session.id))
+        let startedAt = try XCTUnwrap(finished.lastTurnAt)
+        XCTAssertGreaterThan(try XCTUnwrap(finished.lastWorkAt), startedAt)
+        XCTAssertEqual(workEdges, [.turnStarted, .turnEnded])
+        withExtendedLifetime(events) {}
         controller.terminate(preservingViewport: false)
         XCTAssertEqual(store.removeSession(id: session.id), .applied)
         XCTAssertTrue(waitUntil {
@@ -151,6 +176,8 @@ final class ConversationOpeningCommandTests: HostedStoreTestCase {
         let restored = "/review focus on authentication\n\n"
             + "Keep the draft I started while this was booting."
         XCTAssertEqual(controller.promptView.stringValue, restored)
+        XCTAssertNil(store.session(withID: session.id)?.lastTurnAt)
+        XCTAssertNil(store.session(withID: session.id)?.lastWorkAt)
         XCTAssertEqual(
             SessionContinuityStore.shared.state(for: session.id).conversationDraft,
             restored,

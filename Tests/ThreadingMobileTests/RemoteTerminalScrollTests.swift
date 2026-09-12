@@ -13,12 +13,12 @@ import XCTest
 final class RemoteTerminalScrollTests: XCTestCase {
     private var hostWindows: [UIWindow] = []
 
-    override func tearDown() {
+    override func tearDown() async throws {
         for window in hostWindows {
             window.isHidden = true
         }
         hostWindows.removeAll()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Constants
@@ -312,7 +312,7 @@ final class RemoteTerminalScrollTests: XCTestCase {
         for line in 0..<Fixture.followUpLines {
             view.feed(text: "trimming \(line)\r\n")
         }
-        settleTerminalCallbacks(for: view)
+        waitForContentOffsetChange(in: view, from: offset)
 
         XCTAssertEqual(visibleTopLine(of: view), held)
         XCTAssertLessThan(view.contentOffset.y, offset)
@@ -639,6 +639,21 @@ final class RemoteTerminalScrollTests: XCTestCase {
         view.setNeedsLayout()
         view.layoutIfNeeded()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+
+    /// The buffer mutation is synchronous, but its UIScrollView side effect is deliberately
+    /// coalesced onto the next display-link frame. A fixed delay can end just before that frame,
+    /// especially when the driver is already running from the fixture feed. Wait for the actual
+    /// offset transition so this still fails if the frame path never updates the scroller.
+    private func waitForContentOffsetChange(
+        in view: TerminalView,
+        from originalOffset: CGFloat
+    ) {
+        let deadline = Date(timeIntervalSinceNow: 1)
+        while abs(view.contentOffset.y - originalOffset) <= Fixture.offsetTolerance,
+              Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
     }
 
     private func makeHostWindow() -> UIWindow {

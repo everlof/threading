@@ -100,6 +100,30 @@ final class TranscriptSearchIndexTests: XCTestCase {
         XCTAssertEqual(replacementLocator.sourceGeneration, 2)
     }
 
+    func testWorkRefreshIngestsOnlyChangedSourcesAndPreservesOtherHistory() async throws {
+        try write([codexUser("original amber")])
+        let otherURL = directory.appendingPathComponent("other.jsonl")
+        try Data((codexUser("untouched cobalt") + "\n").utf8).write(to: otherURL)
+        let other = TranscriptSearchSource(
+            sourceID: SearchSourceID(rawValue: "other"), url: otherURL, kind: .codex,
+            projectID: projectID, projectName: "Other", sessionID: SessionID(),
+            sessionTitle: "Other", providerName: "Codex", isArchived: false,
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        let index = try TranscriptSearchIndex(databaseURL: databaseURL)
+        await index.refresh(sources: [source(), other])
+        try append(codexAgent("fresh indigo") + "\n")
+        // If the refresh walks unrelated sources it will discover this replacement too.
+        try Data((codexUser("unannounced violet") + "\n").utf8).write(to: otherURL)
+        await index.refreshChanged(sources: [source()])
+        let changed = try await index.search(query("indigo"))
+        let retained = try await index.search(query("cobalt"))
+        let notScanned = try await index.search(query("violet"))
+        XCTAssertEqual(changed.hits.count, 1)
+        XCTAssertEqual(retained.hits.count, 1)
+        XCTAssertTrue(notScanned.hits.isEmpty)
+    }
+
     func testHistoricalWindowIsBoundedAroundExactSourceRecord() async throws {
         try write((0 ..< 15).map { index in
             codexUser(index == 7 ? "the centered ultramarine target" : "ordinary row \(index)")

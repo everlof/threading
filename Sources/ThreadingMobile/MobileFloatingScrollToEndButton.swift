@@ -65,10 +65,12 @@ final class MobileFloatingScrollToEndButton: UIButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func applyTheme(_ theme: RemoteThemePalette) {
-        backgroundColor = theme.uiFloatingSurface
-        tintColor = theme.uiAccent
-        layer.borderColor = theme.uiBorder.cgColor
-        layer.borderWidth = max(theme.borderWidth, 1)
+        var configuration = configuration ?? .plain()
+        configuration.baseForegroundColor = theme.uiAccent
+        configuration.background.backgroundColor = theme.uiFloatingSurface
+        configuration.background.strokeColor = theme.uiBorder
+        configuration.background.strokeWidth = max(theme.borderWidth, 1)
+        self.configuration = configuration
     }
 
     /// Moves between a small, lowered absence and the settled button.

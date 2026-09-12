@@ -99,7 +99,7 @@ enum StartupSessionRelaunch {
             )
             let ordered = recorded
                 .compactMap { byID[$0] }
-                .sorted { $0.lastActiveAt > $1.lastActiveAt }
+                .sorted { $0.lastUsedAt > $1.lastUsedAt }
                 .map(\.id)
             // An empty record and a session that simply was not running are different facts, and
             // the difference is the one worth saying out loud: the first means the last quit left

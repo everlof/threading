@@ -760,16 +760,16 @@ enum SidebarTreeBuilder {
                 // Handled by the linear path above.
                 break
             case .recentActivity:
-                let lhsLastActive = NativeSidebarParity.fact(
-                    .sessionLastActive,
-                    lhs.lastActiveAt
+                let lhsLastUsed = NativeSidebarParity.fact(
+                    .sessionLastUsed,
+                    lhs.lastUsedAt
                 )
-                let rhsLastActive = NativeSidebarParity.fact(
-                    .sessionLastActive,
-                    rhs.lastActiveAt
+                let rhsLastUsed = NativeSidebarParity.fact(
+                    .sessionLastUsed,
+                    rhs.lastUsedAt
                 )
-                if lhsLastActive != rhsLastActive {
-                    let isNewer = lhsLastActive > rhsLastActive
+                if lhsLastUsed != rhsLastUsed {
+                    let isNewer = lhsLastUsed > rhsLastUsed
                     return isReversed ? !isNewer : isNewer
                 }
             case .name:

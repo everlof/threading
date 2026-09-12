@@ -440,6 +440,15 @@ because upload custody is a separate bounded transfer. A picked movie is copied 
 temporary storage off the main actor, gets one bounded poster there, and its draft tile opens the
 local player; removing or sending the draft removes that temporary copy.
 
+The gallery's Share action exports exactly the attachment on screen through iOS's native share
+sheet. An already-loaded ordinary preview lends its `Data` value to the staging worker instead of
+fetching the same file twice; an unsupported-but-downloadable kind is fetched only after the tap.
+A movie above the whole-file limit is written to one device-local temporary file through the same
+authenticated one-megabyte ranges as playback, so memory remains O(one range) rather than O(movie).
+Changing pages cancels the preparation, and the temporary directory is removed when the share
+sheet closes. Threading owns authorization, staging, selection identity and cleanup; iOS owns the
+share destinations and system chrome.
+
 ### The attachment handle's scope
 
 `ExtensionMediaSource.sessionAttachment` resolves only for the attachment currently on screen, in
@@ -602,10 +611,11 @@ pushing. The general fix is recorded and deliberately not built:
   self-clocked engine runs its own clock under the same visibility gate.
 - **Bounded unit.** One canvas. The backing store is capped at 4,194,304 pixels and 4,096 on either
   axis; a larger canvas renders at a reduced internal scale rather than allocating an unbounded
-  frame. The iPhone movie mirror reads at most one 1 MiB range per request and never materializes
-  the complete recording; its gallery constructs one player only for the current page. Draft movie
-  poster extraction is one off-main task per picked file, within the composer's fixed eight-file
-  cap.
+  frame. The iPhone movie mirror and Share staging read at most one 1 MiB range per request and
+  never materialize a large complete recording; its gallery constructs one player and prepares at
+  most one share for the current page. Ordinary share files keep the existing 24 MB whole-file
+  bound and reuse the current preview's immutable `Data` when available. Draft movie poster
+  extraction is one off-main task per picked file, within the composer's fixed eight-file cap.
 - **Never queued.** The Lottie session holds at most one render in flight and *supersedes* the
   pending position rather than accumulating one. A display link asking for sixty positions a second
   while a frame takes twenty milliseconds would otherwise drift further behind real time the longer

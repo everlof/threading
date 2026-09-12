@@ -212,6 +212,9 @@ final class AgentSessionViewController: NSViewController {
                 self.beginRunProgressTurn()
                 ProjectStore.shared.noteTurnStarted(sessionID: self.sessionID)
             }
+            if transition.endedTurn || transition.completedPendingOutcome {
+                ProjectStore.shared.noteTurnEnded(sessionID: self.sessionID)
+            }
             if transition.endedTurn {
                 self.clearRunProgress(resetTranscriptCursor: false)
                 self.noteTurnFinishedForAttachmentDetection()

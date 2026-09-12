@@ -128,7 +128,7 @@ struct MobileIssueReportView: View {
     @State private var includeAdditionalDetails = false
     @State private var includeScreenshot: Bool
     @State private var activeAction: ActiveAction?
-    @State private var sharePayload: DiagnosticsSharePayload?
+    @State private var sharePayload: MobileSharePayload?
     @State private var exportError: String?
     @State private var notice: Notice?
     @FocusState private var reporterNoteIsFocused: Bool
@@ -325,7 +325,7 @@ struct MobileIssueReportView: View {
             }
         }
         .sheet(item: $sharePayload) { payload in
-            DiagnosticsActivityView(items: payload.items)
+            MobileSystemShareSheet(items: payload.items)
         }
         .themedAlert(
             "Couldn’t prepare report",
@@ -615,7 +615,7 @@ struct MobileIssueReportView: View {
                     reporterNoteURL: reporterNoteURL,
                     screenshotURL: screenshotURL
                 )
-                sharePayload = DiagnosticsSharePayload(items: [archiveURL])
+                sharePayload = MobileSharePayload(items: [archiveURL])
             } catch {
                 MobileDiagnostics.logFailure(.issueReportExport, error: error)
                 exportError = MobileL10n.string("The report files could not be prepared.")

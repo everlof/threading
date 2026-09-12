@@ -143,6 +143,24 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             self?.performScheduledSend(event.id)
         }
 
+        appEvents.observe(TriggerDispatchDidBecomeReady.self) { [weak self] event in
+            self?.performTriggerDispatch(event.dispatch)
+        }
+        appEvents.observe(TriggerFixStageDidBecomeReady.self) { [weak self] event in
+            Task { @MainActor [weak self] in
+                await self?.startRecoveredTriggerFix(event.dispatch)
+            }
+        }
+        appEvents.observe(TriggerAssessmentDidFinish.self) { [weak self] event in
+            self?.triggerAssessmentDidFinish(event)
+        }
+        appEvents.observe(TriggerFixDidFinish.self) { [weak self] event in
+            self?.triggerFixDidFinish(event)
+        }
+        appEvents.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            self?.triggerRuntimeDidChange(event)
+        }
+
         // And once more: the strip offering a way past a spent usage limit lives inside a
         // session's own pane and knows nothing about migrating, reopening or scheduling. See
         // `SessionCoordinator+LimitEscape`.

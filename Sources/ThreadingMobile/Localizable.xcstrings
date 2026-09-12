@@ -1069,6 +1069,23 @@
         }
       }
     },
+    "A question for you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A question for you"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En fråga till dig"
+          }
+        }
+      }
+    },
     "A screenshot can help explain visual problems, but it may contain code or chat content. You can preview and remove it before sharing." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1830,6 +1847,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inte här"
+          }
+        }
+      }
+    },
+    "Back" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillbaka"
           }
         }
       }
@@ -3464,6 +3492,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att skicka rapporten"
+          }
+        }
+      }
+    },
+    "Couldn’t share attachment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att dela bilagan"
           }
         }
       }
@@ -5965,6 +6004,17 @@
         }
       }
     },
+    "Next" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nästa"
+          }
+        }
+      }
+    },
     "Next effort page" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7109,6 +7159,23 @@
         }
       }
     },
+    "Permission needed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permission needed"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåtelse behövs"
+          }
+        }
+      }
+    },
     "Permission notifications open the exact chat for review. They never put Allow or Deny on the lock screen." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7314,6 +7381,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förbereder användning…"
+          }
+        }
+      }
+    },
+    "Preparing attachment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förbereder bilaga"
           }
         }
       }
@@ -7644,6 +7722,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "QR-skanning är inte tillgänglig på den här enheten."
+          }
+        }
+      }
+    },
+    "Question %lld of %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Question %lld of %lld"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fråga %lld av %lld"
           }
         }
       }
@@ -8693,6 +8788,23 @@
         }
       }
     },
+    "Send answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send answer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka svar"
+          }
+        }
+      }
+    },
     "Send feedback" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8952,7 +9064,7 @@
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Andel"
+            "value" : "Dela"
           }
         }
       }
@@ -10475,6 +10587,23 @@
         }
       }
     },
+    "The agent is waiting for your answer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The agent is waiting for your answer."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten väntar på ditt svar."
+          }
+        }
+      }
+    },
     "The agent rejected the archive change." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10537,6 +10666,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten anger om den använde färskt eller cachelagrat underlag från telefonen."
+          }
+        }
+      }
+    },
+    "The attachment changed while it was being prepared." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilagan ändrades medan den förbereddes."
           }
         }
       }
@@ -11042,6 +11182,17 @@
         }
       }
     },
+    "This attachment is too large to share from iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilagan är för stor för att delas från iPhone."
+          }
+        }
+      }
+    },
     "This build has no report service configured, so the report was kept on this device." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11280,6 +11431,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Prompten kunde inte skickas igen säkert. Ditt utkast finns kvar."
+          }
+        }
+      }
+    },
+    "This question is read only on this device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This question is read only on this device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågan kan bara läsas på den här enheten."
           }
         }
       }
@@ -12220,6 +12388,40 @@
         }
       }
     },
+    "Waiting for permission" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for permission"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på tillåtelse"
+          }
+        }
+      }
+    },
+    "Waiting for your answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your answer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på ditt svar"
+          }
+        }
+      }
+    },
     "Watching" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12480,6 +12682,23 @@
         }
       }
     },
+    "Write your answer…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write your answer…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv ditt svar…"
+          }
+        }
+      }
+    },
     "Writes messages and steers the agent." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12524,6 +12743,23 @@
         }
       }
     },
+    "You can answer while work continues." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can answer while work continues."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kan svara medan arbetet fortsätter."
+          }
+        }
+      }
+    },
     "Your Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12542,6 +12778,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Din Mac använder %@"
+          }
+        }
+      }
+    },
+    "Your answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your answer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ditt svar"
           }
         }
       }

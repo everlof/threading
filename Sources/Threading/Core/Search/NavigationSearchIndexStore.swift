@@ -5,7 +5,7 @@ struct NavigationSearchIndexDidChange: AppEvent {
 }
 
 /// Maintains the warm immutable navigation index for the process. Project mutations copy only
-/// value metadata on the main actor, then cancel and replace an off-main index build.
+/// value metadata on the main actor, then coalesce work onto one off-main index build lane.
 @MainActor
 final class NavigationSearchIndexStore {
     private let projectStore: ProjectStore
@@ -27,6 +27,9 @@ final class NavigationSearchIndexStore {
         events = AppEventObservations(center: notificationCenter)
         events.observe(ProjectsDidChange.self) { [weak self] event in
             self?.projectsDidChange(event)
+        }
+        events.observe(SessionWorkDidChange.self) { [weak self] event in
+            self?.replaceSession(event.sessionID)
         }
         rebuildAll()
     }
@@ -139,12 +142,12 @@ final class NavigationSearchIndexStore {
 
     private func scheduleBuild() {
         generation &+= 1
+        guard buildTask == nil else { return }
         let requestedGeneration = generation
         // Dictionary storage is copy-on-write. Capturing this value is constant-time; flattening
         // and indexing every standing destination happen together on the detached worker.
         let recordsByProjectID = recordsByProjectID
         let projectNames = projectNames
-        buildTask?.cancel()
         buildTask = Task.detached(priority: .utility) { [weak self] in
             let records = recordsByProjectID.flatMap { projectID, records in
                 let projectName = projectNames[projectID]
@@ -165,9 +168,11 @@ final class NavigationSearchIndexStore {
     }
 
     private func accept(_ built: NavigationSearchIndex, generation: UInt64) {
-        guard generation == self.generation else { return }
-        index = built
         buildTask = nil
+        index = built
+        // Publish completed progress even if more work arrived while building. Constant activity
+        // must not starve search of every completed index; the successor retains indexing coverage.
+        if generation != self.generation { scheduleBuild() }
         NotificationCenter.default.post(NavigationSearchIndexDidChange())
     }
 }

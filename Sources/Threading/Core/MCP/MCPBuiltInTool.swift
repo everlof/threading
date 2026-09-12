@@ -82,6 +82,13 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case suggestReclaimableLocation
   case proposeStorageCleanup
   case proposeConversationRepair
+  case listTriggerSources
+  case listTriggers
+  case listTriggerRuns
+  case createTriggerDraft
+  case proposeTriggerActivation
+  case reportTriggerAssessment
+  case reportTriggerResult
   case listSettings
   case notifyUser
   case listThemes
@@ -114,6 +121,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
     case workspace
     case supervision
     case storage
+    case triggers
     case notifications
     case appearance
     case settings

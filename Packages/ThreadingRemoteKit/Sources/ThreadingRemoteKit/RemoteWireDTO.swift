@@ -3990,6 +3990,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
     public let canSend: Bool
     public let composerCapabilities: [RemoteComposerCapabilityDTO]
     public let permission: RemotePermissionRequestDTO?
+    public let questions: [RemoteQuestionRequestDTO]
     /// Monotonically increasing within one live conversation mirror.
     public let revision: Int
     /// True when the host has rows before the first row in this window.
@@ -4001,6 +4002,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         canSend: Bool,
         composerCapabilities: [RemoteComposerCapabilityDTO] = [],
         permission: RemotePermissionRequestDTO? = nil,
+        questions: [RemoteQuestionRequestDTO] = [],
         revision: Int = 0,
         hasEarlier: Bool = false
     ) {
@@ -4010,13 +4012,14 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         self.canSend = canSend
         self.composerCapabilities = composerCapabilities
         self.permission = permission
+        self.questions = questions
         self.revision = revision
         self.hasEarlier = hasEarlier
     }
 
     private enum CodingKeys: String, CodingKey {
         case type, rows, streamingText, canSend, composerCapabilities, permission, revision
-        case hasEarlier
+        case hasEarlier, questions
     }
 
     public init(from decoder: Decoder) throws {
@@ -4039,6 +4042,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
             RemotePermissionRequestDTO.self,
             forKey: .permission
         )
+        questions = try container.decodeIfPresent([RemoteQuestionRequestDTO].self, forKey: .questions) ?? []
         revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         hasEarlier = try container.decodeIfPresent(Bool.self, forKey: .hasEarlier) ?? false
     }
@@ -4060,6 +4064,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
     /// Nil means this delta leaves the catalog unchanged.
     public let composerCapabilities: [RemoteComposerCapabilityDTO]?
     public let permission: RemotePermissionRequestDTO?
+    public let questions: [RemoteQuestionRequestDTO]?
     /// Nil means a live update does not change the client's pagination boundary.
     public let hasEarlier: Bool?
 
@@ -4072,6 +4077,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         canSend: Bool,
         composerCapabilities: [RemoteComposerCapabilityDTO]? = nil,
         permission: RemotePermissionRequestDTO? = nil,
+        questions: [RemoteQuestionRequestDTO]? = nil,
         hasEarlier: Bool? = nil
     ) {
         type = "conversationDelta"
@@ -4083,6 +4089,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         self.canSend = canSend
         self.composerCapabilities = composerCapabilities
         self.permission = permission
+        self.questions = questions
         self.hasEarlier = hasEarlier
     }
 }
@@ -4202,6 +4209,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
     public let text: String?
     public let id: String?
     public let decision: String?
+    public let answers: [String: String]?
     public let state: String?
     public let cols: Int?
     public let rows: Int?
@@ -4235,6 +4243,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         text: String? = nil,
         id: String? = nil,
         decision: String? = nil,
+        answers: [String: String]? = nil,
         state: String? = nil,
         cols: Int? = nil,
         rows: Int? = nil,
@@ -4258,6 +4267,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         self.text = text
         self.id = id
         self.decision = decision
+        self.answers = answers
         self.state = state
         self.cols = cols
         self.rows = rows

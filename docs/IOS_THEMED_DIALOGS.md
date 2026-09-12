@@ -116,6 +116,11 @@ The exception is UI whose presentation and trust boundary belong to iOS. Notific
 camera, microphone and tracking permission prompts, the share sheet, document picker, and
 similar operating-system surfaces remain native and are not imitated or themed.
 
+`MobileSystemShareSheet` is the containment boundary for file exports. A caller stages only the
+device-local URLs it intends to offer; `UIActivityViewController` continues to own destinations,
+previews, cancellation, and completion. The temporary file remains host custody and is removed
+after the sheet closes.
+
 ### Current contract
 
 The shared primitive owns:
@@ -450,6 +455,21 @@ accessory so the two do not stack. A fully theme-coloured pad remains possible â
 exposes `inputView` as a settable seam and already ships a symbol/function-key pad â€” but a
 replacement alphanumeric keyboard would cost the user's own layout, autocorrect, dictation and
 emoji, so any such pad belongs beside the system keyboard, not in place of it.
+
+## Inline conversation decisions
+
+`MobileConversationQuestionCard` owns the native question form inside the virtual transcript.
+Each option is one full-width target with its explanation, an explicit selection mark and
+VoiceOver selected state. Actions stack vertically to preserve the tap target at narrow widths
+and accessibility text sizes. It consumes the same `applyRemoteSurface` outline as the other
+conversation rows; reconfiguration replaces the outline and preserves the editor when the
+request has not changed. The host owns exact IDs, validation and once-only settlement. Palette
+updates customize material, while reply authority and provider responses remain host-owned.
+
+Question and permission metadata stop the working orb without disguising a usage refusal as a
+question. Collection insertions honor Reduce Motion, and a newly arrived decision follows only
+when the reader was already at the bottom. Bounded value drafts survive cell recycling and are
+pruned when the matching request is resolved.
 
 ## Visual review
 

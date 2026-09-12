@@ -48,7 +48,8 @@ struct TranscriptSearchIndexDidChange: AppEvent {
 }
 
 /// Copies live project/account metadata on the main actor and drives the search actor with
-/// coalesced complete snapshots. Opening Search only asks for a provider; it never starts a walk.
+/// complete structural snapshots and coalesced work-source updates. Opening Search only asks for
+/// a provider; it never starts a walk.
 ///
 /// **The projection reads no directory on the main actor.** Placing a Codex conversation means
 /// finding its rollout in the account's sessions tree, and a retained catalogue is mostly
@@ -66,12 +67,12 @@ final class TranscriptSearchIndexStore {
     private var sourcesByProjectID: [ProjectID: [SessionID: TranscriptSearchSource]] = [:]
     private var projectNames: [ProjectID: String] = [:]
     private var refreshTask: Task<Void, Never>?
-    private var refreshGeneration: UInt64 = 0
+    private var needsFullRefresh = false
+    private var pendingWorkSources: [SessionID: TranscriptSearchSource] = [:]
     /// Accounts whose sessions tree has to be read before their conversations can be placed,
     /// keyed by config path so a pass over many sessions names each account once.
     private var accountsAwaitingRollouts: [String: AgentAccount] = [:]
     private var rolloutDiscoveryTask: Task<Void, Never>?
-    private var rolloutDiscoveryGeneration: UInt64 = 0
 
     init(
         projectStore: ProjectStore = .shared,
@@ -86,6 +87,9 @@ final class TranscriptSearchIndexStore {
         index = try? TranscriptSearchIndex(databaseURL: databaseURL)
         events.observe(ProjectsDidChange.self) { [weak self] event in
             self?.projectsDidChange(event)
+        }
+        events.observe(SessionWorkDidChange.self) { [weak self] event in
+            self?.workDidChange(event.sessionID)
         }
         rebuildAll()
     }
@@ -208,30 +212,25 @@ final class TranscriptSearchIndexStore {
     /// Reads each waiting account's sessions tree once, on a worker, then places the
     /// conversations on those accounts from the result.
     ///
-    /// A later call while one is in flight supersedes it: the walk itself is not interruptible,
-    /// but its answer is applied by whichever generation is current, and the index folds walks
-    /// closer together than `rolloutIndexMaximumAge` into one read. A conversation the walk did
-    /// not see stays unplaced without scheduling another walk — the next event about it asks
-    /// again, and until then the answer on disk has not changed.
+    /// A later call keeps its accounts pending for the next pass. Cancelling the earlier pass
+    /// used to discard its resolved accounts, leaving their conversations unplaced indefinitely.
+    /// One worker folds repeated account requests together without losing another account's result.
     private func scheduleRolloutDiscovery() {
-        guard !accountsAwaitingRollouts.isEmpty else { return }
+        guard rolloutDiscoveryTask == nil, !accountsAwaitingRollouts.isEmpty else { return }
         let accounts = Array(accountsAwaitingRollouts.values)
         accountsAwaitingRollouts.removeAll()
 
-        rolloutDiscoveryTask?.cancel()
-        rolloutDiscoveryGeneration &+= 1
-        let generation = rolloutDiscoveryGeneration
         rolloutDiscoveryTask = Task.detached(priority: .utility) { [weak self] in
             for account in accounts {
+                guard !Task.isCancelled else { return }
                 CodexTranscript.rolloutIndex(account: account)
             }
             guard !Task.isCancelled else { return }
-            await self?.rolloutsDidResolve(for: accounts, generation: generation)
+            await self?.rolloutsDidResolve(for: accounts)
         }
     }
 
-    private func rolloutsDidResolve(for accounts: [AgentAccount], generation: UInt64) {
-        guard rolloutDiscoveryGeneration == generation else { return }
+    private func rolloutsDidResolve(for accounts: [AgentAccount]) {
         rolloutDiscoveryTask = nil
 
         let accountPaths = Set(accounts.map(\.configPath))
@@ -259,37 +258,58 @@ final class TranscriptSearchIndexStore {
             }
         }
         if changed { scheduleRefresh() }
+        scheduleRolloutDiscovery()
+    }
+
+    private func workDidChange(_ sessionID: SessionID) {
+        guard let project = projectStore.project(forSessionID: sessionID),
+              let session = projectStore.session(withID: sessionID) else { return }
+        if let source = projected(session, in: project) {
+            sourcesByProjectID[project.id, default: [:]][sessionID] = source
+            pendingWorkSources[sessionID] = source
+            startRefreshIfNeeded()
+        }
+        scheduleRolloutDiscovery()
     }
 
     private func scheduleRefresh() {
-        refreshTask?.cancel()
-        refreshGeneration &+= 1
-        let generation = refreshGeneration
-        // Both dictionaries are copy-on-write value snapshots. Flattening every retained source
-        // and applying project-name overlays belong beside SQLite ingestion, off the main actor.
+        needsFullRefresh = true
+        startRefreshIfNeeded()
+    }
+
+    /// One serial ingestion lane. Work arriving during a scan is folded into the next batch,
+    /// so an old full snapshot can neither overwrite a newer work update nor resurrect a removal.
+    /// Work boundaries reconcile only the changed transcripts; queries never start a scan.
+    private func startRefreshIfNeeded() {
+        guard refreshTask == nil, let index,
+              needsFullRefresh || !pendingWorkSources.isEmpty else { return }
+        let isFullRefresh = needsFullRefresh
+        needsFullRefresh = false
+        let changedSources = pendingWorkSources
+        pendingWorkSources.removeAll(keepingCapacity: true)
         let sourcesByProjectID = sourcesByProjectID
         let projectNames = projectNames
-        guard let index else {
-            refreshTask = nil
-            return
-        }
         refreshTask = Task.detached(priority: .utility) { [weak self] in
-            let sources = sourcesByProjectID.flatMap { projectID, sources in
-                let projectName = projectNames[projectID]
-                return sources.values.map { source in
-                    projectName.map { source.replacingProjectName($0) } ?? source
+            if isFullRefresh {
+                let sources = sourcesByProjectID.flatMap { projectID, sources in
+                    let projectName = projectNames[projectID]
+                    return sources.values.map { source in
+                        projectName.map { source.replacingProjectName($0) } ?? source
+                    }
                 }
+                await index.refresh(sources: sources)
+            } else {
+                await index.refreshChanged(sources: Array(changedSources.values))
             }
-            await index.refresh(sources: sources)
             guard !Task.isCancelled else { return }
-            await self?.accept(generation: generation)
+            await self?.acceptRefresh()
         }
     }
 
-    private func accept(generation: UInt64) {
-        guard refreshGeneration == generation else { return }
+    private func acceptRefresh() {
         refreshTask = nil
         NotificationCenter.default.post(TranscriptSearchIndexDidChange())
+        startRefreshIfNeeded()
     }
 
     private func keyed(

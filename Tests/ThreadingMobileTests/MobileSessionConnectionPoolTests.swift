@@ -263,6 +263,10 @@ private final class PoolConnectionDouble: MobileParkableSessionConnection {
     func disconnect(markEnded: Bool) {
         disconnectCalls += 1
     }
+
+    func leave() {
+        disconnect(markEnded: false)
+    }
 }
 
 @MainActor

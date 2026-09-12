@@ -23,25 +23,28 @@ final class ThemedDisclosureRow: ThemedControl {
         case standard
         /// An inline structural heading, such as one hunk inside a source diff.
         case compact
+        /// Work inside a conversation; quiet at rest, with a full keyboard target.
+        case conversation
 
         var minimumHeight: CGFloat {
             switch self {
             case .standard: 44
             case .compact: 27
+            case .conversation: Design.Size.choiceHeight
             }
         }
 
         var edgeInset: CGFloat {
             switch self {
             case .standard: Design.Spacing.inset
-            case .compact: Design.Spacing.small
+            case .compact, .conversation: Design.Spacing.small
             }
         }
 
         var verticalInset: CGFloat {
             switch self {
             case .standard: Design.Spacing.medium
-            case .compact: Design.Spacing.tight
+            case .compact, .conversation: Design.Spacing.tight
             }
         }
 
@@ -52,6 +55,7 @@ final class ThemedDisclosureRow: ThemedControl {
             switch self {
             case .standard: Design.Surface.controlResting
             case .compact: Design.Surface.controlHover
+            case .conversation: Design.Chat.toolRowActive
             }
         }
     }
@@ -64,7 +68,7 @@ final class ThemedDisclosureRow: ThemedControl {
     var isExpanded: Bool {
         didSet {
             guard isExpanded != oldValue else { return }
-            updateChevron()
+            updateChevron(animated: true)
             needsDisplay = true
         }
     }
@@ -169,7 +173,9 @@ final class ThemedDisclosureRow: ThemedControl {
         // theme switch reaches the chevron without anything being recorded on it.
         chevron.tint = Design.Text.tertiary
 
-        if isCollapsible, isPressed {
+        if case .conversation = density, isExpanded || isHovered || isPressed {
+            ThemedSurface.draw(bounds, fill: Design.Chat.toolRowActive, radius: Design.Radius.control)
+        } else if isCollapsible, isPressed {
             ThemedSurface.draw(bounds, fill: Design.Surface.controlHover, radius: 0)
         } else if isCollapsible, isHovered {
             ThemedSurface.draw(bounds, fill: density.hoverFill, radius: 0)
@@ -177,16 +183,28 @@ final class ThemedDisclosureRow: ThemedControl {
 
         // The row is a rectangle spanning its card, so the ring restates that silhouette; the
         // card's own layer corner clips the ring where the first and last rows meet it.
-        drawKeyboardFocus(around: ThemedSurface.Shape(rect: bounds, radius: 0))
+        let radius = density == .conversation ? Design.Radius.control : 0
+        drawKeyboardFocus(around: ThemedSurface.Shape(rect: bounds, radius: radius))
     }
 
-    private func updateChevron() {
+    private func updateChevron(animated: Bool = false) {
         chevron.setSymbol(
             isExpanded ? "chevron.down" : "chevron.right",
             slot: Layout.chevronSlot,
             role: .chevron,
             weight: .semibold
         )
+        // A local transition only: expanding work never animates the height of the transcript
+        // or shifts the reader through intermediate row geometry. Reduce Motion is immediate.
+        if density == .conversation, animated, window != nil, !Design.Motion.reducesMotion {
+            chevron.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Design.Motion.quick
+                chevron.animator().alphaValue = 1
+            }
+        } else {
+            chevron.alphaValue = 1
+        }
     }
 
     // MARK: - Accessibility

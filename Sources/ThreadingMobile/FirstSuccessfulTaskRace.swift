@@ -120,6 +120,20 @@ enum RemoteRouteWalkBudget {
         return wave == .port ? portAttemptTimeout : routeAttemptTimeout
     }
 
+    /// The timeout for the one conditional request a refresh sends on the route that answered
+    /// last, before it falls back to the race.
+    ///
+    /// The probe is a bet that the last route still works, and it is worth exactly one route
+    /// attempt: when it loses, the race behind it tries every other way in at that same pace.
+    /// Given the ordinary request timeout instead, a phone that had left the Mac's Wi-Fi spent
+    /// twenty seconds on the dead LAN origin before the race found Tailscale in one (the
+    /// 2026-09-11 report), while the person sat in a chat that would not open. A Mac with no
+    /// other route keeps the ordinary timeout for the same reason a walk of one does: nothing
+    /// is waiting behind it, so cutting it short would only turn a slow success into a failure.
+    static func warmProbeTimeout(hasOtherRoutes: Bool) -> TimeInterval {
+        hasOtherRoutes ? routeAttemptTimeout : RemoteClientDefaults.requestTimeoutSeconds
+    }
+
     /// The timeout for one attempt at an operation that changes something on the Mac.
     static func mutationTimeout(
         for wave: RemoteRouteWave?,

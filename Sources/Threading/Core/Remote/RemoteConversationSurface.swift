@@ -26,6 +26,8 @@ protocol RemoteConversationSurface: AnyObject {
     var isRunning: Bool { get }
     var remoteProjection: RemoteConversationProjection { get }
 
+    func answerRemoteQuestion(id: String, answers: [String: String]?) -> Bool
+
     @discardableResult
     func sendRemotePrompt(
         _ text: String,
@@ -35,6 +37,8 @@ protocol RemoteConversationSurface: AnyObject {
 }
 
 extension RemoteConversationSurface {
+    func answerRemoteQuestion(id: String, answers: [String: String]?) -> Bool { false }
+
     var remoteSnapshot: RemoteConversationSnapshotDTO {
         remoteProjection.snapshot
     }

@@ -9,6 +9,8 @@ protocol MobileParkableSessionConnection: AnyObject {
     @discardableResult func parkForReuse() -> Bool
     @discardableResult func resumeFromPool() -> Bool
     func disconnect(markEnded: Bool)
+    /// Ends a connection the person walked away from and the pool is not keeping.
+    func leave()
 }
 
 extension RemoteSessionConnection: MobileParkableSessionConnection {}
@@ -369,24 +371,24 @@ final class MobileSessionConnectionPool: ObservableObject {
     func park(_ connection: any MobileParkableSessionConnection, for key: MobileConnectionPoolKey) {
         expireStaleEntries()
         guard capacity > 0 else {
-            connection.disconnect(markEnded: false)
+            connection.leave()
             return
         }
         guard connection.isReadyForConnectionPool else {
             metrics.failedToPark += 1
-            connection.disconnect(markEnded: false)
+            connection.leave()
             saveMetrics()
             return
         }
         guard connection.supportsSessionConnectionParking else {
             metrics.unsupported += 1
-            connection.disconnect(markEnded: false)
+            connection.leave()
             saveMetrics()
             return
         }
         guard connection.parkForReuse() else {
             metrics.failedToPark += 1
-            connection.disconnect(markEnded: false)
+            connection.leave()
             saveMetrics()
             return
         }

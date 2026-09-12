@@ -167,6 +167,11 @@ final class RemoteSessionMirrorRegistry {
         appEvents.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.broadcastSessionRow(event.sessionID)
         }
+        appEvents.observe(SessionWorkDidChange.self) { [weak self] event in
+            // Turn boundaries already publish their complete row on SessionRuntimeDidChange.
+            guard event.kind == .inputAccepted else { return }
+            self?.broadcastSessionRow(event.sessionID)
+        }
         // The System theme can change without an AppTheme event when macOS itself crosses
         // light/dark mode. Its resolved AppKit colours and reported mode must move remotely too.
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance) {
@@ -718,7 +723,8 @@ final class RemoteSessionMirrorRegistry {
             projectName: projectName,
             projectID: projectID.uuidString,
             isAvailable: available,
-            lastActiveAt: session.lastActiveAt.timeIntervalSince1970,
+            // Clients use this for recency and row age; process launch/exit is not chat use.
+            lastActiveAt: session.lastUsedAt.timeIntervalSince1970,
             isPinned: session.isPinned,
             isArchived: session.isArchived,
             archivedAt: session.archivedAt?.timeIntervalSince1970,
@@ -1873,6 +1879,18 @@ final class RemoteSessionMirrorRegistry {
         )
     }
 
+    func answerQuestion(
+        id: String, answers: [String: String]?, sessionID: SessionID,
+        authorization: RemoteAuthorization
+    ) -> Bool {
+        guard authorization.scope.covers(sessionID),
+              canWrite(sessionID: sessionID, authorization: authorization),
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID)
+        else { return false }
+        return conversation.answerRemoteQuestion(id: id, answers: answers)
+    }
+
     @discardableResult
     func sendInput(
         _ bytes: [UInt8],
@@ -2850,6 +2868,7 @@ final class RemoteSessionMirrorRegistry {
             && lhs.canSend == rhs.canSend
             && lhs.composerCapabilities == rhs.composerCapabilities
             && lhs.permission == rhs.permission
+            && lhs.questions == rhs.questions
             && lhs.hasEarlier == rhs.hasEarlier
     }
 

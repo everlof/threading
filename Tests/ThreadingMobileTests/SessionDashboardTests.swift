@@ -80,6 +80,23 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(metrics.recycledTitle, "Second title")
     }
 
+    /// The native-cell migration kept computing the full-swipe threshold and firing its haptic,
+    /// but dropped the visual armed state. The action therefore looked frozen while the finger
+    /// crossed the exact distance that changed what releasing would do.
+    @MainActor
+    func testDashboardSwipeVisiblyAnswersEachArmingEdge() {
+        let metrics = MobileDashboardSwipeArmProbe.exercise()
+
+        XCTAssertTrue(metrics.restingUsesControlPlate)
+        XCTAssertTrue(metrics.armedUsesSelectionPlate)
+        XCTAssertTrue(metrics.disarmedUsesControlPlate)
+        XCTAssertEqual(metrics.firstArmMotionCount, 1)
+        XCTAssertEqual(metrics.disarmMotionCount, 1)
+        XCTAssertEqual(metrics.secondArmMotionCount, 2)
+        XCTAssertTrue(metrics.reducedMotionUsesSelectionPlate)
+        XCTAssertEqual(metrics.reducedMotionArmMotionCount, 0)
+    }
+
     func testDashboardRowHeightFollowsAccessibilityContentSize() {
         let standard = DashboardRowMetrics.height(
             compatibleWith: UITraitCollection(preferredContentSizeCategory: .large),
@@ -951,7 +968,7 @@ final class MobileDemoSceneTests: XCTestCase {
     }
 
     @MainActor
-    func testMarketingSessionNavigationReplaysTheReviewedPTYFixtureThroughTheDemoWire() throws {
+    func testMarketingSessionNavigationReplaysTheReviewedPTYFixtureThroughTheDemoWire() async throws {
         let session = try XCTUnwrap(RemoteAppModel.marketingResponse.sessions.first {
             $0.id == "marketing-claude-session"
         })
@@ -966,6 +983,12 @@ final class MobileDemoSceneTests: XCTestCase {
         connection.connect()
         defer { connection.disconnect(markEnded: false) }
 
+        let replayArrived = await Self.eventually {
+            connection.phase == .connected
+                && received.count >= expected.payload.count
+                && connection.runPlanSteps.count == 3
+        }
+        XCTAssertTrue(replayArrived)
         XCTAssertEqual(connection.phase, .connected)
         XCTAssertEqual(
             Data(received.suffix(expected.payload.count)),
@@ -1115,6 +1138,8 @@ final class MobileDemoSceneTests: XCTestCase {
             case .conversationKeyboard: expected = ("conversation-keyboard", .conversation)
             case .conversationReconnectStress:
                 expected = ("conversation-reconnect-stress", .conversation)
+            case .conversationQuestion: expected = ("conversation-question", .conversation)
+            case .conversationQuestionReadonly: expected = ("conversation-question-readonly", .conversation)
             case .conversationRichContent: expected = ("conversation-rich-content", .conversation)
             case .conversationRunPlan: expected = ("conversation-run-plan", .conversation)
             case .conversationRunPlanExpanded:
@@ -1309,6 +1334,18 @@ final class MobileDemoSceneTests: XCTestCase {
     /// The variable is spelled once, and every reader in the app goes through it.
     func testTheEnvironmentVariableIsSpelledOnce() {
         XCTAssertEqual(MobileDemoScene.environmentKey, "THREADING_MOBILE_DEMO")
+    }
+
+    @MainActor
+    private static func eventually(
+        attempts: Int = 200,
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 }
 #endif

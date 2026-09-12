@@ -75,10 +75,14 @@ public final class PaneFooterView: NSView {
     // MARK: - Initialization
 
     /// Both arrays run leading-to-trailing; the first leading view and the last trailing view
-    /// touch their margins and are the ones aligned by ink.
+    /// touch their margins and are the ones aligned by ink. `compressing` explicitly names the
+    /// one member whose content gives way if the two runs no longer fit. A pane's content must
+    /// not overrule the holding priority of the split item that owns its width; leaving this nil
+    /// is appropriate only when the footer's intrinsic width is itself a real minimum.
     public init(
         leading: [NSView] = [],
         trailing: [NSView] = [],
+        compressing: NSView? = nil,
         margin: PaneBandMargin = .cornerAdapted,
         outerEdgeAlignment: PaneFooterOuterEdgeAlignment = .visibleContent
     ) {
@@ -89,7 +93,7 @@ public final class PaneFooterView: NSView {
         heightAnchor.constraint(equalToConstant: Design.Size.footerHeight).isActive = true
         _ = contentGuide
         installSeparator()
-        install(leading: leading, trailing: trailing)
+        install(leading: leading, trailing: trailing, compressing: compressing)
     }
 
     @available(*, unavailable)
@@ -125,7 +129,11 @@ public final class PaneFooterView: NSView {
         ])
     }
 
-    private func install(leading: [NSView], trailing: [NSView]) {
+    private func install(
+        leading: [NSView],
+        trailing: [NSView],
+        compressing: NSView?
+    ) {
         // One text line per band: controls are centred, and loose text sits on the first
         // titled control's baseline rather than on its own centre — two point sizes centred
         // never share one. See `PaneBandTextAlignment` for the rule and the marks that wore
@@ -136,6 +144,17 @@ public final class PaneFooterView: NSView {
         for view in leading + trailing {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
+        }
+        if let compressing {
+            precondition(
+                (leading + trailing).contains { $0 === compressing },
+                "PaneFooterView can only compress a member installed in the footer"
+            )
+            // This member may truncate inside the width the pane owns; it may not make the
+            // pane wider. Priority 1 is intentional rather than merely `.defaultLow`: a plain
+            // terminal split item holds at 250 and the protected side panes hold at 260, so
+            // either would lose to an ordinary control's 750 unless the footer yielded first.
+            compressing.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         }
         for view in leading + trailing {
             if let baselineAnchor, PaneBandTextAlignment.joins(view, anchoredBy: baselineAnchor) {
@@ -175,8 +194,9 @@ public final class PaneFooterView: NSView {
             ).isActive = true
         }
 
-        // The two runs must not meet — the header's rule, mirrored, so a band that grows a
-        // wide leading view compresses it instead of drawing it under the trailing controls.
+        // The two runs must not meet — the header's rule, mirrored. When a host can become
+        // narrower than the runs' intrinsic measure it names the member that owns that squeeze
+        // through `compressing`; the other controls keep their readable widths.
         if let lastLeading = leading.last, let firstTrailing = trailing.first {
             lastLeading.trailingAnchor.constraint(
                 lessThanOrEqualTo: firstTrailing.leadingAnchor,

@@ -256,6 +256,35 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func listTriggerSources(
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func listTriggers(
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func listTriggerRuns(
+    _ arguments: TriggerReferenceArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func createTriggerDraft(
+    _ arguments: CreateTriggerDraftArguments,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func proposeTriggerActivation(
+    _ arguments: TriggerReferenceArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func reportTriggerAssessment(
+    _ arguments: ReportTriggerAssessmentArguments,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func reportTriggerResult(
+    _ arguments: ReportTriggerResultArguments,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   /// Supplied by whatever owns the sheets a repair ends in — the window, in the app. Nil for a
   /// host that has none, which is every test and the default below.
   var conversationRepairHandler: ConversationRepairHandler? { get }

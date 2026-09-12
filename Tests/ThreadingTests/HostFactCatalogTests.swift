@@ -81,7 +81,7 @@ final class HostFactCatalogTests: XCTestCase {
             descriptor.nativeDependencies.map { ($0, descriptor.definition.key) }
         }, by: \.0)
 
-        XCTAssertEqual(NativeSidebarFactDependency.allCases.count, 31)
+        XCTAssertEqual(NativeSidebarFactDependency.allCases.count, 32)
         XCTAssertEqual(Set(owners.keys), Set(NativeSidebarFactDependency.allCases))
         for dependency in NativeSidebarFactDependency.allCases {
             XCTAssertEqual(
@@ -136,6 +136,17 @@ final class HostFactCatalogTests: XCTestCase {
                 fact.value.type
             )
         }
+    }
+
+    func testLastUsedFactSharesTheWorkClockWithNativeSorting() throws {
+        var session = makeSession(activity: .idle)
+        session.lastWorkAt = Date(timeIntervalSinceReferenceDate: 500)
+        let values = Dictionary(uniqueKeysWithValues: HostFactCatalog.facts(
+            from: .session(session), observedAt: observedAt
+        ).map { ($0.key, $0.value) })
+        XCTAssertEqual(values[ExtensionHostFactKey.sessionLastUsedAt], .date(session.lastWorkAt!))
+        XCTAssertEqual(values[ExtensionHostFactKey.sessionLastTurnAt], session.lastTurnAt.map(ExtensionFactValue.date))
+        XCTAssertEqual(values[ExtensionHostFactKey.sessionLastActiveAt], .date(session.lastActiveAt))
     }
 
     func testOptionalSessionValuesAreAbsentWhileBooleanStateRemainsQueryable() {

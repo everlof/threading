@@ -151,3 +151,12 @@ The structural checker is intentionally backed by behavior tests:
 
 For presentation changes, the ordinary design-system and real-shell UI-evidence gates still apply.
 This contract does not replace them.
+
+### Work recency and catalogue publication
+
+`lastWorkAt` is conversation use, separate from process lifecycle and the preserved `lastTurnAt`.
+Work boundaries update the model before the renderer publishes `SessionRuntimeDidChange`, so the
+remote catalogue projects timestamp and operational state together on its existing single row edge.
+Accepted steering has no new turn edge and publishes through `SessionWorkDidChange.inputAccepted`.
+Local sidebar ordering and search consume the narrow work event; they do not depend on an unrelated
+project edit or a future catalogue rebuild. Receipt changes and visiting a row never stamp work.

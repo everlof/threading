@@ -164,7 +164,11 @@ final class PluginKitPublishabilityTests: XCTestCase {
         var found: [URL] = []
         while let entry = enumerator?.nextObject() as? URL {
             // Build products are not part of the package.
-            if entry.pathComponents.contains(".build") { continue }
+            let relativeComponents = entry.pathComponents.dropFirst(directory.pathComponents.count)
+            if relativeComponents.contains(".build") {
+                enumerator?.skipDescendants()
+                continue
+            }
             var isDirectory: ObjCBool = false
             let exists = FileManager.default.fileExists(atPath: entry.path, isDirectory: &isDirectory)
             if exists && isDirectory.boolValue { continue }

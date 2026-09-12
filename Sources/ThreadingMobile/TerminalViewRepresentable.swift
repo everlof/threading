@@ -38,9 +38,12 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> RemoteTerminalLayoutView {
         let resolvedFontSize = MobileTerminalFontSize.resolvedPreference(fontSize)
         let contentInset = MobileDesign.Spacing.small
-        let containerFrame = UIScreen.main.bounds
+        // Construction has no phone viewport yet. A warm connection already has interactive
+        // capability, so a screen-sized placeholder would immediately resize the Mac before
+        // SwiftUI lays out the smaller chat content area.
+        let containerFrame = CGRect.zero
         let view = RemoteTerminalView(
-            frame: containerFrame.insetBy(dx: contentInset, dy: contentInset),
+            frame: .zero,
             font: UIFont.monospacedSystemFont(ofSize: CGFloat(resolvedFontSize), weight: .regular)
         )
         let container = RemoteTerminalLayoutView(
@@ -74,10 +77,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         MobileTerminalWirePerformanceProbe.terminalViewCreated(connection.session)
 #endif
 
-        // Establish grid ownership before mounting the renderer. Mounting consumes any buffered
-        // PTY bytes immediately; resizing after that cannot repair cursor-addressed output that
-        // was already interpreted against the wrong grid.
-        Self.applyViewportOwnership(to: view, connection: connection)
+        // Buffered replay belongs to the Mac's grid until the structural host has laid out its
+        // actual content bounds. Only that first layout may hand viewport ownership to the phone.
+        Self.applyViewportOwnership(to: container, connection: connection)
         context.coordinator.bindRenderer(to: connection)
         if allowsDirectInput, focusesOnCreation {
 #if DEBUG
@@ -115,7 +117,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             canPaste: allowsDirectInput
         )
         terminalView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))
-        Self.applyViewportOwnership(to: terminalView, connection: connection)
+        Self.applyViewportOwnership(to: uiView, connection: connection)
         Self.apply(theme, to: terminalView)
         context.coordinator.refreshScrollToEndPresence(animated: false)
     }
@@ -144,16 +146,17 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     }
 
     private static func applyViewportOwnership(
-        to terminalView: RemoteTerminalView,
+        to layoutView: RemoteTerminalLayoutView,
         connection: RemoteSessionConnection
     ) {
+        let terminalView = layoutView.terminalView
 #if DEBUG
         let demoID = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
         let replaysRecordedGrid = MobileDemoScene.recordedPTYFixtureIDs.contains(demoID ?? "")
 #else
         let replaysRecordedGrid = false
 #endif
-        let local = usesLocalViewport(
+        let local = layoutView.hasLaidOutTerminalViewport && usesLocalViewport(
             capability: connection.capability,
             replaysRecordedGrid: replaysRecordedGrid
         )
@@ -295,6 +298,13 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         func attach(to view: RemoteTerminalView, in layoutView: RemoteTerminalLayoutView) {
             terminalView = view
             self.layoutView = layoutView
+            layoutView.onInitialViewportLayout = { [weak self] in
+                guard let self, let layoutView = self.layoutView else { return }
+                TerminalViewRepresentable.applyViewportOwnership(
+                    to: layoutView,
+                    connection: self.connection
+                )
+            }
             keyBridge.attachTerminalView(view)
             view.scrollOwnershipDidChange = { [weak self] in
                 self?.refreshScrollToEndPresence()
@@ -318,6 +328,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             contentOffsetObservation?.invalidate()
             contentOffsetObservation = nil
             terminalView?.scrollOwnershipDidChange = nil
+            layoutView?.onInitialViewportLayout = nil
             if let terminalView { keyBridge.detachTerminalView(terminalView) }
             terminalView = nil
             layoutView = nil
@@ -380,9 +391,16 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         }
 
         nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            let sourceID = ObjectIdentifier(source)
             Task { @MainActor [weak self] in
-                guard let self, reportsTerminalViewportChanges else { return }
-                connection.updateTerminalViewport(cols: newCols, rows: newRows)
+                guard let self, let view = terminalView,
+                      ObjectIdentifier(view) == sourceID,
+                      reportsTerminalViewportChanges,
+                      connection.isTerminalRendererOwner(view) else { return }
+                // Delegate delivery crosses an actor hop. Only the current geometry of the
+                // mounted owner can lease the viewport, never a size superseded before delivery.
+                let grid = view.terminalDimensions
+                connection.updateTerminalViewport(cols: grid.cols, rows: grid.rows)
             }
         }
         nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
@@ -442,6 +460,8 @@ final class RemoteTerminalLayoutView: UIView {
     private(set) var settledTerminalHeight: CGFloat
     private(set) var pendingTerminalHeight: CGFloat?
     private(set) var isKeyboardGeometryInFlight = false
+    private(set) var hasLaidOutTerminalViewport = false
+    var onInitialViewportLayout: (() -> Void)?
 #if DEBUG
     private(set) var terminalWidthApplicationCount = 0
     private(set) var terminalHeightApplicationCount = 0
@@ -545,6 +565,11 @@ final class RemoteTerminalLayoutView: UIView {
             width: settledTerminalWidth,
             height: settledTerminalHeight
         )
+        if !hasLaidOutTerminalViewport,
+           settledTerminalWidth > 0, settledTerminalHeight > 0 {
+            hasLaidOutTerminalViewport = true
+            onInitialViewportLayout?()
+        }
     }
 
     /// Begins a keyboard-owned geometry transaction. Internal so a frame storm can be exercised

@@ -13,6 +13,9 @@ enum MobileRefreshReason: String, Sendable {
     case pullToRefresh
     /// The event socket has been lost and its bounded backoff has run.
     case socketRecovery
+    /// The network path changed underneath a socket that was not delivering, or one that a
+    /// liveness ping then found dead.
+    case networkPathChanged
     /// The event socket said something structural changed and offered no row delta.
     case structuralChange
     /// A delta named a catalogue edition this phone cannot be holding.
@@ -63,7 +66,7 @@ enum MobileRefreshPolicy {
             // is not new information about the Mac. Without the socket, ask cheaply first.
             if eventSocketHealthy { return .skip }
             return canRefreshConditionally ? .conditional : .full
-        case .foreground, .socketRecovery, .openTarget, .notificationOpen:
+        case .foreground, .socketRecovery, .networkPathChanged, .openTarget, .notificationOpen:
             // One round trip on the known route re-validates both the route and the catalogue,
             // and re-establishes the socket afterwards. The connectivity lanes wait for a
             // `hostRefreshSucceeded` after a resume, and a `304` records one.

@@ -359,6 +359,10 @@ struct RemoteAttachmentPreviewContent: View {
     private let isCurrentPage: Bool
     /// Told the pixel size of a decoded image, for the gallery's detail line.
     private let onDecodedImageSize: ((CGSize) -> Void)?
+    /// Gives the gallery only the current page's already-loaded bytes so Share does not fetch the
+    /// same file twice. The gallery retains one `Data` value, never a cache proportional to the
+    /// attachment list.
+    private let onLoadedData: ((Data) -> Void)?
 
     init(
         sessionID: String,
@@ -368,7 +372,8 @@ struct RemoteAttachmentPreviewContent: View {
         loadsRemotely: Bool = true,
         offersVideoStreaming: Bool = false,
         isCurrentPage: Bool = true,
-        onDecodedImageSize: ((CGSize) -> Void)? = nil
+        onDecodedImageSize: ((CGSize) -> Void)? = nil,
+        onLoadedData: ((Data) -> Void)? = nil
     ) {
         self.sessionID = sessionID
         self.attachment = attachment
@@ -377,6 +382,7 @@ struct RemoteAttachmentPreviewContent: View {
         self.offersVideoStreaming = offersVideoStreaming
         self.isCurrentPage = isCurrentPage
         self.onDecodedImageSize = onDecodedImageSize
+        self.onLoadedData = onLoadedData
         _data = State(initialValue: initialData)
     }
 
@@ -482,9 +488,13 @@ struct RemoteAttachmentPreviewContent: View {
         )
         switch decision {
         case .localFixture:
-            if let data { reportImageSize(in: data) }
+            if let data {
+                reportImageSize(in: data)
+                if isCurrentPage { onLoadedData?(data) }
+            }
             return
         case .alreadyLoaded:
+            if let data, isCurrentPage { onLoadedData?(data) }
             return
         case .previewUnavailable:
             if !didRecordUnavailablePreview {
@@ -517,6 +527,7 @@ struct RemoteAttachmentPreviewContent: View {
             data = fetched
             errorMessage = nil
             reportImageSize(in: fetched)
+            if isCurrentPage { onLoadedData?(fetched) }
         } catch {
             guard let message = RemoteAttachmentPreviewFailure.message(for: error) else {
                 MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .cancel)

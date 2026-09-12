@@ -306,6 +306,33 @@ public class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// reporting no pop-up buttons on a page that visibly has one.
     public override func isAccessibilityElement() -> Bool { true }
     public override func isAccessibilityEnabled() -> Bool { isEnabled }
+
+    /// AppKit's `NSControl` hit test returns its cell. These controls draw without a cell,
+    /// so an accessible button could be listed and enabled yet return no element under the
+    /// pointer. In a scroll view, UI automation then tried scrolling an already visible button
+    /// into view forever. Preserve descendant hits and supply the drawn control at its own
+    /// visible bounds, including disabled controls that VoiceOver still needs to describe.
+    public override nonisolated func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        // AppKit imports accessibility overrides as nonisolated even though it delivers them on
+        // the main thread. Keep every read of view geometry inside that explicit bridge, as the
+        // semantic-scene accessibility elements do for their live frames and actions.
+        let result: MainActorAccessibilityHitResult? = MainActor.assumeIsolated {
+            guard let window, !isHiddenOrHasHiddenAncestor else { return nil }
+            let local = convert(window.convertPoint(fromScreen: point), from: nil)
+            guard bounds.intersection(visibleRect).contains(local) else { return nil }
+            return MainActorAccessibilityHitResult(
+                value: super.accessibilityHitTest(point) ?? self
+            )
+        }
+        return result?.value
+    }
+}
+
+/// `MainActor.assumeIsolated` executes synchronously on the already-current main executor, so the
+/// AppKit accessibility object is never transferred to another thread. The wrapper states that
+/// narrow fact without declaring all `NSAccessibility` values Sendable.
+private struct MainActorAccessibilityHitResult: @unchecked Sendable {
+    let value: Any
 }
 
 /// Applies the design system's disabled recipe before any part of a modern control is drawn.

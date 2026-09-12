@@ -450,11 +450,27 @@ struct AgentSession: Codable, Identifiable {
 
   /// When this conversation was last used, as well as the record can say.
   ///
-  /// The real turn where there is one, and the runtime's own timestamp for records that predate
-  /// it. The launch restore window reads this, and this fallback is exactly why that window is
-  /// also capped: on the first launch after the field arrives, every older session reads as
-  /// recently touched, and the cap is what keeps that from booting the whole store.
-  var lastUsedAt: Date { lastTurnAt ?? lastActiveAt }
+  /// The latest observed work boundary or accepted input, retaining the latest turn start for
+  /// older records. Only a record with neither work timestamp uses process activity. Restoration
+  /// remains capped because legacy process timestamps can make many old chats look recent.
+  var lastUsedAt: Date {
+    Self.conversationRecency(lastActiveAt: lastActiveAt, lastTurnAt: lastTurnAt, lastWorkAt: lastWorkAt)
+  }
+
+  /// Latest observed work boundary or accepted steering input. Process lifecycle and replay
+  /// never advance this value. `lastTurnAt` remains the start of the latest turn.
+  var lastWorkAt: Date?
+
+  static func conversationRecency(
+    lastActiveAt: Date, lastTurnAt: Date?, lastWorkAt: Date?
+  ) -> Date {
+    switch (lastTurnAt, lastWorkAt) {
+    case let (turn?, work?): return max(turn, work)
+    case let (turn?, nil): return turn
+    case let (nil, work?): return work
+    case (nil, nil): return lastActiveAt
+    }
+  }
 
   /// Whether this record has no conversation, is waiting for an identifier, or can resume.
   ///
@@ -840,6 +856,7 @@ struct AgentSession: Codable, Identifiable {
     self.createdAt = Date()
     self.lastActiveAt = Date()
     self.lastTurnAt = nil
+    self.lastWorkAt = nil
     self.resumeState = ResumeState.initial(for: configuration.kind)
     self.hasLaunched = false
     self.lastExitCode = nil
@@ -873,7 +890,7 @@ struct AgentSession: Codable, Identifiable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, kind, title, customTitle, createdAt, lastActiveAt, lastTurnAt
+    case id, kind, title, customTitle, createdAt, lastActiveAt, lastTurnAt, lastWorkAt
     case agentTitle = "terminalTitle"
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
@@ -914,6 +931,7 @@ struct AgentSession: Codable, Identifiable {
       try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
       ?? createdAt
     lastTurnAt = try container.decodeIfPresent(Date.self, forKey: .lastTurnAt)
+    lastWorkAt = try container.decodeIfPresent(Date.self, forKey: .lastWorkAt)
     resumeState = ResumeState.restoring(
       try container.decodeIfPresent(TranscriptID.self, forKey: .agentSessionID),
       for: decodedKind
@@ -1280,6 +1298,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encode(createdAt, forKey: .createdAt)
     try container.encode(lastActiveAt, forKey: .lastActiveAt)
     try container.encodeIfPresent(lastTurnAt, forKey: .lastTurnAt)
+    try container.encodeIfPresent(lastWorkAt, forKey: .lastWorkAt)
     try container.encodeIfPresent(resumeState.transcriptID, forKey: .agentSessionID)
     try container.encode(hasLaunched, forKey: .hasLaunched)
     try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)

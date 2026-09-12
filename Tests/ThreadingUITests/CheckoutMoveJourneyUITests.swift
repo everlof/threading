@@ -32,7 +32,7 @@ final class CheckoutMoveJourneyUITests: XCTestCase {
         let targetSize = sandbox.configure(app)
         fixture.configure(app, scenarioRoot: sandbox.root)
         application = app
-        app.launch()
+        sandbox.launch(app)
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 20))

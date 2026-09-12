@@ -657,6 +657,24 @@ final class UsageScanProgressReporter {
     }
 }
 
+/// Export freshness differs from row recency: a live turn can append usage without another
+/// work boundary. Each live/forced scan gets its own revision; settled work retains a warm cache.
+enum TranscriptUsageExportRevision {
+    /// Retire entries created under the process-time contract, including legacy sessions whose
+    /// fallback date happens to match it. This versions only exports, not every transcript parser.
+    static func sourceKey(transcriptID: String, hasPendingOutcome: Bool = false) -> String {
+        // A provisional export must never satisfy a settled read, even across a clock correction.
+        let phase = hasPendingOutcome ? "live" : "settled"
+        return "opencode|work-v1|\(phase)|\(transcriptID)"
+    }
+
+    static func resolve(
+        lastUsedAt: Date, hasPendingOutcome: Bool, force: Bool, sampledAt: Date
+    ) -> Date {
+        hasPendingOutcome || force ? sampledAt : lastUsedAt
+    }
+}
+
 // MARK: - Transcript Usage Service
 
 @MainActor
@@ -674,7 +692,9 @@ final class TranscriptUsageService {
         let runtimeID: String
         let transcriptID: String
         let projectPath: String
-        let lastActiveAt: Date
+        let revision: Date
+        let hasPendingOutcome: Bool
+        let forceRefresh: Bool
     }
 
     /// One transcript or rollout waiting to be parsed, resolved during enumeration so the scan
@@ -736,16 +756,27 @@ final class TranscriptUsageService {
         let projectDescriptors = projects.map {
             UsageLedgerBuilder.ProjectDescriptor(path: $0.folderPath, name: $0.name)
         }
+        let sampledAt = Date()
         let exports: [ExportSource] = projects.flatMap { project in
             project.sessions.compactMap { session in
                 guard let transcriptID = session.resumeState.transcriptID else { return nil }
                 switch session.kind {
                 case .openCode:
+                    let hasPendingOutcome = AgentRuntime.shared.runtimeSnapshot(
+                        sessionID: session.id
+                    ).hasPendingOutcome
                     return ExportSource(
                         runtimeID: session.kind.rawValue,
                         transcriptID: transcriptID.rawValue,
                         projectPath: project.folderPath,
-                        lastActiveAt: session.lastActiveAt
+                        revision: TranscriptUsageExportRevision.resolve(
+                            lastUsedAt: session.lastUsedAt,
+                            hasPendingOutcome: hasPendingOutcome,
+                            force: force,
+                            sampledAt: sampledAt
+                        ),
+                        hasPendingOutcome: hasPendingOutcome,
+                        forceRefresh: force || hasPendingOutcome
                     )
                 case .claude, .codex, .grok, .cursor:
                     return nil
@@ -970,16 +1001,20 @@ final class TranscriptUsageService {
             }
             item.sourceCount += 1
             do {
-                let key = "opencode|\(source.transcriptID)"
+                let key = TranscriptUsageExportRevision.sourceKey(
+                    transcriptID: source.transcriptID, hasPendingOutcome: source.hasPendingOutcome
+                )
                 let result = try index.update(
                     key: key,
-                    revision: source.lastActiveAt,
-                    parserID: UsageScanCacheDefaults.openCodeParserID
+                    revision: source.revision,
+                    parserID: UsageScanCacheDefaults.openCodeParserID,
+                    forceRefresh: source.forceRefresh
                 ) {
                     try cache.records(
                         forKey: key,
-                        revision: source.lastActiveAt,
-                        parserID: UsageScanCacheDefaults.openCodeParserID
+                        revision: source.revision,
+                        parserID: UsageScanCacheDefaults.openCodeParserID,
+                        forceRefresh: source.forceRefresh
                     ) {
                         let data = try ConversationHandoffCapture.runExport(
                             kind: runtime,

@@ -366,12 +366,22 @@ final class RemoteConnectionFailureTests: XCTestCase {
         connection.connect()
         defer { connection.disconnect(markEnded: false) }
 
+        let connected = await Self.eventually { connection.phase == .connected }
+        XCTAssertTrue(connected)
         XCTAssertEqual(connection.phase, .connected)
         connection.sendTerminalKey("z")
         let submissionID = try XCTUnwrap(connection.submitTerminalLine("status"))
+        let sessionPseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let repliesArrived = await Self.eventually {
+            let records = MobileDiagnostics.journal.records().filter {
+                $0.fields[RemoteDiagnosticField.session.rawValue] == sessionPseudonym
+            }
+            return records.contains { $0.event == .terminalInputProbeEnded }
+                && records.contains { $0.event == .promptSubmissionEnded }
+        }
+        XCTAssertTrue(repliesArrived)
         await connection.waitForInteractionDiagnosticsForTesting()
 
-        let sessionPseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
         let records = MobileDiagnostics.journal.records().filter {
             $0.fields[RemoteDiagnosticField.session.rawValue] == sessionPseudonym
         }
@@ -497,6 +507,121 @@ final class RemoteConnectionFailureTests: XCTestCase {
         )
     }
 
+    /// A person who backs out of a chat still waiting for its hello leaves a socket that has not
+    /// failed, so nothing else would ever end its journal story. The 2026-09-11 report had one
+    /// `socketConnecting` on a dead origin with no ending, and the abandonment was the fact the
+    /// reader needed. A connected socket the pool declines still ends silently.
+    func testLeavingADialStillWaitingForItsHelloRecordsTheAbandonment() throws {
+        let server = try SilentTCPServer()
+        defer { server.stop() }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let pseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let connection = makeConnection(port: server.port, sessionID: sessionID)
+        connection.connect()
+        XCTAssertEqual(connection.phase, .connecting)
+
+        connection.leave()
+
+        let records = MobileDiagnostics.journal.records().filter {
+            $0.fields[RemoteDiagnosticField.session.rawValue] == pseudonym
+        }
+        let connecting = try XCTUnwrap(records.last { $0.event == .socketConnecting })
+        let abandoned = try XCTUnwrap(records.last { $0.event == .socketEnded })
+        XCTAssertEqual(abandoned.fields[RemoteDiagnosticField.result.rawValue], "abandoned")
+        XCTAssertEqual(abandoned.fields[RemoteDiagnosticField.reason.rawValue], "userLeft")
+        XCTAssertEqual(abandoned.fields[RemoteDiagnosticField.phase.rawValue], "hello")
+        XCTAssertEqual(
+            abandoned.fields[RemoteDiagnosticField.trace.rawValue],
+            connecting.fields[RemoteDiagnosticField.trace.rawValue],
+            "the attempt that ends is the one that was dialling"
+        )
+        XCTAssertEqual(
+            abandoned.fields[RemoteDiagnosticField.origin.rawValue],
+            originDigest(port: server.port)
+        )
+        XCTAssertFalse(
+            records.contains { $0.event == .socketFailed },
+            "leaving is not a failure, and the deadline must not fire after it"
+        )
+
+        connection.leave()
+        let endings = MobileDiagnostics.journal.records().filter {
+            $0.fields[RemoteDiagnosticField.session.rawValue] == pseudonym
+                && $0.event == .socketEnded
+        }
+        XCTAssertEqual(endings.count, 1, "a socket already ended is not abandoned twice")
+    }
+
+    /// The title's retry used to call `connect()` on the client the socket already held — after
+    /// a route loss, the origin that had just failed — and cancelled the model-routed retry
+    /// sleeping in its backoff to do it. A person's tap now goes to the model at once, as a
+    /// retry, so the route is re-resolved rather than trusted.
+    func testAManualRetryAsksTheModelForARouteInsteadOfRedialling() async throws {
+        let server = try SilentTCPServer()
+        defer { server.stop() }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let pseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let requests = ReconnectRequestLog()
+        let connection = makeConnection(port: server.port, sessionID: sessionID) { request in
+            requests.record(request)
+            return nil
+        }
+        connection.connect()
+        _ = try await terminalFailure(of: connection)
+
+        connection.retryNow()
+        let request = try await requests.first(within: terminalAllowance)
+        connection.disconnect(markEnded: false)
+
+        XCTAssertGreaterThanOrEqual(request.attempt, 1, "a tap is a retry, never a first attempt")
+        XCTAssertTrue(
+            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                request,
+                dashboardRecoveryPending: false
+            ),
+            "the manual retry re-resolves the route through the model"
+        )
+        let connecting = MobileDiagnostics.journal.records().filter {
+            $0.event == .socketConnecting
+                && $0.fields[RemoteDiagnosticField.session.rawValue] == pseudonym
+        }
+        XCTAssertEqual(connecting.count, 1, "the old origin is not dialled again on a tap")
+    }
+
+    /// A backoff counts toward the network the socket lost. When the path changes underneath
+    /// it, the network it is waiting for may already be there, so the retry asks the model now
+    /// rather than at the end of the sleep.
+    func testAPathChangeDuringBackoffAsksTheModelAtOnce() async throws {
+        let server = try SilentTCPServer()
+        defer { server.stop() }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let requests = ReconnectRequestLog()
+        let connection = makeConnection(port: server.port, sessionID: sessionID) { request in
+            requests.record(request)
+            return nil
+        }
+        connection.connect()
+        _ = try await terminalFailure(of: connection)
+        // The first retry is sleeping its one-second backoff now.
+        XCTAssertTrue(requests.requests.isEmpty, "nothing has asked the model yet")
+
+        let askedAt = Date()
+        connection.networkPathChanged()
+        let request = try await requests.first(within: terminalAllowance)
+        connection.disconnect(markEnded: false)
+
+        XCTAssertLessThan(
+            Date().timeIntervalSince(askedAt),
+            0.5,
+            "the path change ends the backoff rather than waiting it out"
+        )
+        XCTAssertEqual(request.attempt, 0)
+        XCTAssertFalse(request.peerSentClose)
+    }
+
     func testARouteThatMovesDuringBackoffDialsTheNewOneAtOnce() async throws {
         let oldServer = try SilentTCPServer()
         defer { oldServer.stop() }
@@ -529,7 +654,7 @@ final class RemoteConnectionFailureTests: XCTestCase {
         )
     }
 
-    func testAConnectedSocketIsNotRestartedWhenTheRouteMoves() {
+    func testAConnectedSocketIsNotRestartedWhenTheRouteMoves() async {
         let connection = RemoteSessionConnection(
             session: RemoteSessionSummaryDTO(
                 id: UUID().uuidString.lowercased(),
@@ -543,6 +668,8 @@ final class RemoteConnectionFailureTests: XCTestCase {
         )
         connection.connect()
         defer { connection.disconnect(markEnded: false) }
+        let connected = await Self.eventually { connection.phase == .connected }
+        XCTAssertTrue(connected)
         XCTAssertEqual(connection.phase, .connected)
 
         XCTAssertFalse(
@@ -553,6 +680,17 @@ final class RemoteConnectionFailureTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private static func eventually(
+        attempts: Int = 200,
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
 
     private func makeConnection(
         port: UInt16,

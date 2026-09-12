@@ -15,36 +15,17 @@ final class TurnFoldView: NSView {
     private let foldedViews: [NSView]
     private let onExpansionChanged: ((TurnFoldView, Bool) -> Void)?
 
-    private lazy var chevron: NSImageView = {
-        let image = NSImageView()
-        image.translatesAutoresizingMaskIntoConstraints = false
-        image.image = NSImage(
-            systemSymbolName: "chevron.right",
-            accessibilityDescription: nil
-        )
-        // The same ink as the label beside it. At `quaternary` the disclosure was fainter than the
-        // words it discloses, so the one control that opens a turn's work read as a label with a
-        // smudge in front of it rather than as one object. Its *quietness* is intended — the row
-        // takes its plate on hover, which is the "quiet until relevant" contract — but quiet is a
-        // level, and the two halves of a control should be on the same one.
-        image.contentTintColor = Design.Text.tertiary
-        image.symbolConfiguration = Design.Symbol.configuration(
-            Design.Symbol.chevron,
-            weight: .semibold
-        )
-        return image
-    }()
-    private lazy var titleLabel: NSTextField = {
+    private lazy var disclosure: ThemedDisclosureRow = {
         let title = NSTextField(labelWithString: label)
         title.applyFont(.caption, in: .conversation)
         title.textColor = Design.Text.tertiary
-        title.translatesAutoresizingMaskIntoConstraints = false
-        title.maximumNumberOfLines = 1
-        return title
+        let control = ThemedDisclosureRow(content: title, isExpanded: isExpanded, density: .conversation)
+        control.setAccessibilityLabel(label)
+        control.setAccessibilityIdentifier("conversation.work-disclosure")
+        control.onToggle = { [weak self] expanded in self?.setExpanded(expanded) }
+        return control
     }()
-
     private var isExpanded = false
-    private var isHovered = false
 
     // MARK: - Initialization
 
@@ -90,32 +71,13 @@ final class TurnFoldView: NSView {
 
     private func setupViews() {
         translatesAutoresizingMaskIntoConstraints = false
-        applySurface(fill: Design.Chat.toolRowResting, radius: .control)
-
-        addSubview(chevron)
-        addSubview(titleLabel)
-
-        let inset = Design.Spacing.small
+        addSubview(disclosure)
         NSLayoutConstraint.activate([
-            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            chevron.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
-            chevron.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            titleLabel.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: inset),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -inset),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+            disclosure.leadingAnchor.constraint(equalTo: leadingAnchor),
+            disclosure.trailingAnchor.constraint(equalTo: trailingAnchor),
+            disclosure.topAnchor.constraint(equalTo: topAnchor),
+            disclosure.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-
-        setAccessibilityRole(.disclosureTriangle)
-        setAccessibilityLabel(label)
-        chevron.image = NSImage(
-            systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
-            accessibilityDescription: nil
-        )
-        setAccessibilityExpanded(isExpanded)
-        updateSurface()
-        addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(toggle)))
     }
 
     // MARK: - Private Methods
@@ -138,58 +100,15 @@ final class TurnFoldView: NSView {
             : "\(verb) after \(TurnStatusText.duration(duration))"
     }
 
-    @objc private func toggle() {
-        setExpanded(!isExpanded)
-    }
-
-    /// Kept separate from pointer handling so restoration is directly regression-testable.
+    /// Disclosure state stays with the transcript identity across recycled row hosts.
     func setExpanded(_ expanded: Bool) {
         guard expanded != isExpanded else { return }
         isExpanded = expanded
+        disclosure.isExpanded = expanded
         if let onExpansionChanged {
-            onExpansionChanged(self, isExpanded)
+            onExpansionChanged(self, expanded)
         } else {
-            foldedViews.forEach { $0.isHidden = !isExpanded }
+            foldedViews.forEach { $0.isHidden = !expanded }
         }
-        chevron.image = NSImage(
-            systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
-            accessibilityDescription: nil
-        )
-        setAccessibilityExpanded(isExpanded)
-        updateSurface()
-    }
-
-    // MARK: - Hover
-
-    /// No fill at rest, so hover is the only thing saying the line can be clicked — the same
-    /// rule, and the same staleness guard, as the tool rows around it.
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        ))
-
-        if hoverIsStale(isHovered) {
-            isHovered = false
-            updateSurface()
-        }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateSurface()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateSurface()
-    }
-
-    private func updateSurface() {
-        let isActive = isHovered || isExpanded
-        applyLayerBackground(isActive ? Design.Chat.toolRowActive : Design.Chat.toolRowResting)
     }
 }

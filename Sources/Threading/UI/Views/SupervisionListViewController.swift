@@ -18,8 +18,9 @@ final class SupervisionListViewController: NSViewController {
     var onArchive: ((SessionID) -> Void)?
     var onRelease: ((SessionID) -> Void)?
 
-    private var rows: [Row] = []
+    private(set) var rows: [Row] = []
     private let events = AppEventObservations()
+    private var refreshIsScheduled = false
     private let root = ThemedSurfaceView()
     private let titleLabel = NSTextField(labelWithString: L10n.string("Managed chats"))
     private let countLabel = NSTextField(labelWithString: "")
@@ -43,11 +44,15 @@ final class SupervisionListViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         events.observe(SupervisionDidChange.self) { [weak self] event in
             guard event.managerID == self?.managerID else { return }
-            self?.refresh()
+            self?.scheduleRefresh()
+        }
+        events.observe(SessionWorkDidChange.self) { [weak self] event in
+            guard self?.rows.contains(where: { $0.session.id == event.sessionID }) == true else { return }
+            self?.scheduleRefresh()
         }
         events.observe(SessionActivityDidChange.self) { [weak self] event in
             guard self?.rows.contains(where: { $0.session.id == event.sessionID }) == true else { return }
-            self?.refresh()
+            self?.scheduleRefresh()
         }
     }
 
@@ -66,6 +71,17 @@ final class SupervisionListViewController: NSViewController {
         refresh()
     }
 
+    private func scheduleRefresh() {
+        guard !refreshIsScheduled else { return }
+        refreshIsScheduled = true
+        // A work stamp precedes its runtime/receipt changes. Read the completed projection once.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            refreshIsScheduled = false
+            refresh()
+        }
+    }
+
     func refresh() {
         if let rowsProvider {
             rows = rowsProvider()
@@ -78,7 +94,14 @@ final class SupervisionListViewController: NSViewController {
                     activity: AgentRuntime.shared.activity(sessionID: session.id),
                     lastEvent: ControlGrantStore.shared.events(for: supervision.id).last
                 )
-            }.sorted { $0.session.lastActiveAt > $1.session.lastActiveAt }
+            }
+        }
+
+        rows.sort {
+            if $0.session.lastUsedAt != $1.session.lastUsedAt {
+                return $0.session.lastUsedAt > $1.session.lastUsedAt
+            }
+            return $0.session.id.uuidString < $1.session.id.uuidString
         }
 
         countLabel.stringValue = rows.count == 1

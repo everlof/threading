@@ -119,6 +119,51 @@ final class UsageScanCacheTests: XCTestCase {
         XCTAssertEqual(warm.records.map(\.identity), ["exported"])
     }
 
+    func testExportRefreshesDuringWorkAndOnCompletionAcrossBothCacheLayers() throws {
+        let cacheDirectory = directory.appendingPathComponent("work-cache")
+        let cache = UsageScanCache(directory: cacheDirectory)
+        let index = try UsageLedgerIndex(directory: cacheDirectory)
+        var exports = 0
+        cache.beginScan()
+        index.beginScan()
+        _ = try index.update(key: "opencode|fixture", revision: Date(timeIntervalSince1970: 100), parserID: "export-v1") {
+            try cache.records(forKey: "opencode|fixture", revision: Date(timeIntervalSince1970: 100), parserID: "export-v1") {
+                [self.makeRecord(identity: "old-process-clock")]
+            }
+        }
+        _ = try index.finishScan()
+        cache.finishScan()
+        func scan(work: TimeInterval, pending: Bool, force: Bool = false, sample: TimeInterval) throws -> Bool {
+            cache.beginScan()
+            index.beginScan()
+            let revision = TranscriptUsageExportRevision.resolve(
+                lastUsedAt: Date(timeIntervalSince1970: work), hasPendingOutcome: pending,
+                force: force, sampledAt: Date(timeIntervalSince1970: sample)
+            )
+            let key = TranscriptUsageExportRevision.sourceKey(transcriptID: "fixture", hasPendingOutcome: pending)
+            let result = try index.update(key: key, revision: revision, parserID: "export-v1", forceRefresh: force || pending) {
+                try cache.records(forKey: key, revision: revision, parserID: "export-v1", forceRefresh: force || pending) {
+                    exports += 1
+                    return [self.makeRecord(identity: "response-\(exports)")]
+                }
+            }
+            _ = try index.finishScan()
+            cache.finishScan()
+            return result.wasCacheHit
+        }
+        XCTAssertFalse(try scan(work: 100, pending: false, sample: 200))
+        XCTAssertTrue(try scan(work: 100, pending: false, sample: 300))
+        XCTAssertFalse(try scan(work: 400, pending: true, sample: 500))
+        XCTAssertFalse(try scan(work: 400, pending: true, sample: 600))
+        XCTAssertFalse(try scan(work: 700, pending: false, sample: 800))
+        XCTAssertTrue(try scan(work: 700, pending: false, sample: 900))
+        XCTAssertFalse(try scan(work: 700, pending: false, force: true, sample: 700))
+        XCTAssertFalse(try scan(work: 700, pending: true, sample: 700))
+        XCTAssertFalse(try scan(work: 700, pending: true, sample: 700))
+        XCTAssertFalse(try scan(work: 700, pending: false, sample: 700))
+        XCTAssertEqual(exports, 8)
+    }
+
     func testLedgerIndexSkipsEnvelopeReadsAndStreamsOneGloballyDistinctRecord() throws {
         let cacheDirectory = directory.appendingPathComponent("cache")
         let secondSource = directory.appendingPathComponent("second.jsonl")

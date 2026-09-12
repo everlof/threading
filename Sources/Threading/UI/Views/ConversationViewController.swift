@@ -556,6 +556,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private let account: AgentAccount?
     var workingStartedAt: TimeInterval?
     var workingStatusTimer: Timer?
+    var presentedStatus: ConversationTimeline.Status = .loading
 
     /// The structured plan position most recently reported in this turn.
     var runProgress: RunProgress? {
@@ -608,6 +609,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// Called from the status edge in `ConversationRendering` rather than as the list arrives,
     /// so a task finishing between turns cannot momentarily declare the session done.
     func noteTurnBoundary() {
+        if !isReplaying, !isTurnInFlight {
+            ProjectStore.shared.noteTurnEnded(sessionID: sessionID)
+        }
         pausedOnOwnWork = isTurnInFlight
             ? false
             : backgroundWork.turnEnded(leaving: backgroundWorkInFlight)
@@ -880,14 +884,20 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     /// The approval card on screen, if any. Only one is shown at a time.
     var activePermissionCard: PermissionRequestView?
+    var questionCards: [UUID: ConversationQuestionCard] = [:]
+    var questionOrder: [UUID] = []
 
     /// Requests waiting their turn, shown one after another: an agent can fire several tool
     /// calls at once, but a wall of cards is answered out of context, so they queue.
     var permissionQueue: [(request: PermissionRequest, decide: (PermissionDecision) -> Void)] = []
 
     /// Whether anything is waiting on the user, on screen or queued behind it.
-    private var hasPendingPermission: Bool {
+    var hasPendingPermission: Bool {
         activePermissionCard != nil || !permissionQueue.isEmpty
+    }
+
+    var hasPendingUserDecision: Bool {
+        hasPendingPermission || questionCards.values.contains { $0.request.blocksTurn }
     }
 
     weak var delegate: ConversationViewControllerDelegate?
@@ -924,7 +934,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// is dimmed, resuming is the offer, and the refusal is still the newest thing in the
     /// transcript when it comes back.
     var activity: SessionActivity {
-        if hasPendingPermission {
+        if hasPendingUserDecision {
             return isTurnInFlight ? .awaitingUser : .needsAttention
         }
         if isTurnInFlight { return .working }
@@ -939,7 +949,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         } else {
             .none
         }
-        let blocker: SessionRuntimeBlocker = if hasPendingPermission {
+        let blocker: SessionRuntimeBlocker = if hasPendingUserDecision {
             .awaitingUser
         } else if usageLimit != nil {
             .usageLimit
@@ -1551,6 +1561,13 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 )
             }
             self.handle(event)
+        }
+        if let asking = stream as? QuestionAskingConversation {
+            asking.onQuestion = { [weak self] request, answer in
+                guard let self else { answer(nil); return }
+                self.presentQuestion(request, answer: answer)
+            }
+            asking.onQuestionResolved = { [weak self] in self?.removeQuestion(id: $0) }
         }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
         stream.onLaunchFailure = { [weak self] error in self?.handleLaunchFailure(error) }
@@ -2192,6 +2209,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
         workingStatusTimer?.invalidate()
         workingStatusTimer = nil
+        presentedStatus = .ended(code: 0)
         #if DEBUG
         let viewportEnded = DispatchTime.now().uptimeNanoseconds
         #endif
@@ -2203,6 +2221,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // which would otherwise create a new unresolved card in the middle of shutdown.
         let queuedPermissions = permissionQueue
         permissionQueue.removeAll()
+        for id in Array(questionCards.keys) { removeQuestion(id: id) }
 
         activePermissionCard?.resolve(.deny(reason: "The session ended before the request was answered."))
         activePermissionCard = nil
@@ -2332,7 +2351,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                         unavailableReason: capability.unavailableReason
                     )
                 },
-                permission: activePermissionCard?.remoteRequest
+                permission: activePermissionCard?.remoteRequest,
+                questions: questionOrder.compactMap { questionCards[$0]?.request.remoteRequest }
             ),
             rowsRevision: remoteRowProjection.rowsRevision
         )
@@ -2700,16 +2720,19 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             userTurnID: messageID.wireValue,
             transport: { [weak self] _ in
                 guard let self else { return false }
-                return self.sendPreparedTurn(
-                    localPrompt: localPrompt,
+                return self.transportPreparedTurn(
                     transportedPrompt: transportedPrompt,
                     invocation: invocation,
-                    sourceText: trimmed,
                     messageID: messageID
                 )
             }
-        ) { [weak self] _, _ in
+        ) { [weak self] admitted, _ in
             guard let self else { return }
+            if admitted {
+                self.presentAdmittedTurn(
+                    localPrompt: localPrompt, invocation: invocation, sourceText: trimmed
+                )
+            }
             self.isPreparingTurn = false
             self.refreshInputControl()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
@@ -2792,11 +2815,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     /// Releases one accepted prompt after its immutable turn-start tree has been recorded.
-    private func sendPreparedTurn(
-        localPrompt: ConversationPrompt,
+    private func transportPreparedTurn(
         transportedPrompt: ConversationPrompt,
         invocation: ComposerInvocation?,
-        sourceText: String,
         messageID: ConversationMessageID
     ) -> Bool {
         let sent: Bool
@@ -2814,9 +2835,12 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
             return false
         }
-        // Native transports do not emit the hook edge terminal sessions use for this durable
-        // timestamp. The accepted send is their authoritative submitted-turn edge.
-        ProjectStore.shared.noteTurnStarted(sessionID: sessionID)
+        return true
+    }
+
+    private func presentAdmittedTurn(
+        localPrompt: ConversationPrompt, invocation: ComposerInvocation?, sourceText: String
+    ) {
         refreshConversationControls()
         runProgress = nil
 
@@ -2830,7 +2854,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         promptView.clear()
         SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
-        return true
     }
 
     /// Draws a user turn that has just gone over the wire.

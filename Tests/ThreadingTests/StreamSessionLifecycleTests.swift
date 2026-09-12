@@ -145,6 +145,51 @@ final class StreamSessionLifecycleTests: XCTestCase {
         wait(for: [diagnosticReceived, exited], timeout: 2)
     }
 
+    func testCodexQuestionReturnsAnAnswerThroughTheRealTransport() {
+        let finished = expectation(description: "question answered and turn completed")
+        var resolved = 0
+        var presented = 0
+        let script = #"""
+        read -r initialize
+        printf '%s\n' '{"id":1,"result":{}}'
+        read -r initialized
+        read -r open_thread
+        printf '%s\n' '{"id":2,"result":{"thread":{"id":"thread-1"}}}'
+        read -r start_turn
+        printf '%s\n' '{"id":3,"result":{"turn":{"id":"turn-1"}}}'
+        printf '%s\n' '{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}'
+        printf '%s\n' '{"id":"ask-1","method":"item/tool/requestUserInput","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","isBlocking":true,"questions":[{"id":"density","header":"Density","question":"Choose a layout","isOther":false,"isSecret":false,"options":[{"label":"Compact","description":"Show less work"},{"label":"Expanded","description":"Show all work"}]}]}}'
+        read -r answer
+        case "$answer" in
+          *'"density":{"answers":["Compact"]}'*)
+            printf '%s\n' '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}' ;;
+          *) exit 7 ;;
+        esac
+        cat >/dev/null
+        """#
+        let session = CodexStreamSession(sessionID: SessionID()) { self.shellPlan(script) }
+        session.onQuestion = { request, answer in
+            presented += 1
+            XCTAssertEqual(request.questions.map(\.id), ["density"])
+            answer(["density": "Compact"])
+            answer(["density": "Expanded"])
+        }
+        session.onQuestionResolved = { _ in resolved += 1 }
+        session.onEvent = { event in
+            if case .turnFinished(_, let outcome, _) = event {
+                XCTAssertEqual(outcome, .completed)
+                finished.fulfill()
+            }
+        }
+        session.start()
+        XCTAssertTrue(session.send("Ask me which layout I want"))
+        wait(for: [finished], timeout: 3)
+        XCTAssertEqual(presented, 1)
+        XCTAssertEqual(resolved, 1)
+        XCTAssertTrue(session.canSend)
+        session.terminate()
+    }
+
     func testCodexTerminalEventIsDeliveredOnceOnMain() {
         let finished = expectation(description: "terminal event")
         let rootPlan = expectation(description: "root plan")

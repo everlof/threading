@@ -6,6 +6,15 @@ struct TerminalSessionDidEnd: AppEvent {
     let sessionID: SessionID
 }
 
+/// One conversation's work clock moved. Turn boundaries precede the renderer's runtime event;
+/// accepted input within an open turn has no runtime transition of its own.
+struct SessionWorkDidChange: AppEvent {
+    static let name = Notification.Name("sessionWorkDidChange")
+    enum Kind: Equatable, Sendable { case turnStarted, turnEnded, inputAccepted }
+    let sessionID: SessionID
+    let kind: Kind
+}
+
 struct SessionActivityDidChange: AppEvent {
     static let name = Notification.Name("sessionActivityDidChange")
     let sessionID: SessionID

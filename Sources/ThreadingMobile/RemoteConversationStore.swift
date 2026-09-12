@@ -16,6 +16,7 @@ final class RemoteConversationStore {
             updated: [String],
             streamingChanged: Bool,
             permissionChanged: Bool,
+            questionsChanged: Bool = false,
             capabilitiesChanged: Bool,
             historyChanged: Bool
         )
@@ -26,6 +27,7 @@ final class RemoteConversationStore {
     private(set) var state = RemoteConversationState()
     private(set) var isLoadingEarlier = false
 
+    var onDecisionChange: (() -> Void)?
     var onCanSendChange: ((Bool) -> Void)?
 
     private var observers: [UUID: (Change) -> Void] = [:]
@@ -52,6 +54,7 @@ final class RemoteConversationStore {
         state.apply(snapshot)
         rowsByID = Dictionary(uniqueKeysWithValues: state.rows.map { ($0.id, $0) })
         isLoadingEarlier = false
+        if oldState.permission != state.permission || oldState.questions != state.questions { onDecisionChange?() }
         if oldCanSend != state.canSend {
             onCanSendChange?(state.canSend)
         }
@@ -72,11 +75,13 @@ final class RemoteConversationStore {
 
         let streamingChanged = oldState.streamingText != state.streamingText
         let permissionChanged = oldState.permission != state.permission
+        let questionsChanged = oldState.questions != state.questions
         let capabilitiesChanged = oldState.composerCapabilities != state.composerCapabilities
         let historyChanged = oldState.hasEarlier != state.hasEarlier || wasLoadingEarlier
         guard !updated.isEmpty
                 || streamingChanged
                 || permissionChanged
+                || questionsChanged
                 || capabilitiesChanged
                 || historyChanged else {
             return .unchanged
@@ -87,6 +92,7 @@ final class RemoteConversationStore {
             updated: updated,
             streamingChanged: streamingChanged,
             permissionChanged: permissionChanged,
+            questionsChanged: questionsChanged,
             capabilitiesChanged: capabilitiesChanged,
             historyChanged: historyChanged
         )
@@ -99,6 +105,7 @@ final class RemoteConversationStore {
     func apply(_ delta: RemoteConversationDeltaDTO) -> Bool {
         let oldStreaming = state.streamingText
         let oldPermission = state.permission
+        let oldQuestions = state.questions
         let oldCapabilities = state.composerCapabilities
         let oldCanSend = state.canSend
         let oldHasEarlier = state.hasEarlier
@@ -106,6 +113,7 @@ final class RemoteConversationStore {
         case .requiresSnapshot:
             return false
         case .changed(let inserted, let updated):
+            if oldPermission != state.permission || oldQuestions != state.questions { onDecisionChange?() }
             let changedIDs = Set(inserted + updated)
             for row in delta.updatedRows + delta.appendedRows where changedIDs.contains(row.id) {
                 rowsByID[row.id] = row
@@ -118,6 +126,7 @@ final class RemoteConversationStore {
                 updated: updated,
                 streamingChanged: oldStreaming != state.streamingText,
                 permissionChanged: oldPermission != state.permission,
+                questionsChanged: oldQuestions != state.questions,
                 capabilitiesChanged: oldCapabilities != state.composerCapabilities,
                 historyChanged: oldHasEarlier != state.hasEarlier
             ))

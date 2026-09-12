@@ -230,6 +230,9 @@ private struct MobileRowSwipeModifier: ViewModifier {
     @State private var travel: CGFloat?
     @State private var rowWidth: CGFloat = 0
     @State private var armFeedback = UIImpactFeedbackGenerator(style: .medium)
+    /// Changes only when the action becomes armed, so the symbol answers that edge once rather
+    /// than bouncing again when the finger crosses back below the threshold.
+    @State private var armEffectTrigger = 0
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -282,6 +285,8 @@ private struct MobileRowSwipeModifier: ViewModifier {
             .onChange(of: armed) { _, isArmed in
                 guard isArmed else { return }
                 armFeedback.impactOccurred()
+                guard !reduceMotion else { return }
+                armEffectTrigger += 1
             }
             .accessibilityAction(named: Text(action.title)) {
                 action.perform()
@@ -315,6 +320,11 @@ private struct MobileRowSwipeModifier: ViewModifier {
             VStack(spacing: MobileDesign.Spacing.hairline) {
                 Image(systemName: action.systemImage)
                     .font(.caption.weight(.medium))
+                    .symbolEffect(
+                        .bounce,
+                        options: .nonRepeating,
+                        value: armEffectTrigger
+                    )
                 Text(action.title)
                     .font(.caption2)
                     .lineLimit(1)

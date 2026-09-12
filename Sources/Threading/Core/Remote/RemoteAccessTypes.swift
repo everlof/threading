@@ -766,6 +766,7 @@ enum RemoteConversationWirePolicy {
             canSend: snapshot.canSend,
             composerCapabilities: safeCapabilities(snapshot.composerCapabilities),
             permission: snapshot.permission.map(safePermission),
+            questions: safeQuestions(snapshot.questions),
             revision: snapshot.revision,
             hasEarlier: snapshot.hasEarlier
         )
@@ -790,6 +791,7 @@ enum RemoteConversationWirePolicy {
             canSend: snapshot.canSend,
             composerCapabilities: safeCapabilities(snapshot.composerCapabilities),
             permission: snapshot.permission.map(safePermission),
+            questions: safeQuestions(snapshot.questions),
             revision: revision,
             hasEarlier: window.hasEarlier
         )
@@ -859,7 +861,8 @@ enum RemoteConversationWirePolicy {
             composerCapabilities: previousCapabilities == currentCapabilities
                 ? nil
                 : currentCapabilities,
-            permission: current.permission.map(safePermission)
+            permission: current.permission.map(safePermission),
+            questions: safeQuestions(current.questions)
         )
     }
 
@@ -889,7 +892,8 @@ enum RemoteConversationWirePolicy {
             composerCapabilities: previousCapabilities == currentCapabilities
                 ? nil
                 : currentCapabilities,
-            permission: current.permission.map(safePermission)
+            permission: current.permission.map(safePermission),
+            questions: safeQuestions(current.questions)
         )
     }
 
@@ -922,6 +926,7 @@ enum RemoteConversationWirePolicy {
                 ? snapshot.composerCapabilities
                 : [],
             permission: permission,
+            questions: safeQuestions(snapshot.questions).map { $0.allowingAnswers(authorization.capability == .interact && canWrite) },
             revision: snapshot.revision,
             hasEarlier: snapshot.hasEarlier
         )
@@ -944,8 +949,15 @@ enum RemoteConversationWirePolicy {
                 ? delta.composerCapabilities
                 : delta.composerCapabilities.map { _ in [] },
             permission: permission,
+            questions: safeQuestions(delta.questions ?? []).map { $0.allowingAnswers(authorization.capability == .interact && canWrite) },
             hasEarlier: delta.hasEarlier
         )
+    }
+
+    static func safeQuestions(_ questions: [RemoteQuestionRequestDTO]) -> [RemoteQuestionRequestDTO] {
+        guard questions.count <= 3 else { return [] }
+        var ids = Set<String>()
+        return questions.filter { $0.isValid && ids.insert($0.id).inserted }
     }
 
     static func safePermission(_ request: RemotePermissionRequestDTO) -> RemotePermissionRequestDTO {

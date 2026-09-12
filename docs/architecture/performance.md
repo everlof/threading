@@ -959,6 +959,67 @@ installs only a changed theme, and the same test file asserts an unchanged theme
 rows. For reference the probe's grid-independent costs: a 512 KB ring replay parses in
 ~320–350 ms and the local-viewport reflow after it is 7–10 ms, at every font size.
 
+### Initial phone viewport ownership, 2026-09-12
+
+The first terminal frame is not a viewport lease. `TerminalViewRepresentable` starts with zero
+geometry and interprets buffered replay against the Mac's authoritative grid until
+`RemoteTerminalLayoutView` commits its first nonempty content layout. That layout hands local
+viewport ownership to an interactive phone; a view-only or recorded-grid renderer retains host
+ownership. Construction, theme changes and capability publication cannot invent content bounds.
+
+This matters particularly for parked connections: they retain interactive capability, so the
+former `UIScreen.main.bounds` construction frame immediately became a phone lease. Seven observed
+warm reopenings all sent 60×71 followed by 60×51 or 60×29, 161–255 ms later. Each changed grid can
+restart the Mac's SIGWINCH repaint and replace the ordered hydration transaction. Codex's normal
+screen history makes repeated resize repair especially expensive; the wire lab deliberately
+exercises that shape with its 2,400-line Codex fixture beside Claude's alternate-screen fixture.
+
+The scaling contract remains one mounted terminal and one bounded replay per opening, independent
+of the number of visited chats. Initial geometry admission is O(1); later width/keyboard storms
+retain the existing settled-layout boundary. A queued size delegate reads only the current grid
+of the renderer that still owns the connection, so an obsolete frame or replaced renderer cannot
+acquire a lease after its actor hop. `RemoteTerminalInitialViewportTests` exercises actual
+SwiftUI representable construction inside a constrained UIKit host, and covers host-grid replay
+and a replaced renderer's queued callback. The wire lab starts a fresh probe on `sessionResume`
+as well as on a new socket, so warm reopening receives its own complete entry measurement.
+
+This is host-owned renderer and wire lifecycle; extension presentation never owns viewport leases,
+replay authority or the ordered `terminalReady` boundary. The 200 ms host-local quiet guard stays
+in place: removing duplicate work must not reintroduce partial-screen reveal.
+
+The loopback wire comparison used the same prebuilt Mac fixture host, reset between variants,
+2,400 generated history lines, an iPhone 17 Pro Max / iOS 26.5 simulator, 13 pt text and a final
+53×44 grid. Both phone builds were ordinary unoptimized Debug builds; three warm opens per
+provider followed one cold open. Every warm baseline sent 53×58 then 53×44; every fixed open sent
+only 53×44. Median / maximum observations:
+
+| Warm entry measurement | Before | After |
+| --- | --- | --- |
+| Codex bytes received | 313,022 / 313,022 | 158,585 / 158,585 |
+| Codex terminal feed time | 103.24 / 106.39 ms | 53.97 / 56.84 ms |
+| Codex connect to reveal | 985.81 / 1,184.41 ms | 889.23 / 1,290.97 ms |
+| Claude bytes received | 10,229 / 10,229 | 6,929 / 6,929 |
+| Claude terminal feed time | 4.40 / 4.54 ms | 2.95 / 2.97 ms |
+| Claude connect to reveal | 573.03 / 573.59 ms | 375.46 / 377.28 ms |
+
+These are iteration measurements, not physical-device Release launch claims. Concurrent Mac
+build activity makes the wall-time comparison noisy (Codex's maximum did not improve); the
+deterministic result is the eliminated extra lease and repaint, including 49% fewer Codex bytes.
+The measured interval starts at connection/resume, not at the dashboard tap. Artifacts live in
+`/tmp/threading-profiles/20260912T043729Z-ios-terminal-wire-lab/` (`before.metrics.log`,
+`after.metrics.log`, `comparison.json`, and real-shell screenshots).
+All 785 ordinary mobile tests passed, including the three new initial-layout regressions and
+the existing 10,000-frame keyboard storm, lease, scroll and pool contracts; one unrelated opt-in
+attachment stress test was skipped. Mobile tests still use explicit Xcode membership, unlike
+the filesystem-synchronized Mac test targets, so the new test file is registered in that target.
+The 20 scoped terminal/standalone evidence captures stabilized with every fixture check passing;
+inspected keyboard-open/dismissed renders preserve content and restore the editor frame and safe
+area. No baselines were changed. The broader `full 5` Mac sweep could not execute: its app link
+failed on `UsageScanCache` / `UsageLedgerIndex` `forceRefresh` symbols in separately modified
+usage-cache code. That broader check remains unverified; no Mac implementation changed here.
+The ordinary iOS Simulator Release build also passed. Physical-iPhone installation and Release
+opening measurements remain unverified.
+
 ### Mobile host-recovery single-flight contract, 2026-08-22
 
 Host recovery is one operation per Mac, not one operation per socket. An iPhone report captured
@@ -4637,6 +4698,16 @@ run on every `fast` pass so an accidental shape change fails immediately;
 profiling sweep, and `THREADING_MEDIA_STRESS_LAYERS` / `THREADING_MEDIA_STRESS_FILES` set them
 directly.
 
+The iPhone attachment Share path has one independent byte-size axis. Expected ordinary files are
+0–24 MB; the stress case is a multi-hundred-megabyte movie. A tap prepares exactly the selected
+identity, only one preparation exists per gallery, and page or route changes cancel it. An
+already-loaded ordinary preview shares the same immutable `Data` storage; a larger movie is
+written off-main in authenticated 1 MiB ranges while holding one of the existing two preview
+download slots, so resident staging payload is O(one range) and temporary custody is O(one
+selected file). `RemoteAttachmentSharingTests` pins exact ordered ranges, short-range cleanup and
+filename containment. Set `THREADING_ATTACHMENT_SHARE_STRESS=1` to stream a 256 MB deterministic
+fixture through the production stager and verify its final size and 256 bounded fetches.
+
 The subsystem it measures is described in
 [`media-documents.md`](media-documents.md). **The player is the only high-frequency surface in the
 feature**; everything else there is an action round trip, so these are the numbers that decide
@@ -4995,6 +5066,12 @@ The implemented ownership rules are:
   unbounded buffer. The `FileHandle` readiness callback consumes available bytes before it
   returns and queues only parsing/capture: postponing the read itself can leave a pipe readable
   without another readiness edge, deadlocking a child whose stderr exceeds the pipe capacity.
+- Each iOS session WebSocket has one ordered JSON encoding lane. Main-actor admission is O(1),
+  pending messages are capped at 64, and the serial worker is the only owner of encoding for both
+  production client frames and the demo's synthesized server frames. Advancing the connection
+  generation retires queued work before it can reach a replacement socket. Main receives only an
+  immutable encoded string or a typed failure; `RemoteWireEncodingLaneTests` pin worker-thread
+  execution, admission order, generation retirement and backpressure.
 - The execution-audit live record APIs enqueue one ordered transaction containing correlation,
   sanitization, hashing, rotation and append. The synchronous append remains only for callers
   that explicitly need its returned seal (tests and support tooling); a following read drains the
@@ -5095,3 +5172,26 @@ run (an earlier run was 1 / 2 ms). This measures JavaScript geometry resolution,
 construction, bridge transport, native drawing and compositor latency. The shipping native
 scroll/edit/clip/replacement tests passed with the display locked; keyboard activation and live
 compositor timing require an unlocked display and are separate checks.
+
+### Work-recency invalidation (2026-09-12)
+
+A work boundary carries one session identity. The durable write is the existing coalesced exact-row
+save; remote projection adds no file lookup, timer, or duplicate runtime broadcast. Recent ordering
+rebuilds only the owning project's sidebar projection and adopts existing outline identities.
+Supervision reorders only its already scoped children. These are boundary events, never token events.
+
+Navigation keeps its immutable index on one detached build lane. A burst updates value metadata and
+requests one successor build; it cannot launch an unbounded set of concurrent full index builders.
+Transcript search similarly serializes ingestion, but work events reconcile only their changed source
+set. A full structural snapshot and later work updates cannot race inside the reentrant SQLite actor.
+One pending value per session coalesces repeated events. Account discovery has its own serial lane,
+retaining pending accounts rather than cancelling and losing another account’s result. The existing bounded JSONL passes still yield
+for queries; neither search opening nor row projection starts a filesystem walk.
+
+The retained-catalogue fixtures for this repair are 1,000 sessions normally and 5,000 at stress,
+with 32 owner clients. Both opt-in runs passed with exactly one shared catalogue build; cached
+encoded-body lookup measured 0.004 ms at both sizes. These fixtures exercise snapshot fan-out;
+`RemoteSessionRecencyTests` separately pins one publication for a work-only steering event, and
+`SidebarRowAnimationTests` drives a completion through the actual event and outline without a
+manual reload. The complete validation record is in
+[`session-time-audit-2026-09-12.md`](../research/session-time-audit-2026-09-12.md).

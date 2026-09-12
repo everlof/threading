@@ -35,7 +35,8 @@ final class CodexStreamSession:
     SteerableConversation,
     MessageLifecycleReportingConversation,
     SubagentReportingConversation,
-    SessionTitleReportingConversation {
+    SessionTitleReportingConversation,
+    QuestionAskingConversation {
 
     // MARK: - Properties
 
@@ -48,6 +49,23 @@ final class CodexStreamSession:
     var onSessionTitleChange: ((String) -> Void)?
     var onExit: ((Int32) -> Void)?
     var onInteractionAvailabilityChange: (() -> Void)?
+    var onQuestion: ((ConversationQuestionRequest, @escaping ([String: String]?) -> Void) -> Void)? {
+        didSet { questionRequests.onPresent = onQuestion }
+    }
+    var onQuestionResolved: ((UUID) -> Void)?
+    private lazy var questionRequests: CodexQuestionRequests = {
+        let requests = CodexQuestionRequests()
+        requests.onPresent = onQuestion
+        requests.onResolved = { [weak self] in self?.onQuestionResolved?($0) }
+        requests.respond = { [weak self] id, result, error in
+            if let error {
+                self?.sendResponse(id: id, error: ["code": -32602, "message": error])
+            } else {
+                self?.sendResponse(id: id, result: result ?? [:])
+            }
+        }
+        return requests
+    }()
     var onComposerCapabilitiesChange: (() -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
     var isComposerCapabilityCatalogReady: Bool {
@@ -354,6 +372,7 @@ final class CodexStreamSession:
     }
 
     func terminate() {
+        questionRequests.invalidate()
         guard isRunning else { return }
 
         isTerminating = true
@@ -397,6 +416,7 @@ final class CodexStreamSession:
     // MARK: - Launch Handshake
 
     private func resetForLaunch(resumeState: ResumeState) {
+        questionRequests.invalidate()
         launchResumeState = resumeState
         transport = nil
         acceptsInput = false
@@ -429,7 +449,8 @@ final class CodexStreamSession:
                 "name": "threading",
                 "title": "Threading",
                 "version": version
-            ]
+            ],
+            "capabilities": ["experimentalApi": true]
         ]
         _ = sendRequest(
             method: "initialize",
@@ -596,6 +617,7 @@ final class CodexStreamSession:
         if method == "turn/started" {
             if isRoot {
                 let previousTurnID = activeTurnID
+                if previousTurnID != turnID { questionRequests.invalidate() }
                 activeTurnID = turnID
                 // `isCompactionInFlight` is set by the request that asked for it; a review turn
                 // is the one we started through `review/start`. Nothing on the wire names the
@@ -621,6 +643,7 @@ final class CodexStreamSession:
     /// terminal wire boundary. Idempotence matters because app-server may emit a non-retrying
     /// `error` and then the ordinary `turn/completed` for the same turn.
     private func settleRootTurnIdentity() {
+        questionRequests.invalidate()
         let hadActiveTurn = activeTurnID != nil
         activeTurnID = nil
         activeTurnKind = .ordinary
@@ -934,6 +957,12 @@ final class CodexStreamSession:
     }
 
     private func handleNotification(method: String, parameters: [String: Any]) {
+        if method == "serverRequest/resolved",
+           parameters["threadId"] as? String == rootThreadID,
+           let id = JSONRPCRequestID(parameters["requestId"]) {
+            questionRequests.resolve(id: id)
+            return
+        }
         if method == "skills/changed" {
             requestSkillsIfNeeded(forceReload: true)
         }
@@ -1053,6 +1082,12 @@ final class CodexStreamSession:
         method: String,
         parameters: [String: Any]
     ) {
+        if method == "item/tool/requestUserInput" {
+            questionRequests.receive(
+                id: id, parameters: parameters, threadID: rootThreadID, turnID: activeTurnID
+            )
+            return
+        }
         let request: PermissionRequest
 
         switch method {
@@ -1171,6 +1206,7 @@ final class CodexStreamSession:
 
     private func finishTermination(status: Int32, diagnostics: String) {
         guard process != nil else { return }
+        questionRequests.invalidate()
         process = nil
         transport = nil
 

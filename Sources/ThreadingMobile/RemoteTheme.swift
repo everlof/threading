@@ -863,6 +863,7 @@ struct RemoteThemePalette: Equatable {
         return luminance > MobileKeyboardAppearance.lightThreshold ? .black : .white
     }
     var uiAccentMuted: UIColor { uiColor("accent_muted", fallback: "#FFFFFF24") }
+    var uiSelection: UIColor { uiColor("selection", fallback: "#FFFFFF32") }
     var uiPositive: UIColor { uiColor("status_positive", fallback: "#55B978") }
     var uiWarning: UIColor { uiColor("status_warning", fallback: "#D9A441") }
     var uiNegative: UIColor { uiColor("status_negative", fallback: "#D87878") }

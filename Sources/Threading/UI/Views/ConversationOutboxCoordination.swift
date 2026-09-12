@@ -181,6 +181,8 @@ extension ConversationViewController {
             return
         }
 
+        ProjectStore.shared.noteInputAccepted(sessionID: sessionID)
+
         if let turnID = GitTurnBaselineStore.shared
             .activeCheckpoint(forSessionID: sessionID)?.userTurnID {
             SessionAttachmentStore.shared.associate(

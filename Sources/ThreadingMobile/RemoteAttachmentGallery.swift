@@ -46,9 +46,17 @@ struct RemoteAttachmentGallery: View {
     @StateObject private var thumbnails: RemoteAttachmentThumbnailStore
     @State private var currentID: String?
     @State private var pixelSizes: [String: CGSize] = [:]
+    @State private var cachedShareAttachmentID: String?
+    @State private var cachedShareData: Data?
+    @State private var shareRequest: RemoteAttachmentShareRequest?
+    @State private var sharePayload: MobileSharePayload?
+    @State private var stagedShareDirectory: URL?
+    @State private var shareErrorMessage: String?
+    @State private var isPreparingShare = false
     private let initialData: [String: Data]
     private let loadsRemotely: Bool
     private let offersVideoStreaming: Bool
+    private let shareStager = RemoteAttachmentShareStager()
 
     init(
         sessionID: String,
@@ -103,7 +111,17 @@ struct RemoteAttachmentGallery: View {
         // it owns is not, so it is told. Keyed on the origin rather than the client value, which
         // carries a bearer and is deliberately not `Equatable`.
         .onAppear { thumbnails.adopt(client: client) }
-        .onChange(of: client.link.baseURL) { _, _ in thumbnails.adopt(client: client) }
+        .onChange(of: client.link.baseURL) { _, _ in
+            thumbnails.adopt(client: client)
+            shareRequest = nil
+            isPreparingShare = false
+        }
+        .onChange(of: currentID) { _, _ in
+            cachedShareAttachmentID = nil
+            cachedShareData = nil
+            shareRequest = nil
+            isPreparingShare = false
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 RemoteAttachmentGalleryTitle(
@@ -118,7 +136,42 @@ struct RemoteAttachmentGallery: View {
                     } ?? ""
                 )
             }
+            // Keep this toolbar item's identity stable while UIKit-backed previews (notably
+            // WKWebView) mount. Conditional toolbar items can be lost during that reconciliation.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    guard let current else { return }
+                    prepareToShare(current)
+                } label: {
+                    if isPreparingShare {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                .disabled(current == nil || isPreparingShare)
+                .accessibilityLabel(MobileL10n.string(
+                    isPreparingShare ? "Preparing attachment" : "Share"
+                ))
+            }
         }
+        .task(id: shareRequest?.id) {
+            guard let shareRequest else { return }
+            await prepareShare(shareRequest)
+        }
+        .sheet(item: $sharePayload, onDismiss: clearStagedShare) { payload in
+            MobileSystemShareSheet(items: payload.items)
+        }
+        .themedAlert(
+            "Couldn’t share attachment",
+            message: shareErrorMessage ?? "",
+            isPresented: Binding(
+                get: { shareErrorMessage != nil },
+                set: { if !$0 { shareErrorMessage = nil } }
+            ),
+            actions: [ThemedDialogAction("OK")]
+        )
     }
 
     private var pages: some View {
@@ -133,7 +186,12 @@ struct RemoteAttachmentGallery: View {
                         loadsRemotely: loadsRemotely,
                         offersVideoStreaming: offersVideoStreaming,
                         isCurrentPage: attachment.id == current?.id,
-                        onDecodedImageSize: { size in pixelSizes[attachment.id] = size }
+                        onDecodedImageSize: { size in pixelSizes[attachment.id] = size },
+                        onLoadedData: { data in
+                            guard attachment.id == current?.id else { return }
+                            cachedShareAttachmentID = attachment.id
+                            cachedShareData = data
+                        }
                     )
                     // A page is the scroller's whole viewport, both ways: a preview sized to
                     // its content left the ledger standing in the middle of the screen.
@@ -202,6 +260,54 @@ struct RemoteAttachmentGallery: View {
             }
         }
         .accessibilityLabel(MobileL10n.string("Attachments"))
+    }
+
+    private func prepareToShare(_ attachment: RemoteAttachmentDTO) {
+        let cachedData = cachedShareAttachmentID == attachment.id ? cachedShareData : nil
+        shareErrorMessage = nil
+        isPreparingShare = true
+        shareRequest = RemoteAttachmentShareRequest(
+            sessionID: sessionID,
+            attachment: attachment,
+            client: client,
+            cachedData: cachedData,
+            loadsRemotely: loadsRemotely,
+            offersVideoStreaming: offersVideoStreaming
+        )
+    }
+
+    @MainActor
+    private func prepareShare(_ request: RemoteAttachmentShareRequest) async {
+        do {
+            let staged = try await request.prepare(using: shareStager)
+            try Task.checkCancellation()
+            guard shareRequest?.id == request.id else {
+                await removeStagedDirectory(staged.directoryURL)
+                return
+            }
+            stagedShareDirectory = staged.directoryURL
+            sharePayload = MobileSharePayload(items: [staged.fileURL])
+        } catch is CancellationError {
+            // Swiping to another attachment or leaving the gallery withdraws this action.
+        } catch {
+            guard shareRequest?.id == request.id else { return }
+            shareErrorMessage = error.localizedDescription
+        }
+        guard shareRequest?.id == request.id else { return }
+        shareRequest = nil
+        isPreparingShare = false
+    }
+
+    private func clearStagedShare() {
+        guard let directory = stagedShareDirectory else { return }
+        stagedShareDirectory = nil
+        Task { await removeStagedDirectory(directory) }
+    }
+
+    private func removeStagedDirectory(_ directory: URL) async {
+        await Task.detached(priority: .utility) {
+            try? FileManager.default.removeItem(at: directory)
+        }.value
     }
 }
 

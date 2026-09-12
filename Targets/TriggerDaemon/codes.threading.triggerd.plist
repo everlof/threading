@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>codes.threading.triggerd</string>
+	<key>BundleProgram</key>
+	<string>Contents/Helpers/threading-triggerd</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>Contents/Helpers/threading-triggerd</string>
+	</array>
+	<key>KeepAlive</key>
+	<true/>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ExitTimeOut</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>codes.threading</string>
+	</array>
+</dict>
+</plist>

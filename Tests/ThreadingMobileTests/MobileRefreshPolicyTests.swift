@@ -10,6 +10,40 @@ import XCTest
 /// two callers that produced most of them — a dashboard coming on screen and the scene
 /// activating — to the answers that stop that, and everything that must still be paid in full.
 final class MobileRefreshPolicyTests: XCTestCase {
+    /// Which path changes are worth asking the sockets about: a network coming or going, or the
+    /// kinds of interface carrying it changing. The first observation describes the network the
+    /// sockets were built on and is not a change; the path becoming expensive or constrained
+    /// alters nothing a socket is bound to.
+    func testOnlyANetworkOrInterfaceKindChangeIsMaterial() {
+        let wifi = MobileNetworkPathSummary(status: .satisfied, usesWiFi: true)
+        let cellular = MobileNetworkPathSummary(
+            status: .satisfied, usesCellular: true, isExpensive: true
+        )
+        let expensiveWiFi = MobileNetworkPathSummary(
+            status: .satisfied, usesWiFi: true, isExpensive: true, isConstrained: true
+        )
+        let nothing = MobileNetworkPathSummary(status: .unsatisfied)
+
+        XCTAssertFalse(
+            MobileNetworkPathChangePolicy.isMaterial(from: nil, to: wifi),
+            "the first observation is the network the sockets were built on"
+        )
+        XCTAssertFalse(MobileNetworkPathChangePolicy.isMaterial(from: wifi, to: wifi))
+        XCTAssertFalse(
+            MobileNetworkPathChangePolicy.isMaterial(from: wifi, to: expensiveWiFi),
+            "cost and constraint change nothing a socket is bound to"
+        )
+        XCTAssertTrue(
+            MobileNetworkPathChangePolicy.isMaterial(from: wifi, to: cellular),
+            "a Wi-Fi socket is dead on the wire once the phone is on cellular"
+        )
+        XCTAssertTrue(MobileNetworkPathChangePolicy.isMaterial(from: wifi, to: nothing))
+        XCTAssertTrue(
+            MobileNetworkPathChangePolicy.isMaterial(from: nothing, to: cellular),
+            "a network coming back is what a socket in backoff is waiting for"
+        )
+    }
+
     func testADashboardComingOnScreenAsksNothingWhileTheSocketDelivers() {
         XCTAssertEqual(
             MobileRefreshPolicy.decide(
@@ -47,7 +81,10 @@ final class MobileRefreshPolicyTests: XCTestCase {
     /// a race, even while a socket is healthy: the connectivity lanes wait for a refresh success
     /// after a resume, and a `304` records one.
     func testAForegroundOrRecoveryRevalidatesTheKnownRoute() {
-        for reason in [MobileRefreshReason.foreground, .socketRecovery, .openTarget, .notificationOpen] {
+        for reason in [
+            MobileRefreshReason.foreground, .socketRecovery, .networkPathChanged, .openTarget,
+            .notificationOpen,
+        ] {
             XCTAssertEqual(
                 MobileRefreshPolicy.decide(
                     reason: reason,
@@ -74,8 +111,8 @@ final class MobileRefreshPolicyTests: XCTestCase {
     func testAnythingWithoutACatalogueIsAFullRefresh() {
         for reason in [
             MobileRefreshReason.dashboardAppeared, .foreground, .launch, .hostChanged, .pullToRefresh,
-            .socketRecovery, .structuralChange, .revisionGap, .notificationOpen, .openTarget,
-            .mutationFollowUp, .userCheck,
+            .socketRecovery, .networkPathChanged, .structuralChange, .revisionGap,
+            .notificationOpen, .openTarget, .mutationFollowUp, .userCheck,
         ] {
             XCTAssertEqual(
                 MobileRefreshPolicy.decide(

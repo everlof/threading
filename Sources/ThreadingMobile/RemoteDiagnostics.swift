@@ -637,7 +637,7 @@ struct RemoteDiagnosticsView: View {
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
     @State private var isRunningChecks = false
-    @State private var sharePayload: DiagnosticsSharePayload?
+    @State private var sharePayload: MobileSharePayload?
     @State private var issueReportRequest: MobileIssueReportRequest?
     @State private var exportError: String?
     @State private var sharingError: String?
@@ -783,7 +783,7 @@ struct RemoteDiagnosticsView: View {
                                 .reason: "diagnostics-only",
                             ])
                             let url = try await MobileDiagnostics.supportReport()
-                            sharePayload = DiagnosticsSharePayload(items: [url])
+                            sharePayload = MobileSharePayload(items: [url])
                         } catch {
                             exportError = MobileL10n.string(
                                 "The support report could not be prepared."
@@ -804,7 +804,7 @@ struct RemoteDiagnosticsView: View {
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $sharePayload) { payload in
-            DiagnosticsActivityView(items: payload.items)
+            MobileSystemShareSheet(items: payload.items)
         }
         .sheet(item: $issueReportRequest) { request in
             MobileIssueReportView(request: request)
@@ -869,22 +869,4 @@ struct RemoteDiagnosticsView: View {
         case nil: return MobileL10n.string("Not registered")
         }
     }
-}
-
-struct DiagnosticsSharePayload: Identifiable {
-    let id = UUID()
-    let items: [URL]
-}
-
-struct DiagnosticsActivityView: UIViewControllerRepresentable {
-    let items: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(
-        _ uiViewController: UIActivityViewController,
-        context: Context
-    ) {}
 }

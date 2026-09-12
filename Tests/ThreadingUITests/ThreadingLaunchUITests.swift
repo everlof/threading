@@ -26,12 +26,8 @@ final class ThreadingLaunchUITests: XCTestCase {
         let targetSize = sandbox.configure(app)
         application = app
 
-        app.launch()
+        sandbox.launch(app)
 
-        XCTAssertTrue(
-            app.wait(for: .runningForeground, timeout: 20),
-            "Threading did not reach the foreground"
-        )
         let window = app.windows.firstMatch
         XCTAssertTrue(
             window.waitForExistence(timeout: 10),

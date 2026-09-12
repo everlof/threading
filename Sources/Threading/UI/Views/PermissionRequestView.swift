@@ -48,9 +48,14 @@ final class PermissionRequestView: NSView {
     private func setupViews() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        // An accent border rather than a fill, so a waiting request reads as active without
-        // shouting over the conversation around it.
-        applySurface(fill: Design.Surface.panel, radius: .control, border: Design.Surface.accent)
+        applySurface(fill: Design.Surface.panel, radius: .control, border: Design.Surface.border)
+        setAccessibilityIdentifier("conversation.permission.\(remoteID)")
+
+        let header = ConversationDecisionHeader(
+            title: L10n.string("Permission needed"),
+            detail: L10n.string("Review this action before the agent continues."),
+            symbol: "hand.raised"
+        )
 
         let title = NSTextField(
             labelWithString: L10n.format("Allow %@?", request.toolName)
@@ -65,10 +70,10 @@ final class PermissionRequestView: NSView {
         detail.isSelectable = true
         detail.translatesAutoresizingMaskIntoConstraints = false
 
-        let column = NSStackView(views: [title, detail])
+        let column = NSStackView(views: [header, title, detail])
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = Design.Spacing.tight
+        column.spacing = Design.Spacing.medium
         column.translatesAutoresizingMaskIntoConstraints = false
 
         // An edit is approved on what it changes, so its diff sits between the summary and the
@@ -99,7 +104,9 @@ final class PermissionRequestView: NSView {
 
     private func makeButtonRow() -> NSStackView {
         let allow = makeButton(L10n.string("Allow"), action: #selector(allowOnce))
-        allow.keyEquivalent = "\r"  // Return approves, matching the old sheet's default.
+        allow.emphasis = .primary
+        // Return in the composer must remain a send, not grant a newly arrived permission.
+        // The focused button still activates through the ordinary keyboard/AX contract.
 
         let row = NSStackView(views: [
             allow,

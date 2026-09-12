@@ -40,7 +40,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     // MARK: - Tests
 
     @MainActor
-    func testTheFirstGridOfALeaseIsSentImmediately() {
+    func testTheFirstGridOfALeaseIsSentImmediately() async {
         let connection = Self.demoConnection()
         connection.connect()
 
@@ -49,18 +49,28 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             rows: Fixture.entryGrid.rows
         )
 
+        let leaseApplied = await Self.eventually {
+            connection.terminalColumns == Fixture.entryGrid.cols
+                && connection.terminalRows == Fixture.entryGrid.rows
+        }
+        XCTAssertTrue(leaseApplied)
         XCTAssertEqual(connection.terminalColumns, Fixture.entryGrid.cols)
         XCTAssertEqual(connection.terminalRows, Fixture.entryGrid.rows)
     }
 
     @MainActor
-    func testAViewportStormLeasesOnlyTheSettledGrid() {
+    func testAViewportStormLeasesOnlyTheSettledGrid() async {
         let connection = Self.demoConnection()
         connection.connect()
         connection.updateTerminalViewport(
             cols: Fixture.entryGrid.cols,
             rows: Fixture.entryGrid.rows
         )
+        let openingLeaseApplied = await Self.eventually {
+            connection.terminalColumns == Fixture.entryGrid.cols
+                && connection.terminalRows == Fixture.entryGrid.rows
+        }
+        XCTAssertTrue(openingLeaseApplied)
         var appliedGrids: [(Int, Int)] = []
         // Rows publish after columns in `updateTerminalGrid`, so sampling on the rows change
         // sees the whole applied grid.
@@ -86,7 +96,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             .prefix(1)
             .sink { _ in settled.fulfill() }
             .store(in: &cancellables)
-        wait(for: [settled], timeout: Fixture.settleTimeout)
+        await fulfillment(of: [settled], timeout: Fixture.settleTimeout)
 
         XCTAssertEqual(appliedGrids.count, 1, "One settled lease, got \(appliedGrids)")
         XCTAssertEqual(appliedGrids.first?.0, Fixture.pinchLadder.last?.0)
@@ -101,6 +111,11 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             cols: Fixture.entryGrid.cols,
             rows: Fixture.entryGrid.rows
         )
+        let openingLeaseApplied = await Self.eventually {
+            connection.terminalColumns == Fixture.entryGrid.cols
+                && connection.terminalRows == Fixture.entryGrid.rows
+        }
+        XCTAssertTrue(openingLeaseApplied)
 
         connection.updateTerminalViewport(cols: 48, rows: 41)
         connection.releaseTerminalViewport()
@@ -118,11 +133,10 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     /// clear and partial reflow states between them.
     @MainActor
     func testInitialTerminalStaysHydratingUntilOutputIsQuietAfterTheViewport() async throws {
-        let connection = Self.demoConnection(
+        let connection = Self.wireFixtureConnection(
             hydrationQuietDelay: Fixture.hydrationQuietDelay
         )
         connection.onTerminalOutput = { _ in }
-        connection.connect()
 
         // Model an older host: it knows the ordinary terminal protocol but does not advertise
         // the ordered hydration boundary. The phone must retain its conservative silence
@@ -145,7 +159,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         XCTAssertTrue(connection.isTerminalHydrating)
 
         // Another repaint chunk restarts the quiet boundary instead of exposing a partial frame.
-        connection.receiveDemoTerminalOutput(Data("late repaint chunk".utf8))
+        connection.receiveServerTerminalOutputForTesting(Data("late repaint chunk".utf8))
         try await Task.sleep(for: Fixture.hydrationHalfDelay)
         XCTAssertTrue(connection.isTerminalHydrating)
         try await Task.sleep(for: Fixture.hydrationQuietDelay)
@@ -155,7 +169,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     /// A current Mac puts `terminalReady` behind the resize repaint and final screen seed, so a
     /// one-second phone timer is both slower and less accurate than the ordered wire boundary.
     @MainActor
-    func testCurrentHostRevealsOnTheMatchingTerminalBoundary() {
+    func testCurrentHostRevealsOnTheMatchingTerminalBoundary() async {
         let connection = Self.demoConnection(hydrationQuietDelay: .seconds(2))
         connection.onTerminalOutput = { _ in }
         connection.connect()
@@ -166,6 +180,8 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             rows: Fixture.entryGrid.rows
         )
 
+        let hydrationCompleted = await Self.eventually { !connection.isTerminalHydrating }
+        XCTAssertTrue(hydrationCompleted)
         XCTAssertFalse(
             connection.isTerminalHydrating,
             "The host boundary must avoid the old fixed quiet tax"
@@ -176,7 +192,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     /// binary frames can be buffered in the connection while the later ready text is decoded.
     /// Reveal follows renderer delivery, not merely socket receipt.
     @MainActor
-    func testTerminalBoundaryWaitsForBufferedOutputToReachSwiftTerm() {
+    func testTerminalBoundaryWaitsForBufferedOutputToReachSwiftTerm() async {
         let connection = Self.demoConnection(hydrationQuietDelay: .seconds(2))
         connection.connect()
         connection.updateTerminalViewport(
@@ -188,6 +204,10 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         var received = Data()
         connection.onTerminalOutput = { received.append($0) }
 
+        let renderingCompleted = await Self.eventually {
+            !received.isEmpty && !connection.isTerminalHydrating
+        }
+        XCTAssertTrue(renderingCompleted)
         XCTAssertFalse(received.isEmpty)
         XCTAssertFalse(connection.isTerminalHydrating)
     }
@@ -292,9 +312,11 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     /// The old teardown must not clear the new renderer's callback or release its viewport: that
     /// leaves a healthy socket buffering typed repaints until the chat is opened yet again.
     @MainActor
-    func testStaleRendererTeardownCannotDetachItsReplacement() {
+    func testStaleRendererTeardownCannotDetachItsReplacement() async {
         let connection = Self.demoConnection()
         connection.connect()
+        let connected = await Self.eventually { connection.phase == .connected }
+        XCTAssertTrue(connected)
         let outgoing = NSObject()
         let replacement = NSObject()
         var replacementOutput = Data()
@@ -316,6 +338,10 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         let repaint = Data("typed repaint".utf8)
         connection.receiveDemoTerminalOutput(repaint)
 
+        let repaintArrived = await Self.eventually {
+            replacementOutput.suffix(repaint.count) == repaint
+        }
+        XCTAssertTrue(repaintArrived)
         XCTAssertEqual(replacementOutput.suffix(repaint.count), repaint)
     }
 
@@ -367,8 +393,8 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     /// lock goes on (the switcher card is softened) and comes off the moment the app is back,
     /// with no reconnect and no replay.
     @MainActor
-    func testAPromptThatNeverBackgroundsReleasesTheLockAtOnce() {
-        let connection = Self.presentedConnection()
+    func testAPromptThatNeverBackgroundsReleasesTheLockAtOnce() async {
+        let connection = await Self.presentedConnection()
         connection.noteResigningActive()
         XCTAssertTrue(connection.isAwaitingResume)
 
@@ -381,11 +407,11 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
 
     /// A long background has almost certainly cost the socket on the Mac's side: the return
     /// reconnects outright, keeping the last screen on display until the replay has arrived —
-    /// which, against the in-process demo Mac, is before the call returns: the held reset and
-    /// replay reach the terminal as one delivery, and the lock is released behind them.
+    /// the held reset and replay reach the terminal as one ordered delivery, and the lock is
+    /// released behind them.
     @MainActor
-    func testALongBackgroundReconnectsOutrightKeepingTheScreen() {
-        let connection = Self.presentedConnection()
+    func testALongBackgroundReconnectsOutrightKeepingTheScreen() async {
+        let connection = await Self.presentedConnection()
         var deliveries: [Data] = []
         connection.onTerminalOutput = { deliveries.append($0) }
         let left = Date(timeIntervalSince1970: 1_800_000_000)
@@ -395,6 +421,14 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
 
         connection.resumeAfterActivation(now: left.addingTimeInterval(120))
 
+        let replayArrived = await Self.eventually {
+            !deliveries.isEmpty
+                && connection.phase == .connected
+                && !connection.isTerminalHydrating
+                && !connection.holdsPreviousScreen
+                && !connection.isAwaitingResume
+        }
+        XCTAssertTrue(replayArrived)
         // The held frame first, opening with the reset; what the Mac paints after the viewport
         // — the demo's whole seed, a real Mac's post-resize repaint — is live output behind it.
         XCTAssertFalse(deliveries.isEmpty, "the reconnect reached the terminal")
@@ -410,8 +444,8 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     /// to ask, so the lock is released as the answer nothing could change; a real socket is
     /// pinged with a one-second deadline.
     @MainActor
-    func testAShortBackgroundReplaysNothingOnItsOwn() {
-        let connection = Self.presentedConnection()
+    func testAShortBackgroundReplaysNothingOnItsOwn() async {
+        let connection = await Self.presentedConnection()
         var deliveries: [Data] = []
         connection.onTerminalOutput = { deliveries.append($0) }
         let left = Date(timeIntervalSince1970: 1_800_000_000)
@@ -429,7 +463,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
 
     /// A connection that has shown a screen: connected, hydrated, with a renderer attached.
     @MainActor
-    private static func presentedConnection() -> RemoteSessionConnection {
+    private static func presentedConnection() async -> RemoteSessionConnection {
         let connection = demoConnection(hydrationQuietDelay: .seconds(2))
         connection.onTerminalOutput = { _ in }
         connection.connect()
@@ -437,7 +471,12 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             cols: Fixture.entryGrid.cols,
             rows: Fixture.entryGrid.rows
         )
-        precondition(!connection.isTerminalHydrating && connection.hasPresentedTerminalOutput)
+        let presented = await eventually {
+            connection.phase == .connected
+                && !connection.isTerminalHydrating
+                && connection.hasPresentedTerminalOutput
+        }
+        XCTAssertTrue(presented, "the demo opening must reach a mounted renderer")
         return connection
     }
 
@@ -461,6 +500,43 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             terminalHydrationQuietDelay: hydrationQuietDelay,
             terminalHydrationMaximumDelay: .seconds(2)
         )
+    }
+
+    @MainActor
+    private static func wireFixtureConnection(
+        hydrationQuietDelay: Duration
+    ) -> RemoteSessionConnection {
+        let session = RemoteSessionSummaryDTO(
+            id: "0e6f7d1c-5716-470b-933c-d68310644b4f",
+            title: "Claude Code · AnotherTerminal",
+            agentKind: "claude",
+            surface: .terminal,
+            state: .idle,
+            projectName: "AnotherTerminal"
+        )
+        return RemoteSessionConnection(
+            session: session,
+            client: RemoteClient(
+                link: RemoteConnectionLink(
+                    string: "https://terminal-wire-fixture.invalid/#lease"
+                )!
+            ),
+            viewportSettleDelay: Fixture.settleDelay,
+            terminalHydrationQuietDelay: hydrationQuietDelay,
+            terminalHydrationMaximumDelay: .seconds(2)
+        )
+    }
+
+    @MainActor
+    private static func eventually(
+        attempts: Int = 200,
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 
     private static func theme(background: String) -> RemoteTerminalThemeDTO {

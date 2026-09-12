@@ -480,6 +480,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         case row(String)
         case streaming
         case permission(String)
+        case question(String)
     }
 
     private let connection: RemoteSessionConnection
@@ -500,6 +501,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private var hasHistoryItem = false
     private var hasStreamingItem = false
     private var permissionItemID: String?
+    private var questionItemIDs: [String] = []
+    private var questionDrafts: [String: MobileConversationQuestionDraft] = [:]
     private var needsInitialBottomPosition = true
     private var isInitialBottomPositionScheduled = false
     private var hasTimelineAppeared = false
@@ -625,6 +628,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 forCellWithReuseIdentifier: reuseIdentifier
             )
         }
+        collectionView.register(RemoteConversationQuestionCell.self,
+                                forCellWithReuseIdentifier: RemoteConversationQuestionCell.reuseIdentifier)
         collectionView.register(
             RemoteConversationPermissionCell.self,
             forCellWithReuseIdentifier: RemoteConversationPermissionCell.reuseIdentifier
@@ -716,6 +721,13 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 )
                 return cell
 
+            case .question(let id):
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: RemoteConversationQuestionCell.reuseIdentifier, for: indexPath
+                ) as! RemoteConversationQuestionCell
+                configureQuestion(cell, id: id)
+                return cell
+
             case .permission:
                 guard let permission = connection.conversationStore.state.permission else {
                     return nil
@@ -771,6 +783,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
             let updated,
             let streamingChanged,
             let permissionChanged,
+            let questionsChanged,
             _,
             let historyChanged
         ):
@@ -786,11 +799,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 || (historyChanged && hasHistoryItem != desiredHistoryItem)
                 || hasStreamingItem != !state.streamingText.isEmpty
                 || permissionItemID != desiredPermissionID
+                || questionItemIDs != state.questions.map(\.id)
 
             if structureChanged {
                 applySnapshot(
                     reconfiguring: Set(updated),
-                    scrollToBottom: nearBottom && !inserted.isEmpty
+                    scrollToBottom: nearBottom && (!inserted.isEmpty || questionsChanged || permissionChanged)
                 )
             } else {
                 var items = updated.map(Item.row)
@@ -800,6 +814,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 if permissionChanged, let desiredPermissionID {
                     items.append(.permission(desiredPermissionID))
                 }
+                if questionsChanged { items.append(contentsOf: state.questions.map { .question($0.id) }) }
                 if historyChanged, hasHistoryItem {
                     items.append(.history)
                 }
@@ -830,6 +845,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         if let permission = state.permission {
             snapshot.appendItems([.permission(permission.id)])
         }
+        snapshot.appendItems(state.questions.map { .question($0.id) })
         return snapshot
     }
 
@@ -858,7 +874,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
             }
             snapshot.reconfigureItems(synthetic)
         }
-        dataSource.apply(snapshot, animatingDifferences: hasAppliedInitialSnapshot) { [weak self] in
+        dataSource.apply(snapshot, animatingDifferences: hasAppliedInitialSnapshot && !UIAccessibility.isReduceMotionEnabled) { [weak self] in
             guard let self else { return }
 #if DEBUG
             if profilesInitialSnapshot {
@@ -1002,6 +1018,9 @@ final class RemoteConversationTimelineViewController: UIViewController {
         hasHistoryItem = state.hasEarlier || connection.conversationStore.isLoadingEarlier
         hasStreamingItem = !state.streamingText.isEmpty
         permissionItemID = state.permission?.id
+        questionItemIDs = state.questions.map(\.id)
+        let active = Set(questionItemIDs)
+        questionDrafts = questionDrafts.filter { active.contains($0.key) }
     }
 
     @discardableResult
@@ -1042,6 +1061,11 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 )
                 changedVisibleItems.append(AnyHashable(item))
 
+            case .question(let id):
+                guard let cell = cell as? RemoteConversationQuestionCell else { continue }
+                configureQuestion(cell, id: id)
+                changedVisibleItems.append(AnyHashable(item))
+
             case .permission:
                 guard let cell = cell as? RemoteConversationPermissionCell,
                       let permission = connection.conversationStore.state.permission else {
@@ -1059,6 +1083,18 @@ final class RemoteConversationTimelineViewController: UIViewController {
         }
         conversationLayout.invalidateHeights(for: changedVisibleItems)
         return !changedVisibleItems.isEmpty
+    }
+
+    private func configureQuestion(_ cell: RemoteConversationQuestionCell, id: String) {
+        guard let request = connection.conversationStore.state.questions.first(where: { $0.id == id }) else { return }
+        let draft = questionDrafts[id] ?? MobileConversationQuestionDraft()
+        questionDrafts[id] = draft
+        cell.configure(request: request, draft: draft, theme: theme, answer: { [weak self] answers in
+            self?.connection.answerQuestion(request, answers: answers)
+        }, layoutChanged: { [weak self] in
+            guard let self else { return }
+            conversationLayout.invalidateHeights(for: [AnyHashable(Item.question(id))])
+        })
     }
 
     private var conversationLayout: RemoteConversationLayout {
@@ -2630,7 +2666,7 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
         panel.applyRemoteSurface(
             fill: theme.uiPanel,
             radius: theme.panelRadius,
-            border: theme.uiWarning.withAlphaComponent(0.7),
+            border: theme.uiBorder,
             borderWidth: theme.borderWidth,
             glow: theme.glow
         )
@@ -2644,8 +2680,16 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
         title.font = .preferredFont(forTextStyle: .headline)
         title.adjustsFontForContentSizeCategory = true
         title.textColor = theme.uiLabel
-        title.text = MobileL10n.string("Allow %@?", permission.toolName)
+        title.text = MobileL10n.string("Permission needed")
+        title.accessibilityTraits.insert(.header)
         stack.addArrangedSubview(title)
+        let explanation = UILabel()
+        explanation.numberOfLines = 0
+        explanation.font = .preferredFont(forTextStyle: .subheadline)
+        explanation.adjustsFontForContentSizeCategory = true
+        explanation.textColor = theme.uiSecondaryLabel
+        explanation.text = MobileL10n.string("Allow %@?", permission.toolName)
+        stack.addArrangedSubview(explanation)
 
         if !permission.summary.isEmpty {
             stack.addArrangedSubview(RemoteUserMessageView.textView(
@@ -2677,7 +2721,7 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
             buttons.addArrangedSubview(Self.actionButton(
                 title: MobileL10n.string("Allow"),
                 fill: theme.uiAccent,
-                foreground: theme.uiGround,
+                foreground: theme.uiAccentForeground,
                 radius: theme.controlRadius,
                 action: { decide(true) }
             ))
@@ -2936,7 +2980,7 @@ private final class RemoteConversationHistoryCell: UICollectionViewCell {
     }
 }
 
-private extension UIView {
+extension UIView {
     func applyRemoteSurface(
         fill: UIColor,
         radius: CGFloat,

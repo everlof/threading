@@ -99,6 +99,29 @@ final class ChangedFilesCardTests: XCTestCase {
 
     // MARK: - Geometry
 
+    func testLineCountsStayInsideTheCardInAConversation() throws {
+        let (controller, host) = NativeChatShowcaseTests.fixture(.answer)
+        defer { controller.terminate() }
+        let window = NSWindow(contentRect: host.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        fixtureWindows.append(window)
+        host.layoutSubtreeIfNeeded()
+        func find<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+            (view as? T).map { [$0] } ?? view.subviews.flatMap { find(type, in: $0) }
+        }
+        let card = try XCTUnwrap(find(ChangedFilesCardView.self, in: host).last)
+        let rows = find(ChangedFilesRowView.self, in: card)
+        XCTAssertFalse(rows.isEmpty)
+        for row in rows {
+            for field in row.descendantTextFields where field.stringValue.hasPrefix("+") {
+                let edge = field.superview!.convert(field.alignmentRect(forFrame: field.frame), to: card).maxX
+                XCTAssertLessThanOrEqual(edge, card.bounds.maxX - Design.Spacing.medium + 0.5)
+
+            }
+        }
+    }
+
     func testAFilesNameStartsOneIndentStepRightOfItsDirectory() throws {
         let card = makeCard(tree: makeTree([("Tests/ThreadingTests/ThemedControlTests.swift", 4, 1)]))
 

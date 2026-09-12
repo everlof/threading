@@ -17,6 +17,7 @@ public struct RemoteConversationState: Equatable, Sendable {
     public private(set) var streamingText: String
     public private(set) var canSend: Bool
     public private(set) var composerCapabilities: [RemoteComposerCapabilityDTO]
+    public private(set) var questions: [RemoteQuestionRequestDTO]
     public private(set) var permission: RemotePermissionRequestDTO?
     public private(set) var revision: Int
     public private(set) var hasEarlier: Bool
@@ -27,6 +28,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         canSend: Bool = false,
         composerCapabilities: [RemoteComposerCapabilityDTO] = [],
         permission: RemotePermissionRequestDTO? = nil,
+        questions: [RemoteQuestionRequestDTO] = [],
         revision: Int = 0,
         hasEarlier: Bool = false
     ) {
@@ -35,6 +37,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         self.canSend = canSend
         self.composerCapabilities = composerCapabilities
         self.permission = permission
+        self.questions = Self.safeQuestions(questions)
         self.revision = revision
         self.hasEarlier = hasEarlier
     }
@@ -46,6 +49,7 @@ public struct RemoteConversationState: Equatable, Sendable {
         canSend = snapshot.canSend
         composerCapabilities = snapshot.composerCapabilities
         permission = snapshot.permission
+        questions = Self.safeQuestions(snapshot.questions)
         revision = snapshot.revision
         hasEarlier = snapshot.hasEarlier
         return .replaced
@@ -81,6 +85,7 @@ public struct RemoteConversationState: Equatable, Sendable {
             || canSend != delta.canSend
             || delta.composerCapabilities.map { composerCapabilities != $0 } == true
             || permission != delta.permission
+            || questions != Self.safeQuestions(delta.questions ?? [])
             || delta.hasEarlier.map { hasEarlier != $0 } == true
         streamingText = delta.streamingText
         canSend = delta.canSend
@@ -88,6 +93,7 @@ public struct RemoteConversationState: Equatable, Sendable {
             composerCapabilities = capabilities
         }
         permission = delta.permission
+        questions = Self.safeQuestions(delta.questions ?? [])
         if let hasEarlier = delta.hasEarlier {
             self.hasEarlier = hasEarlier
         }
@@ -107,6 +113,12 @@ public struct RemoteConversationState: Equatable, Sendable {
         guard !newRows.isEmpty else { return .unchanged }
         rows.insert(contentsOf: newRows, at: 0)
         return .prepended(newRows.map(\.id))
+    }
+
+    private static func safeQuestions(_ requests: [RemoteQuestionRequestDTO]) -> [RemoteQuestionRequestDTO] {
+        guard requests.count <= 3 else { return [] }
+        var ids = Set<String>()
+        return requests.filter { $0.isValid && ids.insert($0.id).inserted }
     }
 
     private static func unique(

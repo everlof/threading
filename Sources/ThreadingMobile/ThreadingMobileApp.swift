@@ -21,6 +21,7 @@ struct ThreadingMobileHostedRoot: View {
                 // `onChange(of: scenePhase)` does not fire for the phase the app launches into,
                 // so the first foreground is this one.
                 model.startDiscovery()
+                model.startNetworkPathWatch()
                 if !model.isEphemeralTerminalWireFixture {
                     await notifications.clearTurnCompletionsOnApplicationActivation()
                     await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
@@ -36,6 +37,7 @@ struct ThreadingMobileHostedRoot: View {
                     // Browsing belongs to the foreground: it is a multicast listener, and the
                     // address it finds is only useful while somebody is looking at the app.
                     model.startDiscovery()
+                    model.startNetworkPathWatch()
                     Task {
                         await notifications.clearTurnCompletionsOnApplicationActivation()
                         await model.refresh(reason: .foreground)
@@ -48,6 +50,7 @@ struct ThreadingMobileHostedRoot: View {
                     }
                 } else if phase == .background {
                     model.stopDiscovery()
+                    model.stopNetworkPathWatch()
                     model.suspendHostedConnections()
                     if !model.isEphemeralTerminalWireFixture {
                         Task {

@@ -902,6 +902,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 targetID: parsed.recipientID,
                 requestID: parsed.requestID
             )
+        case "questionAnswer":
+            handleQuestionAnswer(connection, id: parsed.id, answers: parsed.answers, decision: parsed.decision)
         case "permission":
             handlePermission(
                 connection,
@@ -4606,6 +4608,39 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 status: status
             )))
             self.resolveClaim(attachmentUploadIDs, accepted: status == .accepted)
+        }
+    }
+
+    private func handleQuestionAnswer(
+        _ connection: RemoteConnection, id: String?, answers: [String: String]?, decision: String?
+    ) {
+        guard let authorization = connection.authorization, authorization.capability == .interact,
+              let routed = connection.routedSessionID, let sessionID = SessionID(uuidString: routed),
+              authorization.scope.covers(sessionID) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        guard let id, UUID(uuidString: id) != nil,
+              (decision == "answer" && answers.map { (1...3).contains($0.count) } == true)
+                || (decision == "cancel" && answers == nil) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidQuestionAnswer")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            guard self.services.mirrors.answerQuestion(
+                id: id, answers: answers, sessionID: sessionID, authorization: authorization
+            ) else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "questionNotPending")))
+                return
+            }
+            self.services.eventLog.recordRemoteEvent("Remote question answered", [
+                .session: sessionID.uuidString, .decision: decision ?? "answer",
+                .device: connection.deviceID ?? "unknown"
+            ])
         }
     }
 

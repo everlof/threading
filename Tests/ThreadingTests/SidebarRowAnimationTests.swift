@@ -516,10 +516,8 @@ final class SidebarRowAnimationTests: XCTestCase {
         let viewsBefore = rowViews(fixture.controller)
         let hoisted = try XCTUnwrap(store.projects.first?.sessions.last)
 
-        // `update` is the store's quiet edit — it persists and says nothing, so the sidebar is
-        // asked directly, which is also what the arrangement menu does.
-        store.update(sessionID: hoisted.id) { $0.lastActiveAt = Date(timeIntervalSince1970: 2_000) }
-        fixture.controller.reload()
+        // Exercise the shipping work event: no manual reload, project mutation or re-selection.
+        store.noteTurnEnded(sessionID: hoisted.id, at: Date(timeIntervalSince1970: 2_000))
 
         // It moved, and it moved by travelling: the row is drawn behind its new place while the
         // move plays out.

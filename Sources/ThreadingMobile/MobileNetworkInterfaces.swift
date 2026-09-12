@@ -237,6 +237,28 @@ enum MobileNetworkInterfaces {
     }
 }
 
+/// Decides which network path changes are worth asking the sockets about.
+///
+/// `NWPathMonitor` reports every change to the path, including ones that alter nothing a socket
+/// depends on — the path becoming expensive, a constraint, an interface joining the list while
+/// the one in use stays. A socket cares about two things: whether there is a network at all, and
+/// which kinds of interface carry it, because a socket bound to Wi-Fi is dead on the wire the
+/// moment the phone leaves it for cellular, however long iOS takes to say so. The first
+/// observation after the monitor starts describes the network the sockets were built on, and is
+/// not a change. Pure and unit-tested.
+enum MobileNetworkPathChangePolicy {
+    static func isMaterial(
+        from previous: MobileNetworkPathSummary?,
+        to current: MobileNetworkPathSummary
+    ) -> Bool {
+        guard let previous else { return false }
+        if previous.status != current.status { return true }
+        return previous.usesWiFi != current.usesWiFi
+            || previous.usesCellular != current.usesCellular
+            || previous.usesWired != current.usesWired
+    }
+}
+
 /// Watches the network path for as long as a connection panel is on screen.
 ///
 /// One `NWPathMonitor`, started when the panel appears and cancelled when it goes, and the

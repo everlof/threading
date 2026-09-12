@@ -58,6 +58,7 @@ extension ConversationViewController {
             showStreaming(text)
 
         case .status(let status):
+            presentedStatus = status
             let wasInFlight = isTurnInFlight
             isTurnInFlight = {
                 if case .working = status { return true }
@@ -76,17 +77,7 @@ extension ConversationViewController {
 
             // The orb runs only while a turn is in flight; hidden, it detaches
             // from the status row and its display link idles.
-            if case .working(let word) = status {
-                if orbView.isHidden {
-                    orbView.prepareForWorking(style: AppSettings.shared.workingOrbStyle)
-                }
-                orbView.isHidden = false
-                beginWorkingStatus(word: word)
-            } else {
-                orbView.isHidden = true
-                endWorkingStatus()
-                setStatus(describe(status))
-            }
+            refreshDecisionStatus()
             if isTurnInFlight != wasInFlight {
                 // The edge is the turn boundary, and the only place the agent's own running
                 // work is weighed. A status restated without an edge — a re-init, a model
@@ -386,9 +377,28 @@ extension ConversationViewController {
         }
     }
 
+    /// The status tells the same truth as the inline card and sidebar. Waiting stops the orb
+    /// and its clock callback without resetting the elapsed turn when an answer resumes it.
+    func refreshDecisionStatus() {
+        if hasPendingUserDecision {
+            workingStatusTimer?.invalidate()
+            workingStatusTimer = nil
+            orbView.isHidden = true
+            setStatus(hasPendingPermission ? L10n.string("Waiting for permission") : L10n.string("Waiting for your answer"))
+        } else if case .working(let word) = presentedStatus {
+            if orbView.isHidden { orbView.prepareForWorking(style: AppSettings.shared.workingOrbStyle) }
+            orbView.isHidden = false
+            beginWorkingStatus(word: word)
+        } else {
+            orbView.isHidden = true
+            endWorkingStatus()
+            setStatus(describe(presentedStatus))
+        }
+    }
+
     private func beginWorkingStatus(word: String) {
         workingStatusTimer?.invalidate()
-        workingStartedAt = ProcessInfo.processInfo.systemUptime
+        if workingStartedAt == nil { workingStartedAt = ProcessInfo.processInfo.systemUptime }
 
         updateWorkingStatus(word: word)
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -599,6 +609,7 @@ extension ConversationViewController {
         _ = view
 
         permissionQueue.append((request, decide))
+        refreshDecisionStatus()
         SessionSnoozeCenter.shared.record(.approvalRequested, for: sessionID)
         delegate?.conversationDidChangeActivity(self)
 
@@ -613,6 +624,7 @@ extension ConversationViewController {
 
     /// Shows the next queued request, unless one is already on screen awaiting an answer.
     private func showNextPermissionIfIdle() {
+        defer { refreshDecisionStatus() }
         guard activePermissionCard == nil, !permissionQueue.isEmpty else { return }
 
         let pending = permissionQueue.removeFirst()
@@ -638,10 +650,12 @@ extension ConversationViewController {
             self.transcript.remove(cardID)
             self.delegate?.conversationDidChangeActivity(self)
             self.showNextPermissionIfIdle()
+            self.refreshDecisionStatus()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
         }
 
         activePermissionCard = card
+        refreshDecisionStatus()
         RemoteNotificationService.shared.permissionRequested(
             sessionID: sessionID,
             toolName: pending.request.toolName,

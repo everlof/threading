@@ -154,7 +154,7 @@ actor TranscriptSearchIndex {
     private let database: SQLiteDatabase
     private var currentSourcesByID: [SearchSourceID: TranscriptSearchSource] = [:]
     private var refreshState: RefreshState = .idle
-    private var unavailableSourceCount = 0
+    private var unavailableSourceIDs: Set<SearchSourceID> = []
     private var containsTruncatedBody = false
 
     /// How many times the metadata rewrite below has actually run.
@@ -218,19 +218,35 @@ actor TranscriptSearchIndex {
     /// Reconciles a complete source snapshot. Cancellation takes effect between sources and
     /// bounded JSONL passes; every accepted pass and its resume cursor commit atomically.
     func refresh(sources: [TranscriptSearchSource]) async {
-        currentSourcesByID = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
+        await refresh(sources: sources, replacingAll: true)
+    }
+
+    /// A work event owns only these sources. It must not delete other conversations' FTS rows.
+    /// The store serializes ingestion calls while this actor allows queries between bounded passes.
+    func refreshChanged(sources: [TranscriptSearchSource]) async {
+        await refresh(sources: sources, replacingAll: false)
+    }
+
+    private func refresh(sources: [TranscriptSearchSource], replacingAll: Bool) async {
+        if replacingAll {
+            currentSourcesByID = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
+            unavailableSourceIDs.removeAll(keepingCapacity: true)
+        } else {
+            for source in sources { currentSourcesByID[source.sourceID] = source }
+        }
         let ordered = sources.sorted {
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
             return $0.sourceID.rawValue < $1.sourceID.rawValue
         }
         refreshState = .indexing(indexed: 0, total: ordered.count)
-        unavailableSourceCount = 0
 
         do {
-            try deleteSourcesAbsent(from: Set(ordered.map(\.sourceID.rawValue)))
-            containsTruncatedBody = try persistedTruncationState()
+            if replacingAll {
+                try deleteSourcesAbsent(from: Set(ordered.map(\.sourceID.rawValue)))
+                containsTruncatedBody = try persistedTruncationState()
+            }
         } catch {
-            unavailableSourceCount = ordered.count
+            unavailableSourceIDs.formUnion(ordered.map(\.sourceID))
             refreshState = .idle
             return
         }
@@ -240,14 +256,15 @@ actor TranscriptSearchIndex {
             guard !Task.isCancelled else { return }
             do {
                 guard FileManager.default.fileExists(atPath: source.url.path) else {
-                    unavailableSourceCount += 1
+                    unavailableSourceIDs.insert(source.sourceID)
                     indexed += 1
                     refreshState = .indexing(indexed: indexed, total: ordered.count)
                     continue
                 }
                 try await reconcile(source)
+                unavailableSourceIDs.remove(source.sourceID)
             } catch {
-                unavailableSourceCount += 1
+                unavailableSourceIDs.insert(source.sourceID)
             }
             indexed += 1
             refreshState = .indexing(indexed: indexed, total: ordered.count)
@@ -1034,7 +1051,7 @@ actor TranscriptSearchIndex {
         switch refreshState {
         case let .indexing(indexed, total):
             return .indexing(indexed: indexed, total: total)
-        case .idle where unavailableSourceCount > 0:
+        case .idle where !unavailableSourceIDs.isEmpty:
             return .partial(reason: L10n.string(
                 "Some conversation history is unavailable."
             ))

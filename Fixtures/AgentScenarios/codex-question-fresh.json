@@ -1,0 +1,94 @@
+{
+  "id": "codex-question-fresh",
+  "provenance": {
+    "protocolVersion": "app-server-1",
+    "providerVersion": "0.154.0",
+    "recordedAt": "2026-09-10T17:30:00Z"
+  },
+  "provider": "codex",
+  "steps": [
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":1,\"method\":\"initialize\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":1,\"result\":{\"userAgent\":\"threading-ui-fixture/1\"}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"initialized\"}"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":2,\"method\":\"thread/start\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-question\",\"name\":\"Question fixture\",\"model\":\"gpt-5.6\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project\",\"skills\":[],\"errors\":[]}]}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-question\",\"input\":[{\"type\":\"text\",\"text\":\"Ask me how to review this chat.\"}]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"fixture-turn-question\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"fixture-thread-question\",\"turn\":{\"id\":\"fixture-turn-question\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":\"question-request-1\",\"method\":\"item/tool/requestUserInput\",\"params\":{\"threadId\":\"fixture-thread-question\",\"turnId\":\"fixture-turn-question\",\"itemId\":\"question-item\",\"isBlocking\":true,\"questions\":[{\"id\":\"density\",\"header\":\"Density\",\"question\":\"How much work detail should the chat show?\",\"isOther\":false,\"isSecret\":false,\"options\":[{\"label\":\"Compact\",\"description\":\"Keep completed work behind a disclosure.\"}]},{\"id\":\"review\",\"header\":\"Review\",\"question\":\"What should we check first?\",\"isOther\":false,\"isSecret\":false,\"options\":[{\"label\":\"Interactions\",\"description\":\"Check scrolling and keyboard behavior.\"}]}]}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":\"question-request-1\",\"result\":{\"answers\":{\"density\":{\"answers\":[\"Compact\"]},\"review\":{\"answers\":[\"Interactions\"]}}}}"
+    },
+    {
+      "kind": "writeFixtureFile",
+      "path": "project/answers.json",
+      "contents": "{\"density\":\"Compact\",\"review\":\"Interactions\"}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-question\",\"turnId\":\"fixture-turn-question\",\"item\":{\"id\":\"answer-message\",\"type\":\"agentMessage\",\"text\":\"Answer received: Compact and Interactions.\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread-question\",\"turn\":{\"id\":\"fixture-turn-question\",\"status\":\"completed\",\"durationMs\":1000}}}\n"
+    },
+    {
+      "afterMilliseconds": 5000,
+      "kind": "exit",
+      "status": 0
+    }
+  ],
+  "title": "Synthetic Codex question and explicit answer",
+  "transport": "codex-app-server",
+  "version": 1
+}

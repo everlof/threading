@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import ThreadingGlanceKit
 import ThreadingPeerTransport
 import ThreadingRemoteKit
@@ -149,6 +150,24 @@ enum MobileConnectionRecoveryPolicy {
         if dashboardRecoveryPending { return true }
         if request.attempt > 0 { return true }
         return !request.peerSentClose
+    }
+
+    /// Whether opening a chat or terminal goes through host recovery before its socket dials.
+    ///
+    /// Without a catalogue or online phase there is nothing to open against. With both, the
+    /// answer is whether the dashboard is recovering from a lost event socket: the phase stays
+    /// online through that loss, so the model's client still names the origin that just died.
+    /// The 2026-09-11 report opened a chat ten seconds into such a recovery; the open took that
+    /// client, dialled the dead LAN origin, and the person backed out of a chat that "felt
+    /// stuck" while the recovery found Tailscale beside it. Joining the recovery costs the open
+    /// nothing it would not have paid on the hello deadline, and it dials the right route once.
+    static func openNeedsHostRecovery(
+        isOnline: Bool,
+        hasCatalogue: Bool,
+        dashboardRecoveryPending: Bool
+    ) -> Bool {
+        if !isOnline || !hasCatalogue { return true }
+        return dashboardRecoveryPending
     }
 }
 
@@ -463,6 +482,21 @@ final class RemoteAppModel: ObservableObject {
     /// The host whose dashboard recovery is scheduled but has not run yet. Set beside
     /// `themeEventsRecoveryTask`, cleared when that recovery runs or the socket's owner ends it.
     private var themeEventsRecoveryHostID: String?
+    /// Which settled path change the event socket last answered or failed, so a ping's error
+    /// callback and its deadline cannot both tear the socket down.
+    private var themeEventsPathProbeAnswered = 0
+    private var networkPathMonitor: NWPathMonitor?
+    private let networkPathQueue = DispatchQueue(
+        label: "threading.mobile.model.network-path",
+        qos: .utility
+    )
+    private var networkPathSettleTask: Task<Void, Never>?
+    private var lastObservedNetworkPath: MobileNetworkPathSummary?
+    /// How long a changed path must stay changed before the sockets are asked about it.
+    static let networkPathSettleDelay: Duration = .milliseconds(500)
+    /// Advances once per settled material path change. A session screen watches it and asks
+    /// its socket whether it is still there; see `RemoteSessionConnection.networkPathChanged()`.
+    @Published private(set) var networkPathGeneration = 0
     /// Consecutive automatic recovery waits since the event socket last delivered a frame.
     /// The dashboard uses the count to keep a transient miss in compact progress chrome and
     /// disclose the full recovery surface only after repeated bounded attempts.
@@ -1155,6 +1189,8 @@ final class RemoteAppModel: ObservableObject {
                         ),
                     ]) { _, new in new }
                 )
+                // A hosted-only acceptance cannot persist a loopback URL after this tunnel
+                // stops. Retry the same invitation while the Mac retains its device-bound receipt.
                 if transport == .hosted { throw error }
                 // Pairing and the private routes this Mac advertised remain valid. The Mac will
                 // advertise the feature again so a later refresh can retry provisioning.
@@ -1401,7 +1437,7 @@ final class RemoteAppModel: ObservableObject {
     /// socket is attempted. The detail screen can appear immediately, but it waits here while
     /// the dashboard's single-flight reconnect does the network work.
     func liveSessionForOpening(id: String) async throws -> RemoteSessionSummaryDTO {
-        if phase != .online || me == nil {
+        if openNeedsHostRecovery {
             await refresh(reason: .openTarget)
         }
         guard let response = me else {
@@ -1416,7 +1452,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     func liveTerminalForOpening(id: String) async throws -> RemoteProjectTerminalSummaryDTO {
-        if phase != .online || me == nil {
+        if openNeedsHostRecovery {
             await refresh(reason: .openTarget)
         }
         guard let response = me else {
@@ -1427,6 +1463,18 @@ final class RemoteAppModel: ObservableObject {
             throw MobileDashboardItemError.terminalUnavailable
         }
         return terminal
+    }
+
+    /// Whether opening a chat or terminal has to go through host recovery before it takes the
+    /// model's client. A pending dashboard recovery means the route that client names is the one
+    /// that just failed; the open joins that recovery (or starts it early) rather than dialling
+    /// the old origin and waiting out a hello deadline on it.
+    private var openNeedsHostRecovery: Bool {
+        MobileConnectionRecoveryPolicy.openNeedsHostRecovery(
+            isOnline: phase == .online,
+            hasCatalogue: me != nil,
+            dashboardRecoveryPending: activeHostID.map(isDashboardRecoveryPending(for:)) ?? false
+        )
     }
 
     /// Returns a route for a live-session reconnect without turning one refused session socket
@@ -1499,6 +1547,11 @@ final class RemoteAppModel: ObservableObject {
         )
         guard decision != .skip else { return }
 
+        // One walk for the whole refresh, probe included, so a chat title that names the route
+        // being tried says so from the probe's failure onward rather than from the race's second
+        // attempt. `fetchMe` opens its own nested walk; the count keeps the status one story.
+        beginRouteWalk()
+        defer { endRouteWalk() }
         discardPendingSessionDeltas()
         refreshGeneration &+= 1
         let generation = refreshGeneration
@@ -1525,16 +1578,28 @@ final class RemoteAppModel: ObservableObject {
             }
         }
         let wasOnline = phase == .online && me != nil
+        // What the walk would try, asked here only for its size: a host with one way in has no
+        // ceiling and no short warm probe, because there is no other route to get on with.
+        // Bounded by the advertised endpoint list and the one sticky range, so this is a few
+        // dozen URL constructions.
+        let plannedCandidateCount = host.candidates(
+            preferring: discoveredAddresses[host.id]
+        ).count
+        let plannedRouteCount = plannedCandidateCount + (hasHostedRoute(host) ? 1 : 0)
 
         // The cheap path first: one request on the route that answered last, naming the edition
         // in hand. A `304` settles the refresh; a full body is adopted like any race winner; a
         // transport failure on that one route says nothing about the others and falls through
-        // to the race below.
+        // to the race below — which is why the probe is given one route attempt, not a whole
+        // request timeout, whenever that race has somewhere else to go.
         if decision == .conditional, let warm, let edition {
             switch await refreshConditionally(
                 from: host,
                 candidate: warm,
                 edition: edition,
+                timeout: RemoteRouteWalkBudget.warmProbeTimeout(
+                    hasOtherRoutes: plannedRouteCount > 1
+                ),
                 generation: generation,
                 wasOnline: wasOnline,
                 trace: refreshTrace,
@@ -1552,12 +1617,6 @@ final class RemoteAppModel: ObservableObject {
             phase = .connecting
             connectionProgress = .preparingRoutes
         }
-        // What the walk is about to try, asked here only for its size: a host with one way in has
-        // no ceiling, because there is no other route to get on with. Bounded by the advertised
-        // endpoint list and the one sticky range, so this is a few dozen URL constructions.
-        let plannedCandidateCount = host.candidates(
-            preferring: discoveredAddresses[host.id]
-        ).count
         do {
             // The ceiling owns the whole race. Once it answers, every request from that generation
             // is cancelled before recovery may start a fresh one; two refreshes never compete to
@@ -2482,6 +2541,114 @@ final class RemoteAppModel: ObservableObject {
         discovery.stop()
     }
 
+    // MARK: - The network path
+
+    /// Starts watching the network path, for as long as the app is in the foreground.
+    ///
+    /// A socket the phone still calls connected can be dead on the wire for as long as iOS takes
+    /// to notice, and before this the phone reacted to a path change nowhere outside the
+    /// connection panel: a person who walked from Wi-Fi to cellular with a chat open sat on a
+    /// connected-looking socket until something aborted it (2026-09-11). The path is the one
+    /// piece of evidence the phone has before that, so a material change asks every socket
+    /// whether it is still there, at once.
+    func startNetworkPathWatch() {
+        guard !isDemo, !isEphemeralTerminalWireFixture, networkPathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let summary = MobileNetworkPathSummary(path)
+            Task { @MainActor [weak self] in
+                self?.networkPathObserved(summary)
+            }
+        }
+        networkPathMonitor = monitor
+        monitor.start(queue: networkPathQueue)
+    }
+
+    /// Stops watching. The background has its own recovery on return, and a path that changes
+    /// while the app is suspended is answered by the activation probe.
+    func stopNetworkPathWatch() {
+        networkPathMonitor?.cancel()
+        networkPathMonitor = nil
+        networkPathSettleTask?.cancel()
+        networkPathSettleTask = nil
+        lastObservedNetworkPath = nil
+    }
+
+    /// One observation from the monitor. Immaterial changes are dropped; material ones settle for
+    /// a moment, because a handoff reports several paths in quick succession and the sockets
+    /// should be asked about the one that stays.
+    func networkPathObserved(_ summary: MobileNetworkPathSummary) {
+        let previous = lastObservedNetworkPath
+        lastObservedNetworkPath = summary
+        guard MobileNetworkPathChangePolicy.isMaterial(from: previous, to: summary) else { return }
+        networkPathSettleTask?.cancel()
+        networkPathSettleTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.networkPathSettleDelay)
+            guard !Task.isCancelled else { return }
+            self?.networkPathSettled()
+        }
+    }
+
+    /// The path has changed and stayed changed. Session sockets learn through the generation;
+    /// the dashboard's own socket is asked here: a ping when it is delivering, and recovery now
+    /// — not after whatever backoff was counting toward the old network — when it is not.
+    private func networkPathSettled() {
+        networkPathSettleTask = nil
+        networkPathGeneration &+= 1
+        guard let host = activeHost, !isDemo else { return }
+        let hostID = host.id
+        if let task = themeEventsTask, themeEventsDidReceiveHello, themeEventsHostID == hostID {
+            let generation = themeEventsGeneration
+            let probe = networkPathGeneration
+            task.sendPing { [weak self] error in
+                Task { @MainActor in
+                    guard let self, self.themeEventsGeneration == generation,
+                          self.themeEventsTask === task, error != nil else { return }
+                    self.recoverThemeEventsAfterPathChange(for: hostID, probe: probe)
+                }
+            }
+            Task { [weak self, deadline = RemoteMobileConnectionDefaults.resumeLivenessDeadline] in
+                try? await Task.sleep(for: deadline)
+                guard let self, self.themeEventsGeneration == generation,
+                      self.themeEventsTask === task, self.networkPathGeneration == probe,
+                      self.themeEventsPathProbeAnswered != probe else { return }
+                self.recoverThemeEventsAfterPathChange(for: hostID, probe: probe)
+            }
+            return
+        }
+        guard hostRefreshSingleFlight.hasFlight(for: hostID) == false else { return }
+        themeEventsRecoveryTask?.cancel()
+        themeEventsRecoveryTask = nil
+        themeEventsRecoveryHostID = nil
+        Task { [weak self] in
+            await self?.refresh(reason: .networkPathChanged)
+        }
+    }
+
+    /// The event socket did not answer the ping the path change sent. It is torn down as a
+    /// loss and recovered at once.
+    private func recoverThemeEventsAfterPathChange(for hostID: String, probe: Int) {
+        guard themeEventsPathProbeAnswered != probe else { return }
+        themeEventsPathProbeAnswered = probe
+        guard themeEventsHostID == hostID, themeEventsTask != nil else { return }
+        MobileDiagnostics.recordConnectivity(
+            .socketFailed,
+            level: .error,
+            fields: themeEventFields(phase: "events.session").merging([
+                .result: "failed",
+                .code: "liveness.pathChanged",
+                .reason: MobileRefreshReason.networkPathChanged.rawValue,
+            ]) { _, new in new }
+        )
+        clearThemeEventSocket()
+        themeEventsRecoveryTask?.cancel()
+        themeEventsRecoveryTask = nil
+        themeEventsRecoveryHostID = nil
+        Task { [weak self] in
+            await self?.refresh(reason: .networkPathChanged)
+        }
+    }
+
     /// Where a paired Mac was last found on this network, if the browse has seen it.
     func discoveredAddress(forHostID id: String) -> URL? {
         discoveredAddresses[id]
@@ -2618,6 +2785,7 @@ final class RemoteAppModel: ObservableObject {
         from host: PairedRemoteHost,
         candidate: ConnectionCandidate,
         edition: RemoteCatalogueRevisionDTO,
+        timeout: TimeInterval,
         generation: Int,
         wasOnline: Bool,
         trace refreshTrace: String,
@@ -2630,6 +2798,7 @@ final class RemoteAppModel: ObservableObject {
             answer = try await fetchMeConditionally(
                 candidate: candidate,
                 edition: edition,
+                timeout: timeout,
                 trace: refreshTrace
             )
         } catch is CancellationError {
@@ -2702,14 +2871,15 @@ final class RemoteAppModel: ObservableObject {
     }
 
     /// One request on one route, naming the edition in hand, with the same journal shape as an
-    /// attempt in the race so a report reads both alike. `wave` says which it was.
+    /// attempt in the race so a report reads both alike. `wave` says which it was, and
+    /// `timeoutMS` says what it was given — `RemoteRouteWalkBudget.warmProbeTimeout`.
     private func fetchMeConditionally(
         candidate: ConnectionCandidate,
         edition: RemoteCatalogueRevisionDTO,
+        timeout: TimeInterval,
         trace: String
     ) async throws -> ConditionalAnswer {
         let startedAt = MobileDiagnostics.monotonicNow()
-        let timeout = RemoteClientDefaults.requestTimeoutSeconds
         let baseFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
             .transport: candidate.kind.rawValue,
@@ -2778,8 +2948,14 @@ final class RemoteAppModel: ObservableObject {
                 ]) { current, _ in current }
             )
             if cancelled { throw CancellationError() }
+            noteRouteFailure()
             throw error
         }
+    }
+
+    /// Whether the race may also dial the hosted rendezvous for `host`.
+    private func hasHostedRoute(_ host: PairedRemoteHost) -> Bool {
+        host.hostedServiceURL != nil && host.hostedCredential != nil
     }
 
     private func fetchMe(
@@ -2826,8 +3002,7 @@ final class RemoteAppModel: ObservableObject {
             }
         }
         let localCandidates = localCandidateLanes.flatMap { $0 }
-        let hasHostedRoute = host.hostedServiceURL != nil
-            && host.hostedCredential != nil
+        let hasHostedRoute = self.hasHostedRoute(host)
         let isOnlyCandidateInRace = localCandidates.count + (hasHostedRoute ? 1 : 0) == 1
 
         if reportsProgress, let firstKind = localCandidates.first?.kind

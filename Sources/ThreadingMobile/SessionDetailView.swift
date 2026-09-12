@@ -71,13 +71,27 @@ enum MobileSessionChrome {
         routeWalk: RemoteAppModel.RouteWalkStatus?
     ) -> String {
         guard isAvailable else { return MobileL10n.string("Resuming on your Mac…") }
-        guard let routeWalk, routeWalk.followsFailure else {
-            return MobileL10n.string("Opening chat…")
+        return diallingStatus(hasEverConnected: false, routeWalk: routeWalk)
+    }
+
+    /// What a chat's title says while its socket is dialling, whether for the first time or
+    /// again after a loss. The same rule as `openingStatus`: the route is named only once
+    /// something has failed. "Reconnecting…" used to be the whole of what a chat said through a
+    /// route loss, however long the walk behind it took, and a person reading it could not tell
+    /// a phone working through a dead LAN from one that had stopped (2026-09-11).
+    static func diallingStatus(
+        hasEverConnected: Bool,
+        routeWalk: RemoteAppModel.RouteWalkStatus?
+    ) -> String {
+        if let routeWalk, routeWalk.followsFailure {
+            return MobileL10n.string(
+                "Trying %@",
+                PairedRemoteHost.connectionLabelInSentence(forEndpointKind: routeWalk.kind)
+            )
         }
-        return MobileL10n.string(
-            "Trying %@",
-            PairedRemoteHost.connectionLabelInSentence(forEndpointKind: routeWalk.kind)
-        )
+        return hasEverConnected
+            ? MobileL10n.string("Reconnecting…")
+            : MobileL10n.string("Opening chat…")
     }
 
     /// The same rule, resolved against the catalogue as it stands now rather than against the
@@ -463,10 +477,13 @@ struct SessionDetailView: View {
         .onChange(of: model.routeIdentity) { _, _ in
             adoptRouteIfMoved()
         }
+        .onChange(of: model.networkPathGeneration) { _, _ in
+            connection?.networkPathChanged()
+        }
         .onDisappear {
             guard let connection else { return }
             guard let hostID = model.activeHostID else {
-                connection.disconnect(markEnded: false)
+                connection.leave()
                 return
             }
             MobileSessionConnectionPool.shared.park(
@@ -1251,7 +1268,7 @@ private struct RemoteNavigationTitle: View {
     private func recover(from failure: RemoteConnectionFailure) {
         switch failure.recovery {
         case .reconnect:
-            connection.connect()
+            connection.retryNow()
         case .pairAgain:
             model.isPairing = true
         case .openLocalNetworkSettings:
@@ -1285,9 +1302,10 @@ private struct RemoteNavigationTitle: View {
     private var label: String {
         switch connection.phase {
         case .connecting:
-            return connection.hasEverConnected
-                ? MobileL10n.string("Reconnecting…")
-                : MobileL10n.string("Opening chat…")
+            return MobileSessionChrome.diallingStatus(
+                hasEverConnected: connection.hasEverConnected,
+                routeWalk: model.routeWalkStatus
+            )
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case let .ended(reason): return reason

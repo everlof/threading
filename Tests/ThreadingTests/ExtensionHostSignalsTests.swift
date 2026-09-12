@@ -5,6 +5,7 @@ import XCTest
 
 /// The live values a custom surface may bind to, and the promise that the SDK's list and the
 /// host's answers cannot drift apart.
+@MainActor
 final class ExtensionHostSignalsTests: XCTestCase {
 
     private var previousIntensity: (() -> AgentIntensity)!
@@ -13,26 +14,22 @@ final class ExtensionHostSignalsTests: XCTestCase {
     private var previousCalendar: (() -> Calendar)!
     private var previousUsage: (() -> Double?)!
 
-    override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated {
-            previousIntensity = ExtensionHostSignals.intensity
-            previousUptime = ExtensionHostSignals.uptime
-            previousNow = ExtensionHostSignals.now
-            previousCalendar = ExtensionHostSignals.calendar
-            previousUsage = ExtensionHostSignals.activeAccountUsageRemaining
-        }
+    override func setUp() async throws {
+        try await super.setUp()
+        previousIntensity = ExtensionHostSignals.intensity
+        previousUptime = ExtensionHostSignals.uptime
+        previousNow = ExtensionHostSignals.now
+        previousCalendar = ExtensionHostSignals.calendar
+        previousUsage = ExtensionHostSignals.activeAccountUsageRemaining
     }
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            ExtensionHostSignals.intensity = previousIntensity
-            ExtensionHostSignals.uptime = previousUptime
-            ExtensionHostSignals.now = previousNow
-            ExtensionHostSignals.calendar = previousCalendar
-            ExtensionHostSignals.activeAccountUsageRemaining = previousUsage
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        ExtensionHostSignals.intensity = previousIntensity
+        ExtensionHostSignals.uptime = previousUptime
+        ExtensionHostSignals.now = previousNow
+        ExtensionHostSignals.calendar = previousCalendar
+        ExtensionHostSignals.activeAccountUsageRemaining = previousUsage
+        try await super.tearDown()
     }
 
     /// Every signal the SDK names, this host answers — and nothing the SDK does not name.

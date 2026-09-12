@@ -36,6 +36,34 @@ final class ThemedControlTests: HostedStoreTestCase {
 
     // MARK: - Drop-in Behaviour
 
+    func testDrawnControlsAnswerAccessibilityHitTestsWithinTheirVisibleBounds() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        let window = NSWindow(contentRect: root.bounds, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = root
+        defer { window.orderOut(nil) }
+        let controls: [ThemedControl] = [
+            ThemedButton(title: "Next", target: nil, action: nil),
+            ThemedButton(symbol: "arrow.up", accessibility: "Send", target: nil, action: nil),
+            ThemedToggle()
+        ]
+        for (index, control) in controls.enumerated() {
+            control.frame = NSRect(x: CGFloat(index) * 90, y: 30, width: 80, height: 28)
+            root.addSubview(control)
+            let point = window.convertPoint(toScreen: control.convert(
+                NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: nil
+            ))
+            XCTAssertTrue(control.accessibilityHitTest(point) as? NSView === control)
+            XCTAssertTrue(window.accessibilityHitTest(point) as? NSView === control)
+            control.isEnabled = false
+            XCTAssertTrue(control.accessibilityHitTest(point) as? NSView === control)
+            control.isHidden = true
+            XCTAssertNil(control.accessibilityHitTest(point))
+            control.isHidden = false
+            let outside = window.convertPoint(toScreen: control.convert(NSPoint(x: -10, y: -10), to: nil))
+            XCTAssertNil(control.accessibilityHitTest(outside))
+        }
+    }
+
     /// `ThemedToggle` replaces `NSSwitch` at call sites that read `.state == .on` and fire an
     /// action, so it has to behave like one: a click flips the state and sends the action.
     func testAToggleFlipsAndFiresLikeASwitch() {
@@ -7567,6 +7595,31 @@ final class ThemedControlTests: HostedStoreTestCase {
         ), "a new horizontal gesture inherited the previous vertical lock")
     }
 
+    func testAnEdgeToEdgeEmbeddedTableKeepsItsOwnWidthInsideAPaddedCard() {
+        let scroll = ThemedScrollView(frame: NSRect(x: 0, y: 0, width: 900, height: 400))
+        let document = NSView(frame: scroll.bounds)
+        scroll.documentView = document
+        let card = NSView(frame: NSRect(x: 140, y: 0, width: 620, height: 80))
+        document.addSubview(card)
+        let table = ThemedTableView()
+        table.addTableColumn(NSTableColumn(identifier: .init("Content")))
+        table.style = .plain
+        table.soleColumnFillsBoundsExactly = true
+        table.headerView = nil
+        table.intercellSpacing = .zero
+        card.addSubview(table)
+        table.setFrameSize(NSSize(width: 600, height: 20))
+        table.frame.origin.x = 10
+        table.fitSoleColumnToWidth()
+        XCTAssertEqual(table.frame.width, 600, accuracy: 0.5)
+        XCTAssertEqual(table.tableColumns[0].width, 600, accuracy: 0.5)
+        XCTAssertEqual(table.frame.maxX, card.bounds.maxX - 10, accuracy: 0.5)
+
+        table.setFrameSize(NSSize(width: 340, height: 20))
+        XCTAssertEqual(table.frame.width, 340, accuracy: 0.5)
+        XCTAssertEqual(table.tableColumns[0].width, 340, accuracy: 0.5)
+    }
+
     /// **A one-column list's cells are as wide as the list**, whenever the list is installed —
     /// which is the case AppKit gets wrong and `SoleColumnFit` exists for.
     ///
@@ -7853,8 +7906,11 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "BrowserFindBar",
                 "ChipView",
                 "ColorPairSpecimenView",
+                "ConversationChoiceRow",
                 "ConversationContextRailView",
+                "ConversationDecisionHeader",
                 "ConversationHandoffView",
+                "ConversationQuestionCard",
                 "ConversationOutboxRailView",
                 "ConversationOutboxRowView",
                 "ConversationSearchWindowViewController",

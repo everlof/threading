@@ -20,3 +20,7 @@ The `codex-update-status-*` pair replays the minimized fresh/resume exchange beh
 and relaunch journey. The `codex-stop-turn-*` pair adds the host-driven interrupt exchange behind
 the Stop-and-continue journey. Each fresh tape has a matching resume tape because the application
 chooses that process contract from durable session state before it starts the provider.
+
+`codex-question-fresh` and `codex-question-resume` are synthetic fixtures authored against the
+installed Codex 0.154.0 generated app-server schema. The fresh tape waits for two exact question
+answers before writing its receipt and completing the turn; no real provider runs in this journey.

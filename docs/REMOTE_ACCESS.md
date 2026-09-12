@@ -246,6 +246,63 @@ to refresh, a host change, a structural change and a mutation follow-up always p
 status — `200` or `304` — so the next audit can attribute every refresh. `Cache-Control:
 no-store` stays on every response: this is application-level freshness, not a shared cache.
 
+**The warm probe is worth one route attempt, and an open joins the recovery it finds running.**
+The 2026-09-11 report is what the conditional refresh cost when its bet was wrong. The phone had
+left the Mac's Wi-Fi with both sockets up; they died together without a close frame, the
+dashboard scheduled its recovery, and that recovery sent its one conditional request to the LAN
+origin that had just died — with the ordinary twenty-second request timeout, because a request
+is a request. Ten seconds into that wait the person opened a chat. The phase stays online through
+a lost event socket, so the open trusted the catalogue in hand, took the model's client, and
+dialled the same dead origin; the person backed out of a chat that "felt stuck" a moment before
+the probe timed out, the race found Tailscale in one second, and the second open connected at
+once. Three things changed. `RemoteRouteWalkBudget.warmProbeTimeout` gives the probe one route
+attempt (four seconds) whenever the race behind it has another way in — a lost probe and the
+whole race now end inside what one probe used to cost — and keeps the ordinary timeout for a Mac
+with a single route, for the same reason a walk of one keeps it. Opening a chat or terminal asks
+`MobileConnectionRecoveryPolicy.openNeedsHostRecovery` first: while the dashboard's recovery is
+pending (scheduled or in flight) the open joins it through the single flight instead of dialling
+the origin it is about to replace. And a socket the person leaves while it is still waiting for
+its hello or sleeping out a backoff records `socketEnded … result: abandoned, reason: userLeft`
+through `RemoteSessionConnection.leave()`, which the pool and both detail screens call; before,
+the abandoned `socketConnecting` had no ending at all, and the report could not say whether the
+person or the network gave up. The boundaries are `testTheWarmProbeIsWorthOneRouteAttemptWhenTheRaceHasSomewhereElseToGo`,
+`testAnOpenJoinsAPendingDashboardRecoveryBeforeItDials` and
+`testLeavingADialStillWaitingForItsHelloRecordsTheAbandonment`.
+
+**A chat you stay in recovers on its own, and says what it is doing.** The same report asked
+what would have happened had the person not backed out, and the answer had three holes. The
+title's retry — the one tap a person has in a chat that says it failed — called `connect()` on
+the client the socket already held, which after a route loss is the origin that just failed,
+and cancelled the model-routed retry sleeping in its backoff to do it; `retryNow()` goes to the
+model at once and as a retry, so `sessionReconnectNeedsHostRecovery` re-resolves the route. A
+socket the phone still called connected could be dead on the wire for as long as iOS took to
+notice, and typing into it was how the person found out: a terminal input the Mac has not
+acknowledged inside the probe's ten seconds now sends the same one-second liveness ping the
+return from the background does (`probeLiveness()`), and a missed pong reconnects through the
+model. And the title said "Reconnecting…" for the whole of the walk behind it; it now follows
+the opening rule (`MobileSessionChrome.diallingStatus`): "Reconnecting…" until a route has
+failed, then "Trying Tailscale", with the conditional probe counted as the walk's first attempt
+so the race's first try is already narrated. The automatic path was already there and is
+unchanged: a hello still waiting when the refresh adopts another route restarts on it
+(`adoptRoute`), and a socket that fails asks the model for the route on its first retry. The last
+hole was a socket dead on the wire while nobody typed: the Mac pings every thirty seconds and
+closes after two missed pongs, but the phone learned of that only when its own socket errored,
+and nothing on the phone reacted to `NWPathMonitor` outside the connection panel. The model now
+watches the path while the app is in the foreground (`startNetworkPathWatch`, started and
+stopped beside discovery). `MobileNetworkPathChangePolicy` — pure, unit-tested — keeps only the
+changes a socket is bound to: the network coming or going, or the kinds of interface carrying
+it; the first observation, cost and constraint are not changes. A material change settles for
+half a second, because a handoff reports several paths in a row, and then every socket is asked
+at once. The dashboard's event socket gets the one-second liveness ping and is torn down and
+recovered (`refresh(reason: .networkPathChanged)`, journalled as
+`socketFailed … code: liveness.pathChanged`) when it does not answer; a socket already in backoff
+has that backoff cancelled and recovers now. Session sockets learn through
+`networkPathGeneration`, which each detail screen relays to `networkPathChanged()`: a delivering
+socket is pinged, one in backoff retries now, and one still dialling is left to its hello and to
+the route the same change is re-resolving. `testOnlyANetworkOrInterfaceKindChangeIsMaterial`
+and `testAPathChangeDuringBackoffAsksTheModelAtOnce` are the boundaries; the ping on a live
+socket has no automated test, since it needs a connected socket against a server that answers.
+
 **An address that keeps refusing is rested.** The same audit counted 758 attempts against two of
 one Mac's three Tailscale origins — its IPv4 address and its MagicDNS name — every one `url.-1200`
 inside 30 ms while the third origin and the LAN address answered, because a race retried both on
@@ -304,7 +361,17 @@ main queue, and served gzip-compressed to any client whose `Accept-Encoding` all
 [`performance.md`](architecture/performance.md).
 
 The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
-including dormant sessions. The navigation title names the connected Mac and carries its live
+including dormant sessions. The remote row's `lastActiveAt` projects `AgentSession.lastUsedAt`:
+the latest observed work boundary or accepted steering input, falling back to turn start and then
+process activity for legacy records. Ordering and row age share this value, so a long-running turn
+moves up when it finishes and an idle process relaunch does not promote an old conversation.
+Snapshots and live row deltas share this projection. Both renderers stamp work before their typed
+runtime edge invalidates the catalogue. Turn stamps add no second broadcast; accepted steering has
+no runtime transition and publishes one row directly through `SessionWorkDidChange`.
+This remains O(1) per projected row and O(changed) per runtime event at the ordinary 1,000-session
+and stress 5,000-session catalogue sizes; no transcript lookup or timer is introduced.
+`RemoteSessionRecencyTests` covers ordering, pinning, legacy fallback, scoped summaries and cached
+catalogue invalidation. The navigation title names the connected Mac and carries its live
 connection status; the leading Mac button switches paired hosts, so the dashboard does not repeat
 that same device as a card in its content. Project headings are destinations. Opening one replaces
 the mixed dashboard with one plain, project-scoped chat list, names the project above the same
@@ -554,6 +621,12 @@ other kind, which the ledger draws as the kind's glyph. The phone asks per cell 
 brings it on screen, through a cache bounded at `RemoteAttachmentThumbnailStore.capacity`; a Mac
 that does not advertise the feature is never asked, and a notification that names one attachment
 opens the gallery on it with the listing that resolved it as the set.
+
+The bar's Share button acts on the attachment currently on screen. The phone reuses preview bytes
+it already holds or fetches one ordinary file on demand, then gives one temporary file URL to the
+native iOS share sheet. A recording above the 24 MB whole-file limit is streamed into that file in
+the same authenticated one-megabyte ranges as playback, so it is never accumulated in memory.
+Swiping away cancels preparation, and closing the share sheet removes the temporary directory.
 
 **A lost connection is not a lost attachment.** The audit of 4–5 Sep 2026 found 27 previews
 failed with `URLError.networkConnectionLost` while the catalogue and terminal sockets beside them

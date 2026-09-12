@@ -345,6 +345,7 @@ final class LiveHostFactProjectionSource {
             createdAt: session.createdAt,
             lastActiveAt: session.lastActiveAt,
             lastTurnAt: session.lastTurnAt,
+            lastWorkAt: session.lastWorkAt,
             manualOrder: manualOrder,
             model: session.model,
             managerID: managerIDByChildSessionID[session.id].map { Self.opaqueID($0) },

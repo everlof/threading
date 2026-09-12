@@ -58,6 +58,10 @@ enum AppDataResetFlow {
             // moving the app's directories aside would leave every one of them behind while
             // telling the user their state had been removed.
             try BrowserCredentialStore().deleteAll()
+            // Trigger-source bearers are app-owned too. The source records themselves live
+            // inside Application Support and are moved aside below; their Keychain secrets do
+            // not, so Reset Everything must erase them explicitly.
+            try TriggerSourceCredentialStore.deleteAll()
             // The 1Password references deliberately have *no* line here. They live in the
             // preferences domain, which `AppDataReset` snapshots into the backup and then
             // removes — so clearing them first would delete them from the recovery copy and lose

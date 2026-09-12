@@ -32,6 +32,9 @@ struct UIScenarioSandbox {
 
         @MainActor
         func configure(_ application: XCUIApplication, scenarioRoot: URL) {
+            // Protocol fixtures belong to this disposable app process. A background-host
+            // preference must not redirect them to a daemon or outlive the sandbox cleanup.
+            application.launchArguments += ["-ptyHostEnabled", "NO"]
             application.launchEnvironment["CODEX_HOME"] = scenarioRoot
                 .appendingPathComponent(".codex", isDirectory: true).path
             application.launchEnvironment["THREADING_UI_SCENARIO_PROJECT"] = project.path
@@ -75,6 +78,30 @@ struct UIScenarioSandbox {
             "-\(Defaults.onboardingCompletedVersion)", "1",
         ]
         return UIWindowContract.configure(application)
+    }
+
+    /// Launches the isolated application and makes it the actual interaction target.
+    ///
+    /// `XCUIApplication.launch()` can leave another already-active application in front on
+    /// macOS, especially while a separately installed copy of Threading is still running. The
+    /// accessibility tree remains queryable in that state, but synthesized clicks land on the
+    /// covering window. Every scenario therefore crosses one shared launch boundary that
+    /// explicitly activates its process before any UI contract is asserted or exercised.
+    @MainActor
+    func launch(
+        _ application: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        application.launch()
+        application.activate()
+        XCTAssertTrue(
+            application.wait(for: .runningForeground, timeout: timeout),
+            "Threading did not reach the foreground",
+            file: file,
+            line: line
+        )
     }
 
     func captureScenarioEvidence(named name: String) throws -> Data {
@@ -131,6 +158,11 @@ struct UIScenarioSandbox {
             resumeTapeName: "codex-update-status-resume.json",
             fileManager: fileManager
         )
+    }
+
+    func prepareCodexQuestionFixture(fileManager: FileManager = .default) throws -> CodexScenarioFixture {
+        try prepareCodexFixture(title: "Question fixture", freshTapeName: "codex-question-fresh.json",
+                               resumeTapeName: "codex-question-resume.json", fileManager: fileManager)
     }
 
     func prepareCodexStopTurnFixture(

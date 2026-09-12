@@ -30,6 +30,7 @@ final class LiveHostFactProjectionSourceTests: XCTestCase {
         )
         session.lastActiveAt = Date(timeIntervalSinceReferenceDate: 300)
         session.lastTurnAt = Date(timeIntervalSinceReferenceDate: 350)
+        session.lastWorkAt = Date(timeIntervalSinceReferenceDate: 375)
         var terminal = ProjectTerminal(
             currentDirectory: project.folderPath,
             title: "Stored terminal"
@@ -74,6 +75,7 @@ final class LiveHostFactProjectionSourceTests: XCTestCase {
         XCTAssertEqual(sessionFacts.providerID, "claude")
         XCTAssertEqual(sessionFacts.accountID, "claude:work")
         XCTAssertEqual(sessionFacts.activity, .awaitingUser)
+        XCTAssertEqual(sessionFacts.lastWorkAt, session.lastWorkAt)
         XCTAssertEqual(sessionFacts.branch, "release/2")
         XCTAssertTrue(sessionFacts.usesNativeUI)
         XCTAssertTrue(sessionFacts.isPinned)

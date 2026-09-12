@@ -1234,7 +1234,11 @@ enum NativeGitTurnAdmission {
                 return
             }
             let admitted = transport(checkpointID)
-            if !admitted {
+            if admitted {
+                // Direct sends, provider commands and queue drains share this accepted transport
+                // edge. Renderers may echo it afterwards; replay and rejected sends never enter.
+                ProjectStore.shared.noteTurnStarted(sessionID: sessionID)
+            } else {
                 store.cancelPreparedTurn(checkpointID, sessionID: sessionID)
             }
             completion(admitted, checkpointID)

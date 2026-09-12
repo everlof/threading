@@ -1848,21 +1848,30 @@ final class ProjectStore {
         return .applied
     }
 
-    /// Records that a turn began in this conversation, which is what "recently used" means.
-    ///
-    /// `lastActiveAt` cannot answer that question: the runtime stamps it on launch and on exit,
-    /// so a background relaunch marks every session it brings back as active today and the launch
-    /// restore window would keep feeding itself its own last launch.
-    ///
-    /// Coalesced on purpose. Losing the last fraction of a second of this costs nothing, and the
-    /// quit flushes what is pending, while a whole-graph write on every turn boundary of every
-    /// running session would be the one avoidable cost here. Nothing visible changes either, so
-    /// no observer is told: rows read activity from the tracker, never from this field.
-    func noteTurnStarted(sessionID: SessionID) {
+    /// Work timestamps use the exact-session coalesced save path. Consumers receive the one
+    /// changed identity, never a structural project invalidation. Runtime row publication follows
+    /// turn boundaries; steering is an accepted input with no new turn or runtime transition.
+    func noteTurnStarted(sessionID: SessionID, at date: Date = Date()) {
+        noteWork(sessionID: sessionID, kind: .turnStarted, at: date)
+    }
+
+    func noteTurnEnded(sessionID: SessionID, at date: Date = Date()) {
+        noteWork(sessionID: sessionID, kind: .turnEnded, at: date)
+    }
+
+    func noteInputAccepted(sessionID: SessionID, at date: Date = Date()) {
+        noteWork(sessionID: sessionID, kind: .inputAccepted, at: date)
+    }
+
+    private func noteWork(sessionID: SessionID, kind: SessionWorkDidChange.Kind, at date: Date) {
         guard let location = locate(sessionID: sessionID),
               stateWritePolicy.allowsWrites else { return }
-        projects[location.projectIndex].sessions[location.sessionIndex].lastTurnAt = Date()
+        if kind == .turnStarted {
+            projects[location.projectIndex].sessions[location.sessionIndex].lastTurnAt = date
+        }
+        projects[location.projectIndex].sessions[location.sessionIndex].lastWorkAt = date
         scheduleSessionSave(sessionID)
+        NotificationCenter.default.post(SessionWorkDidChange(sessionID: sessionID, kind: kind))
     }
 
     // MARK: - Lookup

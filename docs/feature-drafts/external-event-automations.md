@@ -1,12 +1,11 @@
-# External event automations: let events start accountable agent work
+# Triggers: listen, match, start an agent
 
-**Status: draft.** Researched 2026-08-28. Nothing is committed. The provider-neutral core and
-local, read-only execution path are ready to design in detail. The first useful release should
-prove the abstraction with **two sources: incoming email and Sentry issues**. Both may initially
-poll through a connection owned by the Mac, so the feature remains local-first and does not wait
-for a public service. Reliable delivery while every device is offline, including a Threading
-forwarding address and public webhooks, shares the deployment and privacy gates in
-[hosted-remote-service.md](hosted-remote-service.md).
+**Status: first local slice implemented 2026-09-10.** The provider-neutral model, immutable rules,
+durable event/run store, background launch agent, two-stage assess/fix authority, Trigger Center,
+agent MCP tools and first read-only Sonda adapter now live in the codebase. Durable decisions are
+in [`triggers.md`](../architecture/triggers.md). Hosted ingress, public webhooks, source resources,
+push quick replies, source write-back and publication remain future slices and share the relevant
+deployment/privacy gates in [hosted-remote-service.md](hosted-remote-service.md).
 
 This draft deliberately separates the part that can begin now from that later gate. It also
 separates an event *arriving* from an agent being *authorized to act*. An email, issue body or
@@ -17,30 +16,17 @@ budget or publication action.
 
 Threading can start agent work when a person opens the app, when a scheduled message fires, when
 an owner creates a remote session, and when a granted manager launches a child. It cannot yet
-express the ordinary automation shape:
+express one small, general rule:
 
-> When something happens elsewhere, start a visible agent chat under a policy I approved.
+> **Listen to something. If a condition becomes true, start an agent with these instructions.**
 
-Two initial examples cover much more of the design space than either one alone:
+The listener might observe a work-item transition, incoming message, CI failure, monitoring
+alert, file arrival, calendar event or custom webhook. Those are adapters over the same feature,
+not separate session launchers. The output is an ordinary Threading session that can finish,
+ask a question, receive a reply and carry attachments like any other chat.
 
-1. **Incoming email.** Mail arriving from an allowed sender, at a particular alias, or under a
-   mailbox label starts a triage or diagnosis chat. The agent can summarize the mail, relate it to
-   a project, inspect the repository read-only, and leave a durable conversation for a person.
-   Later, a separately authorized workflow could prepare a change or draft a reply.
-2. **Sentry issue.** A new, regressed or high-priority issue starts a diagnosis chat for the
-   mapped project. The agent reads the issue through a bounded Sentry source, inspects the code,
-   and reports a likely cause. A stronger rule may instead work in a managed worktree, run tests,
-   and ask Threading to publish a draft pull request.
-
-Email is intentionally a starting source, not an example added after a Sentry-specific design.
-It forces the framework to handle threads, replies, attachments, privacy and weak sender identity.
-Sentry forces it to handle signed delivery, revisions, issue coalescing and structured provider
-data. A core that handles both is likely to fit GitHub events, CI failures, PagerDuty incidents,
-calendar events, local file drops, scheduled feeds and custom webhooks without turning each into
-a special session launcher.
-
-The feature is not "webhooks execute prompts." It is a small automation control plane whose
-output happens to be an ordinary Threading agent session.
+The feature is not "webhooks execute prompts." External content supplies evidence. The saved rule
+supplies the project, instructions and authority.
 
 ## Product contract
 
@@ -69,12 +55,12 @@ The following rules are the durable center of the proposal.
    posting a comment, pushing a branch and opening a pull request are distinct actions. Reading a
    source or writing a worktree never implies any of them. Initial change publication is draft PR
    only and remains host-owned.
-7. **The Mac can be the first ingress owner.** Connected sources may poll while Threading is
-   running. This preserves local-first behavior and makes the execution path useful before a
-   hosted relay exists. The product must say "checked while this Mac is running," not imply
-   always-on delivery.
-8. **Provider-specific code stops at the adapter boundary.** Email and Sentry normalize identity,
-   metadata and resource handles. They do not create sessions. The host owns rules, project
+7. **The Mac is the first ingress owner.** Connected sources poll through the separate Trigger
+   launch agent while this Mac is awake and the user is logged in. The helper can wake Threading
+   without activating its window; an offline or sleeping Mac still waits for provider cursor
+   replay or a future hosted relay.
+8. **Provider-specific code stops at the adapter boundary.** A listener normalizes identity,
+   metadata and resource handles. It does not create sessions. The host owns rules, project
    mapping, grants, deduplication, queues, session creation, run history, publication and
    revocation.
 9. **Inbound text is evidence, never instructions.** Subjects, bodies, stack traces, tags,
@@ -83,39 +69,47 @@ The following rules are the durable center of the proposal.
 10. **Automatic work is bounded before it starts.** Every rule has an explicit concurrency
     policy, queue limit, quiet-hours behavior, spend ceiling and failure policy. A burst of alerts
     cannot silently create an unbounded fleet.
+11. **Agent judgment never expands authority.** "Straightforward to fix" is a task decision, not
+    a permission escalation. A managed-fix rule pre-authorizes one isolated worktree and its
+    allowed checks before any event arrives. The agent may use that authority or stop with a
+    diagnosis; it cannot grant itself publication, deployment, provider writes or broader
+    filesystem access by declaring an item straightforward.
+12. **After launch, it is a normal conversation.** Questions, permission requests, replies,
+    attachments, remote access and notifications use the session's existing paths. Automation
+    needs an origin receipt; it does not need a second chat protocol.
 
 ## The user-facing model
 
 The smallest understandable rule reads like this:
 
-> **When** mail reaches `bugs@…` from an allowed sender\
-> **For** the Sonda project\
-> **Start** a read-only Codex diagnosis\
-> **Using** the "triage incoming report" task\
-> **At most** one at a time, coalesced by mail thread
+> **Listen to** a connected source\
+> **When** these typed conditions match\
+> **Start** this agent for this Threading project\
+> **With** these saved instructions and event context\
+> **Allow** only this permission, spend and concurrency envelope\
+> **Notify** me when it finishes or needs me
 
-or:
+The product can call this saved rule a **Trigger**. `AutomationRule` remains an implementation
+name for the durable policy behind it.
 
-> **When** a Sentry issue becomes new or regressed\
-> **For** the Sonda project\
-> **Start** a read-only Codex diagnosis\
-> **Using** the "diagnose production issue" task\
-> **At most** one active run per issue
+Sonda's `Needs review` workflow is one configuration of that grammar: listen to its case source,
+match the status transition, start an agent in the Sonda project with an assess-and-fix brief, and
+notify the owner. Nothing in the automation core knows what Sonda or `Needs review` means.
 
-The setup surface has four host-owned parts:
+The setup surface has five host-owned parts:
 
-- **Source:** which connected mailbox, forwarding alias, Sentry organization/project or other
-  installation may emit events;
-- **Match:** typed filters offered by that source, such as recipient alias, label, sender/domain,
-  event transition, environment or severity;
-- **Work:** target Threading project and a versioned host-authored task template;
+- **Source:** which connected listener installation may emit events;
+- **Match:** the typed conditions offered by that listener;
+- **Work:** target Threading project and versioned host-authored instructions;
 - **Authority:** agent/account policy, read-only or managed-fix mode, budget, concurrency,
-  quiet-hours behavior and allowed publication actions.
+  quiet-hours behavior and allowed publication actions;
+- **Result:** which completed outcomes notify the owner, where the notification opens, and whether
+  a prepared workspace is kept locally or sent through a separately authorized draft-review path.
 
-The resulting session is an ordinary durable chat. It gets a compact origin receipt such as
-"Email · bugs@… · rule: Triage reports" or "Sentry · SONDA-418 · rule: Diagnose regressions."
-The receipt opens the run record and the original provider resource. The agent session launches
-in the background; a new event must not steal keyboard focus or change the selected project.
+The resulting session is an ordinary durable chat. It gets a compact origin receipt naming the
+listener, event and rule. The receipt opens the run record and original resource. The agent
+session launches in the background; a new event must not steal keyboard focus or change the
+selected project.
 
 A separate Automations/Activity surface lists queued, running, completed, suppressed and failed
 runs. It must answer:
@@ -126,6 +120,86 @@ runs. It must answer:
 - which session and managed workspace it created;
 - whether it is waiting for attention;
 - what external result, if any, Threading published.
+
+## The primitive
+
+```text
+listener -> bounded event -> rule match -> ordinary Threading session
+```
+
+The listener may use a webhook, provider event stream, incremental API poll, local filesystem
+observer or a future safe-extension source. It emits a stable event identity plus bounded typed
+facts and lazy resource handles. The matcher evaluates only those facts. If a rule matches, the
+host freezes the rule revision, deduplicates the event and starts the configured session with the
+saved instructions plus a clearly separated evidence block.
+
+A state listener fires on an event revision or transition, not on every poll returning the same
+value. Initial connection defaults to **Start from now**; processing current matches requires an
+explicit bounded choice. One failing listener backs off independently and cannot delay the rest.
+
+"Anytime" has two honest receipts. **Event accepted** means the event is durably queued; **agent
+started** means an eligible execution host launched the session. A local listener checks only
+while Threading is running. Hosted ingress can accept while every Mac is offline, but execution
+still waits for an authorized host. The product must not collapse those into one success state.
+
+## While the app is closed
+
+Running listeners outside the macOS app is a useful target, but the existing `threading-ptyd` is
+the wrong owner. Its safety contract is deliberately narrow: it owns child processes, pipes or
+PTYs, raw byte rings and exit state. It owns no projects, accounts, rules, credentials, SQLite,
+policy, transcript interpretation or notifications, and it parses no agent output. Adding
+listeners and rule execution there would erase that boundary.
+
+Use a separate per-user launch agent, provisionally `threading-triggerd`:
+
+```text
+threading-triggerd                  Threading                     threading-ptyd
+listeners + source cursors  --->   validate rule + create  ---> child process + byte stream
+durable event inbox                ordinary session              survives app detachment
+queue/backoff/dedup                 control plane + notifications
+```
+
+The first headless slice does not duplicate the application kernel. The Trigger daemon accepts and
+queues events, then launches or wakes Threading in a non-activating dispatch mode. The app claims
+the event, revalidates the frozen rule against current project/account/grant state, persists the
+session and starts it. If background hosting is enabled, `threading-ptyd` can then keep the child
+alive after the UI detaches. The user no longer has to leave Threading open in advance, even though
+the app process is briefly—or for an interactive turn, continuously—present as the session owner.
+
+Real-time questions while the app process is absent are a later boundary. `threading-ptyd` cannot
+detect a question because it intentionally parses nothing. Supporting that fully headlessly means
+extracting the native conversation transport, activity model, control plane and notification
+coordinator into a headless application service. That service must become the sole owner of its
+session/policy store; the GUI and two daemons must never open and mutate the same project database
+independently.
+
+This gives three distinct availability promises:
+
+- **Threading app open:** listeners and execution work locally;
+- **app closed, Mac awake and user logged in:** the Trigger launch agent can accept an event and
+  wake Threading to start the session;
+- **Mac asleep, offline or powered off:** only a provider cursor or hosted relay can retain the
+  event, and execution waits for an eligible host. Immediate always-on execution requires another
+  always-on Mac or a remote execution host.
+
+## Questions, replies and images
+
+Because an automation launches a normal session, the continuation path mostly already exists:
+
+- if the agent asks a question or requests permission, Threading's existing response-notification
+  path can notify the paired iPhone;
+- tapping the notification opens the authenticated conversation, and the reply resumes that same
+  session under the person's authority rather than the automation grant;
+- the phone's existing composer can send text, photos and files as ordinary session-owned
+  attachments;
+- an agent-produced image or an image supplied by the triggering source appears as a session
+  attachment and can be previewed on the phone.
+
+Push is the wake-up and routing envelope, not the image transport. It carries opaque event and
+session identity plus privacy-controlled text; rich content is fetched only after the user opens
+the authenticated conversation. A later quick-reply action may answer a bounded text question by
+question ID, but image and file responses should continue through the full composer so custody,
+size limits and provenance remain unchanged.
 
 ## Core records
 
@@ -206,6 +280,11 @@ managed-fix run completes only through the managed-workspace finish handshake. P
 requests, authentication failures and questions for the user become `needsAttention`, never
 infinite retries.
 
+The run's lifecycle state and result remain separate. `completed` answers whether Threading has
+finished orchestrating this attempt; the result says what the attempt produced. Notification copy,
+filtering and later actions must read the durable run outcome rather than infer meaning from a
+generic settled session.
+
 ## Delivery and deduplication
 
 Sources have different delivery mechanisms but one host contract:
@@ -257,7 +336,7 @@ active run per mail thread; Sentry defaults to one active run per issue. A later
 It must not silently steer an agent in the middle of a turn. Adding evidence to a live chat is a
 new, attributable automation turn with the same authority checks as the first.
 
-## Incoming email as a starting source
+## Candidate source: incoming email
 
 Email needs two transport shapes. They share event identity and policy but have different privacy
 and availability properties.
@@ -269,10 +348,10 @@ the Mac is running. Exact providers and protocol are an implementation-time choi
 provider APIs are preferable to collecting a general mailbox password. The source keeps its
 cursor/history token and emits only new matching messages.
 
-This is the recommended first email slice because:
+This is a useful email slice because:
 
 - message bodies do not need to pass through a Threading-operated service;
-- it works with the same local polling lifecycle as the first Sentry slice;
+- it works with the same local polling lifecycle as a Sentry listener;
 - cursor recovery and duplicate delivery exercise the durable inbox honestly;
 - users can disable the source and revoke its provider token independently of every rule;
 - the UI can say exactly when it last checked and that the Mac must be running.
@@ -327,9 +406,9 @@ recipient allowlist and either per-send approval or a deliberately configured au
 policy. Threading must prevent mail loops by never treating its own automated outgoing message as
 a fresh trigger for the same rule.
 
-## Sentry as a starting source
+## Candidate source: Sentry
 
-The first Sentry adapter can poll the issues API while Threading runs, using an organization or
+An initial Sentry adapter can poll the issues API while Threading runs, using an organization or
 project credential restricted to read events. It stores a cursor and converts new, regressed or
 otherwise selected issue transitions into envelopes. Sentry service hooks can later reduce
 latency, but they need a reachable, authenticated receiver and signature verification before
@@ -602,34 +681,47 @@ layout.
 
 This slice is architecture proof, not a user-facing "custom webhook" feature.
 
-### 1. First useful release: incoming email and Sentry, Mac online
+### 1. First useful release: one real listener, app online
 
-- Connect one deliberately selected mailbox provider/transport and one Sentry account.
-- Poll incrementally while Threading runs, with visible last-check/cursor/failure status.
-- Support narrow typed filters and sender/project allowlists.
+- Connect one deliberately selected source through its supported event or polling transport.
+- Poll or subscribe incrementally while Threading runs, with visible
+  last-check/cursor/failure status.
+- Support narrow typed conditions and project mapping.
 - Start read-only native diagnosis sessions only.
 - Show run history, origin receipts, suppression reasons and `needsAttention`.
+- Prove that questions, phone replies and phone-supplied attachments use the ordinary session
+  paths with no automation-specific transport.
 - Ship with low default concurrency and queue caps.
 
-Requiring both sources before calling the *framework* done is valuable: email prevents an
-issue-tracker-shaped core, while Sentry prevents a mail-client-shaped core. They may land in either
-order behind the same contracts.
+A second, structurally different listener should prove the adapter boundary before the public
+source SDK is frozen, but it need not block the first useful rule.
 
-### 2. Managed fixes and draft PRs
+### 2. Trigger daemon and on-demand app launch
+
+- Move source cursors, polling, durable inbox admission, deduplication and per-source backoff into
+  a separately registered per-user launch agent.
+- Let the agent launch or wake Threading without activating its UI when an admitted event needs a
+  session.
+- Have Threading claim and revalidate each event before session persistence or launch; the daemon
+  never opens the project/session database or constructs an agent command line.
+- Reuse `threading-ptyd` only as the process owner after Threading creates the session.
+- Show whether a Trigger is app-only, background-listening, queued for a host or actively running.
+
+### 3. Managed fixes and draft PRs
 
 - Add managed-worktree execution as an explicit stronger rule mode.
 - Reuse existing archive/finish and host-owned change-request publication.
 - Require a separate draft-PR grant and keep network/provider writes out of the agent sandbox.
 - Add test-result and change-summary receipts plus abandoned-worktree recovery.
 
-### 3. Source SDK
+### 4. Source SDK
 
 - Freeze and publish `automation.sources` DTOs/caps/failure states.
 - Move or reproduce first-party adapters through that boundary.
 - Add host-brokered OAuth/credential references and extension health/backoff.
 - Prove one third source without changing the rule/run/session core.
 
-### 4. Hosted forwarding and webhooks
+### 5. Hosted forwarding and webhooks
 
 - Deploy the hosted remote service account/device substrate.
 - Add encrypted bounded ingress queues, acknowledgement and expiry receipts.
@@ -637,7 +729,17 @@ order behind the same contracts.
 - Complete abuse, rate-limit, key-rotation, data-retention and deletion audits.
 - Preserve the local polling mode for users who do not want hosted ingress.
 
-### 5. Explicit outbound actions
+### 6. Fully headless conversations
+
+- Extract native conversation transport, activity interpretation, question delivery and the
+  unattended session coordinator into one headless application service.
+- Make that service the sole durable owner and the Mac app a client; never share mutable SQLite
+  ownership across processes.
+- Preserve `threading-ptyd` as the smaller unprivileged process/stream executor.
+- Prove that an agent can start, ask a question by push, receive the authenticated reply and
+  finish while no GUI process is alive.
+
+### 7. Explicit outbound actions
 
 Only after inbound/read/fix behavior is trustworthy, consider provider actions such as saving an
 email draft or commenting on a Sentry issue. Each action gets its own grants, idempotency keys,
@@ -677,9 +779,16 @@ phase.
 - background launch does not change project or session selection;
 - permission/authentication/question paths become `needsAttention` once;
 - later email in a thread and later Sentry occurrence follow the configured coalescing rule;
+- repeated source polling creates one run for one matched-state revision, while leaving and
+  re-entering that state creates a new revision;
+- initial sync defaults to establishing a baseline without launching historical work;
 - user continuation uses normal user authority and does not edit the automation grant;
 - managed fix archives, preserves evidence, and publishes only a draft change request through the
   host workflow.
+- an automation-created session emits ordinary question, permission and completion notifications
+  and accepts authenticated phone replies with attachments;
+- a managed-fix rule without the corresponding grants cannot push, publish, mutate the source or
+  deploy.
 
 ### Product evidence
 
@@ -709,15 +818,15 @@ phase.
 
 ## Open decisions before implementation
 
-1. **First mailbox transport.** Choose one provider/API or a constrained protocol after measuring
-   OAuth complexity, incremental cursors, mailbox coverage, attachment behavior and macOS support.
-   Do not promise "all email" in the first release.
+1. **First listener and transport.** Choose one real source after measuring authentication,
+   incremental cursors or event identity, resource/attachment behavior and macOS support. Do not
+   turn its provider vocabulary into the rule/run/session core.
 2. **Rule surface location.** Decide whether rules live primarily under each project, in global
    Automations settings, or use a global list with project-scoped editing. The authority receipt
    must remain host-owned whichever navigation wins.
-3. **Thread coalescing default.** The recommendation is one active run per email thread and per
-   Sentry issue, with later events queued or attached only at turn boundaries. Validate this with
-   real triage workflows.
+3. **Event coalescing default.** The recommendation is one active run per source-owned subject,
+   with later events queued or attached only at turn boundaries. Each listener defines its stable
+   subject and revision identity explicitly.
 4. **Task-template customization.** Start with host-authored structured templates plus bounded
    user instructions. If repository-suggested templates are later allowed, freeze/digest them and
    require explicit enablement outside the repository.
@@ -737,12 +846,17 @@ a separate capability.
 
 - [scheduled-messages.md](../architecture/scheduled-messages.md) — frozen plans and background
   unattended launch;
+- [pty-host.md](../architecture/pty-host.md) — the deliberately narrow process/byte-stream daemon
+  that Trigger policy must not move into;
 - [control-plane.md](../architecture/control-plane.md) — actors, grants, revocation, bounded
   supervision and host-owned control operations;
 - [managed-workspaces.md](../architecture/managed-workspaces.md) — worktree lifecycle and finish
   handshake;
 - [source-control.md](../architecture/source-control.md) — host-owned draft change-request
   publication;
+- [notification-delivery.md](../architecture/notification-delivery.md) — activity-aware delivery,
+  consent, question/permission requests, event identity and deep-link semantics reused by the
+  launched session;
 - [project-scripts.md](../architecture/project-scripts.md) — repository setup remains explicit
   user-granted execution;
 - [sessions.md](../architecture/sessions.md) — session identity, native conversation runtime and

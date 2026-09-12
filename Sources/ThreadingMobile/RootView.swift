@@ -207,6 +207,8 @@ enum MobileDemoFixture: String, CaseIterable {
     case conversationContentTypes = "conversation-content-types"
     case conversationKeyboard = "conversation-keyboard"
     case conversationReconnectStress = "conversation-reconnect-stress"
+    case conversationQuestion = "conversation-question"
+    case conversationQuestionReadonly = "conversation-question-readonly"
     case conversationRichContent = "conversation-rich-content"
     case conversationRunPlan = "conversation-run-plan"
     case conversationRunPlanExpanded = "conversation-run-plan-expanded"

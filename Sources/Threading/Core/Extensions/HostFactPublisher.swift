@@ -262,6 +262,9 @@ final class HostFactPublisher {
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
             self?.refreshSessionsSafely([event.sessionID])
         }
+        observations.observe(SessionWorkDidChange.self) { [weak self] event in
+            self?.refreshSessionsSafely([event.sessionID])
+        }
         observations.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
             guard let self else { return }
             dependencies.prepareScheduledState()

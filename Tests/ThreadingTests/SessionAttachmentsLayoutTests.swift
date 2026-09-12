@@ -1822,10 +1822,7 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             SessionAttachmentStore.shared.attachments(for: pane.sessionID).first
         )
 
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        let expected = formatter.string(from: attachment.referencedAt)
+        let expected = AttachmentMoment.description(of: attachment.referencedAt)
 
         let row = try row(0, of: pane)
         let labels = descendants(of: row).compactMap { ($0 as? NSTextField)?.stringValue }

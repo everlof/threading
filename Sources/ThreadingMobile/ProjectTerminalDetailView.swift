@@ -296,7 +296,10 @@ struct ProjectTerminalDetailView: View {
                   model.activeHostID == connectedHostID else { return }
             connection.adoptRoute(client)
         }
-        .onDisappear { openingState.connection?.disconnect(markEnded: false) }
+        .onDisappear { openingState.connection?.leave() }
+        .onChange(of: model.networkPathGeneration) { _, _ in
+            openingState.connection?.networkPathChanged()
+        }
         .sheet(item: $sharedLink) { link in
             SharedSessionLinkView(link: link)
                 .mobileTheme(theme)

@@ -24,7 +24,11 @@ COMPONENT_METADATA_KIND = "threading-component-evidence"
 JOURNEY_METADATA_KIND = "threading-ui-journey-report"
 SAFE_ID = re.compile(r"^[a-z][a-z0-9-]*$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-MAXIMUM_ARTIFACTS = 1_024
+# The complete Mac catalogue crossed 1,024 as its component-gallery and native-conversation
+# matrices became first-class evidence. Keep a hard, power-of-two ceiling with enough headroom
+# for a reviewed catalogue cycle; this still catches a runaway glob or render loop long before
+# report staging can grow without bound.
+MAXIMUM_ARTIFACTS = 2_048
 MAXIMUM_IMAGE_BYTES = 24 * 1024 * 1024
 MAXIMUM_IMAGE_EDGE = 16_384
 MAXIMUM_IMAGE_PIXELS = 64 * 1024 * 1024

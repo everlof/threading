@@ -2630,6 +2630,14 @@ enum MCPTools {
   static let proposeStorageCleanup = MCPBuiltInTool.proposeStorageCleanup.rawValue
   static let proposeConversationRepair = MCPBuiltInTool.proposeConversationRepair.rawValue
 
+  static let listTriggerSources = MCPBuiltInTool.listTriggerSources.rawValue
+  static let listTriggers = MCPBuiltInTool.listTriggers.rawValue
+  static let listTriggerRuns = MCPBuiltInTool.listTriggerRuns.rawValue
+  static let createTriggerDraft = MCPBuiltInTool.createTriggerDraft.rawValue
+  static let proposeTriggerActivation = MCPBuiltInTool.proposeTriggerActivation.rawValue
+  static let reportTriggerAssessment = MCPBuiltInTool.reportTriggerAssessment.rawValue
+  static let reportTriggerResult = MCPBuiltInTool.reportTriggerResult.rawValue
+
   static let notifyUser = MCPBuiltInTool.notifyUser.rawValue
 
   static let listThemes = MCPBuiltInTool.listThemes.rawValue
@@ -2664,6 +2672,7 @@ enum MCPTools {
   static let workspaceTools = names(in: .workspace)
   static let supervisionTools = names(in: .supervision)
   static let storageTools = names(in: .storage)
+  static let triggerTools = names(in: .triggers)
   static let notificationTools = names(in: .notifications)
   static let themeTools = [
     MCPBuiltInTool.listThemes,
@@ -7865,6 +7874,331 @@ enum MCPTools {
         required: []
       )
     ),
+    ])
+    declarations.append(contentsOf: [
+      MCPToolDefinition(
+        tool: .listTriggerSources,
+        name: "list_trigger_sources",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        ),
+        title: "List trigger sources",
+        detail: "See configured event sources and their connection health.",
+        symbol: "antenna.radiowaves.left.and.right",
+        decodeArguments: { container in
+          try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+            ?? EmptyToolArguments()
+        },
+        observesPanel: false,
+        executeArguments: { handler, _, _, completion in
+          handler.listTriggerSources(completion: completion)
+        },
+        description: """
+          List the event sources available to trigger drafts, including each opaque source_id, \
+          source type, enabled state, and health. Configuration secrets are never returned.
+          """,
+        inputSchema: MCPInputSchema(properties: [:], required: [])
+      ),
+      MCPToolDefinition(
+        tool: .listTriggers,
+        name: "list_triggers",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        ),
+        title: "List triggers",
+        detail: "Inspect active rules and disabled drafts without exposing credentials.",
+        symbol: "bolt.badge.clock",
+        decodeArguments: { container in
+          try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+            ?? EmptyToolArguments()
+        },
+        observesPanel: false,
+        executeArguments: { handler, _, _, completion in
+          handler.listTriggers(completion: completion)
+        },
+        description: """
+          List trigger definitions and the revision currently visible for editing. An enabled \
+          definition executes only its active revision; a returned newer draft remains inert.
+          """,
+        inputSchema: MCPInputSchema(properties: [:], required: [])
+      ),
+      MCPToolDefinition(
+        tool: .listTriggerRuns,
+        name: "list_trigger_runs",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        ),
+        title: "List trigger runs",
+        detail: "Inspect recent queued, active, completed, and attention runs.",
+        symbol: "list.bullet.rectangle",
+        decodeArguments: { container in
+          try container.decodeIfPresent(TriggerReferenceArguments.self, forKey: .arguments)
+            ?? TriggerReferenceArguments(triggerID: nil, revisionID: nil)
+        },
+        observesPanel: false,
+        executeArguments: { handler, arguments, _, completion in
+          handler.listTriggerRuns(arguments, completion: completion)
+        },
+        description: """
+          List up to 100 recent trigger runs. Optionally filter by trigger_id. Results contain \
+          bounded summaries and Threading identities, never source credentials or transcript text.
+          """,
+        inputSchema: MCPInputSchema(
+          properties: [
+            "trigger_id": MCPPropertySchema(
+              type: .string,
+              description: "Optional trigger id returned by list_triggers."
+            )
+          ],
+          required: []
+        )
+      ),
+      MCPToolDefinition(
+        tool: .createTriggerDraft,
+        name: "create_trigger_draft",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false
+        ),
+        title: "Create trigger draft",
+        detail: "Create an inert rule draft for the user to review and activate.",
+        symbol: "doc.badge.plus",
+        decodeArguments: { container in
+          try container.decodeIfPresent(CreateTriggerDraftArguments.self, forKey: .arguments)
+            ?? CreateTriggerDraftArguments(
+              name: nil,
+              sourceID: nil,
+              eventKind: nil,
+              projectID: nil,
+              instructions: nil,
+              agent: nil,
+              account: nil,
+              model: nil,
+              reasoningEffort: nil,
+              executionMode: nil,
+              checkoutPolicy: nil,
+              conditions: nil
+            )
+        },
+        observesPanel: false,
+        executeArguments: { handler, arguments, sessionID, completion in
+          handler.createTriggerDraft(arguments, for: sessionID, completion: completion)
+        },
+        description: """
+          Create a disabled trigger draft when the user asks you to configure an event-driven \
+          agent. Call list_trigger_sources first for source_id and list_sessions for a project_id. \
+          The draft cannot listen, start agents, or acquire credentials. Never put a token, \
+          password, cookie, or private key in any field. Defaults: codex, assessThenFix, and \
+          projectCheckout. Activation is a separate user-visible proposal.
+          """,
+        inputSchema: MCPInputSchema(
+          properties: [
+            "name": MCPPropertySchema(type: .string, description: "Short user-facing rule name."),
+            "source_id": MCPPropertySchema(
+              type: .string,
+              description: "Opaque installation id from list_trigger_sources."
+            ),
+            "event_kind": MCPPropertySchema(
+              type: .string,
+              description: "Exact event kind advertised by the source, such as case.review-required."
+            ),
+            "project_id": MCPPropertySchema(
+              type: .string,
+              description: "Threading project id in which the agent will work."
+            ),
+            "instructions": MCPPropertySchema(
+              type: .string,
+              description: "Host-owned assessment and bounded-fix instructions; no credentials."
+            ),
+            "agent": MCPPropertySchema(
+              type: .string,
+              description: "claude, codex, or grok. Defaults to codex."
+            ),
+            "account": MCPPropertySchema(
+              type: .string,
+              description: "Optional persisted Threading account handle."
+            ),
+            "model": MCPPropertySchema(type: .string, description: "Optional model override."),
+            "reasoning_effort": MCPPropertySchema(
+              type: .string,
+              description: "Optional reasoning-effort override."
+            ),
+            "execution_mode": MCPPropertySchema(
+              type: .string,
+              description: "assessOnly or assessThenFix. Defaults to assessThenFix."
+            ),
+            "checkout_policy": MCPPropertySchema(
+              type: .string,
+              description: "projectCheckout or managedWorktree. Defaults to projectCheckout."
+            ),
+            "conditions": MCPPropertySchema(
+              type: .array,
+              description: "Optional AND conditions over typed event attributes.",
+              items: MCPArrayItemSchema(
+                type: .object,
+                description: "attribute, comparison, and exactly one typed *_value field."
+              )
+            )
+          ],
+          required: ["name", "source_id", "event_kind", "project_id", "instructions"]
+        )
+      ),
+      MCPToolDefinition(
+        tool: .proposeTriggerActivation,
+        name: "propose_trigger_activation",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: false
+        ),
+        title: "Propose trigger activation",
+        detail: "Ask the user to activate one exact immutable draft revision.",
+        symbol: "checkmark.shield",
+        decodeArguments: { container in
+          try container.decodeIfPresent(TriggerReferenceArguments.self, forKey: .arguments)
+            ?? TriggerReferenceArguments(triggerID: nil, revisionID: nil)
+        },
+        observesPanel: false,
+        executeArguments: { handler, arguments, _, completion in
+          handler.proposeTriggerActivation(arguments, completion: completion)
+        },
+        description: """
+          Show a host-owned approval sheet for one exact trigger draft revision and activate it \
+          only if the user accepts. A stale revision is refused rather than silently substituting \
+          a newer draft. Call this only after the user has asked to enable the trigger.
+          """,
+        inputSchema: MCPInputSchema(
+          properties: [
+            "trigger_id": MCPPropertySchema(type: .string, description: "Trigger draft id."),
+            "revision_id": MCPPropertySchema(
+              type: .string,
+              description: "Exact immutable draft revision id."
+            )
+          ],
+          required: ["trigger_id", "revision_id"]
+        )
+      ),
+      MCPToolDefinition(
+        tool: .reportTriggerAssessment,
+        name: "report_trigger_assessment",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        ),
+        title: "Report trigger assessment",
+        detail: "Settle the read-only stage of the run bound to this conversation.",
+        symbol: "checklist",
+        decodeArguments: { container in
+          try container.decodeIfPresent(ReportTriggerAssessmentArguments.self, forKey: .arguments)
+            ?? ReportTriggerAssessmentArguments(runID: nil, disposition: nil, summary: nil)
+        },
+        observesPanel: false,
+        executeArguments: { handler, arguments, sessionID, completion in
+          handler.reportTriggerAssessment(arguments, for: sessionID, completion: completion)
+        },
+        description: """
+          Report the outcome of this conversation's read-only trigger assessment. Threading \
+          refuses a run owned by another session. disposition is noChangeNeeded, \
+          straightforwardFix, needsHuman, or failed. straightforwardFix merely requests the \
+          separately authorized fix stage; it does not grant write authority to this turn.
+          """,
+        inputSchema: MCPInputSchema(
+          properties: [
+            "run_id": MCPPropertySchema(type: .string, description: "Run id from the opening brief."),
+            "disposition": MCPPropertySchema(
+              type: .string,
+              description: "noChangeNeeded, straightforwardFix, needsHuman, or failed."
+            ),
+            "summary": MCPPropertySchema(
+              type: .string,
+              description: "Concise factual assessment, at most 4096 UTF-8 bytes."
+            )
+          ],
+          required: ["run_id", "disposition", "summary"]
+        )
+      ),
+      MCPToolDefinition(
+        tool: .reportTriggerResult,
+        name: "report_trigger_result",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        ),
+        title: "Report trigger result",
+        detail: "Settle the fix stage bound to this conversation with verification evidence.",
+        symbol: "checkmark.seal",
+        decodeArguments: { container in
+          try container.decodeIfPresent(ReportTriggerResultArguments.self, forKey: .arguments)
+            ?? ReportTriggerResultArguments(
+              runID: nil,
+              disposition: nil,
+              summary: nil,
+              changedPaths: nil,
+              tests: nil
+            )
+        },
+        observesPanel: false,
+        executeArguments: { handler, arguments, sessionID, completion in
+          handler.reportTriggerResult(arguments, for: sessionID, completion: completion)
+        },
+        description: """
+          Report the final outcome of this conversation's trigger fix stage. Threading refuses \
+          a run owned by another session or not currently fixing. disposition is fixed, \
+          noChangeNeeded, needsHuman, or failed. changed_paths and tests are bounded evidence shown to the user; \
+          this tool never pushes, deploys, opens a review, or writes to the source.
+          """,
+        inputSchema: MCPInputSchema(
+          properties: [
+            "run_id": MCPPropertySchema(type: .string, description: "Run id from the fix brief."),
+            "disposition": MCPPropertySchema(
+              type: .string,
+              description: "fixed, noChangeNeeded, needsHuman, or failed."
+            ),
+            "summary": MCPPropertySchema(type: .string, description: "Concise final result."),
+            "changed_paths": MCPPropertySchema(
+              type: .array,
+              description: "Repository-relative files changed by the fix.",
+              items: MCPArrayItemSchema(type: .string, description: "One relative path.")
+            ),
+            "tests": MCPPropertySchema(
+              type: .array,
+              description: "Local checks run and their bounded outcomes.",
+              items: MCPArrayItemSchema(type: .string, description: "One verification check.")
+            )
+          ],
+          required: ["run_id", "disposition", "summary", "changed_paths", "tests"]
+        )
+      )
     ])
     return declarations
   }()

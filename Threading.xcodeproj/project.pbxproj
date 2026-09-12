@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F10A00010000000000000001 /* MobileConversationQuestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10A00010000000000000002 /* MobileConversationQuestionTests.swift */; };
+		F10B00010000000000000001 /* RemoteWireEncodingLaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10B00010000000000000002 /* RemoteWireEncodingLaneTests.swift */; };
 		09EEC39439CEDA7EAFBC697C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
 		5AAA00010000000000000011 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5AAA00010000000000000001 /* Sparkle */; };
 		5CC000010000000000000001 /* scc in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 5CC000010000000000000002 /* scc */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -57,6 +59,9 @@
 		7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F1 /* ThreadingPluginKit */; };
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
+		7C00000C000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B001 /* main.swift */; };
+		7C00000C000000000000A002 /* threading-triggerd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B011 /* threading-triggerd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		7C00000C000000000000A003 /* codes.threading.triggerd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C00000C000000000000B004 /* codes.threading.triggerd.plist */; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
 		A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
@@ -101,6 +106,7 @@
 		A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */; };
 		A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70400010000000000000002 /* ComposerClipboardTests.swift */; };
 		A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */; };
+		DA615910541442DC8D940C01 /* RemoteTerminalInitialViewportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */; };
 		A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */; };
 		A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */; };
 		A70800010000000000000001 /* MobileDeveloperReportHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */; };
@@ -116,6 +122,7 @@
 		A72200010000000000000001 /* MobileLiveRoutePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */; };
 		A72300010000000000000001 /* MobileSocketRecoveryBackoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */; };
 		A72400010000000000000001 /* RemoteAttachmentMomentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72400010000000000000002 /* RemoteAttachmentMomentTests.swift */; };
+		A72500010000000000000001 /* RemoteAttachmentSharingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72500010000000000000002 /* RemoteAttachmentSharingTests.swift */; };
 		A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */; };
 		A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */; };
 		A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71900010000000000000002 /* MobileScrubSurfaceTests.swift */; };
@@ -206,6 +213,13 @@
 			remoteGlobalIDString = 7C000007000000000000C003;
 			remoteInfo = ThreadingSimulatorHelper;
 		};
+		7C00000C000000000000C004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7C00000C000000000000C003;
+			remoteInfo = ThreadingTriggerDaemon;
+		};
 		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
@@ -273,6 +287,7 @@
 				7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */,
 				7C000005000000000000A009 /* threading-ptyd in Embed Extension Helpers */,
 				7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */,
+				7C00000C000000000000A002 /* threading-triggerd in Embed Extension Helpers */,
 			);
 			name = "Embed Extension Helpers";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -284,6 +299,7 @@
 			dstSubfolderSpec = 1;
 			files = (
 				7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */,
+				7C00000C000000000000A003 /* codes.threading.triggerd.plist in Embed Launch Agents */,
 			);
 			name = "Embed Launch Agents";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -292,6 +308,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F10A00010000000000000002 /* MobileConversationQuestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileConversationQuestionTests.swift; sourceTree = "<group>"; };
+		F10B00010000000000000002 /* RemoteWireEncodingLaneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteWireEncodingLaneTests.swift; sourceTree = "<group>"; };
 		7C000009000000000000E000 /* DeviceLogsPlugin.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DeviceLogsPlugin.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		7C00000B000000000000E000 /* T3NavigatorPlugin.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = T3NavigatorPlugin.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionRunnerRequest.swift; sourceTree = "<group>"; };
@@ -345,6 +363,11 @@
 		7C000007000000000000B008 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000007000000000000B009 /* threading-simulator-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-simulator-helper.entitlements"; sourceTree = "<group>"; };
 		7C000007000000000000B011 /* threading-simulator-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-simulator-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C00000C000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		7C00000C000000000000B002 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		7C00000C000000000000B003 /* threading-triggerd.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-triggerd.entitlements"; sourceTree = "<group>"; };
+		7C00000C000000000000B004 /* codes.threading.triggerd.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = codes.threading.triggerd.plist; sourceTree = "<group>"; };
+		7C00000C000000000000B011 /* threading-triggerd */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-triggerd"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
 		A61100010000000000000002 /* RemoteUsageDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteUsageDashboardTests.swift; sourceTree = "<group>"; };
@@ -381,6 +404,7 @@
 		A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteExtensionSceneScalingTests.swift; sourceTree = "<group>"; };
 		A70400010000000000000002 /* ComposerClipboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerClipboardTests.swift; sourceTree = "<group>"; };
 		A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalLayoutViewTests.swift; sourceTree = "<group>"; };
+		DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalInitialViewportTests.swift; sourceTree = "<group>"; };
 		A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentPreviewFailureTests.swift; sourceTree = "<group>"; };
 		A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentThumbnailRequestStateTests.swift; sourceTree = "<group>"; };
 		A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDeveloperReportHandoffTests.swift; sourceTree = "<group>"; };
@@ -396,6 +420,7 @@
 		A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLiveRoutePolicyTests.swift; sourceTree = "<group>"; };
 		A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSocketRecoveryBackoffTests.swift; sourceTree = "<group>"; };
 		A72400010000000000000002 /* RemoteAttachmentMomentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentMomentTests.swift; sourceTree = "<group>"; };
+		A72500010000000000000002 /* RemoteAttachmentSharingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentSharingTests.swift; sourceTree = "<group>"; };
 		A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileMediaDownloadLimiterTests.swift; sourceTree = "<group>"; };
 		A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRouteHealthLedgerTests.swift; sourceTree = "<group>"; };
 		A71900010000000000000002 /* MobileScrubSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileScrubSurfaceTests.swift; sourceTree = "<group>"; };
@@ -432,6 +457,7 @@
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,
+				ThreadingMobile/MobileConversationQuestionCard.swift,
 				ThreadingMobile/MobileDashboardCacheStore.swift,
 				ThreadingMobile/MobileDiagnosticsBridge.swift,
 				ThreadingMobile/MobileDraftChooser.swift,
@@ -458,6 +484,7 @@
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileSettingsView.swift,
 				ThreadingMobile/MobileSocketRecoveryBackoff.swift,
+				ThreadingMobile/MobileSystemShareSheet.swift,
 				ThreadingMobile/MobileTerminalFontSize.swift,
 				ThreadingMobile/MobileTerminalKeyboardStore.swift,
 				ThreadingMobile/MobileTerminalPresentation.swift,
@@ -476,6 +503,7 @@
 				ThreadingMobile/RemoteAttachmentGallery.swift,
 				ThreadingMobile/RemoteAttachmentPreviewFailure.swift,
 				ThreadingMobile/RemoteAttachmentPreviewLoad.swift,
+				ThreadingMobile/RemoteAttachmentSharing.swift,
 				ThreadingMobile/RemoteAttachmentThumbnailStore.swift,
 				ThreadingMobile/RemoteAttachmentsView.swift,
 				ThreadingMobile/RemoteBrowserFollowView.swift,
@@ -732,6 +760,18 @@
 			path = Targets/SimulatorHelper;
 			sourceTree = "<group>";
 		};
+		7C00000C000000000000C001 /* Trigger Daemon */ = {
+			isa = PBXGroup;
+			children = (
+				7C00000C000000000000B001 /* main.swift */,
+				7C00000C000000000000B002 /* Info.plist */,
+				7C00000C000000000000B003 /* threading-triggerd.entitlements */,
+				7C00000C000000000000B004 /* codes.threading.triggerd.plist */,
+			);
+			name = "Trigger Daemon";
+			path = Targets/TriggerDaemon;
+			sourceTree = "<group>";
+		};
 		B2000001000000000000000F /* Mobile Tests */ = {
 			isa = PBXGroup;
 			children = (
@@ -745,6 +785,8 @@
 				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
 				A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */,
 				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
+				F10A00010000000000000002 /* MobileConversationQuestionTests.swift */,
+				F10B00010000000000000002 /* RemoteWireEncodingLaneTests.swift */,
 				A61100010000000000000002 /* RemoteUsageDashboardTests.swift */,
 				A61100010000000000000104 /* MobileTerminalPresentationTests.swift */,
 				A61300010000000000000002 /* SessionDashboardTests.swift */,
@@ -769,6 +811,7 @@
 				A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */,
 				A70400010000000000000002 /* ComposerClipboardTests.swift */,
 				A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */,
+				DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */,
 				A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */,
 				A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */,
 				A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */,
@@ -784,6 +827,7 @@
 				A72200010000000000000002 /* MobileLiveRoutePolicyTests.swift */,
 				A72300010000000000000002 /* MobileSocketRecoveryBackoffTests.swift */,
 				A72400010000000000000002 /* RemoteAttachmentMomentTests.swift */,
+				A72500010000000000000002 /* RemoteAttachmentSharingTests.swift */,
 				A71700010000000000000002 /* MobileMediaDownloadLimiterTests.swift */,
 				A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */,
 				A71900010000000000000002 /* MobileScrubSurfaceTests.swift */,
@@ -844,6 +888,7 @@
 				7C000003000000000000C001 /* MCP Bridge */,
 				7C000005000000000000C001 /* PTY Host */,
 				7C000007000000000000C001 /* Simulator Helper */,
+				7C00000C000000000000C001 /* Trigger Daemon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -869,6 +914,7 @@
 				7C00000B000000000000E000 /* T3NavigatorPlugin.bundle */,
 				7C000005000000000000B011 /* threading-ptyd */,
 				7C000007000000000000B011 /* threading-simulator-helper */,
+				7C00000C000000000000B011 /* threading-triggerd */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1035,6 +1081,21 @@
 			productReference = 7C000007000000000000B011 /* threading-simulator-helper */;
 			productType = "com.apple.product-type.tool";
 		};
+		7C00000C000000000000C003 /* ThreadingTriggerDaemon */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7C00000C000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingTriggerDaemon" */;
+			buildPhases = (
+				7C00000C000000000000C002 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThreadingTriggerDaemon;
+			productName = ThreadingTriggerDaemon;
+			productReference = 7C00000C000000000000B011 /* threading-triggerd */;
+			productType = "com.apple.product-type.tool";
+		};
 		A20000010000000000000001 /* ThreadingMobile */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A20000010000000000000006 /* Build configuration list for PBXNativeTarget "ThreadingMobile" */;
@@ -1177,6 +1238,7 @@
 				7C000003000000000000C005 /* PBXTargetDependency */,
 				7C000005000000000000C005 /* PBXTargetDependency */,
 				7C000007000000000000C005 /* PBXTargetDependency */,
+				7C00000C000000000000C005 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
@@ -1297,6 +1359,7 @@
 				7C000003000000000000C003 /* ThreadingMCPBridge */,
 				7C000005000000000000C003 /* ThreadingPTYHost */,
 				7C000007000000000000C003 /* ThreadingSimulatorHelper */,
+				7C00000C000000000000C003 /* ThreadingTriggerDaemon */,
 			);
 		};
 /* End PBXProject section */
@@ -1562,6 +1625,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C00000C000000000000C002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C00000C000000000000A001 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A20000010000000000000005 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1583,6 +1654,8 @@
 				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
 				A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,
+				F10A00010000000000000001 /* MobileConversationQuestionTests.swift in Sources */,
+				F10B00010000000000000001 /* RemoteWireEncodingLaneTests.swift in Sources */,
 				A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */,
 				A61100010000000000000103 /* MobileTerminalPresentationTests.swift in Sources */,
 				A61300010000000000000001 /* SessionDashboardTests.swift in Sources */,
@@ -1607,6 +1680,7 @@
 				A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */,
 				A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */,
 				A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */,
+				DA615910541442DC8D940C01 /* RemoteTerminalInitialViewportTests.swift in Sources */,
 				A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */,
 				A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */,
 				A70800010000000000000001 /* MobileDeveloperReportHandoffTests.swift in Sources */,
@@ -1622,6 +1696,7 @@
 				A72200010000000000000001 /* MobileLiveRoutePolicyTests.swift in Sources */,
 				A72300010000000000000001 /* MobileSocketRecoveryBackoffTests.swift in Sources */,
 				A72400010000000000000001 /* RemoteAttachmentMomentTests.swift in Sources */,
+				A72500010000000000000001 /* RemoteAttachmentSharingTests.swift in Sources */,
 				A71700010000000000000001 /* MobileMediaDownloadLimiterTests.swift in Sources */,
 				A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */,
 				A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */,
@@ -1710,6 +1785,12 @@
 			name = ThreadingSimulatorHelper;
 			target = 7C000007000000000000C003 /* ThreadingSimulatorHelper */;
 			targetProxy = 7C000007000000000000C004 /* PBXContainerItemProxy */;
+		};
+		7C00000C000000000000C005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = ThreadingTriggerDaemon;
+			target = 7C00000C000000000000C003 /* ThreadingTriggerDaemon */;
+			targetProxy = 7C00000C000000000000C004 /* PBXContainerItemProxy */;
 		};
 		A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -2042,6 +2123,52 @@
 				MARKETING_VERSION = 0.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.ptyd";
 				PRODUCT_NAME = "threading-ptyd";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		7C00000C000000000000C006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 0.0.0;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Targets/TriggerDaemon/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.0.0;
+				OTHER_SWIFT_FLAGS = "-parse-as-library";
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.triggerd";
+				PRODUCT_NAME = "threading-triggerd";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7C00000C000000000000C007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Targets/TriggerDaemon/threading-triggerd.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 0.0.0;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Targets/TriggerDaemon/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.0.0;
+				OTHER_SWIFT_FLAGS = "-parse-as-library";
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.triggerd";
+				PRODUCT_NAME = "threading-triggerd";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -2716,6 +2843,15 @@
 			buildConfigurations = (
 				7C000007000000000000C007 /* Release */,
 				7C000007000000000000C006 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7C00000C000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingTriggerDaemon" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C00000C000000000000C007 /* Release */,
+				7C00000C000000000000C006 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

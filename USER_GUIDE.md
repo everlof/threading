@@ -94,6 +94,29 @@ row, name, directory, branch and theme survive relaunch; its process and scrollb
 **Account** — a distinct agent login. If you have more than one, each is offered separately
 when creating a session. See [Accounts](#accounts).
 
+### Triggers
+
+**Triggers** in the sidebar is Threading's event-automation center. A trigger listens to one
+connected source and starts an ordinary agent session when typed conditions match. The source
+supplies facts; the saved trigger supplies the project, agent and instructions.
+
+The destination has three pages. **Triggers** shows active rules and disabled drafts, **Activity**
+shows durable queued/running/completed receipts, and **Sources** connects or pauses event feeds.
+The first source adapter reads Sonda review-required events through a scoped API key. The key is
+entered in the source sheet, stored in Keychain and never shown to agents.
+
+Agents can list this setup and create a disabled draft when you ask. A draft does nothing until
+you review the exact event, project, instructions, agent, checkout policy and authority and press
+**Activate**. Assessment always begins read-only. If the saved mode allows it and the agent reports
+a straightforward fix, Threading may begin a separate local-edit stage in a clean checkout or an
+isolated managed worktree. It can edit and test locally; it cannot push, deploy, open a change
+request or write back to the source. The completion notice tells you what to verify.
+
+The source listener is a separate per-user background process. It can receive events and wake
+Threading while the app is closed, as long as the Mac is awake and logged in. A sleeping or
+offline Mac catches up from the provider cursor when it returns. Questions, replies and images
+use the resulting session's normal notification, iPhone conversation and attachment paths.
+
 ### Manager sessions
 
 A **Manager** is a normal chat with user-granted authority to coordinate other chats in one
@@ -2879,6 +2902,11 @@ Sessions; Pair and Forget live under Macs. Appearance opens the same scrollable 
 page as Settings. Keeping those choices behind their named destination means the menu itself never
 depends on iOS's over-height menu scrolling.
 
+**Most recent** orders chats by when work last happened, with pinned chats first. Starting a turn,
+steering an ongoing turn, and finishing work update that time. The age beside each chat uses the
+same time. Restarting an idle agent process alone does not move a chat up the list. Older records
+use their latest recorded turn start, or process activity if no work timestamp is available.
+
 Choose a project heading to open that project. This screen contains only the project's chats;
 its title keeps the connection status visible, and the **+** in the navigation bar starts a chat
 already set to that project. Return to the Mac dashboard to browse another project or the recent
@@ -3067,7 +3095,10 @@ right, tap that sliver, or use its close button to put it away. An attachment op
 under the name, and use the ledger of thumbnails along the bottom to jump to any of them (the
 Mac draws the thumbnails for images, PDFs and movies; other kinds show their glyph). Movies play
 in this gallery, streamed from the Mac in small authenticated pieces, so even a recording larger
-than the ordinary attachment download limit remains visible without loading the whole file. If an agent opens a
+than the ordinary attachment download limit remains visible without loading the whole file. Tap
+the Share button to send or save the attachment currently on screen through the standard iOS share
+sheet; large movies are prepared from the same bounded stream, and the temporary phone copy is
+removed when the sheet closes. If an agent opens a
 page, Threading does not pull you away from the chat. The account
 disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
 read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
@@ -3430,6 +3461,19 @@ Four buttons sit at that end, and each one decides what this pane shows:
 - **Session Status Card** — shows or hides the compact session card floating over the session.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
+
+Native Codex chats can show questions directly in the conversation. Select an option or write
+an answer, then choose **Send answer**. A request with several questions uses **Next** and
+**Back**, keeping your earlier choices. Nothing is sent until you submit; **Cancel** closes the
+request without choosing an answer. Questions that block work show **Waiting for your answer**;
+optional questions leave work running. You can also answer on a paired iPhone with reply access. Selections survive scrolling away
+and back, and a question answered on either device closes on the other.
+
+Expand a native chat's work disclosure with a click, Space, Return, or VoiceOver. Its focus is
+visible and the short transition respects Reduce Motion. Permission requests remain separate:
+review the action and choose **Allow**, **Allow for Session**, or **Deny**. Return in the composer
+does not approve a newly arrived request. A spent usage limit keeps its own recovery ribbon with
+the available account and reset actions.
 
 Open **Overview** from the display panel's **+** menu (or press **Cmd+P** to focus its Activity
 section) to see what the selected agent has done in the checkout. The summary at the top shows the

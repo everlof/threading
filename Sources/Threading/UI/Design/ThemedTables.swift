@@ -19,6 +19,12 @@ public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, S
     /// See `SoleColumnFitting`.
     public var soleColumnFitWidth: CGFloat = -1
 
+    /// Whether the sole column deliberately fills the table's complete bounds instead of
+    /// preserving AppKit's table-style gutters. Embedded card tables opt in; being embedded is
+    /// not itself the decision, because the sidebar outline is embedded too and its inset band
+    /// is where narrow-width density reclaims space.
+    public var soleColumnFillsBoundsExactly = false
+
     /// See `SelectionStrengthStating` — asked by this list's own rows as AppKit demotes them.
     public var drawsSelectionAtFullStrength: Bool { selectionStrength.drawsAsKey }
 
@@ -76,6 +82,7 @@ public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, S
     }
 
     public override func setFrameSize(_ newSize: NSSize) {
+        _ = fitExactSoleColumn(to: newSize.width)
         super.setFrameSize(newSize)
         fitSoleColumnToWidth()
     }
@@ -376,6 +383,10 @@ public protocol SoleColumnFitting: NSTableView {
     /// It is also the re-entry guard: `sizeLastColumnToFit()` re-tiles, which comes straight back
     /// through `setFrameSize`, and this is recorded *before* the call.
     var soleColumnFitWidth: CGFloat { get set }
+
+    /// An explicit opt-in for a table whose cell is the complete embedded surface. AppKit's
+    /// style padding remains load-bearing for ordinary lists, including the sidebar.
+    var soleColumnFillsBoundsExactly: Bool { get set }
 }
 
 @MainActor
@@ -396,7 +407,20 @@ extension SoleColumnFitting {
               abs(bounds.width - soleColumnFitWidth) > 0.5 else { return }
 
         soleColumnFitWidth = bounds.width
-        sizeLastColumnToFit()
+        if !fitExactSoleColumn(to: bounds.width) { sizeLastColumnToFit() }
+    }
+
+    /// Own an explicitly edge-to-edge column before AppKit commits a frame. A pending table tile
+    /// can run on the first bounds read and restore the old column width, losing the requested
+    /// size. The policy is explicit rather than inferred from the superview: both card tables and
+    /// the sidebar outline are embedded, but only the former has no table-style gutter.
+    fileprivate func fitExactSoleColumn(to width: CGFloat) -> Bool {
+        guard soleColumnFillsBoundsExactly, width > 0,
+              tableColumns.count == 1, let column = tableColumns.first else { return false }
+        guard abs(column.width - width) > 0.5 else { return true }
+        soleColumnFitWidth = width
+        column.width = width
+        return true
     }
 }
 
@@ -919,6 +943,9 @@ public class ThemedOutlineView:
     SoleColumnFitting,
     SelectionStrengthStating {
 
+    /// See `SoleColumnFitting`.
+    public var soleColumnFillsBoundsExactly = false
+
     /// A secondary click (or an accessibility "show menu") landed on a row — `-1` for the
     /// empty stretch below the last one. Reported rather than handled, with the anchor the
     /// gesture carries: what a row's menu holds is the host's knowledge, not the outline's.
@@ -1114,6 +1141,7 @@ public class ThemedOutlineView:
     }
 
     public override func setFrameSize(_ newSize: NSSize) {
+        _ = fitExactSoleColumn(to: newSize.width)
         super.setFrameSize(newSize)
         fitSoleColumnToWidth()
     }

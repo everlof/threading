@@ -983,6 +983,69 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.stringValue, "hej")
     }
 
+    /// The launch choices are preparation for writing the brief, not a second editing mode.
+    /// Once a choice closes, ordinary typing must continue in the prompt instead of disappearing
+    /// into the chip that the menu presenter restored as first responder.
+    func testChoosingAComposerSettingReturnsTypingFocusToThePrompt() throws {
+        let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
+        _ = composer.view
+        composer.updatePromptCustomization(for: ProjectID())
+
+        let window = makeWindow(hosting: composer.view)
+        let prompt = try XCTUnwrap(
+            descendants(of: composer.view).compactMap { $0 as? PromptView }.first
+        )
+        let textView = try promptTextView(in: prompt)
+        let role = try XCTUnwrap(
+            descendants(of: composer.view).compactMap { $0 as? ChipView }.first {
+                $0.accessibilityIdentifier() == "composer.session-start.role"
+            }
+        )
+        role.menuPresentationOverride = { presentation in
+            presentation.entries.compactMap(\.item).first { !$0.isSelected }
+        }
+
+        XCTAssertTrue(window.makeFirstResponder(role), "the chooser has to own focus first")
+        XCTAssertTrue(role.accessibilityPerformShowMenu(), "the role menu has to choose a row")
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        XCTAssertTrue(
+            window.firstResponder === textView,
+            "closing a launch chooser left typing focus on the chip"
+        )
+        type("hej", in: window)
+        XCTAssertEqual(prompt.stringValue, "hej")
+    }
+
+    /// The session brief is deliberately a tall, paragraph-sized target. Once a chooser has
+    /// taken focus, clicking the visible empty part of that target must reach the editor rather
+    /// than the scroll view's bare clip area; otherwise the box looks writable but leaves the
+    /// keyboard on the chooser.
+    func testEmptySessionComposerPromptUsesItsWholeTextAreaAsTheEditorHitTarget() throws {
+        let composer = SessionComposerViewController(customizationLookup: { _ in .empty })
+        _ = composer.view
+        composer.updatePromptCustomization(for: ProjectID())
+
+        let window = makeWindow(hosting: composer.view)
+        let prompt = try XCTUnwrap(
+            descendants(of: composer.view).compactMap { $0 as? PromptView }.first
+        )
+        let textView = try promptTextView(in: prompt)
+        let root = try XCTUnwrap(window.contentView)
+        root.layoutSubtreeIfNeeded()
+
+        let pointNearTop = prompt.convert(
+            NSPoint(x: prompt.bounds.midX, y: prompt.bounds.maxY - Design.Spacing.inset),
+            to: root
+        )
+        let hit = try XCTUnwrap(root.hitTest(pointNearTop))
+
+        XCTAssertTrue(
+            hit === textView || hit.isDescendant(of: textView),
+            "the visible text area hit \(Swift.type(of: hit)) instead of the prompt editor"
+        )
+    }
+
     /// Arriving at the composer *is* the request to type: ⌘N and selecting a project both land
     /// here, and the pane focuses everything else it puts on screen — a terminal, a native
     /// conversation's reply box. The caret goes after any restored draft, because the position

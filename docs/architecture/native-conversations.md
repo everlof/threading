@@ -939,6 +939,50 @@ controller. The same two-operation capability carries cross-session prose delive
 boot and turn-in-flight policy remains in `SessionMessageDelivery` and `AgentRuntime`. This keeps
 the two workflows on one live PTY without giving either Core policy presentation authority.
 
+## Inline questions
+
+Codex's native transport accepts `item/tool/requestUserInput` through an optional
+`QuestionAskingConversation` capability. The app-server initialize handshake opts into its
+experimental API; the installed CLI's generated TypeScript schema is the contract. Each request
+is scoped to the current root thread and turn, and its JSON-RPC identity remains distinct from
+both its local card UUID and the question IDs echoed in the answer. `CodexQuestionRequests`
+takes an outstanding entry before replying, so double activation, `serverRequest/resolved`, a
+turn boundary and process teardown cannot reply twice or leave an old form able to answer a new
+request with a reused RPC ID.
+
+Questions are deliberately host-only. Threading owns their exact text, answer validation,
+selection, cancellation and routing; they have no permission-card extension hook. The renderer
+shows one question page at a time, preserves earlier selections when going Back, enables Send
+answer only after input, and never submits a suggested choice or a timeout default. The form
+admits at most three questions and six choices each, with explicit UTF-8 text budgets; oversized,
+malformed, foreign-turn and secret-input requests return an explicit protocol refusal rather
+than a partially displayed question. Secret input needs a secure-entry contract before it can
+be supported. The paired iPhone receives the same exact bounded questions in snapshot/delta metadata. Its
+native collection keeps one synthetic identity per request and only the current page mounted;
+value drafts survive recycling and unchanged reconnects. Settlement removes the matching draft.
+The `questionAnswer` route rechecks current credentials, routed session scope and input ownership
+before reaching the same once-only card action. Read-only viewers can inspect but cannot answer.
+Question responses carry no tool-approval authority.
+
+The provider's `isBlocking` flag determines whether the turn is waiting. Blocking questions and
+permissions stop the status orb and its clock callback and publish the same awaiting-user state
+to the sidebar. Answering resumes the status without restarting the elapsed turn. Optional
+questions let work continue. Usage refusal stays a separate standing recovery ribbon: a question
+selection cannot approve a tool, change an account or resume quota-limited work.
+
+Work-fold headers compose `ThemedDisclosureRow` at conversation density. Keyboard and VoiceOver
+activation use the same stable-identity mutation as pointer activation; focus is visible and the
+chevron has a short Reduce Motion-aware fade. Transcript heights change directly, so expanding
+work does not animate the reader through intermediate layouts. Permission cards use a shared
+inline-decision heading and a distinct primary Allow action. Return is only an approval when
+the button has focus; arrival of a card does not take Return from the composer.
+
+`NativeChatShowcaseTests` drives the shipping virtualized controller with separately named review
+states. The evidence catalogue's `native-chat-showcase` entry captures the answer, table, code,
+folded and expanded work, edit diff, long prompt, progress, interruption, streaming, permission,
+question and usage-recovery paths under adaptive and authored themes. Research and review
+instructions are in [the review record](../research/native-chat-review.md).
+
 ## Conversation Rendering
 
 A cross-runtime destination begins with a retained **Context handoff** row before its replayed

@@ -1242,12 +1242,17 @@ The rules, each of which is the answer to a way this goes wrong:
   back as active today: a window read from it feeds itself its own last launch and never lets
   go of anything. Measured on a real store, the gap was days — seventeen sessions relaunched
   one morning read as active that morning while their transcripts had not been written to since
-  the week before, and a three-day window selected all thirty-two sessions. `lastTurnAt` is
-  stamped instead from the turn-start edge in `AgentSessionViewController`'s activity observer,
-  which fires for a reported turn and an inferred one and cannot fire for a relaunch, and is
-  coalesced through `ProjectStore.noteTurnStarted`. Records written before the field existed
-  fall back to `lastActiveAt`, which is the second reason the limit exists: on the first launch
-  after the update, the fallback makes every old session look recent, and the cap bounds that.
+  the week before, and a three-day window selected all thirty-two sessions. `lastTurnAt` retains
+  the latest start; `lastWorkAt` records observed starts, endings and accepted steering input.
+  `lastUsedAt` takes the later work timestamp and falls back to process activity only when neither
+  exists. Both restore policies use this clock, as do idle-process retention, sidebar sorting,
+  remote row age, search and supervision. A long job's completion starts its idle window.
+  Native starts are recorded at `NativeGitTurnAdmission` after transport acceptance and before
+  presentation, shared by direct sends, commands and queue drains. Terminal starts and endings
+  follow the tracker's operational turn edges, including inferred turns. Native endings ignore
+  transcript replay. Queuing without execution, rejected sends and idle launches are not work.
+  `ProjectStore` coalesces exact-session writes and publishes `SessionWorkDidChange`, never a
+  structural project change. Legacy fallback still makes the restoration cap necessary.
 - **The record is consumed on read** (`StateManager.consumeRunningSessionIDs`), the same
   pattern as `EventLog`'s launch marker: only a clean quit rewrites it, so a list that
   outlived the launch that read it would relaunch sessions the user has since closed the

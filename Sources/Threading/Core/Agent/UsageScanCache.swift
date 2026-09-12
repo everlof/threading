@@ -121,16 +121,18 @@ final class UsageScanCache {
         return Result(records: parsed, wasCacheHit: false)
     }
 
-    /// Cache for a supported CLI export. `revision` is the session's durable last-activity
-    /// stamp, so a dormant OpenCode session costs no process launch on a warm rebuild.
+    /// Cache for a supported CLI export. The caller supplies a work revision for settled sources
+    /// and a new sample revision for live or explicitly refreshed exports. Row age alone cannot
+    /// version output that is still being appended inside the same turn.
     func records(
         forKey key: String,
         revision: Date,
         parserID: String,
+        forceRefresh: Bool = false,
         parse: () throws -> [UsageLedgerRecord]
     ) throws -> Result {
         try autoreleasepool {
-            try resolveRecords(forKey: key, revision: revision, parserID: parserID, parse: parse)
+            try resolveRecords(forKey: key, revision: revision, parserID: parserID, forceRefresh: forceRefresh, parse: parse)
         }
     }
 
@@ -138,13 +140,14 @@ final class UsageScanCache {
         forKey key: String,
         revision: Date,
         parserID: String,
+        forceRefresh: Bool = false,
         parse: () throws -> [UsageLedgerRecord]
     ) throws -> Result {
         let fingerprint = Fingerprint(size: 0, modifiedAt: revision.timeIntervalSince1970)
         let cacheURL = url(forSourcePath: key, parserID: parserID)
         usedFiles.insert(cacheURL.lastPathComponent)
 
-        if let envelope = cachedEnvelope(at: cacheURL),
+        if !forceRefresh, let envelope = cachedEnvelope(at: cacheURL),
            envelope.schemaVersion == UsageScanCacheDefaults.schemaVersion,
            envelope.parserID == parserID,
            envelope.sourcePath == key,
@@ -449,12 +452,14 @@ final class UsageLedgerIndex {
         key: String,
         revision: Date,
         parserID: String,
+        forceRefresh: Bool = false,
         load: () throws -> UsageScanCache.Result
     ) throws -> Update {
         try update(
             key: key,
             revision: Revision(size: 0, modifiedAt: revision.timeIntervalSince1970),
             parserID: parserID,
+            forceRefresh: forceRefresh,
             load: load
         )
     }
@@ -543,11 +548,12 @@ final class UsageLedgerIndex {
         key: String,
         revision: Revision,
         parserID: String,
+        forceRefresh: Bool = false,
         load: () throws -> UsageScanCache.Result
     ) throws -> Update {
         let sourceKey = Self.sourceKey(path: key, parserID: parserID)
         usedSources.insert(sourceKey)
-        if let stored = try storedSource(
+        if !forceRefresh, let stored = try storedSource(
             sourceKey: sourceKey,
             parserID: parserID,
             revision: revision

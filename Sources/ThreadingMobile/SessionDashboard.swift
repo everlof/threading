@@ -1364,6 +1364,9 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     private var beganAtOffset: CGFloat = 0
     private var isSwipeArmed = false
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
+#if DEBUG
+    private var swipeArmMotionCountForTesting = 0
+#endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1454,6 +1457,8 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         beganAtOffset = 0
         isSwipeArmed = false
         rowView.layer.removeAllAnimations()
+        actionBackdropView.layer.removeAllAnimations()
+        actionButton.imageView?.removeAllSymbolEffects(animated: false)
         rowView.transform = .identity
         actionBackdropView.isHidden = true
         actionButton.isHidden = true
@@ -1473,7 +1478,10 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         accessibilityTraits = configuration.activate == nil ? [] : .link
         restingOffset = 0
         beganAtOffset = 0
+        isSwipeArmed = false
         rowView.layer.removeAllAnimations()
+        actionBackdropView.layer.removeAllAnimations()
+        actionButton.imageView?.removeAllSymbolEffects(animated: false)
         rowView.transform = .identity
         applyFonts()
         applyCommon(configuration, animatesTitle: animatesTitle)
@@ -1617,6 +1625,14 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
 
     var titlePresentationForTesting: (text: String, isAnimating: Bool) {
         (titleView.stringValue, titleView.isAnimatingTitleForTesting)
+    }
+
+    var swipePresentationForTesting: (isArmed: Bool, backdrop: UIColor?, motionCount: Int) {
+        (isSwipeArmed, actionBackdropView.backgroundColor, swipeArmMotionCountForTesting)
+    }
+
+    func setSwipeArmedForTesting(_ armed: Bool, reducesMotion: Bool) {
+        setSwipeArmed(armed, animated: true, reducesMotion: reducesMotion)
     }
 #endif
 
@@ -1940,6 +1956,40 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         actionBackdropView.backgroundColor = theme.uiControlResting
     }
 
+    /// Applies the threshold edge the pan has already decided. The action stays in its fixed
+    /// compact slot while the backdrop expands, but arming changes the plate and gives the
+    /// symbol one discrete bounce alongside the haptic. Crossing back disarms the plate without
+    /// replaying the symbol, and Reduce Motion keeps the same visible state change synchronously.
+    private func setSwipeArmed(
+        _ armed: Bool,
+        animated: Bool,
+        reducesMotion: Bool = UIAccessibility.isReduceMotionEnabled
+    ) {
+        guard armed != isSwipeArmed, let configuration else { return }
+        isSwipeArmed = armed
+        let targetColor = armed
+            ? configuration.theme.uiSelection
+            : configuration.theme.uiControlResting
+        let changes = { self.actionBackdropView.backgroundColor = targetColor }
+        if animated, !reducesMotion {
+            UIView.animate(
+                withDuration: MobileDesign.Motion.controlResponse,
+                delay: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: changes
+            )
+        } else {
+            actionBackdropView.layer.removeAllAnimations()
+            changes()
+        }
+
+        guard armed, !reducesMotion, let imageView = actionButton.imageView else { return }
+        imageView.addSymbolEffect(.bounce, options: .nonRepeating)
+#if DEBUG
+        swipeArmMotionCountForTesting += 1
+#endif
+    }
+
     private func applySwipeOffset(_ offset: CGFloat) {
         rowView.transform = CGAffineTransform(translationX: offset, y: 0)
         let revealed = min(contentView.bounds.width, max(0, -offset))
@@ -1998,7 +2048,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
                 allowsFullSwipe: !configuration.isArchived
             )
             if armed, !isSwipeArmed { feedback.impactOccurred() }
-            isSwipeArmed = armed
+            setSwipeArmed(armed, animated: true)
             applySwipeOffset(offset)
         case .ended:
             let offset = rowView.transform.tx
@@ -2032,6 +2082,12 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
 
     private func animate(to offset: CGFloat, completion: (() -> Void)? = nil) {
         restingOffset = offset
+        let armed = MobileRowSwipe.isArmed(
+            offset: offset,
+            rowWidth: contentView.bounds.width,
+            allowsFullSwipe: !(configuration?.isArchived ?? true)
+        )
+        setSwipeArmed(armed, animated: true)
         UIView.animate(
             withDuration: MobileRowSwipe.settleResponse,
             delay: 0,
@@ -2201,6 +2257,94 @@ struct MobileDashboardTitleReuseMetrics: Equatable {
     let sameRecordRenameAnimated: Bool
     let recycledPresentationAnimated: Bool
     let recycledTitle: String
+}
+
+struct MobileDashboardSwipeArmMetrics: Equatable {
+    let restingUsesControlPlate: Bool
+    let armedUsesSelectionPlate: Bool
+    let disarmedUsesControlPlate: Bool
+    let firstArmMotionCount: Int
+    let disarmMotionCount: Int
+    let secondArmMotionCount: Int
+    let reducedMotionUsesSelectionPlate: Bool
+    let reducedMotionArmMotionCount: Int
+}
+
+/// Exercises the armed edge on the same retained UIKit cell the shipping dashboard uses. This
+/// keeps the migration from silently dropping the visual threshold response while preserving a
+/// synchronous, motion-free state change for Reduce Motion.
+@MainActor
+enum MobileDashboardSwipeArmProbe {
+    static func exercise() -> MobileDashboardSwipeArmMetrics {
+        let theme = RemoteThemePalette(RemoteAppModel.demoTheme)
+        let cell = DashboardRowCollectionCell(frame: CGRect(x: 0, y: 0, width: 361, height: 58))
+        cell.configure(configuration(theme: theme))
+        cell.layoutIfNeeded()
+
+        let resting = cell.swipePresentationForTesting
+        cell.setSwipeArmedForTesting(true, reducesMotion: false)
+        let firstArm = cell.swipePresentationForTesting
+        cell.setSwipeArmedForTesting(false, reducesMotion: false)
+        let disarmed = cell.swipePresentationForTesting
+        cell.setSwipeArmedForTesting(true, reducesMotion: false)
+        let secondArm = cell.swipePresentationForTesting
+
+        let reducedMotionCell = DashboardRowCollectionCell(
+            frame: CGRect(x: 0, y: 0, width: 361, height: 58)
+        )
+        reducedMotionCell.configure(configuration(theme: theme))
+        reducedMotionCell.layoutIfNeeded()
+        reducedMotionCell.setSwipeArmedForTesting(true, reducesMotion: true)
+        let reducedMotionArm = reducedMotionCell.swipePresentationForTesting
+
+        return MobileDashboardSwipeArmMetrics(
+            restingUsesControlPlate: resting.backdrop == theme.uiControlResting,
+            armedUsesSelectionPlate: firstArm.isArmed
+                && firstArm.backdrop == theme.uiSelection,
+            disarmedUsesControlPlate: !disarmed.isArmed
+                && disarmed.backdrop == theme.uiControlResting,
+            firstArmMotionCount: firstArm.motionCount,
+            disarmMotionCount: disarmed.motionCount,
+            secondArmMotionCount: secondArm.motionCount,
+            reducedMotionUsesSelectionPlate: reducedMotionArm.isArmed
+                && reducedMotionArm.backdrop == theme.uiSelection,
+            reducedMotionArmMotionCount: reducedMotionArm.motionCount
+        )
+    }
+
+    private static func configuration(
+        theme: RemoteThemePalette
+    ) -> DashboardUIKitRowConfiguration {
+        let session = RemoteSessionSummaryDTO(
+            id: "swipe-arm-probe",
+            title: "Archive me",
+            agentKind: "claude",
+            surface: .conversation,
+            state: .idle,
+            projectName: "Probe",
+            lastActiveAt: 0
+        )
+        return DashboardUIKitRowConfiguration(
+            row: DashboardCollectionRow(
+                item: .chat(session),
+                hasDivider: false,
+                isFirst: true,
+                isLast: true
+            ),
+            theme: theme,
+            isArchived: false,
+            isCatalogueLive: true,
+            showsProjectName: false,
+            activate: nil,
+            swipeAction: MobileRowSwipeAction(
+                "Archive",
+                systemImage: "archivebox",
+                role: .destructive,
+                perform: {}
+            ),
+            contextMenu: nil
+        )
+    }
 }
 
 /// Exercises the dashboard title in the same retained UIKit cell the collection reuses while

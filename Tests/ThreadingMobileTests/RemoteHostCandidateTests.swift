@@ -313,6 +313,28 @@ final class RemoteHostCandidateTests: XCTestCase {
         )
     }
 
+    /// The conditional request a refresh sends first is a bet that the last route still works,
+    /// and it is worth one route attempt: the race behind it tries every other way in at that
+    /// pace. Given a whole request timeout, a phone that had left the Mac's Wi-Fi spent twenty
+    /// seconds on the dead LAN origin before the race found Tailscale in one (2026-09-11).
+    func testTheWarmProbeIsWorthOneRouteAttemptWhenTheRaceHasSomewhereElseToGo() {
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.warmProbeTimeout(hasOtherRoutes: true),
+            RemoteRouteWalkBudget.routeAttemptTimeout
+        )
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.warmProbeTimeout(hasOtherRoutes: false),
+            RemoteClient.defaultRequestTimeout,
+            "a Mac with one way in has nothing waiting behind the probe"
+        )
+        XCTAssertLessThan(
+            RemoteRouteWalkBudget.warmProbeTimeout(hasOtherRoutes: true)
+                + RemoteRouteWalkBudget.walkCeiling,
+            RemoteClient.defaultRequestTimeout,
+            "a lost probe and the whole race behind it end inside one old probe"
+        )
+    }
+
     /// The ceiling is an ownership boundary. Recovery may start as soon as it answers, so the old
     /// walk must already have been cancelled and cannot later compete with that new generation.
     @MainActor
@@ -558,6 +580,35 @@ final class RemoteHostCandidateTests: XCTestCase {
     }
 
     /// A dormant session is being woken on the Mac rather than reached over a route, so the route
+    /// A chat reconnecting after a loss follows the opening rule: "Reconnecting…" until a route
+    /// has failed, then the route it is on. "Reconnecting…" alone was the whole of what a chat
+    /// said through a route loss, however long the walk behind it took (2026-09-11).
+    func testAReconnectingChatNamesTheRouteOnceOneHasFailed() {
+        XCTAssertEqual(
+            MobileSessionChrome.diallingStatus(hasEverConnected: true, routeWalk: nil),
+            "Reconnecting…"
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.diallingStatus(hasEverConnected: false, routeWalk: nil),
+            "Opening chat…"
+        )
+        let walking = RemoteAppModel.RouteWalkStatus(
+            kind: RemoteHostEndpointKind.tailscale,
+            attempt: 2,
+            total: 13,
+            followsFailure: true
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.diallingStatus(hasEverConnected: true, routeWalk: walking),
+            MobileSessionChrome.openingStatus(isAvailable: true, routeWalk: walking),
+            "the reconnecting chat and the opening chat name a route the same way"
+        )
+        XCTAssertNotEqual(
+            MobileSessionChrome.diallingStatus(hasEverConnected: true, routeWalk: walking),
+            "Reconnecting…"
+        )
+    }
+
     /// walk has nothing to say about it.
     func testAResumingSessionKeepsItsOwnSentence() {
         XCTAssertEqual(

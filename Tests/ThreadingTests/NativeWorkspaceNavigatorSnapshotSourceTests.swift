@@ -8,14 +8,12 @@ final class NativeWorkspaceNavigatorSnapshotSourceTests: XCTestCase {
     private var directories: [URL] = []
     private var stateManagers: [StateManager] = []
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            stateManagers.forEach { $0.closeDatabase() }
-            stateManagers = []
-            directories.forEach { try? FileManager.default.removeItem(at: $0) }
-            directories = []
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        stateManagers.forEach { $0.closeDatabase() }
+        stateManagers = []
+        directories.forEach { try? FileManager.default.removeItem(at: $0) }
+        directories = []
+        try await super.tearDown()
     }
 
     func testSnapshotPublishesTypedBoundedDisplayStateWithoutModelObjectsOrPaths() throws {

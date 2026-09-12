@@ -116,6 +116,55 @@ final class PaneFooterTests: XCTestCase {
         XCTAssertEqual(second.frame.minX - first.frame.maxX, Design.Spacing.small)
     }
 
+    /// A footer lives *inside* a pane; it cannot turn a title into an undocumented pane floor.
+    /// The host here is held exactly as an `NSSplitViewItem` holds the sidebar: above ordinary
+    /// hugging but far below a control's default resistance. Naming the flexible member makes
+    /// that member truncate while the pane and the other controls keep their widths.
+    func testTheNamedMemberYieldsBeforeThePaneChangesWidth() {
+        let root = NSView(
+            frame: NSRect(x: 0, y: 0, width: 900, height: 400)
+        )
+
+        let column = NSView()
+        column.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(column)
+
+        let flexible = ThemedButton()
+        flexible.title = "A destination whose title yields"
+        flexible.isBordered = false
+        let fixed = ThemedButton()
+        fixed.title = "Settings"
+        fixed.isBordered = false
+        let trailing = plainButton()
+        let footer = PaneFooterView(
+            leading: [flexible, fixed],
+            trailing: [trailing],
+            compressing: flexible,
+            margin: .paneEdge
+        )
+        column.addSubview(footer)
+
+        let heldWidth: CGFloat = 207
+        let held = column.widthAnchor.constraint(equalToConstant: heldWidth)
+        held.priority = SidebarDefaults.holdingPriority
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.topAnchor.constraint(equalTo: root.topAnchor),
+            column.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            column.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
+            held,
+            footer.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: column.bottomAnchor)
+        ])
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(column.frame.width, heldWidth, accuracy: 0.5)
+        XCTAssertLessThan(flexible.frame.width, flexible.intrinsicContentSize.width)
+        XCTAssertEqual(fixed.frame.width, fixed.intrinsicContentSize.width, accuracy: 0.5)
+        XCTAssertEqual(trailing.frame.width, trailing.intrinsicContentSize.width, accuracy: 0.5)
+    }
+
     // MARK: - Baseline alignment
 
     /// Where a view's first baseline landed in its superview, from AppKit's own report.

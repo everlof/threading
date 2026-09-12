@@ -5,23 +5,20 @@ import XCTest
 /// The material's backdrop: its wire form, the gates that refuse a wash the user could not read
 /// their way out of, the resolution that turns a stated block into drawable values, and the
 /// layer `applySurface` hangs under every participating ground.
+@MainActor
 final class ThemeBackdropTests: XCTestCase {
 
     private var previousTheme: AppTheme!
 
-    override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated {
-            previousTheme = AppThemeLibrary.current
-        }
+    override func setUp() async throws {
+        try await super.setUp()
+        previousTheme = AppThemeLibrary.current
     }
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            AppThemeLibrary.apply(previousTheme)
-            ThemeAssetStore.removeAll(for: Self.scratchThemeID)
-        }
-        super.tearDown()
+    override func tearDown() async throws {
+        AppThemeLibrary.apply(previousTheme)
+        ThemeAssetStore.removeAll(for: Self.scratchThemeID)
+        try await super.tearDown()
     }
 
     private static let scratchThemeID = AppThemeID("custom-theme-backdrop-tests")

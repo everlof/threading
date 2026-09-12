@@ -62,6 +62,9 @@ final class ChangedFilesCardView: NSView, NSTableViewDataSource, NSTableViewDele
         table.style = .plain
         table.selectionHighlightStyle = .none
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        // This table is the card's row surface, not a styled list with AppKit-owned edge bands.
+        // Say that explicitly so the shared fitting rule does not have to guess from containment.
+        table.soleColumnFillsBoundsExactly = true
         table.intercellSpacing = NSSize(width: 0, height: Design.Spacing.hairline)
         table.rowHeight = ChangedFilesCardDefaults.rowHeight
         table.autoresizingMask = [.width]

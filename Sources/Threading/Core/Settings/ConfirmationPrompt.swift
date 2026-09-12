@@ -101,6 +101,8 @@ enum ConfirmationPrompt: String, CaseIterable {
     case installUnsignedExtension
     case updateExtensionCapabilities
     case approveAgentExtensionInstall
+    case connectTriggerSource
+    case approveTriggerActivation
     case shareChatLink
     case approveSystemPermissionPrompt
     case conferManagerRole
@@ -287,6 +289,8 @@ enum ConfirmationPrompt: String, CaseIterable {
              .installUnsignedExtension,
              .updateExtensionCapabilities,
              .approveAgentExtensionInstall,
+             .connectTriggerSource,
+             .approveTriggerActivation,
              .shareChatLink,
              .conferManagerRole,
              .controlSimulatorDevice,

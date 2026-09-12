@@ -1915,6 +1915,17 @@
         }
       }
     },
+    "%lld configured" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld konfigurerade"
+          }
+        }
+      }
+    },
     "%lld conversation folders could not be read; these results are incomplete." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2417,6 +2428,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld väntande"
+          }
+        }
+      }
+    },
+    "%lld recent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld senaste"
           }
         }
       }
@@ -3099,6 +3121,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 mindre katalog"
+          }
+        }
+      }
+    },
+    "1 source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 källa"
           }
         }
       }
@@ -4121,6 +4154,23 @@
         }
       }
     },
+    "A question for you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A question for you"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En fråga till dig"
+          }
+        }
+      }
+    },
     "A quick visual checksum of the active palette." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4980,6 +5030,17 @@
         }
       }
     },
+    "Activate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera"
+          }
+        }
+      }
+    },
     "Activate Rotation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5009,6 +5070,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera de väntande tilläggsändringarna i den här sessionen"
+          }
+        }
+      }
+    },
+    "Activate “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera ”%@”?"
           }
         }
       }
@@ -5108,6 +5180,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivitetsringen visar tre agenter, inklusive högsta arbetsinsats."
+          }
+        }
+      }
+    },
+    "Adapter: Sonda review-required events" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adapter: Sonda-händelser som behöver granskas"
           }
         }
       }
@@ -5746,6 +5829,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agentredigeringar"
+          }
+        }
+      }
+    },
+    "Agent instructions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentinstruktioner"
           }
         }
       }
@@ -6906,6 +7000,17 @@
         }
       }
     },
+    "Any event of this kind" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla händelser av den här typen"
+          }
+        }
+      }
+    },
     "App" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7424,6 +7529,17 @@
         }
       }
     },
+    "Ask an agent to create a disabled draft, or connect a source first. Nothing listens until you activate an exact revision." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Be en agent skapa ett inaktiverat utkast, eller anslut en källa först. Ingenting börjar lyssna förrän du aktiverar en exakt version."
+          }
+        }
+      }
+    },
     "Ask before archiving a running session" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7600,6 +7716,39 @@
         }
       }
     },
+    "Assess only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bedöm endast"
+          }
+        }
+      }
+    },
+    "Assess, then fix if straightforward" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bedöm, åtgärda sedan om det är enkelt"
+          }
+        }
+      }
+    },
+    "Assessing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bedömer"
+          }
+        }
+      }
+    },
     "Assigned" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7754,6 +7903,17 @@
         }
       }
     },
+    "Authentication required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autentisering krävs"
+          }
+        }
+      }
+    },
     "Authorization code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7783,6 +7943,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Automatiskt (godkänn åt mig)"
+          }
+        }
+      }
+    },
+    "Automated trigger" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisk trigger"
           }
         }
       }
@@ -8098,6 +8269,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bakgrundsvärd"
+          }
+        }
+      }
+    },
+    "Background listener" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bakgrundslyssnare"
+          }
+        }
+      }
+    },
+    "Backing off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar före nytt försök"
           }
         }
       }
@@ -10139,6 +10332,17 @@
         }
       }
     },
+    "Checking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar"
+          }
+        }
+      }
+    },
     "Checking Tailscale" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10620,6 +10824,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj eller granska den aktiva modellen"
+          }
+        }
+      }
+    },
+    "Choose or write an answer, review the next page, then send explicitly. Cancel declines the request; selecting a choice alone sends nothing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj eller skriv ett svar, granska nästa sida och skicka sedan. Avbryt avböjer frågan; att bara välja ett alternativ skickar ingenting."
           }
         }
       }
@@ -12859,6 +13074,17 @@
         }
       }
     },
+    "Configured triggers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurerade utlösare"
+          }
+        }
+      }
+    },
     "Confirmations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12870,6 +13096,17 @@
         }
       }
     },
+    "Connect" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut"
+          }
+        }
+      }
+    },
     "Connect GitHub…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12877,6 +13114,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut GitHub…"
+          }
+        }
+      }
+    },
+    "Connect Source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut källa"
           }
         }
       }
@@ -12905,6 +13153,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut en modelleverantör"
+          }
+        }
+      }
+    },
+    "Connect an Event Source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut en händelsekälla"
           }
         }
       }
@@ -13543,6 +13802,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ConversationOutboxRailView"
+          }
+        }
+      }
+    },
+    "ConversationQuestionCard, ConversationChoiceRow & ConversationDecisionHeader" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ConversationQuestionCard, ConversationChoiceRow & ConversationDecisionHeader"
           }
         }
       }
@@ -16155,6 +16425,28 @@
         }
       }
     },
+    "Disconnect “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Koppla från ”%@”?"
+          }
+        }
+      }
+    },
+    "Disconnected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frånkopplad"
+          }
+        }
+      }
+    },
     "Discover account avatars" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16503,6 +16795,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv utkast med Codex"
+          }
+        }
+      }
+    },
+    "Draft — not listening" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utkast – lyssnar inte"
           }
         }
       }
@@ -17157,6 +17460,17 @@
         }
       }
     },
+    "Enabled in Login Items" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiverad under Inloggningsobjekt"
+          }
+        }
+      }
+    },
     "Encrypted skin archives are not supported." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17278,6 +17592,17 @@
         }
       }
     },
+    "Enter a short name, a full HTTPS URL without embedded credentials, and a scoped API key." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange ett kort namn, en fullständig HTTPS-adress utan inbäddade inloggningsuppgifter och en begränsad API-nyckel."
+          }
+        }
+      }
+    },
     "Enter a whole percentage from 1% to 99%." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17384,6 +17709,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förslaget avfärdades."
+          }
+        }
+      }
+    },
+    "Event sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelsekällor"
+          }
+        }
+      }
+    },
+    "Event: %@\nMatch: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelse: %@\nMatchning: %@\nProjekt: %@\nAgent: %@\nLäge: %@\nArbetskopia: %@\nHögsta antal samtidiga körningar: %lld"
+          }
+        }
+      }
+    },
+    "Event: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelse: %@\nProjekt: %@\nAgent: %@\nLäge: %@\nUtcheckning: %@\nHögsta antal samtidiga körningar: %lld"
           }
         }
       }
@@ -17725,6 +18083,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör igenom en ändring hela vägen och se vad den faktiskt gör"
+          }
+        }
+      }
+    },
+    "Existing project checkout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Befintlig arbetskopia för projektet"
           }
         }
       }
@@ -19264,6 +19633,17 @@
         }
       }
     },
+    "Fixing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtgärdar"
+          }
+        }
+      }
+    },
     "Fixture error: invalid patch was accepted." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20570,6 +20950,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hälsokontrollera Claude Code-uppsättningen och laga det som är trasigt"
+          }
+        }
+      }
+    },
+    "Healthy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fungerar"
           }
         }
       }
@@ -21889,6 +22280,17 @@
         }
       }
     },
+    "Inspect event listeners, create disabled drafts, and report scoped run outcomes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska händelselyssnare, skapa inaktiverade utkast och rapportera avgränsade körningsresultat."
+          }
+        }
+      }
+    },
     "Inspect redacted request metadata, status codes, and durations." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22292,6 +22694,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Isolerad webbläsare"
+          }
+        }
+      }
+    },
+    "Isolated managed worktree" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Isolerat hanterat arbetsträd"
           }
         }
       }
@@ -23968,6 +24381,17 @@
         }
       }
     },
+    "Listen for events, assess them with an agent, and fix only the straightforward ones." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lyssna efter händelser, bedöm dem med en agent och åtgärda bara de enkla fallen."
+          }
+        }
+      }
+    },
     "Listen to Claude FM" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24738,6 +25162,17 @@
         }
       }
     },
+    "Match conditions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matchningsvillkor"
+          }
+        }
+      }
+    },
     "Match found" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24745,6 +25180,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Träff hittad"
+          }
+        }
+      }
+    },
+    "Matched events and their agent runs will appear here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matchade händelser och deras agentkörningar visas här."
           }
         }
       }
@@ -26592,6 +27038,17 @@
         }
       }
     },
+    "No activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen aktivitet"
+          }
+        }
+      }
+    },
     "No agent accounts found." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27307,6 +27764,17 @@
         }
       }
     },
+    "No sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga källor"
+          }
+        }
+      }
+    },
     "No stored revision." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27424,6 +27892,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen transkription registrerades för denna underagent."
+          }
+        }
+      }
+    },
+    "No triggers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga utlösare"
           }
         }
       }
@@ -27853,6 +28332,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Går inte att nå"
+          }
+        }
+      }
+    },
+    "Not running; retry registration to keep listening in the background" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs inte; försök registrera igen för att fortsätta lyssna i bakgrunden"
+          }
+        }
+      }
+    },
+    "Not selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not selected"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte valt"
           }
         }
       }
@@ -30420,6 +30927,17 @@
         }
       }
     },
+    "Paused" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausad"
+          }
+        }
+      }
+    },
     "Peak per %lld days" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30504,6 +31022,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Behörighetsläge"
+          }
+        }
+      }
+    },
+    "Permission needed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permission needed"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåtelse behövs"
           }
         }
       }
@@ -32334,6 +32869,23 @@
         }
       }
     },
+    "Question %lld of %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Question %lld of %lld"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fråga %lld av %lld"
+          }
+        }
+      }
+    },
     "Queue a message for when this turn finishes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33093,6 +33645,17 @@
         }
       }
     },
+    "Ready to verify" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo att verifiera"
+          }
+        }
+      }
+    },
     "Ready when you are." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33177,6 +33740,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bygg om"
+          }
+        }
+      }
+    },
+    "Received" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mottagen"
           }
         }
       }
@@ -35455,6 +36029,17 @@
         }
       }
     },
+    "Review & Activate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska och aktivera"
+          }
+        }
+      }
+    },
     "Review before publishing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35484,6 +36069,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Granska aktuell diff eller en pull request efter buggar och upprensningar"
+          }
+        }
+      }
+    },
+    "Review the exact listener, project, instructions, and authority below. The first stage is read-only; local fixes use a separate permission stage. Threading will not push, deploy, open a review, or write back to the source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska den exakta lyssnaren, projektet, instruktionerna och behörigheten nedan. Det första steget är skrivskyddat; lokala åtgärder använder ett separat behörighetssteg. Threading kommer inte att pusha, driftsätta, öppna en granskning eller skriva tillbaka till källan."
+          }
+        }
+      }
+    },
+    "Review this action before the agent continues." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review this action before the agent continues."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska åtgärden innan agenten fortsätter."
           }
         }
       }
@@ -36049,6 +36662,17 @@
         }
       }
     },
+    "Runs while Threading is closed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs medan Threading är stängt"
+          }
+        }
+      }
+    },
     "Runtime extension" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36551,6 +37175,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Schemalägger…"
+          }
+        }
+      }
+    },
+    "Scoped API key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Begränsad API-nyckel"
           }
         }
       }
@@ -37259,6 +37894,23 @@
         }
       }
     },
+    "Selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selected"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valt"
+          }
+        }
+      }
+    },
     "Selected item with supporting text" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37464,6 +38116,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka en avslutning före spärrtiden"
+          }
+        }
+      }
+    },
+    "Send answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send answer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka svar"
           }
         }
       }
@@ -40281,6 +40950,17 @@
         }
       }
     },
+    "Sonda Demo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sonda Demo"
+          }
+        }
+      }
+    },
     "Sort by" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40468,6 +41148,17 @@
         }
       }
     },
+    "Source: %@\nEvent: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källa: %@\nHändelse: %@\nProjekt: %@\nAgent: %@\nLäge: %@\nUtcheckning: %@\nHögsta antal samtidiga körningar: %lld"
+          }
+        }
+      }
+    },
     "Sources" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40475,6 +41166,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Källor"
+          }
+        }
+      }
+    },
+    "Sources run through Threading’s background listener, so events can wake the app even when its window is closed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källor körs genom Threadings bakgrundslyssnare, så händelser kan väcka appen även när dess fönster är stängt."
           }
         }
       }
@@ -41700,6 +42402,17 @@
         }
       }
     },
+    "Suppressed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undertryckt"
+          }
+        }
+      }
+    },
     "Surface Duo" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42883,6 +43596,23 @@
         }
       }
     },
+    "The agent is waiting for your answer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The agent is waiting for your answer."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten väntar på ditt svar."
+          }
+        }
+      }
+    },
     "The agent left uncommitted changes in its managed workspace." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43246,6 +43976,28 @@
         }
       }
     },
+    "The assessment agent could not be started." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bedömningsagenten kunde inte startas."
+          }
+        }
+      }
+    },
+    "The assessment agent ended without reporting an assessment." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bedömningsagenten avslutades utan att rapportera en bedömning."
+          }
+        }
+      }
+    },
     "The attached images could not be kept, so this was not scheduled." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43264,6 +44016,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Autentiseringsåteranropet avvisar nu felaktigt tillstånd innan en token utväxlas."
+          }
+        }
+      }
+    },
+    "The authorized fix agent could not be started." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den behöriga åtgärdsagenten kunde inte startas."
           }
         }
       }
@@ -43374,6 +44137,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bakgrundsvärden väntar på ditt godkännande i Systeminställningar ▸ Allmänt ▸ Inloggningsobjekt."
+          }
+        }
+      }
+    },
+    "The background listener is unavailable in this build" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bakgrundslyssnaren är inte tillgänglig i den här versionen"
           }
         }
       }
@@ -43664,6 +44438,39 @@
         }
       }
     },
+    "The configured agent cannot guarantee a read-only assessment stage." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den konfigurerade agenten kan inte garantera ett skrivskyddat bedömningssteg."
+          }
+        }
+      }
+    },
+    "The configured agent surface cannot safely receive an unattended second-stage prompt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den konfigurerade agentytan kan inte ta emot en obevakad instruktion för det andra steget på ett säkert sätt."
+          }
+        }
+      }
+    },
+    "The configured project or workspace is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det konfigurerade projektet eller arbetsutrymmet är inte tillgängligt."
+          }
+        }
+      }
+    },
     "The connection is ready, but Threading could not build a pairing code for it. Retrying starts the connection again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43935,6 +44742,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kvällspasset — de lugna timmarna."
+          }
+        }
+      }
+    },
+    "The existing checkout changed after assessment. Review it before allowing automated edits." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den befintliga utcheckningen ändrades efter bedömningen. Granska den innan automatiska ändringar tillåts."
           }
         }
       }
@@ -44276,6 +45094,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Katalogen över förstapartstillägg upprepar %@."
+          }
+        }
+      }
+    },
+    "The fix agent ended without reporting a final result." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtgärdsagenten avslutades utan att rapportera ett slutresultat."
           }
         }
       }
@@ -45915,6 +46744,17 @@
         }
       }
     },
+    "The source was not connected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källan anslöts inte"
+          }
+        }
+      }
+    },
     "The spectrum material's workload reading in place of the brand: seven fixed bands off the shared AgentIntensity envelope, the working count in one-bit figures, and MAX at provider-relative top effort. Decorative, and it drives no timer while hidden, idle, or under Reduce Motion." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46109,6 +46949,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollerna som en värdägd mediaspelare bär: spela/pausa, reglaget och en avläsning med fasta siffror. Den äger ingen klocka — den visar det den fått veta och rapporterar det användaren gjorde."
+          }
+        }
+      }
+    },
+    "The trigger run needs review." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösarkörningen behöver granskas."
           }
         }
       }
@@ -48423,6 +49274,17 @@
         }
       }
     },
+    "Threading could not save the fix-stage permission mode." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte spara behörighetsläget för åtgärdssteget."
+          }
+        }
+      }
+    },
     "Threading could not start %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48808,6 +49670,17 @@
         }
       }
     },
+    "Threading stores the scoped key in your Keychain. Its background listener uses it only to read bounded event metadata from this exact HTTPS service." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading lagrar den begränsade nyckeln i din nyckelring. Bakgrundslyssnaren använder den bara för att läsa avgränsad händelsemetadata från just den här HTTPS-tjänsten."
+          }
+        }
+      }
+    },
     "Threading supports Claude Code, Codex, Grok, Cursor, and OpenCode. Add and switch Claude Code or Codex logins here; the others keep sign-in in their own tools." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48896,6 +49769,17 @@
         }
       }
     },
+    "Threading will listen for matching source events and may start agents in the configured project. Review the trigger in Triggers before approving if anything is unexpected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading lyssnar efter matchande källhändelser och kan starta agenter i det konfigurerade projektet. Granska utlösaren under Utlösare innan du godkänner om något är oväntat."
+          }
+        }
+      }
+    },
     "Threading will quit and reopen as the new version." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48947,6 +49831,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading startas om med sina standardinställningar. Dina projekt och konversationer behålls. De nuvarande inställningarna sparas i en datummärkt mapp bredvid dina data, så ingenting kastas bort."
+          }
+        }
+      }
+    },
+    "Threading will stop this listener and remove its scoped key from Keychain. Existing trigger definitions and run history stay visible, but they cannot receive new events until you reconnect the source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading stoppar lyssnaren och tar bort dess begränsade nyckel från Nyckelhanteraren. Befintliga triggerdefinitioner och körningshistorik finns kvar, men de kan inte ta emot nya händelser förrän du återansluter källan."
           }
         }
       }
@@ -49519,6 +50414,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transkription av %@"
+          }
+        }
+      }
+    },
+    "Trigger fix ready to verify" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösarens åtgärd är redo att verifieras"
+          }
+        }
+      }
+    },
+    "Trigger run failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösarkörningen misslyckades"
+          }
+        }
+      }
+    },
+    "Trigger run needs attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösarkörningen behöver hanteras"
+          }
+        }
+      }
+    },
+    "Triggers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utlösare"
           }
         }
       }
@@ -51752,6 +52691,17 @@
         }
       }
     },
+    "Waiting for approval in System Settings ▸ General ▸ Login Items" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på godkännande i Systeminställningar ▸ Allmänt ▸ Inloggningsobjekt"
+          }
+        }
+      }
+    },
     "Waiting for navigator data." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51759,6 +52709,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på navigatordata."
+          }
+        }
+      }
+    },
+    "Waiting for permission" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for permission"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på tillåtelse"
           }
         }
       }
@@ -51814,6 +52781,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på dig"
+          }
+        }
+      }
+    },
+    "Waiting for your answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your answer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på ditt svar"
           }
         }
       }
@@ -53094,6 +54078,23 @@
         }
       }
     },
+    "Write your answer…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write your answer…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv ditt svar…"
+          }
+        }
+      }
+    },
     "Writes a share-safe diagnostics file and reveals it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53162,6 +54163,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du tillåter Threading i Systeminställningar och läser sedan om tillägget."
+          }
+        }
+      }
+    },
+    "You can answer while work continues." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can answer while work continues."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kan svara medan arbetet fortsätter."
           }
         }
       }
@@ -53261,6 +54279,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dina egna gränser"
+          }
+        }
+      }
+    },
+    "Your answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your answer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ditt svar"
           }
         }
       }

@@ -287,7 +287,7 @@ Adapters make provider wire differences explicit:
 |---|---|
 | Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. A JSONL below `<parent>/subagents/` is durably attributed to that parent independently of whether a hook or native renderer observed it. Message/request identity deduplicates resumes, compactions, forks and copied responses after all files have joined. Repeated streaming partials merge the component-wise maximum of every token counter, so file order cannot retain a smaller output total. |
 | Codex | Stateful rollout parsing carries session metadata, working directory and active model into each `token_count`. A current child rollout retains its exact `parent_thread_id`; older child rollouts are recognised by the first `inter_agent_communication_metadata` boundary, and copied parent usage before it is excluded. Codex input includes cached input on the wire, so the adapter subtracts it once. An immediately repeated `last_token_usage` is suppressed without collapsing two later responses that happen to have equal counts. |
-| OpenCode | Supported CLI exports provide assistant token counts, model, provider route and reported cost. Export revision is the session's durable activity timestamp, so a warm scan does not launch OpenCode for a dormant session. |
+| OpenCode | Supported CLI exports provide assistant token counts, model, provider route and reported cost. Settled exports use the session's work revision. Active and forced scans bypass both cache layers, even when timestamps match; provisional and settled export keys cannot satisfy each other. Warm settled scans do not launch OpenCode, while repeated scans inside one turn can observe new usage. |
 | OpenRouter | It is a billing route reported by an OpenCode export, not a fake fifth runtime. It gets its own coverage row and chart series so routed spend remains visible. |
 | Grok | The measured ACP surface exposes current context occupancy, while its supported transcript export is Markdown. That is partial coverage, not a token estimate derived from characters. An authoritative future export can land behind `GrokUsageAdapter` without changing the ledger or dashboard. |
 
@@ -372,7 +372,9 @@ request.
 
 `UsageLedgerIndex` is the warm authority. Its SQLite source table stores each parser/path pair with
 file size and a freshly read modification timestamp; OpenCode entries use export id plus session
-revision. The comparison happens before any response envelope is read. A changed source replaces
+revision. Export source keys version the work-clock contract, retiring process-clock entries even
+when a legacy fallback date matches, without rebuilding unrelated transcript parsers. The
+comparison happens before any response envelope is read. A changed source replaces
 only its source-to-record edges, while a separate identity table retains one payload globally, so
 warm and cold results have the same exact deduplication. Sources no adapter offered this pass and
 their now-unowned records are removed once at the end of the transaction.

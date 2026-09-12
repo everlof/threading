@@ -579,7 +579,7 @@ capture_fixture() {
     return 1
   fi
   case "${content_size}" in
-    extra-small|small|medium|large|extra-large|extra-extra-large|extra-extra-extra-large) ;;
+    extra-small|small|medium|large|extra-large|extra-extra-large|extra-extra-extra-large|accessibility-medium|accessibility-large|accessibility-extra-large|accessibility-extra-extra-large|accessibility-extra-extra-extra-large) ;;
     *)
       printf 'error: capture %s has unsupported content size: %s\n' \
         "${identifier}" "${content_size}" >&2

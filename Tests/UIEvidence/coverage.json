@@ -112,6 +112,39 @@
       }
     },
     {
+      "id": "trigger-center",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Trigger center",
+      "description": "The complete event-automation destination, including active authority, durable agent-run receipts, and the health and pause controls for background sources.",
+      "states": [
+        "Active trigger",
+        "Completed fix receipt",
+        "Healthy background source",
+        "Source pause control"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "900×640-point destination"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/TriggerCenterRenderTests.swift",
+        "test": "ThreadingTests/TriggerCenterRenderTests/testRendersConfigurationActivityAndSources"
+      },
+      "capture": {
+        "glob": "trigger-center-*.png"
+      }
+    },
+    {
       "id": "scheduled-session-placeholder",
       "kind": "surface",
       "status": "implemented",
@@ -385,6 +418,49 @@
       },
       "capture": {
         "glob": "settings-canvas-*.png"
+      }
+    },
+    {
+      "id": "native-chat-showcase",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Native chat interaction showcase",
+      "description": "A bounded script in the shipping virtualized native conversation, with separate identities for answers, live work, permission, usage recovery, interruption and streaming.",
+      "states": [
+        "Rich answer",
+        "Working",
+        "Permission",
+        "Usage limit",
+        "Interrupted",
+        "Streaming",
+        "Question",
+        "Selected answer",
+        "Expanded work",
+        "Long prompt"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Swiss Minimalist"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Theme-authored"
+        ],
+        "sizes": [
+          "900×780-point native conversation pane",
+          "480×780-point decision pane"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/NativeChatShowcaseTests.swift",
+        "test": "ThreadingTests/NativeChatShowcaseTests/testRendersNativeChatShowcase"
+      },
+      "capture": {
+        "glob": "native-chat-*.png"
       }
     },
     {
@@ -822,6 +898,27 @@
       }
     },
     {
+      "id": "browser-inline-annotations",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Inline browser annotations",
+      "description": "The native note editor over a live WebKit page in the shipping detached-browser tab host.",
+      "states": ["New note", "Existing note with delete", "Empty note with disabled save", "Compact viewport", "Live theme switch", "Scrolled nested iframe", "Matching page colour", "Saturated page", "Checkerboard and busy artwork"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["430 points", "760 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/BrowserAnnotationEditingTests.swift",
+        "test": "ThreadingTests/BrowserAnnotationEditingTests/testRendersInlineEditorInBrowserHostAcrossThemesAndWidths"
+      },
+      "capture": {
+        "glob": "browser-inline-annotation-*.png"
+      }
+    },
+    {
       "id": "browser-responsive-review",
       "kind": "surface",
       "status": "implemented",
@@ -897,27 +994,6 @@
         "appearances": ["Dark"],
         "sizes": ["960×640-point product shell"]
       },
-    {
-      "id": "browser-inline-annotations",
-      "kind": "surface",
-      "status": "implemented",
-      "priority": "important",
-      "title": "Inline browser annotations",
-      "description": "The native note editor over a live WebKit page in the shipping detached-browser tab host.",
-      "states": ["New note", "Existing note with delete", "Empty note with disabled save", "Compact viewport", "Live theme switch", "Scrolled nested iframe", "Matching page colour", "Saturated page", "Checkerboard and busy artwork"],
-      "matrix": {
-        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
-        "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["430 points", "760 points"]
-      },
-      "source": {
-        "path": "Tests/ThreadingTests/BrowserAnnotationEditingTests.swift",
-        "test": "ThreadingTests/BrowserAnnotationEditingTests/testRendersInlineEditorInBrowserHostAcrossThemesAndWidths"
-      },
-      "capture": {
-        "glob": "browser-inline-annotation-*.png"
-      }
-    },
       "source": {
         "path": "Tests/ThreadingTests/MediaInspectorTests.swift",
         "test": "ThreadingTests/MediaInspectorTests/testRendersLongCollectionRailOnFirstLayout"
@@ -1428,7 +1504,7 @@
         "journey": "File change and relaunch recovery"
       }
     },
-  {
+    {
     "id": "stop-and-continue",
       "kind": "journey",
       "status": "implemented",
@@ -1448,7 +1524,7 @@
       "journey": "Stop and continue"
     }
   },
-  {
+    {
     "id": "move-chat-between-checkouts",
     "kind": "journey",
     "status": "implemented",
@@ -1476,7 +1552,35 @@
       "journey": "Move chat between checkouts"
     }
   },
-  {
+    {
+      "id": "inline-question-answer",
+      "kind": "journey",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Answer an inline question",
+      "description": "An actual app-server question waits for explicit choices, returns each answer by its exact ID, and leaves the same conversation usable.",
+      "states": [
+        "Waiting without a default answer",
+        "Review final choice",
+        "Answer delivered and card removed"
+      ],
+      "matrix": {
+        "providers": [
+          "Codex fixture agent"
+        ],
+        "sizes": [
+          "1400×900 points"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingUITests/CodexQuestionJourneyUITests.swift",
+        "test": "ThreadingUITests/CodexQuestionJourneyUITests/testQuestionWaitsForExplicitAnswersAndResumesTheSameChat"
+      },
+      "capture": {
+        "journey": "Answer an inline question"
+      }
+    },
+    {
     "id": "permission-refusal-recovery",
       "kind": "journey",
       "status": "planned",

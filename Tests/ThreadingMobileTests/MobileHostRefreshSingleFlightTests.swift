@@ -42,6 +42,44 @@ final class MobileHostRefreshSingleFlightTests: XCTestCase {
         )
     }
 
+    /// The phase stays online through a lost event socket, so an open that trusted it took the
+    /// model's client, dialled the origin that had just died, and waited out a hello deadline
+    /// there while the dashboard's recovery found the Mac on another route beside it
+    /// (2026-09-11: the person backed out of a chat that "felt stuck"). An open joins that
+    /// recovery instead; without a catalogue or an online phase it needs one regardless.
+    func testAnOpenJoinsAPendingDashboardRecoveryBeforeItDials() {
+        XCTAssertFalse(
+            MobileConnectionRecoveryPolicy.openNeedsHostRecovery(
+                isOnline: true,
+                hasCatalogue: true,
+                dashboardRecoveryPending: false
+            ),
+            "an authoritative catalogue and no loss in progress dial at once"
+        )
+        XCTAssertTrue(
+            MobileConnectionRecoveryPolicy.openNeedsHostRecovery(
+                isOnline: true,
+                hasCatalogue: true,
+                dashboardRecoveryPending: true
+            ),
+            "the client names the route that just failed until the recovery replaces it"
+        )
+        XCTAssertTrue(
+            MobileConnectionRecoveryPolicy.openNeedsHostRecovery(
+                isOnline: false,
+                hasCatalogue: true,
+                dashboardRecoveryPending: false
+            )
+        )
+        XCTAssertTrue(
+            MobileConnectionRecoveryPolicy.openNeedsHostRecovery(
+                isOnline: true,
+                hasCatalogue: false,
+                dashboardRecoveryPending: false
+            )
+        )
+    }
+
     func testConcurrentWaitersRunOneHostRecovery() async {
         let coordinator = MobileHostRefreshSingleFlight()
         let gate = HostRefreshTestGate()

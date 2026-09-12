@@ -22,6 +22,7 @@ enum NativeSidebarFactDependency: String, CaseIterable, Sendable {
     case sessionCreated
     case sessionLastActive
     case sessionLastTurn
+    case sessionLastUsed
     case sessionManualOrder
     case sessionModel
     case sessionManagerRelationship
@@ -47,6 +48,7 @@ enum NativeSidebarFactDependency: String, CaseIterable, Sendable {
 /// `displayTitle -> session.title` explicit without making the fact catalog main-actor isolated.
 enum NativeSidebarMemberAlias: String, CaseIterable, Sendable {
     case sessionDisplayTitle = "AgentSession.displayTitle"
+    case sessionLastUsed = "AgentSession.lastUsedAt"
     case sessionProvider = "AgentSession.kind"
     case sessionAccount = "AgentSession.accountHandle"
     case sessionParentFork = "AgentSession.forkedFrom"
@@ -93,6 +95,7 @@ struct NativeSidebarSessionFacts: Equatable, Sendable {
     let createdAt: Date
     let lastActiveAt: Date
     let lastTurnAt: Date?
+    var lastWorkAt: Date? = nil
     let manualOrder: Int
     let model: String?
     let managerID: String?
@@ -304,8 +307,13 @@ enum HostFactCatalog {
             parity: [.sessionLastTurn]
         ) { $0.lastTurnAt.map(ExtensionFactValue.date) },
         session(
-            ExtensionHostFactKey.sessionLastUsedAt, "Last Used At", .date, dateUsages
-        ) { .date($0.lastTurnAt ?? $0.lastActiveAt) },
+            ExtensionHostFactKey.sessionLastUsedAt, "Last Used At", .date, dateUsages,
+            parity: [.sessionLastUsed], nativeAliases: [.sessionLastUsed]
+        ) {
+            .date(AgentSession.conversationRecency(
+                lastActiveAt: $0.lastActiveAt, lastTurnAt: $0.lastTurnAt, lastWorkAt: $0.lastWorkAt
+            ))
+        },
         session(
             ExtensionHostFactKey.sessionManualOrder, "Manual Order", .integer, [.sortable],
             parity: [.sessionManualOrder],

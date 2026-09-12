@@ -190,6 +190,27 @@ extension AgentCommand {
   static func proposeStorageCleanup(_ value: StorageCleanupArguments) -> Self {
     builtIn(.proposeStorageCleanup, value)
   }
+  static func listTriggerSources(_ value: EmptyToolArguments = .init()) -> Self {
+    builtIn(.listTriggerSources, value)
+  }
+  static func listTriggers(_ value: EmptyToolArguments = .init()) -> Self {
+    builtIn(.listTriggers, value)
+  }
+  static func listTriggerRuns(_ value: TriggerReferenceArguments) -> Self {
+    builtIn(.listTriggerRuns, value)
+  }
+  static func createTriggerDraft(_ value: CreateTriggerDraftArguments) -> Self {
+    builtIn(.createTriggerDraft, value)
+  }
+  static func proposeTriggerActivation(_ value: TriggerReferenceArguments) -> Self {
+    builtIn(.proposeTriggerActivation, value)
+  }
+  static func reportTriggerAssessment(_ value: ReportTriggerAssessmentArguments) -> Self {
+    builtIn(.reportTriggerAssessment, value)
+  }
+  static func reportTriggerResult(_ value: ReportTriggerResultArguments) -> Self {
+    builtIn(.reportTriggerResult, value)
+  }
   static func listSettings(_ value: EmptyToolArguments) -> Self { builtIn(.listSettings, value) }
   static func notifyUser(_ value: NotifyUserArguments) -> Self { builtIn(.notifyUser, value) }
   static func listThemes(_ value: ListThemesArguments) -> Self { builtIn(.listThemes, value) }

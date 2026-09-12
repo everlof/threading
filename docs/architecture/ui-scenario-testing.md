@@ -41,7 +41,16 @@ The launch harness assigns a fresh `CFFIXED_USER_HOME` and matching `HOME` befor
 process starts. Foundation preferences, Application Support, the instance lock, provider account
 discovery, and child processes therefore see one disposable scenario home rather than the
 developer's state. Cleanup refuses any directory that lacks both the exact generated shape and
-the harness marker.
+the harness marker. The same harness owns the actual launch and explicitly activates the new
+process before a scenario interacts with it. On macOS, `XCUIApplication.launch()` alone can leave
+an unrelated application covering the test window—particularly when the installed copy of
+Threading remains open—while its accessibility tree is still queryable. A scenario must therefore
+use `UIScenarioSandbox.launch(_:)`, not call `launch()` directly.
+
+Codex protocol fixtures explicitly disable `ptyHostEnabled` in their launch arguments: the
+signed synthetic provider belongs to the disposable application process and must end with it.
+Background-host durability has its own test lane; routing these fixtures through the daemon also
+makes its Unix socket path exceed the limit inside the UI runner's temporary home.
 
 `THREADING_UI_SCENARIO_HOME` is that home's name, and it is also how the application recognises
 that a machine rather than a person is driving it. `AutomatedRun` reads it, so the refusal beep an

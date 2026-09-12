@@ -213,6 +213,14 @@ enum ManagedGitWorkspace {
         GitInfo.repositoryRoot(for: project.folderPath) != nil
     }
 
+    /// Last-moment write gate for an unattended agent using the user's existing checkout.
+    /// A non-Git project has no repository worktree to protect and is therefore clean for this
+    /// particular check; ordinary filesystem permissions still govern the session.
+    static func existingCheckoutIsClean(_ path: String) throws -> Bool {
+        guard let root = GitInfo.repositoryRoot(for: path) else { return true }
+        return try isClean(root)
+    }
+
     /// Applies the selected local delivery and turns every validation refusal into the durable
     /// state the session coordinator presents. Publication has its own asynchronous path; this
     /// method owns only the two local outcomes selected in the composer.

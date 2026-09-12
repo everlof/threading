@@ -1,0 +1,54 @@
+{
+  "id": "codex-question-resume",
+  "provenance": {
+    "protocolVersion": "app-server-1",
+    "providerVersion": "0.154.0",
+    "recordedAt": "2026-09-10T17:30:00Z"
+  },
+  "provider": "codex",
+  "steps": [
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":1,\"method\":\"initialize\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":1,\"result\":{\"userAgent\":\"threading-ui-fixture/1\"}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"initialized\"}"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":2,\"method\":\"thread/resume\",\"params\":{\"threadId\":\"fixture-thread-question\"}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-question\",\"name\":\"Question fixture\",\"model\":\"gpt-5.6\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project\",\"skills\":[],\"errors\":[]}]}}\n"
+    },
+    {
+      "afterMilliseconds": 100,
+      "kind": "exit",
+      "status": 0
+    }
+  ],
+  "title": "Synthetic Codex question resume handshake",
+  "transport": "codex-app-server",
+  "version": 1
+}

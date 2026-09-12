@@ -31,7 +31,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
         let targetSize = sandbox.configure(firstLaunch)
         fixture.configure(firstLaunch, scenarioRoot: sandbox.root)
         application = firstLaunch
-        firstLaunch.launch()
+        sandbox.launch(firstLaunch)
 
         let firstWindow = firstLaunch.windows.firstMatch
         XCTAssertTrue(firstWindow.waitForExistence(timeout: 20))
@@ -176,7 +176,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
         let secondTargetSize = sandbox.configure(secondLaunch)
         fixture.configure(secondLaunch, scenarioRoot: sandbox.root)
         application = secondLaunch
-        secondLaunch.launch()
+        sandbox.launch(secondLaunch)
 
         let secondWindow = secondLaunch.windows.firstMatch
         XCTAssertTrue(secondWindow.waitForExistence(timeout: 20))

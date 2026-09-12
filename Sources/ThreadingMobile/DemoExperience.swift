@@ -13,7 +13,8 @@ import ThreadingRemoteKit
 /// same type-tagged JSON the Mac's WebSocket sends and feeds it through the connection's real
 /// message handler, so hello handling, snapshot application, and submit acknowledgements all
 /// run the production path. Only the socket is skipped — which is what keeps the demo from
-/// quietly drifting away from real behavior as the protocol grows.
+/// quietly drifting away from real behavior as the protocol grows. Server messages also cross
+/// the connection's ordered worker codec instead of making the UI actor serialize fixture data.
 @MainActor
 enum DemoExperience {
 
@@ -57,7 +58,7 @@ enum DemoExperience {
 /// `begin` delivers the same opening the real server sends — `hello`, then the conversation
 /// snapshot or terminal replay — and `handleClient` answers the messages the app sends back.
 /// Everything crosses the same JSON boundary a socket would, via
-/// `RemoteSessionConnection.receiveDemoServerText`.
+/// `RemoteSessionConnection.receiveDemoServerMessage`.
 @MainActor
 final class DemoSessionScript {
 
@@ -286,11 +287,8 @@ final class DemoSessionScript {
 
     // MARK: - Delivery
 
-    private func deliver<Message: Encodable>(_ message: Message) {
-        guard let connection,
-              let data = try? JSONEncoder().encode(message),
-              let text = String(data: data, encoding: .utf8) else { return }
-        connection.receiveDemoServerText(text)
+    private func deliver<Message: Encodable & Sendable>(_ message: Message) {
+        connection?.receiveDemoServerMessage(message)
     }
 
     // MARK: - Fixture content

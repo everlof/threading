@@ -92,8 +92,11 @@ final class ComponentGalleryViewController: NSViewController {
         "BrowserFindBar",
         "ChipView",
         "ColorPairSpecimenView",
+        "ConversationChoiceRow",
         "ConversationContextRailView",
+        "ConversationDecisionHeader",
         "ConversationHandoffView",
+        "ConversationQuestionCard",
         "ConversationOutboxRailView",
         "ConversationOutboxRowView",
         "ConversationSearchWindowViewController",
@@ -1905,6 +1908,12 @@ final class ComponentGalleryViewController: NSViewController {
                     contextRail
                 ),
                 story(
+                    "ConversationQuestionCard, ConversationChoiceRow & ConversationDecisionHeader",
+                    "Choose or write an answer, review the next page, then send explicitly. "
+                        + "Cancel declines the request; selecting a choice alone sends nothing.",
+                    makeConversationQuestionStory()
+                ),
+                story(
                     "ConversationOutboxRailView",
                     "Messages waiting to be sent. Drag a waiting row to reorder it, click one to "
                         + "edit it, ⌘↑/⌘↓ from the keyboard. The row already handed to the agent "
@@ -1950,6 +1959,27 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    private func makeConversationQuestionStory() -> NSView {
+        let request = ConversationQuestionRequest(id: UUID(), questions: [
+            .init(id: "density", header: "Density",
+                  prompt: "How much work detail should the chat show?",
+                  options: [
+                    .init(label: "Compact", detail: "Keep completed work behind a disclosure."),
+                    .init(label: "Expanded", detail: "Show every step in the transcript.")
+                  ], allowsOther: true),
+            .init(id: "review", header: "Review",
+                  prompt: "What should we check first?",
+                  options: [
+                    .init(label: "Interactions", detail: "Check scrolling and keyboard behavior."),
+                    .init(label: "Appearance", detail: "Check the light and dark themes.")
+                  ], allowsOther: false)
+        ], blocksTurn: true)
+        return ConversationQuestionCard(request: request) { [weak self] answers in
+            self?.showReceipt(answers?.sorted { $0.key < $1.key }
+                .map { $0.value }.joined(separator: " · ") ?? L10n.string("Cancel"))
+        }
     }
 
     private func makeFeedbackSection() -> NSView {

@@ -780,6 +780,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // answered on a SIP-enabled Mac — it short-circuits before touching launchd. Registration
         // is attempted and never required: every failure leaves sessions on the in-process PTY.
         PTYHostRegistrationCoordinator.shared.start(settings: environment.settings)
+        TriggerDaemonInboxMonitor.shared.start()
+
+        // Source events committed before a crash are replayed only after the main window and its
+        // session coordinator exist, so every ready dispatch has a lifecycle owner to receive it.
+        Task { await TriggerRuntime.shared.start() }
 
         // The shim directory that makes `~/.local/bin/threading-ptyd` survive a bundle move.
         // Every launch, because the bundle is exactly what moves: the autoinstall hook replaces

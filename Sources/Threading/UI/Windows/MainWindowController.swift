@@ -3843,6 +3843,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// What the pane is showing now, as a page — a session, a project's composer, or nothing.
     /// Settings is not one of the answers: it is what the caller is about to replace.
     private func currentPage() -> NavigationHistory.Page? {
+        if containerViewController.isShowingTriggers { return .triggers }
         if let sessionID = containerViewController.currentSessionID {
             return .session(sessionID)
         }
@@ -3874,6 +3875,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         case .settingsAISearch:
             showSettingsAISearchSurface()
+
+        case .triggers:
+            showTriggers()
         }
     }
 
@@ -4518,6 +4522,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 syncDisplayPane(to: nil)
                 recordVisit(.composer(projectID))
 
+            case .triggers:
+                showTriggers()
+
             case .settings, .settingsAISearch, .none:
                 containerViewController.show(sessionID: nil)
             }
@@ -5040,6 +5047,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID) {
+        sidebar.setTriggersMode(false)
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
         let prompt = sessionCoordinator.takePendingPrompt(for: sessionID)
@@ -5071,6 +5079,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         _ sidebar: ProjectSidebarViewController,
         didSelectTerminal terminalID: TerminalID
     ) {
+        sidebar.setTriggersMode(false)
         let previousSessionID = containerViewController.currentSessionID
         let previousTerminalID = containerViewController.currentTerminalID
 
@@ -5096,6 +5105,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// A project has no terminal of its own, so selecting one offers the composer: the
     /// choices that are only made when a session starts.
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectProject projectID: ProjectID) {
+        sidebar.setTriggersMode(false)
         let previousSessionID = containerViewController.currentSessionID
         let previousTerminalID = containerViewController.currentTerminalID
         containerViewController.showComposer(projectID: projectID)
@@ -5318,7 +5328,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
                 return !terminalIDs.contains(terminalID)
             case let .composer(projectID):
                 return projectID != project.id
-            case .settings, .settingsAISearch:
+            case .settings, .settingsAISearch, .triggers:
                 return true
             }
         }
@@ -5342,7 +5352,25 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebarDidToggleSettings(_: ProjectSidebarViewController) {
+        sidebarViewController.setTriggersMode(false)
         toggleSettings()
+    }
+
+    func projectSidebarDidSelectTriggers(_: ProjectSidebarViewController) {
+        showTriggers()
+    }
+
+    func showTriggers() {
+        window?.makeKeyAndOrderFront(nil)
+        if containerViewController.isShowingSettings {
+            sidebarViewController.setSettingsMode(false)
+            workspaceSidebarViewController.setSettingsOverride(false)
+        }
+        sidebarViewController.setTriggersMode(true)
+        containerViewController.showTriggers()
+        syncDisplayPane(to: nil)
+        updateSessionTitleItem()
+        recordVisit(.triggers)
     }
 
     func projectSidebar(

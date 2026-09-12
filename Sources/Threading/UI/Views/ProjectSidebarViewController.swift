@@ -142,6 +142,19 @@ final class ProjectSidebarViewController: NSViewController {
         button.action = #selector(settingsClicked)
         return button
     }()
+    private lazy var triggersButton: ThemedButton = {
+        let button = ThemedButton()
+        button.title = L10n.string("Triggers")
+        button.image = NSImage(
+            systemSymbolName: "bolt.badge.clock",
+            accessibilityDescription: L10n.string("Triggers")
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        button.isBordered = false
+        button.applyFont(.controlRegular)
+        button.target = self
+        button.action = #selector(triggersClicked)
+        return button
+    }()
     /// The global silence gate, at the band's trailing edge.
     ///
     /// The speaker becomes slashed while the gate holds, and the selected surface reinforces
@@ -159,16 +172,20 @@ final class ProjectSidebarViewController: NSViewController {
         button.onPress = { [weak self] in self?.silenceClicked() }
         return button
     }()
-    /// Settings is the sidebar's one standing destination. Surfaces that live in the *trailing*
-    /// panel are opened from that panel — see `DisplayPaneController.newTabEntries(for:)` — so
-    /// this column never carries a permanent door to something it does not show.
+    /// The sidebar's standing global destinations. Surfaces that live in the *trailing* panel
+    /// are opened from that panel — see `DisplayPaneController.newTabEntries(for:)` — so this
+    /// column never carries a permanent door to something it does not show.
     /// The trailing silence gate is not a counterexample: it opens nothing and goes nowhere,
     /// it reports and changes one piece of the app's own live state, and the rule is about
     /// destinations rather than about controls.
     // A non-release build carries its channel mark beside Settings — see `BuildChannelBadge`.
     private lazy var footer = PaneFooterView(
-        leading: [settingsButton, BuildChannelBadge.make()].compactMap { $0 },
+        leading: [triggersButton, settingsButton, BuildChannelBadge.make()].compactMap { $0 },
         trailing: [silenceButton],
+        // A split pane owns its width. The new destination is the footer member whose title
+        // truncates at the narrow floor; without naming that ownership its intrinsic title
+        // outranks the sidebar holding priority and silently raises the floor by twenty points.
+        compressing: triggersButton,
         margin: .paneEdge
     )
 
@@ -633,6 +650,10 @@ private extension ProjectSidebarViewController {
         delegate?.projectSidebarDidToggleSettings(self)
     }
 
+    @objc private func triggersClicked() {
+        delegate?.projectSidebarDidSelectTriggers(self)
+    }
+
     /// Toggles the gate and nothing else. The button is not set here: the setting's own change
     /// event is what moves it, so this window, a second window, the Settings row and the menu
     /// item all follow the same one signal rather than each other.
@@ -664,6 +685,12 @@ private extension ProjectSidebarViewController {
     private func observeStoreChanges() {
         appEvents.observe(ProjectsDidChange.self) { [weak self] change in
             self?.projectsDidChange(change)
+        }
+        appEvents.observe(SessionWorkDidChange.self) { [weak self] event in
+            guard let self, projectNodesBySessionID[event.sessionID] != nil else { return }
+            if NativeSidebarPipelineOptions.current.sessionOrder == .recentActivity {
+                applySessionOrderChange(event.sessionID)
+            }
         }
         appEvents.observe(NativeSidebarArrangementDidChange.self) { [weak self] _ in
             self?.reload()
@@ -1150,7 +1177,7 @@ extension ProjectSidebarViewController {
         #endif
     }
 
-    /// Reorders the one project whose session title changed while Name order is active.
+    /// Reorders the one project whose title or work clock changed under the active ordering.
     ///
     /// A title cannot add a row, change repository grouping, move a terminal, or change a
     /// session's branch/lineage. Rebuilding all projects for it made one 5,000-session title
@@ -2800,6 +2827,7 @@ extension ProjectSidebarViewController {
             addButton.isHidden = true
             arrangeButton.isHidden = true
             settingsButton.contentTintColor = Design.Text.label
+            triggersButton.contentTintColor = Design.Text.secondary
         } else {
             // The query leaves with the visit that asked it — `SettingsSidebar.resetSearch`
             // says why. Cleared on the way *out* rather than on the way in, so nothing about
@@ -2812,6 +2840,11 @@ extension ProjectSidebarViewController {
             arrangeButton.isHidden = false
             settingsButton.contentTintColor = Design.Text.secondary
         }
+    }
+
+    func setTriggersMode(_ on: Bool) {
+        triggersButton.contentTintColor = on ? Design.Text.label : Design.Text.secondary
+        if on, isSettingsMode { setSettingsMode(false) }
     }
 
     private func makeSettingsSidebar() -> SettingsSidebar {
@@ -4631,6 +4664,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didRemoveProject project: Project)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
+    func projectSidebarDidSelectTriggers(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
     /// A search result named a setting: open its page and scroll to the row `anchorTitle`
     /// names, marking it — see `SettingsRowReveal`.

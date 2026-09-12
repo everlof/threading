@@ -555,7 +555,7 @@ final class SidebarBrandViewTests: XCTestCase {
     // MARK: - The sidebar's shape
 
     /// The header carries the brand at its leading edge and the list's two controls at its
-    /// trailing one; the footer carries global destinations, icon and word, at the leading
+    /// trailing one; the footer carries global destinations, icon and word, from the leading
     /// margin.
     @MainActor
     func testTheSidebarPlacesBrandAddAndSettingsWhereTheDesignSays() throws {
@@ -586,20 +586,25 @@ final class SidebarBrandViewTests: XCTestCase {
             "the footer has no titled Settings button"
         )
         let footer = try XCTUnwrap(ancestor(of: settings, as: PaneFooterView.self))
-        let inFooter = footer.convert(settings.frame, from: settings.superview)
+        let triggers = try XCTUnwrap(
+            descendants(of: sidebar.view)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title == L10n.string("Triggers") },
+            "the footer has no titled Triggers destination"
+        )
+        XCTAssertEqual(footer, ancestor(of: triggers, as: PaneFooterView.self))
         XCTAssertLessThan(
-            inFooter.midX,
-            footer.bounds.midX,
-            "Settings moved to the leading edge and should sit in the left half of the band"
+            footer.convert(triggers.frame, from: triggers.superview).minX,
+            footer.convert(settings.frame, from: settings.superview).minX,
+            "global destinations no longer read from the footer's leading edge"
         )
     }
 
-    /// Settings is the only standing destination this column carries. Current Theme opens into
-    /// the *trailing* panel, so its door moved to that panel's `+` — a sidebar row for it was a
-    /// permanent fixture pointing at something the sidebar never shows. Asserted with theme tools
-    /// deliberately on, which is the state that used to reveal the row.
+    /// Current Theme opens into the *trailing* panel, so its door stays on that panel's `+` rather
+    /// than becoming a third global destination here. Asserted with theme tools deliberately on,
+    /// which is the state that used to reveal the row.
     @MainActor
-    func testTheFooterCarriesSettingsAloneEvenWhileThemeToolsAreEnabled() throws {
+    func testTheFooterCarriesOnlyGlobalDestinationsEvenWhileThemeToolsAreEnabled() throws {
         let settings = AppSettings.shared
         let previous = settings.disabledToolGroupIDs
         defer { settings.disabledToolGroupIDs = previous }
@@ -616,6 +621,7 @@ final class SidebarBrandViewTests: XCTestCase {
         )
 
         let settingsButton = try XCTUnwrap(buttons.first { $0.title == L10n.string("Settings") })
+        XCTAssertNotNil(buttons.first { $0.title == L10n.string("Triggers") })
         let footer = try XCTUnwrap(ancestor(of: settingsButton, as: PaneFooterView.self))
         XCTAssertFalse(footer.isHidden)
         XCTAssertEqual(
@@ -625,7 +631,8 @@ final class SidebarBrandViewTests: XCTestCase {
         )
     }
 
-    /// The brand and Settings sit on the **list's** margin, not on the platform's.
+    /// The brand and the first global destination sit on the **list's** margin, not on the
+    /// platform's.
     ///
     /// Both bands run the sidebar's full width, so the corner-adapted region they used to
     /// measure from held the window controls clear for their whole height — see
@@ -633,26 +640,28 @@ final class SidebarBrandViewTests: XCTestCase {
     /// the allowance anyway indented the brand and the gear some eighty points past every row
     /// between them: one column read as three.
     @MainActor
-    func testTheBrandAndSettingsSitOnTheSameMarginAsTheList() throws {
+    func testTheBrandAndFirstDestinationSitOnTheSameMarginAsTheList() throws {
         AppThemeLibrary.apply(.system)
         let sidebar = ProjectSidebarViewController()
         sidebar.view.frame = NSRect(x: 0, y: 0, width: 240, height: 600)
         sidebar.view.layoutSubtreeIfNeeded()
 
         let brand = try XCTUnwrap(descendant(of: sidebar.view, as: SidebarBrandView.self))
-        let settings = try XCTUnwrap(
+        let firstDestination = try XCTUnwrap(
             descendants(of: sidebar.view)
                 .compactMap { $0 as? ThemedButton }
-                .first { $0.title == L10n.string("Settings") }
+                .first { $0.title == L10n.string("Triggers") }
         )
 
         let brandInk = sidebar.view.convert(brand.bounds, from: brand).minX
-        let settingsInk = sidebar.view.convert(settings.bounds, from: settings).minX
-            + settings.opticalHorizontalInset
+        let destinationInk = sidebar.view.convert(
+            firstDestination.bounds,
+            from: firstDestination
+        ).minX + firstDestination.opticalHorizontalInset
 
         XCTAssertEqual(brandInk, Design.Spacing.inset, accuracy: 0.5)
         XCTAssertEqual(
-            settingsInk,
+            destinationInk,
             brandInk,
             accuracy: 1,
             "the top of the column and the bottom of it should start on one line"

@@ -200,9 +200,11 @@ final class TerminalContainerViewController: NSViewController {
     private var settingsPage: NSViewController?
     private var settingsPageCache: [String: NSViewController] = [:]
     private var settingsAISearch: SettingsAISearchViewController?
+    private var triggerCenter: TriggerCenterViewController?
 
     /// Whether settings is the surface currently on screen, so the window can title the pane.
     var isShowingSettings: Bool { settingsPage != nil }
+    var isShowingTriggers: Bool { triggerCenter?.view.superview != nil }
 
     /// The non-session sidebar destination currently shown. These make the toolbar tab derive
     /// from the same selection as the content pane instead of falling back to a generic title.
@@ -677,6 +679,35 @@ final class TerminalContainerViewController: NSViewController {
     func showManagerComposer(projectID: ProjectID) {
         showComposer(projectID: projectID)
         composerViewController.presetManagerRole()
+    }
+
+    /// Shows the authority-bearing trigger workspace as a first-class content destination.
+    /// Unlike Settings it uses the full pane width and leaves the project sidebar in place.
+    func showTriggers() {
+        consumeComposerHandoff(for: nil)
+        detachCurrentChild()
+        currentComposerProjectID = nil
+        currentSettingsPageID = nil
+        currentTerminalID = nil
+        currentSessionID = nil
+        applyDrawer(for: nil)
+        placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
+        hideComposerIfLoaded()
+        applyPaneBackground(.chrome)
+
+        let controller = triggerCenter ?? TriggerCenterViewController()
+        triggerCenter = controller
+        addChild(controller)
+        let content = controller.view
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: contentTopAnchor),
+            content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
     }
 
     /// Shows a settings page centred in the pane, replacing whatever session or composer was on
@@ -1688,6 +1719,11 @@ final class TerminalContainerViewController: NSViewController {
         // replaced the one it was carrying a box between.
         composerHandoff.finish()
         scheduledPlaceholderView?.isHidden = true
+
+        if let triggerCenter, triggerCenter.view.superview != nil {
+            triggerCenter.view.removeFromSuperview()
+            triggerCenter.removeFromParent()
+        }
 
         if let page = settingsPage {
             page.view.removeFromSuperview()

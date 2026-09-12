@@ -10,12 +10,133 @@ private let remoteInteractionDiagnosticQueue = DispatchQueue(
     label: "codes.threading.mobile-diagnostics.interaction"
 )
 
+enum RemoteWireEncodingFailure: LocalizedError, Equatable, Sendable {
+    case backpressure
+    case encodingFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .backpressure:
+            return "The remote connection stopped accepting messages."
+        case .encodingFailed:
+            return "Threading could not encode a remote message."
+        }
+    }
+}
+
+/// One ordered, bounded JSON lane for a session socket.
+///
+/// A prompt or snapshot can carry externally sized strings, so encoding never belongs to the
+/// main actor. Calls are admitted synchronously in O(1), encoded in admission order, and dropped
+/// when their connection generation is retired. The class is `@unchecked Sendable` because its
+/// only mutable state is confined by `stateLock`, while `encodingQueue` owns codec execution.
+final class RemoteWireEncodingLane: @unchecked Sendable {
+    typealias Completion = @Sendable (Result<String, RemoteWireEncodingFailure>) -> Void
+
+    private let encodingQueue: DispatchQueue
+    private let stateLock = NSLock()
+    private let maximumPendingMessages: Int
+    private var currentGeneration: Int
+    private var pendingMessages = 0
+
+    init(
+        label: String,
+        generation: Int = 0,
+        maximumPendingMessages: Int = RemoteMobileConnectionDefaults.maximumPendingWireMessages
+    ) {
+        encodingQueue = DispatchQueue(label: label, qos: .userInitiated)
+        currentGeneration = generation
+        self.maximumPendingMessages = max(1, maximumPendingMessages)
+    }
+
+    /// Retires queued work from the previous socket without waiting for codec work on the UI
+    /// actor. Already-enqueued closures observe the new generation and return before encoding.
+    func advance(to generation: Int) {
+        stateLock.lock()
+        currentGeneration = generation
+        pendingMessages = 0
+        stateLock.unlock()
+    }
+
+    /// A successful return transfers ownership: the lane will either deliver the encoded text
+    /// or discard it because its socket generation was retired.
+    func enqueue<Message: Encodable & Sendable>(
+        _ message: Message,
+        generation: Int,
+        completion: @escaping Completion
+    ) throws {
+        stateLock.lock()
+        guard generation == currentGeneration else {
+            stateLock.unlock()
+            return
+        }
+        guard pendingMessages < maximumPendingMessages else {
+            stateLock.unlock()
+            throw RemoteWireEncodingFailure.backpressure
+        }
+        pendingMessages += 1
+        stateLock.unlock()
+
+        encodingQueue.async { [weak self] in
+            guard let self, self.isCurrent(generation) else { return }
+            let result: Result<String, RemoteWireEncodingFailure>
+            do {
+                result = .success(String(decoding: try JSONEncoder().encode(message), as: UTF8.self))
+            } catch {
+                result = .failure(.encodingFailed(error.localizedDescription))
+            }
+            guard self.completeIfCurrent(generation) else { return }
+            completion(result)
+        }
+    }
+
+    /// Places an already encoded frame in the same order as JSON work. Demo terminal payloads
+    /// use this path so a binary replay cannot overtake the `hello` text frame that authorizes
+    /// it merely because the replay itself needs no codec work.
+    func enqueuePrepared(
+        generation: Int,
+        completion: @escaping @Sendable () -> Void
+    ) throws {
+        stateLock.lock()
+        guard generation == currentGeneration else {
+            stateLock.unlock()
+            return
+        }
+        guard pendingMessages < maximumPendingMessages else {
+            stateLock.unlock()
+            throw RemoteWireEncodingFailure.backpressure
+        }
+        pendingMessages += 1
+        stateLock.unlock()
+
+        encodingQueue.async { [weak self] in
+            guard let self, self.completeIfCurrent(generation) else { return }
+            completion()
+        }
+    }
+
+    private func isCurrent(_ generation: Int) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return generation == currentGeneration
+    }
+
+    private func completeIfCurrent(_ generation: Int) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard generation == currentGeneration else { return false }
+        pendingMessages = max(0, pendingMessages - 1)
+        return true
+    }
+}
+
 enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
     static let runPlanPageSteps = 64
     static let runPlanMaximumSteps = 256
     static let runPlanMaximumTitleUTF8Bytes = 4_096
     static let runPlanMaximumIdentifierUTF8Bytes = 1_024
+    static let maximumPendingWireMessages = 64
     /// How much of the Mac's replay this phone asks for when it joins a terminal.
     ///
     /// The emulator here keeps SwiftTerm's default 500-line scrollback, so the Mac's whole
@@ -355,6 +476,9 @@ final class RemoteSessionConnection: ObservableObject {
     private var sessionResumeStartedAt: UInt64?
     private var stopped = false
     private var connectionGeneration = 0
+    private let wireEncodingLane = RemoteWireEncodingLane(
+        label: "codes.threading.mobile-session-wire.encode"
+    )
     private var pendingTerminalOutput = Data()
     /// Set by a reconnect whose terminal already shows something: output is held rather than
     /// delivered until hydration completes, then arrives behind one reset.
@@ -444,8 +568,12 @@ final class RemoteSessionConnection: ObservableObject {
 
     /// True while this session's agent is working on a turn — what the navigation title's orb
     /// is drawn for. See `MobileAgentTurnActivity` for why `canSend` is the signal.
+    var isAwaitingUserDecision: Bool {
+        conversationStore.state.permission != nil || conversationStore.state.questions.contains { $0.blocksTurn }
+    }
+
     var isAgentWorking: Bool {
-        MobileAgentTurnActivity.isWorking(
+        !isAwaitingUserDecision && MobileAgentTurnActivity.isWorking(
             isConnected: phase == .connected,
             capability: capability,
             canWrite: inputControl?.canWrite != false,
@@ -537,6 +665,7 @@ final class RemoteSessionConnection: ObservableObject {
         isTerminalHydrating = session.surface == .terminal
         terminalTheme = session.terminalTheme
         deviceID = RemoteDeviceIdentity.current
+        conversationStore.onDecisionChange = { [weak self] in self?.objectWillChange.send() }
         conversationStore.onCanSendChange = { [weak self] canSend in
             self?.conversationCanSend = canSend
         }
@@ -727,6 +856,7 @@ final class RemoteSessionConnection: ObservableObject {
             try? send(RemoteClientMessage(type: "viewportRelease"))
         }
         connectionGeneration &+= 1
+        wireEncodingLane.advance(to: connectionGeneration)
         stopped = true
         cancelHelloDeadline()
         demoScript?.cancel()
@@ -809,6 +939,9 @@ final class RemoteSessionConnection: ObservableObject {
         }
         warmTransportState = .resuming
         phase = .connecting
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.connectionStarted(session)
+#endif
         sessionResumeTrace = MobileDiagnostics.connectivityTrace()
         sessionResumeStartedAt = MobileDiagnostics.monotonicNow()
         recordInteractionDiagnostic(
@@ -958,10 +1091,23 @@ final class RemoteSessionConnection: ObservableObject {
             connect()
             return
         }
-        guard phase == .connected, let task else {
+        guard probeLiveness() else {
             isAwaitingResume = false
             return
         }
+    }
+
+    /// Asks the socket whether it is still there, and reconnects if it is not.
+    ///
+    /// One ping with a one-second deadline. A pong clears the resume hold; silence or an error
+    /// reconnects, which asks the model for the current route. Returns false when there is no
+    /// connected socket to ask, or a probe is already out. Shared by the return from the
+    /// background and by a terminal input the Mac never acknowledged: a socket the phone still
+    /// calls connected can be dead on the wire for as long as iOS takes to notice, and typing
+    /// into it is the moment the person finds out (2026-09-11).
+    @discardableResult
+    private func probeLiveness() -> Bool {
+        guard phase == .connected, let task, resumeProbeGeneration == nil else { return false }
         let generation = connectionGeneration
         resumeProbeGeneration = generation
         task.sendPing { [weak self] error in
@@ -981,17 +1127,60 @@ final class RemoteSessionConnection: ObservableObject {
             self.resumeProbeGeneration = nil
             self.connect()
         }
+        return true
     }
 
     /// A socket dropped in the background is not a flaky network. Reconnect the moment the
     /// app is back rather than serving out a backoff that was counting while it was suspended.
     private func reconnectNowIfWaiting() {
-        guard let waiting = reconnectTask, let reconnectClient else { return }
+        guard let waiting = reconnectTask else { return }
         waiting.cancel()
         reconnectTask = nil
         reconnectAttempt = 0
+        reconnectThroughModel(
+            MobileSessionReconnectRequest(attempt: 0, peerSentClose: lossPeerSentClose)
+        )
+    }
+
+    /// The network path changed underneath this socket. A delivering socket is asked whether it
+    /// is still there; one sleeping out a backoff toward the old network retries now; one still
+    /// dialling is left to its hello deadline and the model's route, which the same change is
+    /// already re-resolving.
+    func networkPathChanged() {
+        guard !isOwnedByConnectionPool, demoScript == nil else { return }
+        if reconnectTask != nil {
+            reconnectNowIfWaiting()
+        } else {
+            probeLiveness()
+        }
+    }
+
+    /// The person asked for another try, from the title or the recovery row.
+    ///
+    /// Until now this dialled the client the socket already held, which after a route loss is
+    /// the origin that just failed — and cancelled the model-routed retry that was sleeping in
+    /// its backoff to do it. A tap is stronger evidence than any backoff that the person wants
+    /// the Mac found now, so it goes to the model at once, and as a retry rather than a first
+    /// attempt so the route is re-resolved rather than trusted. Without a model to ask, the
+    /// old client is all there is.
+    func retryNow() {
+        guard reconnectClient != nil else {
+            connect()
+            return
+        }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectThroughModel(MobileSessionReconnectRequest(
+            attempt: max(reconnectAttempt, 1),
+            peerSentClose: lossPeerSentClose
+        ))
+    }
+
+    /// Asks the model for the route a retry should take and dials it, unless this connection
+    /// has moved on meanwhile.
+    private func reconnectThroughModel(_ request: MobileSessionReconnectRequest) {
+        guard let reconnectClient else { return }
         let generation = connectionGeneration
-        let request = MobileSessionReconnectRequest(attempt: 0, peerSentClose: lossPeerSentClose)
         Task { [weak self] in
             guard let client = await reconnectClient(request) else {
                 self?.isAwaitingResume = false
@@ -1016,14 +1205,7 @@ final class RemoteSessionConnection: ObservableObject {
         guard !isOwnedByConnectionPool, demoScript == nil else { return false }
         guard client.link.baseURL != self.client.link.baseURL
             || client.endpointKind != self.client.endpointKind else { return false }
-        let abandonedPhase: String
-        if reconnectTask != nil {
-            abandonedPhase = "backoff"
-        } else if phase == .connecting, task != nil {
-            abandonedPhase = "hello"
-        } else {
-            return false
-        }
+        guard let abandonedPhase = unansweredDialPhase else { return false }
         MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
             phase: abandonedPhase
         ).merging([
@@ -1035,6 +1217,31 @@ final class RemoteSessionConnection: ObservableObject {
         self.client = client
         connect()
         return true
+    }
+
+    /// The person left the screen. A socket still waiting for its hello, or sleeping out a
+    /// backoff, gets the terminal journal entry every connect is owed before it is torn down;
+    /// without one, a chat that was abandoned mid-dial reads in a report as a connect that never
+    /// ended, and the abandonment is the fact a support reader most needs (2026-09-11). A
+    /// connected socket ends silently: its hello answered, and the pool declined to keep it.
+    func leave() {
+        if !isOwnedByConnectionPool, demoScript == nil, let abandonedPhase = unansweredDialPhase {
+            MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+                phase: abandonedPhase
+            ).merging([
+                .result: "abandoned",
+                .reason: "userLeft",
+            ]) { current, _ in current })
+        }
+        disconnect(markEnded: false)
+    }
+
+    /// Which wait a dial that has not been answered is in: `hello` while the socket is open and
+    /// unanswered, `backoff` while a retry is sleeping. Nil for a connected or ended socket.
+    private var unansweredDialPhase: String? {
+        if reconnectTask != nil { return "backoff" }
+        if phase == .connecting, task != nil { return "hello" }
+        return nil
     }
 
     private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
@@ -1315,6 +1522,30 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+    func answerQuestion(_ request: RemoteQuestionRequestDTO, answers: [String: String]?) {
+        guard phase == .connected, capability == .interact, request.canAnswer,
+              conversationStore.state.questions.contains(where: { $0.id == request.id && $0.canAnswer }),
+              answers.map(request.accepts) ?? true else { return }
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?.hasPrefix("conversation-question") == true {
+            let state = conversationStore.state
+            conversationStore.replace(with: RemoteConversationSnapshotDTO(
+                rows: state.rows + [.init(id: "answered-" + request.id, kind: .notice,
+                                         text: answers == nil ? "Question cancelled." : "Answer sent.")],
+                canSend: true, questions: state.questions.filter { $0.id != request.id }
+            ))
+            return
+        }
+#endif
+        do {
+            try send(RemoteClientMessage(type: "questionAnswer", id: request.id,
+                                         decision: answers == nil ? "cancel" : "answer", answers: answers))
+        } catch {
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
+            scheduleReconnect(generation: connectionGeneration)
+        }
+    }
+
     func decidePermission(_ permission: RemotePermissionRequestDTO, allow: Bool) {
         guard phase == .connected, capability == .interact, permission.canDecide else { return }
         let decision: RemotePermissionDecision = allow ? .allow : .deny
@@ -1425,27 +1656,48 @@ final class RemoteSessionConnection: ObservableObject {
         }
         guard expectedGeneration == connectionGeneration, !stopped,
               let task else { throw RemoteClientError.invalidResponse }
-        let data = try JSONEncoder().encode(message)
-        task.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] error in
-            guard let error else { return }
-            Task { @MainActor in
-                guard let self, self.connectionGeneration == expectedGeneration,
-                      self.stopped == false, self.task === task else { return }
-                if self.isOwnedByConnectionPool {
-                    self.invalidatePooledConnection()
-                    return
+        try wireEncodingLane.enqueue(message, generation: expectedGeneration) { [weak self, task] result in
+            switch result {
+            case .success(let text):
+                task.send(.string(text)) { [weak self] error in
+                    guard let error else { return }
+                    Task { @MainActor in
+                        self?.handleOutboundFailure(
+                            error,
+                            task: task,
+                            generation: expectedGeneration
+                        )
+                    }
                 }
-                self.lossPeerSentClose = Self.peerSentClose(on: task)
-                self.fail(
-                    with: RemoteConnectionFailure.transport(
+            case .failure(let error):
+                Task { @MainActor in
+                    self?.handleOutboundFailure(
                         error,
-                        host: self.destinationHost
-                    ),
-                    httpStatus: Self.httpStatus(of: task)
-                )
-                self.scheduleReconnect(generation: expectedGeneration)
+                        task: task,
+                        generation: expectedGeneration
+                    )
+                }
             }
         }
+    }
+
+    private func handleOutboundFailure(
+        _ error: Error,
+        task: URLSessionWebSocketTask,
+        generation: Int
+    ) {
+        guard connectionGeneration == generation,
+              stopped == false, self.task === task else { return }
+        if isOwnedByConnectionPool {
+            invalidatePooledConnection()
+            return
+        }
+        lossPeerSentClose = Self.peerSentClose(on: task)
+        fail(
+            with: RemoteConnectionFailure.transport(error, host: destinationHost),
+            httpStatus: Self.httpStatus(of: task)
+        )
+        scheduleReconnect(generation: generation)
     }
 
     /// Requests the next bounded page only while an expanded disclosure needs it.
@@ -1479,20 +1731,10 @@ final class RemoteSessionConnection: ObservableObject {
                 }
                 switch message {
                 case .data(let data):
-                    noteTerminalHydrationOutput()
 #if DEBUG
                     MobileTerminalWirePerformanceProbe.outputReceived(data, session: session)
 #endif
-                    if let onTerminalOutput, !holdsReplayForHydration {
-                        presentTerminalOutput(data, through: onTerminalOutput)
-                    } else {
-                        pendingTerminalOutput.append(data)
-                        if pendingTerminalOutput.count > pendingTerminalOutputLimit {
-                            pendingTerminalOutput.removeFirst(
-                                pendingTerminalOutput.count - pendingTerminalOutputLimit
-                            )
-                        }
-                    }
+                    applyTerminalOutput(data)
                 case .string(let text):
                     handle(text)
                 @unknown default:
@@ -1521,9 +1763,36 @@ final class RemoteSessionConnection: ObservableObject {
     /// A synthesized server frame from `DemoSessionScript`, entering through the same handler
     /// a real socket frame reaches. Ignored unless the demo script owns this connection, so
     /// nothing else can inject server state.
-    func receiveDemoServerText(_ text: String) {
+    func receiveDemoServerMessage<Message: Encodable & Sendable>(_ message: Message) {
         guard demoScript != nil else { return }
-        handle(text)
+        let generation = connectionGeneration
+        do {
+            try wireEncodingLane.enqueue(message, generation: generation) { [weak self] result in
+                // Both JSON and prepared binary frames originate on this one serial queue.
+                // Submitting them to the main queue from here preserves their socket order all
+                // the way through state application, rather than relying on unstructured Task
+                // scheduling to happen to retain it.
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, self.demoScript != nil,
+                              self.connectionGeneration == generation else { return }
+                        switch result {
+                        case .success(let text):
+                            self.handle(text)
+                        case .failure(let error):
+                            self.fail(
+                                with: RemoteConnectionFailure.transport(
+                                    error,
+                                    host: self.destinationHost
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch {
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
+        }
     }
 
 #if DEBUG
@@ -1537,9 +1806,30 @@ final class RemoteSessionConnection: ObservableObject {
     }
 #endif
 
-    /// Synthesized terminal bytes, buffered exactly the way `receiveLoop` buffers real ones.
+    /// Synthesized terminal bytes, ordered and buffered exactly the way `receiveLoop` handles
+    /// real WebSocket frames. They join the JSON codec lane even though no encoding is needed:
+    /// otherwise a replay submitted after `hello` can reach the main actor before it.
     func receiveDemoTerminalOutput(_ data: Data) {
         guard demoScript != nil else { return }
+        let generation = connectionGeneration
+        do {
+            try wireEncodingLane.enqueuePrepared(generation: generation) { [weak self] in
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, self.demoScript != nil,
+                              self.connectionGeneration == generation else { return }
+                        self.applyTerminalOutput(data)
+                    }
+                }
+            }
+        } catch {
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
+        }
+    }
+
+    /// The shared binary-frame boundary. A real WebSocket invokes it directly on the main
+    /// actor; the demo reaches it only after its ordered worker lane has applied prior frames.
+    private func applyTerminalOutput(_ data: Data) {
         noteTerminalHydrationOutput()
         if let onTerminalOutput, !holdsReplayForHydration {
             presentTerminalOutput(data, through: onTerminalOutput)
@@ -1556,6 +1846,13 @@ final class RemoteSessionConnection: ObservableObject {
 #if DEBUG
     var terminalHydrationRequestIDForTesting: String? {
         terminalHydrationRequestID
+    }
+
+    /// Feeds binary output through the same state boundary as a real WebSocket without
+    /// requiring a demo script. Hydration compatibility tests use it beside injected text
+    /// frames so the current demo protocol cannot race an older-host fixture.
+    func receiveServerTerminalOutputForTesting(_ data: Data) {
+        applyTerminalOutput(data)
     }
 
     /// Drives the UI half of a reconnect performance fixture after the initial conversation has
@@ -1959,6 +2256,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// Refusals a healthy socket may carry. Everything else still fails the session.
     private static let survivableErrorCodes: Set<String> = [
         "permissionNotPending",
+        "questionNotPending",
         "invalidViewport",
     ]
 
@@ -2147,6 +2445,9 @@ final class RemoteSessionConnection: ObservableObject {
                 result: result
             )
         )
+        // Ten seconds without the Mac acknowledging a keystroke is not latency. The socket may
+        // still say connected; ask it.
+        if result == "timedOut" { probeLiveness() }
 #if DEBUG
         MobileTerminalWirePerformanceProbe.inputProbeCompleted(
             session: session,
@@ -3042,6 +3343,26 @@ final class RemoteSessionConnection: ObservableObject {
                 && sourceRowCount > rows.count
         )
         connection.conversationStore.replace(with: conversationSnapshot)
+        if demoMode.hasPrefix("conversation-question") {
+            let request = RemoteQuestionRequestDTO(
+                id: "F1000000-0000-0000-0000-000000000001",
+                questions: [
+                    .init(id: "density", header: "Density", prompt: "How much work detail should the chat show?",
+                          options: [.init(label: "Compact", detail: "Keep completed work behind a disclosure."),
+                                    .init(label: "Expanded", detail: "Show every step in the transcript.")],
+                          allowsOther: true),
+                    .init(id: "review", header: "Review", prompt: "What should we check first?",
+                          options: [.init(label: "Interactions", detail: "Check scrolling and keyboard behavior."),
+                                    .init(label: "Appearance", detail: "Check spacing, typography, and themes.")],
+                          allowsOther: false)
+                ], blocksTurn: true, canAnswer: demoMode != "conversation-question-readonly"
+            )
+            connection.conversationStore.replace(with: RemoteConversationSnapshotDTO(
+                rows: [.init(id: "question-user", kind: .user, text: "Polish this chat on Mac and iPhone."),
+                       .init(id: "question-assistant", kind: .assistant, text: "I have one choice to check before continuing.")],
+                canSend: false, questions: [request]
+            ))
+        }
         if demoMode == "conversation-run-plan" || demoMode == "conversation-run-plan-expanded" {
             connection.runPlanRevision = 7
             connection.runPlan = RemoteRunPlanSummaryDTO(

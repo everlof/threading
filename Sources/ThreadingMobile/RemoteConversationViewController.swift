@@ -390,10 +390,13 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         placeholderLabel.text = MobileL10n.string("Add feedback…")
         placeholderLabel.font = .preferredFont(forTextStyle: .body)
+        placeholderLabel.adjustsFontForContentSizeCategory = true
+        placeholderLabel.lineBreakMode = .byTruncatingTail
         textView.addSubview(placeholderLabel)
         NSLayoutConstraint.activate([
             placeholderLabel.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 9),
             placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 10),
+            placeholderLabel.widthAnchor.constraint(lessThanOrEqualTo: textView.widthAnchor, constant: -18),
         ])
 
         [capabilityButton, attachButton, attentionButton, textView, sendButton]
@@ -476,7 +479,14 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         accessibilityLabel: String
     ) {
         button.translatesAutoresizingMaskIntoConstraints = false
-        if let symbol { button.setImage(UIImage(systemName: symbol), for: .normal) }
+        if let symbol {
+            button.setImage(UIImage(systemName: symbol), for: .normal)
+            // A symbol stays inside its fixed tap target at accessibility text sizes.
+            button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(
+                pointSize: MobileDesign.Size.minimumTapTarget - 2 * MobileDesign.Spacing.medium,
+                weight: .semibold
+            ), forImageIn: .normal)
+        }
         if let title {
             button.setTitle(title, for: .normal)
             button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
@@ -709,7 +719,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private func recover(from failure: RemoteConnectionFailure) {
         switch failure.recovery {
         case .reconnect:
-            connection.connect()
+            connection.retryNow()
         case .pairAgain:
             model.isPairing = true
         case .openLocalNetworkSettings:
@@ -722,8 +732,14 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private var connectionStatusLabel: String {
         switch connection.phase {
-        case .connecting: return MobileL10n.string("Opening chat…")
+        case .connecting:
+            return MobileSessionChrome.diallingStatus(
+                hasEverConnected: connection.hasEverConnected,
+                routeWalk: model.routeWalkStatus
+            )
         case .connected:
+            if connection.conversationStore.state.permission != nil { return MobileL10n.string("Waiting for permission") }
+            if connection.isAwaitingUserDecision { return MobileL10n.string("Waiting for your answer") }
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
         case .failed(let failure): return failure.message
@@ -732,7 +748,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private var connectionStatusColor: UIColor {
         switch connection.phase {
-        case .connected: return theme.uiPositive
+        case .connected: return connection.isAwaitingUserDecision ? theme.uiWarning : theme.uiPositive
         case .connecting: return theme.uiWarning
         case .ended, .failed: return theme.uiTertiaryLabel
         }
@@ -882,7 +898,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             && (hasText || hasAttachments)
             && tray?.isSettling != true
         sendButton.backgroundColor = sendButton.isEnabled ? theme.uiAccent : theme.uiControlResting
-        sendButton.tintColor = sendButton.isEnabled ? theme.uiGround : theme.uiSecondaryLabel
+        sendButton.tintColor = sendButton.isEnabled ? theme.uiAccentForeground : theme.uiSecondaryLabel
         placeholderLabel.isHidden = !textView.text.isEmpty
         attachmentStrip.update(
             items: tray?.items ?? [],

@@ -69,9 +69,10 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Private issue-report form | — | host-only | evidence selection and paste, review/removal, share-safe bounds, original-file custody, backend projection, delivery and outbox receipts | Host-only |
+| Browser annotation canvas and inline note editor | — | deliberately host-only | page/frame identity, picking, user-authored provenance, draft save/cancel/delete, keyboard focus, scroll dispatch and origin authorization | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | turn grouping/collapse and chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
-| Browser annotation canvas and inline note editor | — | deliberately host-only | page/frame identity, picking, user-authored provenance, draft save/cancel/delete, keyboard focus, scroll dispatch and origin authorization | Host-only |
+| Trigger center, source connection and activation approval | — | host-only | credential custody, exact immutable revision, project and permission authority, daemon health, queue/run truth and pause/activate actions | Host-only |
 | Command-line tool installation (Advanced row) | — | host-only | which tools are public, the shim directory and its refresh, what in a user's `~/.local/bin` may be written or removed, the login-shell `PATH` reading, the refusal to edit a shell profile | Host-only |
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
 | Update channel picker | — | host-only | which builds the updater accepts, the default a build resolves to, the feed override, the versions Sparkle compares | Host-only |
@@ -86,6 +87,13 @@ are already published where an extension can reach them honestly — a session's
 runtime — and what is missing for an extension that wants to *act* is a typed background-session
 entity with the daemon's identity in it, not the box the rows are in. The launch band is a
 `PaneNoticeView`, which is host chrome for the same reason every other band is.
+
+The Trigger center remains host-only because its rows and sheets are authority receipts rather
+than replaceable decoration. Threading owns the source credential, exact immutable revision,
+target project, read-only and local-edit stages, launch-agent health, durable queue state and the
+last-moment activation/pause checks. Agents configure it through typed MCP tools that can create
+only inert drafts and invoke a host approval; extensions do not get a second presentation or
+mutation path that could claim a different rule is active.
 
 The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
 one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
@@ -416,6 +424,13 @@ from silently becoming transcript-read authority. Tool results still attach to t
 native `ToolCallView`, and permission hooks cannot contain buttons—the native card remains the
 only place where Allow or Deny can originate.
 
+Native question forms remain deliberately host-only. Their card UUID identifies one outstanding
+request; provider question IDs identify the exact answers inside it. Threading owns validation,
+paging, focus, cancel, answer submission and invalidation on provider settlement. A question is
+not the permission-card contract: composing into the latter must not create an answer to the
+former or gain transcript-read authority. No new extension data or presentation capability is
+introduced by this form.
+
 Thinking, notices and the streaming placeholder are not public components. They are transient
 states whose durable output becomes an assistant-message row.
 
@@ -476,9 +491,10 @@ able to turn into unbounded process work as the user installs more extensions. S
 The iPhone attachment gallery and the draft's local Quick View do not add another extension
 surface. They are mirrors of the existing host-owned fallback: `attachments.preview@1` continues
 to customize the Mac preview body only. Threading retains remote authorization and range bounds,
-gallery selection, navigation, playback transport and visibility teardown; letting an extension
-replace any of those would either grant file authority the preview contract does not carry or put
-high-frequency playback across the extension boundary.
+gallery selection, navigation, playback transport, Share staging and cleanup, and visibility
+teardown; iOS owns the native share destinations and chrome. Letting an extension replace any of
+those would either grant file authority the preview contract does not carry or put high-frequency
+playback across the extension boundary.
 
 ## Account appearance editor
 
