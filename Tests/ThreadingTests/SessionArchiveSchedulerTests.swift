@@ -20,6 +20,7 @@ final class SessionArchiveSchedulerTests: XCTestCase {
     private var center: NotificationCenter!
     private var session: AgentSession!
     private var activity: SessionActivity = .working
+    private var continuation: SessionContinuationState?
     private var due: [SessionArchiveRequestDidBecomeDue] = []
     private var observations: AppEventObservations!
 
@@ -45,7 +46,10 @@ final class SessionArchiveSchedulerTests: XCTestCase {
         let scheduler = SessionArchiveScheduler(
             center: center,
             runtime: { [weak self] _ in
-                .test(activity: self?.activity ?? .dormant)
+                .test(
+                    activity: self?.activity ?? .dormant,
+                    continuation: self?.continuation
+                )
             },
             session: { [weak self] id in
                 guard let self, id == self.session.id else { return nil }
@@ -57,10 +61,15 @@ final class SessionArchiveSchedulerTests: XCTestCase {
     }
 
     /// The typed lifecycle signal the scheduler listens to, as the runtime posts it.
-    private func reportActivity(_ new: SessionActivity, of sessionID: SessionID? = nil) {
-        let previous = SessionRuntimeSnapshot.test(activity: activity)
+    private func reportActivity(
+        _ new: SessionActivity,
+        continuation newContinuation: SessionContinuationState? = nil,
+        of sessionID: SessionID? = nil
+    ) {
+        let previous = SessionRuntimeSnapshot.test(activity: activity, continuation: continuation)
         activity = new
-        let current = SessionRuntimeSnapshot.test(activity: new)
+        continuation = newContinuation
+        let current = SessionRuntimeSnapshot.test(activity: new, continuation: newContinuation)
         center.post(SessionRuntimeDidChange(
             sessionID: sessionID ?? session.id,
             transition: SessionRuntimeTransition(previous: previous, current: current),
@@ -203,6 +212,40 @@ final class SessionArchiveSchedulerTests: XCTestCase {
         settle(0.4)
 
         XCTAssertEqual(due.count, 1, "the request never landed on the turn's real end")
+    }
+
+    /// A shell the turn left running is the turn's end all the same.
+    ///
+    /// The agent was told the session "will be archived when this turn ends". A standing task may
+    /// never end — nothing separates `npm test` from `npm run dev` — so waiting for one left the
+    /// request armed until `requestExpiry` dropped it half an hour later, and the archive the
+    /// agent had already announced never happened. Caught by the managed-workspace end-to-end
+    /// scenario, whose fixture agent reports exactly this at its Stop hook.
+    func testATurnThatEndsLeavingAShellRunningStillSpendsTheRequest() {
+        let scheduler = scheduler()
+        scheduler.request(sessionID: session.id, reason: nil)
+
+        reportActivity(.readyWithBackgroundWork, continuation: .standing)
+        settle()
+
+        XCTAssertEqual(due.count, 1, "a standing shell held the archive the agent announced")
+    }
+
+    /// Delegated work still holds it, because the user is waiting to read what comes back.
+    func testATurnWaitingOnDelegatedWorkKeepsTheRequestArmed() {
+        let scheduler = scheduler()
+        scheduler.request(sessionID: session.id, reason: nil)
+
+        reportActivity(.readyWithBackgroundWork, continuation: .delegated)
+        settle()
+
+        XCTAssertTrue(due.isEmpty, "the archive landed while a subagent was still reporting back")
+        XCTAssertTrue(scheduler.isPending(sessionID: session.id))
+
+        reportActivity(.idle)
+        settle()
+
+        XCTAssertEqual(due.count, 1, "the request never landed once the child had reported")
     }
 
     /// Another session's turn ending is not this session's turn ending.

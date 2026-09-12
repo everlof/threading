@@ -185,10 +185,16 @@ final class SessionArchiveScheduler {
     /// heuristic falls silent in the middle of a turn — the agent is waiting on the model, not
     /// finished — so a session that starts writing again only *disarms* the settle, and the
     /// request is spent on the turn's real end instead of on the pause in the middle of it.
+    ///
+    /// A shell the turn left running is not a reason to keep waiting. The agent was told its
+    /// session "will be archived when this turn ends", and a standing task may never end: waiting
+    /// on one meant the request sat armed until `requestExpiry` dropped it half an hour later, so
+    /// the archive the agent announced to the user simply never happened. Delegated work still
+    /// holds, because it reports back into this conversation and the user is waiting to read it.
     private func reconcileActivity(for sessionID: SessionID) {
         guard let request = pending[sessionID] else { return }
 
-        guard !runtime(sessionID).hasPendingOutcome else {
+        guard !runtime(sessionID).awaitsConversationOutcome else {
             disarm(sessionID)
             return
         }

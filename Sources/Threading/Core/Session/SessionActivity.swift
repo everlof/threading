@@ -112,6 +112,19 @@ struct SessionRuntimeSnapshot: Equatable, Sendable {
 
     var hasOpenTurn: Bool { turn.isInFlight }
     var hasPendingOutcome: Bool { hasOpenTurn || continuation.isActive }
+
+    /// Whether something the *user* is still waiting to read is owed by this conversation.
+    ///
+    /// An open turn counts, and so does delegated work: a subagent or a workflow reports back
+    /// into this conversation, so the agent will speak again and a caller may wait for it.
+    /// Standing work deliberately does not. A shell or a monitor the turn left running may never
+    /// end — nothing in the payload separates `npm test` from `npm run dev` — so a caller that
+    /// waited on it would be waiting on a condition that is allowed never to arrive.
+    ///
+    /// This is narrower than `hasPendingOutcome`, which asks whether anything at all is still in
+    /// flight. Use that one for "is this session busy"; use this one before spending something
+    /// that cannot simply be deferred for ever.
+    var awaitsConversationOutcome: Bool { hasOpenTurn || continuation == .delegated }
     var isPromptReady: Bool {
         process == .ready && !hasOpenTurn && blocker == .none
     }

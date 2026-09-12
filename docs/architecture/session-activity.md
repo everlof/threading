@@ -644,6 +644,17 @@ pending until they disappear from the reported in-flight list and the resulting 
 This is deliberate: another reply cannot safely prove that a shell's result is irrelevant.
 Monitors still have their own reported kind and retain their standing-work behavior.
 
+**"Pending" is for marks and notifications, not for things that cannot wait for ever.** Holding
+completion open indefinitely is the right answer for a working mark and a completion alert, and the
+wrong one for anything armed to be *spent* at the turn's end. `SessionArchiveScheduler` was the
+first caller to find that out: a self-archive is announced to the user in the agent's own reply —
+"will be archived when this turn ends" — and gating it on `hasPendingOutcome` meant a turn ending
+with one running shell left the request armed until `requestExpiry` dropped it half an hour later,
+so the archive never happened. `SessionRuntimeSnapshot.awaitsConversationOutcome` is the narrower
+question such a caller asks: an open turn or *delegated* work, which reports back into this
+conversation and which the user is therefore waiting to read. A standing shell is excluded, because
+it is allowed never to end. `hasPendingOutcome` remains the answer to "is this session busy".
+
 Both surfaces share this ledger and the same task identities: `background_tasks[].id`/`type`
 on hooks and `tasks[].task_id`/`task_type` on the stream. Classification adds O(1) work per task
 to the existing per-boundary list handling (normally 0–4 tasks); it introduces no transcript,
