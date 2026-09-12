@@ -31,6 +31,20 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(metrics.hostedContentCount, 0)
     }
 
+    @MainActor
+    func testDashboardUpdatesWorkingStatusInTheSamePublicationAsRowMoves() {
+        // Expected: idle, working beside a move, settled during a move, working without a
+        // move, cached (unknown), then live again, followed by prepared cells stopping/starting
+        // at display. No timer or second model update intervenes.
+        for rowCount in [20, 1_000] {
+            XCTAssertEqual(
+                MobileDashboardWorkingStatusProbe.exercise(rowCount: rowCount),
+                [false, true, false, true, false, true, false, true],
+                "Catalogue with \(rowCount) rows"
+            )
+        }
+    }
+
     /// A catalogue update that drops a whole group used to kill the app: the layout installed
     /// for the shorter list was resolved against the snapshot still holding the longer one, and
     /// a compositional layout treats a nil section as an assertion failure rather than an empty

@@ -757,7 +757,7 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
 }
 
 @MainActor
-private final class MobileDashboardCollectionViewController: UIViewController {
+private final class MobileDashboardCollectionViewController: UIViewController, UICollectionViewDelegate {
     private static let plateDecorationKind = "threading.mobile.dashboard.plate"
 
     private var sections: [DashboardCollectionSection] {
@@ -801,6 +801,7 @@ private final class MobileDashboardCollectionViewController: UIViewController {
             collectionViewLayout: layout
         )
         view.translatesAutoresizingMaskIntoConstraints = false
+        view.delegate = self
         view.backgroundColor = theme.uiGround
         view.alwaysBounceVertical = true
         view.contentInset = UIEdgeInsets(
@@ -1043,6 +1044,13 @@ private final class MobileDashboardCollectionViewController: UIViewController {
             snapshot.appendSections([section.id])
             snapshot.appendItems(section.items, toSection: section.id)
         }
+        // A turn can change both state and recency. Diffable moves preserve the cell, so
+        // installing its new position alone leaves its previous working mark on screen.
+        // Refresh only retained viewport items; newly inserted cells configure on dequeue.
+        let retainedVisible = collectionView.indexPathsForVisibleItems.compactMap {
+            dataSource.itemIdentifier(for: $0)
+        }.filter { snapshot.indexOfItem($0) != nil }
+        snapshot.reconfigureItems(retainedVisible)
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self else { return }
             collectionView.layoutIfNeeded()
@@ -1096,6 +1104,19 @@ private final class MobileDashboardCollectionViewController: UIViewController {
         guard !retained.isEmpty else { return }
         snapshot.reconfigureItems(retained)
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplay cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // UIKit may prepare a cell before it becomes visible. A catalogue publication refreshes
+        // only the viewport, so that prepared cell must take the current row at the display edge.
+        guard let cell = cell as? DashboardRowCollectionCell,
+              case .row(let id) = dataSource.itemIdentifier(for: indexPath),
+              let configuration = rowConfiguration(id) else { return }
+        cell.configure(configuration)
     }
 
     private struct VisibleAnchor {
@@ -1592,6 +1613,8 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     }
 
 #if DEBUG
+    var isShowingWorkingIndicatorForTesting: Bool { !workingView.isHidden }
+
     var titlePresentationForTesting: (text: String, isAnimating: Bool) {
         (titleView.stringValue, titleView.isAnimatingTitleForTesting)
     }
@@ -2413,6 +2436,96 @@ enum MobileDashboardCollectionPerformanceProbe {
 }
 
 private extension MobileDashboardCollectionViewController {
+    /// Uses the actual collection and retained cells. A turn can change status and recency in
+    /// one publication; the resulting move must not postpone the status until another event.
+    static func exerciseWorkingStatusUpdates(rowCount: Int) -> [Bool] {
+        let theme = RemoteThemePalette(nil)
+        var state = RemoteSessionActivity.idle
+        var isLive = true
+        let targetID = "working-probe:2"
+        let configuration: @MainActor (String) -> DashboardUIKitRowConfiguration? = { id in
+            DashboardUIKitRowConfiguration(
+                row: DashboardCollectionRow(
+                    item: .chat(RemoteSessionSummaryDTO(
+                        id: id, title: id, agentKind: "claude", surface: .conversation,
+                        state: id == targetID ? state : .idle, projectName: "Probe"
+                    )),
+                    hasDivider: true, isFirst: false, isLast: false
+                ),
+                theme: theme, isArchived: false, isCatalogueLive: isLive,
+                showsProjectName: false, activate: nil, swipeAction: nil, contextMenu: nil
+            )
+        }
+        var items = (0..<rowCount).map { DashboardCollectionItemID.row("working-probe:\($0)") }
+        func sections() -> [DashboardCollectionSection] {
+            [DashboardCollectionSection(id: "probe", kind: .plate, items: items, spacingAfter: 0)]
+        }
+        let content: @MainActor (DashboardCollectionItemID) -> AnyView = { _ in AnyView(EmptyView()) }
+        let controller = MobileDashboardCollectionViewController(
+            sections: sections(), theme: theme, bottomContentInset: 0,
+            content: content, rowConfiguration: configuration, refresh: {}
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer { window.isHidden = true }
+
+        func showsWorking() -> Bool {
+            controller.collectionView.layoutIfNeeded()
+            guard let index = controller.dataSource.indexPath(for: .row(targetID)),
+                  let cell = controller.collectionView.cellForItem(at: index) as? DashboardRowCollectionCell
+            else { preconditionFailure("The probe target must stay visible") }
+            return cell.isShowingWorkingIndicatorForTesting
+        }
+        func update() {
+            controller.update(
+                sections: sections(), theme: theme, bottomContentInset: 0,
+                content: content, rowConfiguration: configuration, refresh: {}
+            )
+        }
+
+        var result = [showsWorking()]
+        state = .working
+        items.swapAt(0, 1) // A neighbouring chat also changed recency in this publication.
+        update()
+        result.append(showsWorking())
+        state = .idle
+        items.swapAt(0, 2) // The target itself moves as its turn settles.
+        update()
+        result.append(showsWorking())
+        state = .working
+        update() // Same-order updates already worked; keep that path exact too.
+        result.append(showsWorking())
+        isLive = false
+        items.swapAt(0, 1)
+        update()
+        result.append(showsWorking())
+        isLive = true
+        items.swapAt(0, 1)
+        update()
+        result.append(showsWorking())
+
+        // Deterministically reproduce UIKit's prepare -> publication -> display ordering.
+        // Invoke the installed collection delegate, so losing the wiring also fails the test.
+        let preparedCell = DashboardRowCollectionCell(frame: .zero)
+        preparedCell.configure(configuration(targetID)!)
+        state = .idle
+        update()
+        let index = controller.dataSource.indexPath(for: .row(targetID))!
+        controller.collectionView.delegate?.collectionView?(
+            controller.collectionView, willDisplay: preparedCell, forItemAt: index
+        )
+        result.append(preparedCell.isShowingWorkingIndicatorForTesting)
+        state = .working
+        update()
+        controller.collectionView.delegate?.collectionView?(
+            controller.collectionView, willDisplay: preparedCell, forItemAt: index
+        )
+        result.append(preparedCell.isShowingWorkingIndicatorForTesting)
+        return result
+    }
+
     var snapshotSectionCount: Int {
         collectionView.layoutIfNeeded()
         return dataSource.snapshot().numberOfSections
@@ -2430,6 +2543,13 @@ private extension MobileDashboardCollectionViewController {
                 .filter { $0 is DashboardRowCollectionCell }
                 .count
         )
+    }
+}
+
+@MainActor
+enum MobileDashboardWorkingStatusProbe {
+    static func exercise(rowCount: Int) -> [Bool] {
+        MobileDashboardCollectionViewController.exerciseWorkingStatusUpdates(rowCount: rowCount)
     }
 }
 #endif

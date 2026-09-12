@@ -85,6 +85,18 @@ and visit message types. Compatibility is not permission to omit the fence in cu
 
 ## Loader settlement
 
+The iPhone dashboard's working mark projects only an available, unarchived `.working` session
+from a live catalogue. The existing typed session/catalogue states own completion, refusal and
+loss of authority; the cell owns no work timer or speculative state. Presentation stays host-only.
+
+Content and identity changes must land in the same publication. A recency change can move a chat
+while its activity changes, but a diffable move alone retains the old cell contents. Structural
+snapshots therefore reconfigure retained visible identities as well as moving them. UIKit can
+also prepare an offscreen cell before a publication; `willDisplay` resolves its current row again.
+This costs O(visible) per publication and O(1) per displayed row, without polling or constructing
+views for the catalogue. The dashboard regression covers starting, settling, cached/live
+transitions and prepare/update/display ordering at 20 and 1,000 rows.
+
 Before adding or changing a loader, write down all of these in the owning type or test:
 
 1. the typed phase that makes progress true;
