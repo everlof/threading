@@ -456,6 +456,7 @@
 				ThreadingMobile/MobileAccountImages.swift,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
+				ThreadingMobile/MobileCollaborationPresence.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,
 				ThreadingMobile/MobileConversationQuestionCard.swift,
 				ThreadingMobile/MobileDashboardCacheStore.swift,
