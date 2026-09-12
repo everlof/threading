@@ -66,9 +66,10 @@ Codex session exposes. Choosing `/skills` narrows the list to skills. The Mac re
 authoritative when an action is submitted; skill instructions and local filesystem paths stay on
 the Mac and are not included in the remote catalog.
 
-Several devices may open the same session at once. The live roster distinguishes each phone,
-tablet, or browser tab and shows viewing and typing state without using presence as a lock. Each
-Native composer keeps its own draft. On iPhone, an agent-UI terminal does the same by default:
+Several devices may open the same session at once. On iPhone, presence describes other people:
+your own devices stay hidden, and a collaborator's devices count as one person shown by name.
+Solo use has no presence row. Viewing and typing state never act as a lock. Each Native composer
+keeps its own draft. On iPhone, an agent-UI terminal does the same by default:
 the device submits a completed line as one atomic PTY write, so another controller cannot splice
 keystrokes into it. Collaboration settings can hide the roster or typing indicators independently
 and can restore direct terminal typing for workflows that need raw character-by-character input.

@@ -39,6 +39,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
 | Chat checkout move controls (session menu, Tools policy, agent approval) | — | host-only | canonical checkout identity, durable ownership transaction, turn/input fence, authority audit and runtime resume | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
+| Mobile collaboration presence | — | host-only | authenticated participant identity, self exclusion, per-person viewing/typing truth, socket lifetime, settings and accessibility | Host-only |
 | Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |

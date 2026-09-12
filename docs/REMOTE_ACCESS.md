@@ -1839,10 +1839,20 @@ controller.
 
 While any shared session is open, the Mac sends an ephemeral roster over the existing
 authenticated WebSocket. A distinct presence id represents every live device or browser tab, so
-one person's iPhone and iPad can appear and leave independently. Clients announce `typing`/`idle`;
-other phones show the device-aware participant label and otherwise show who is viewing. Presence
-is advisory, expires with the connection, and never locks a composer or grants authority. The
-iPhone lets people-presence and typing indicators be hidden separately.
+one person's iPhone and iPad can appear and leave independently. Clients announce `typing`/`idle`.
+The iPhone groups these socket updates by person and excludes the current participant across all
+their devices, including legacy `owner:<device ID>` identities. It waits for the input-control
+frame to identify the viewer; without that identity it shows no presence. Solo use therefore has
+no presence row, even with several owner connections. Other collaborators appear by their member
+name, without a device suffix; the host owner has the localized role “Owner” because owner
+presence does not carry a personal name. Closing one socket preserves that person's remaining
+viewing/typing activity. An unused invitation or an away participant creates no presence.
+
+`MobileCollaborationPresence` is the shared terminal and Native presentation owner. Its socket
+and person indexes update only the changed identity per event; label rendering reads counts and
+at most two other names, including under the 1,000-socket regression fixture. Presence remains
+host-only authority-derived presentation, advisory, connection-scoped, and never a composer lock
+or authorization grant. People-presence and typing indicators can be hidden separately.
 
 Each remote Native composer owns its draft. A shared iPhone terminal uses an independent local
 composer and sends only its completed line, never individual keystrokes. This does not make the

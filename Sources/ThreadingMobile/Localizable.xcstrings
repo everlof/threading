@@ -6950,6 +6950,17 @@
         }
       }
     },
+    "Owner" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ägaren"
+          }
+        }
+      }
+    },
     "Page Down" : {
       "extractionState" : "manual",
       "localizations" : {

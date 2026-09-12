@@ -2978,7 +2978,9 @@ entire line and Return reach Claude Code or Codex as one PTY write, so another p
 their keystrokes into yours. The key bar's controls remain immediate, and the terminal returns to
 its saved input choice when it becomes solo again. In iPhone notification settings, **In-app
 collaboration** only controls people presence and typing indicators; these indicators never create
-a push notification.
+a push notification. They show other collaborators by name, count each person once across their
+devices, and stay hidden when you are alone. Your own phone, tablet, and other connections never
+appear as another participant.
 
 To select terminal text on iPhone, long-press a word: it is selected at once, with handles to
 drag, and the edit menu appears when you lift — slide before lifting to extend from that word.

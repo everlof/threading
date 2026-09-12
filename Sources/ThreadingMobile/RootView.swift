@@ -78,6 +78,7 @@ extension MobileDemoScene {
     /// fixture data `RemoteSessionConnection.demoTerminal()` builds, not the screen.
     static let terminalFixtureIDs: Set<String> = [
         "terminal-collaboration",
+        "terminal-solo-presence",
         "terminal-compose",
         "terminal-ansi",
         "terminal-scrollback",
@@ -186,6 +187,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case terminalClaudeTUI = "terminal-claude-tui"
     case terminalCodexTUI = "terminal-codex-tui"
     case terminalCollaboration = "terminal-collaboration"
+    case terminalSoloPresence = "terminal-solo-presence"
     case terminalCompose = "terminal-compose"
     case terminalScrollback = "terminal-scrollback"
     case terminalSelection = "terminal-selection"
@@ -204,6 +206,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case conversationAwayFromLatest = "conversation-away-from-latest"
     case conversationColdStress = "conversation-cold-stress"
     case conversationCollaboration = "conversation-collaboration"
+    case conversationSoloPresence = "conversation-solo-presence"
     case conversationContentTypes = "conversation-content-types"
     case conversationKeyboard = "conversation-keyboard"
     case conversationReconnectStress = "conversation-reconnect-stress"

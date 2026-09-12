@@ -424,7 +424,7 @@ final class RemoteSessionConnection: ObservableObject {
     private var backgroundedAt: Date?
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
-    @Published private(set) var presence: [String: RemotePresenceDTO] = [:]
+    @Published private(set) var presence = MobileCollaborationPresence()
     @Published private(set) var isPromptSubmissionPending = false
     @Published private(set) var promptSubmissionFeedback: RemotePromptSubmissionFeedback?
     @Published private(set) var supportsAtomicTerminalSubmission = false
@@ -2092,11 +2092,7 @@ final class RemoteSessionConnection: ObservableObject {
             }
         case "presence":
             if let update = try? JSONDecoder().decode(RemotePresenceDTO.self, from: data) {
-                if update.state == .left {
-                    presence[update.id] = nil
-                } else {
-                    presence[update.id] = update
-                }
+                presence.apply(update)
             }
         case "collaborationParticipants":
             if let update = try? JSONDecoder().decode(
@@ -2769,6 +2765,16 @@ final class RemoteSessionConnection: ObservableObject {
         connection.supportsComposerAttachmentUploads = true
         connection.supportsTerminalAttachmentInsertion = true
         connection.inputControl = ownerOnlyInputControlState()
+        if demoMode.hasSuffix("-solo-presence") {
+            // A private chat with two more sockets belonging to this same person. Both must
+            // stay invisible, including a socket currently typing on the owner's iPhone.
+            connection.presence = MobileCollaborationPresence([
+                .init(presenceID: "own-phone", memberID: "owner:phone",
+                      displayName: "iPhone", deviceName: "iPhone", state: .typing),
+                .init(presenceID: "own-tablet", memberID: "owner:tablet",
+                      displayName: "iPad", deviceName: "iPad", state: .viewing),
+            ])
+        }
         if let marketingProvider {
             let fixture: MobileMarketingTerminalFixture
             do {
@@ -2945,13 +2951,13 @@ final class RemoteSessionConnection: ObservableObject {
         )
         let ipad = RemotePresenceDTO(
             presenceID: "terminal-ipad",
-            memberID: "member-david",
-            displayName: "David",
+            memberID: "owner:ipad",
+            displayName: "iPad",
             deviceName: "iPad",
             surface: .terminal,
             state: .viewing
         )
-        connection.presence = [anna.id: anna, ipad.id: ipad]
+        connection.presence = MobileCollaborationPresence([anna, ipad])
         connection.attentionRecipients = [
             .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: true),
             .init(id: "member-priya", displayName: "Priya", role: .member, isOnline: false),
@@ -3014,6 +3020,16 @@ final class RemoteSessionConnection: ObservableObject {
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
         connection.inputControl = ownerOnlyInputControlState()
+        if demoMode.hasSuffix("-solo-presence") {
+            // A private chat with two more sockets belonging to this same person. Both must
+            // stay invisible, including a socket currently typing on the owner's iPhone.
+            connection.presence = MobileCollaborationPresence([
+                .init(presenceID: "own-phone", memberID: "owner:phone",
+                      displayName: "iPhone", deviceName: "iPhone", state: .typing),
+                .init(presenceID: "own-tablet", memberID: "owner:tablet",
+                      displayName: "iPad", deviceName: "iPad", state: .viewing),
+            ])
+        }
         switch environment["THREADING_MOBILE_THEME"] {
         case "light":
             connection.theme = RemoteAppModel.demoLightTheme
@@ -3409,13 +3425,13 @@ final class RemoteSessionConnection: ObservableObject {
             )
             let ipad = RemotePresenceDTO(
                 presenceID: "presence-ipad",
-                memberID: "owner-ipad",
+                memberID: "owner:ipad",
                 displayName: "David’s iPad",
                 deviceName: "David’s iPad",
                 surface: .conversation,
                 state: .viewing
             )
-            connection.presence = [anna.id: anna, ipad.id: ipad]
+            connection.presence = MobileCollaborationPresence([anna, ipad])
             connection.attentionRecipients = [
                 .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: true),
                 .init(id: "member-priya", displayName: "Priya", role: .member, isOnline: false),

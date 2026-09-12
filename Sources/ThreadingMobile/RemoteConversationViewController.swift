@@ -755,17 +755,11 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func updatePresence() {
-        let people = Array(connection.presence.values)
-        let typingNames = uniqueNames(people.filter { $0.state == .typing })
-        let viewingNames = uniqueNames(people)
-        let text: String?
-        if notifications.typingIndicatorsEnabled, !typingNames.isEmpty {
-            text = presenceText(names: typingNames, action: .typing)
-        } else if notifications.peoplePresenceEnabled, !viewingNames.isEmpty {
-            text = presenceText(names: viewingNames, action: .viewing)
-        } else {
-            text = nil
-        }
+        let text = connection.presence.label(
+            currentParticipantID: connection.inputControl?.currentParticipantID,
+            showsTyping: notifications.typingIndicatorsEnabled,
+            showsViewing: notifications.peoplePresenceEnabled
+        )
         presenceLabel.text = text
         presenceLabel.isHidden = text == nil
     }
@@ -1285,34 +1279,6 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 #else
         false
 #endif
-    }
-
-    private func uniqueNames(_ people: [RemotePresenceDTO]) -> [String] {
-        Array(Set(people.map(presenceDisplayName))).sorted()
-    }
-
-    private func presenceDisplayName(_ presence: RemotePresenceDTO) -> String {
-        guard let deviceName = presence.deviceName,
-              !deviceName.isEmpty,
-              deviceName != presence.displayName else { return presence.displayName }
-        return MobileL10n.string("%@ on %@", presence.displayName, deviceName)
-    }
-
-    private func presenceText(names: [String], action: RemotePresenceState) -> String {
-        if names.count == 1 {
-            return action == .typing
-                ? MobileL10n.string("%@ is typing…", names[0])
-                : MobileL10n.string("%@ is here", names[0])
-        }
-        if names.count == 2 {
-            let joined = names.joined(separator: MobileL10n.string(" and "))
-            return action == .typing
-                ? MobileL10n.string("%@ are typing…", joined)
-                : MobileL10n.string("%@ are here", joined)
-        }
-        return action == .typing
-            ? MobileL10n.string("%lld people are typing…", Int64(names.count))
-            : MobileL10n.string("%lld people are here", Int64(names.count))
     }
 
     private func inputControlStatus(_ state: RemoteInputControlStateDTO) -> String {

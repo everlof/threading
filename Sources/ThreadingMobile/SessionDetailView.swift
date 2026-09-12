@@ -2137,14 +2137,11 @@ private struct TerminalCollaborationBar: View {
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        let people = Array(connection.presence.values)
-        let typing = uniqueNames(people.filter { $0.state == .typing })
-        let viewing = uniqueNames(people)
-        let label = notifications.typingIndicatorsEnabled && !typing.isEmpty
-            ? label(for: typing, action: .typing)
-            : notifications.peoplePresenceEnabled && !viewing.isEmpty
-            ? label(for: viewing, action: .viewing)
-            : nil
+        let label = connection.presence.label(
+            currentParticipantID: connection.inputControl?.currentParticipantID,
+            showsTyping: notifications.typingIndicatorsEnabled,
+            showsViewing: notifications.peoplePresenceEnabled
+        )
         if label != nil || canAskForInput {
             HStack(spacing: MobileDesign.Spacing.small) {
                 if let label {
@@ -2178,27 +2175,6 @@ private struct TerminalCollaborationBar: View {
             && connection.capability == .interact
             && connection.supportsAttentionRequests
             && !connection.attentionRecipients.isEmpty
-    }
-
-    private func uniqueNames(_ people: [RemotePresenceDTO]) -> [String] {
-        Array(Set(people.map(remotePresenceLabel))).sorted()
-    }
-
-    private func label(for names: [String], action: RemotePresenceState) -> String {
-        if names.count == 1 {
-            return action == .typing
-                ? MobileL10n.string("%@ is typing…", names[0])
-                : MobileL10n.string("%@ is here", names[0])
-        }
-        if names.count == 2 {
-            let joined = names.joined(separator: MobileL10n.string(" and "))
-            return action == .typing
-                ? MobileL10n.string("%@ are typing…", joined)
-                : MobileL10n.string("%@ are here", joined)
-        }
-        return action == .typing
-            ? MobileL10n.string("%lld people are typing…", Int64(names.count))
-            : MobileL10n.string("%lld people are here", Int64(names.count))
     }
 }
 
@@ -2949,11 +2925,11 @@ private struct LegacyConversationRemoteView: View {
 
     @ViewBuilder
     private var presenceBanner: some View {
-        let people = Array(connection.presence.values)
-        let typingNames = uniqueNames(people.filter { $0.state == .typing })
-        let viewingNames = uniqueNames(people)
-        if notifications.typingIndicatorsEnabled, !typingNames.isEmpty {
-            let label = presenceLabel(names: typingNames, action: .typing)
+        if let label = connection.presence.label(
+            currentParticipantID: connection.inputControl?.currentParticipantID,
+            showsTyping: notifications.typingIndicatorsEnabled,
+            showsViewing: notifications.peoplePresenceEnabled
+        ) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(theme.secondaryLabel)
@@ -2963,17 +2939,6 @@ private struct LegacyConversationRemoteView: View {
                 .background(theme.surface)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(label.replacingOccurrences(of: "…", with: ""))
-        } else if notifications.peoplePresenceEnabled, !viewingNames.isEmpty {
-            let label = presenceLabel(names: viewingNames, action: .viewing)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(theme.secondaryLabel)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, MobileDesign.Spacing.large)
-                .padding(.vertical, MobileDesign.Spacing.small)
-                .background(theme.surface)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(label)
         }
     }
 
@@ -3003,10 +2968,6 @@ private struct LegacyConversationRemoteView: View {
                 .background(theme.surface)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private func uniqueNames(_ people: [RemotePresenceDTO]) -> [String] {
-        Array(Set(people.map(remotePresenceLabel))).sorted()
     }
 
     private var conversationContinuity: MobileSessionContinuityStore.SessionState? {
@@ -3041,23 +3002,6 @@ private struct LegacyConversationRemoteView: View {
             hostID: hostID,
             sessionID: connection.session.id
         )
-    }
-
-    private func presenceLabel(names: [String], action: RemotePresenceState) -> String {
-        if names.count == 1 {
-            return action == .typing
-                ? MobileL10n.string("%@ is typing…", names[0])
-                : MobileL10n.string("%@ is here", names[0])
-        }
-        if names.count == 2 {
-            let joined = names.joined(separator: MobileL10n.string(" and "))
-            return action == .typing
-                ? MobileL10n.string("%@ are typing…", joined)
-                : MobileL10n.string("%@ are here", joined)
-        }
-        return action == .typing
-            ? MobileL10n.string("%lld people are typing…", Int64(names.count))
-            : MobileL10n.string("%lld people are here", Int64(names.count))
     }
 
     private func handleSubmissionFeedback(_ feedback: RemotePromptSubmissionFeedback?) {
@@ -3126,16 +3070,6 @@ private struct LegacyConversationRemoteView: View {
             keyboardOverlap = target
         }
     }
-}
-
-private func remotePresenceLabel(_ presence: RemotePresenceDTO) -> String {
-    guard let deviceName = presence.deviceName,
-          !deviceName.isEmpty,
-          deviceName != presence.displayName
-    else {
-        return presence.displayName
-    }
-    return MobileL10n.string("%@ on %@", presence.displayName, deviceName)
 }
 
 private struct ConversationComposer: View {

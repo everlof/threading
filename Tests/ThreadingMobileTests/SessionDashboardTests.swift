@@ -1118,6 +1118,7 @@ final class MobileDemoSceneTests: XCTestCase {
             case .terminalClaudeTUI: expected = ("terminal-claude-tui", .terminal)
             case .terminalCodexTUI: expected = ("terminal-codex-tui", .terminal)
             case .terminalCollaboration: expected = ("terminal-collaboration", .terminal)
+            case .terminalSoloPresence: expected = ("terminal-solo-presence", .terminal)
             case .terminalCompose: expected = ("terminal-compose", .terminal)
             case .terminalScrollback: expected = ("terminal-scrollback", .terminal)
             case .terminalSelection: expected = ("terminal-selection", .terminal)
@@ -1132,6 +1133,8 @@ final class MobileDemoSceneTests: XCTestCase {
             case .conversationAwayFromLatest:
                 expected = ("conversation-away-from-latest", .conversation)
             case .conversationColdStress: expected = ("conversation-cold-stress", .conversation)
+            case .conversationSoloPresence:
+                expected = ("conversation-solo-presence", .conversation)
             case .conversationCollaboration:
                 expected = ("conversation-collaboration", .conversation)
             case .conversationContentTypes: expected = ("conversation-content-types", .conversation)
