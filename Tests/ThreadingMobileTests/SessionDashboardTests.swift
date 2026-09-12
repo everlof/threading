@@ -1309,6 +1309,7 @@ final class MobileDemoSceneTests: XCTestCase {
             "terminal-compose",
             "terminal-scrollback",
             "terminal-selection",
+            "terminal-solo-presence",
         ])
         // `terminal-key-*` sits beside them and must not be swallowed by the family.
         XCTAssertEqual(MobileDemoScene.resolve("terminal-key-editor"), .terminalKeyEditor)
