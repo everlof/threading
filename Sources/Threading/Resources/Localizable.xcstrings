@@ -9078,6 +9078,50 @@
         }
       }
     },
+    "BrowserAnnotationEditor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserAnnotationEditor"
+          }
+        }
+      }
+    },
+    "BrowserAnnotationEditor deleted the annotation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserAnnotationEditor tog bort anteckningen."
+          }
+        }
+      }
+    },
+    "BrowserAnnotationEditor dismissed without saving." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserAnnotationEditor stängdes utan att spara."
+          }
+        }
+      }
+    },
+    "BrowserAnnotationEditor saved the note." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserAnnotationEditor sparade anteckningen."
+          }
+        }
+      }
+    },
     "BrowserAnnotationOverlay" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9118,6 +9162,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "BrowserAnnotationOverlay valde nål %lld."
+          }
+        }
+      }
+    },
+    "BrowserAnnotationSurfaceView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserAnnotationSurfaceView"
           }
         }
       }
@@ -43932,6 +43987,17 @@
         }
       }
     },
+    "The annotation plate. Fixed opaque extremes, so it holds its own edge over a page whose colours the theme does not choose." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anteckningsplattan. Fasta opaka ytterlägen, så att den håller sin egen kant över en sida vars färger temat inte väljer."
+          }
+        }
+      }
+    },
     "The app will return to the System theme." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45627,6 +45693,17 @@
         }
       }
     },
+    "The nonmodal note form. Return saves, Escape cancels, and Save stays disabled while the note is empty." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det icke-modala anteckningsformuläret. Retur sparar, Esc avbryter och Spara förblir inaktiverat så länge anteckningen är tom."
+          }
+        }
+      }
+    },
     "The note stays in Threading and is never exposed to the web page." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46586,6 +46663,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sidofältets bakgrund: plattformens material med System och temats egen ogenomskinliga yta med ett tema. Byt tema ovan för att se hur den ena ersätter den andra."
+          }
+        }
+      }
+    },
+    "The sign-in button loses its label under 380 pt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningsknappen tappar sin etikett under 380 pt."
           }
         }
       }

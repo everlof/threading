@@ -229,11 +229,13 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         XCTAssertTrue(editor.bounds.contains(editor.convert(editor.saveButton.bounds, from: editor.saveButton)))
     }
 
+    /// Asking for the front before building anything: on a skip, no window is ordered in at all.
     func testEditorTakesKeyboardAndEscapeReturnsItToCanvas() throws {
+        try activateHost()
         let (browser, _, window) = try fixture(width: 760, keyPanel: true)
         defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
         window.makeKey()
-        XCTAssertTrue(window.isKeyWindow)
+        XCTAssertTrue(waitUntil { window.isKeyWindow }, "the panel never took key status")
         browser.setAnnotationMode(true)
         browser.addAnnotation(atViewportPoint: CGPoint(x: 140, y: 160))
         let overlay = try XCTUnwrap(descendant(BrowserAnnotationOverlay.self, in: browser.view))
@@ -453,10 +455,16 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
     }
 
+    /// Parking a borderless window at (-10,000, -10,000) buys a real window for WebKit without
+    /// putting anything on a display, which is what keeps this class in `fast`. It does not buy
+    /// key status: the window server hands the keyboard to no window sitting on no display. So the
+    /// one test that is about where the keystrokes go gets a panel where a person could see it,
+    /// and is skipped from `fast` for exactly that reason.
     private func fixture(width: CGFloat, keyPanel: Bool = false) throws -> (BrowserViewController, DetachedBrowserHostViewController, NSWindow) {
         let browser = BrowserViewController(urlSchemeHandlers: ["threading-annotation": AnnotationPageHandler()])
         let host = DetachedBrowserHostViewController(sessionID: SessionID(), browserFactory: { _ in browser })
-        let rect = NSRect(x: -10_000, y: -10_000, width: width, height: 520)
+        let origin = keyPanel ? NSPoint(x: 120, y: 120) : NSPoint(x: -10_000, y: -10_000)
+        let rect = NSRect(origin: origin, size: NSSize(width: width, height: 520))
         let window: NSWindow = keyPanel
             ? AnnotationKeyPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             : NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -464,11 +472,32 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         window.contentViewController = host
         host.addBrowserTab()
         window.setContentSize(NSSize(width: width, height: 520))
-        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.setFrameOrigin(origin)
         window.orderFront(nil)
         host.view.layoutSubtreeIfNeeded()
         try navigate(browser, to: "threading-annotation://fixture/review")
         return (browser, host, window)
+    }
+
+    /// `NSApp.keyWindow` is nil for the whole of an inactive application, and since macOS 14 an app
+    /// that has not been given the front cannot take it. A command-line run therefore reports this
+    /// as skipped rather than blaming the component; it verifies for real with the host frontmost.
+    private func activateHost() throws {
+        guard !NSApp.isActive else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        _ = waitUntil { NSApp.isActive }
+        try XCTSkipUnless(
+            NSApp.isActive,
+            "the test host could not come to the front, so no window can hold key status"
+        )
+    }
+
+    private func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
+        }
+        return condition()
     }
 
     private func navigate(_ browser: BrowserViewController, to url: String) throws {

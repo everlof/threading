@@ -85,7 +85,9 @@ final class ComponentGalleryViewController: NSViewController {
         "AgentWorkloadAnalyzerView",
         "BackdropOverlay",
         "BackdropThemedControl",
+        "BrowserAnnotationEditor",
         "BrowserAnnotationOverlay",
+        "BrowserAnnotationSurfaceView",
         "BrowserBaselineOverlay",
         "BrowserBaselineOverlayHandle",
         "BrowserDeviceToolbar",
@@ -5139,10 +5141,49 @@ final class ComponentGalleryViewController: NSViewController {
         baselineCard.addSubview(underlying)
         baselineCard.addSubview(baselineOverlay)
 
+        // An existing annotation, so Delete is present: the editor hides that button for a pin
+        // being placed for the first time, and the story with it would be the smaller of the two.
+        let editor = BrowserAnnotationEditor(
+            identifier: 2,
+            note: L10n.string("The sign-in button loses its label under 380 pt."),
+            isExisting: true
+        )
+        editor.onSave = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserAnnotationEditor saved the note."))
+        }
+        editor.onCancel = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserAnnotationEditor dismissed without saving."))
+        }
+        editor.onDelete = { [weak self] in
+            self?.showReceipt(L10n.string("BrowserAnnotationEditor deleted the annotation."))
+        }
+
+        // The plate on its own, over something mid-toned. Its whole job is to stay visible against
+        // a page the theme does not control, which only a story with a page under it can show.
+        let surfaceCard = NSView()
+        surfaceCard.translatesAutoresizingMaskIntoConstraints = false
+        surfaceCard.wantsLayer = true
+        surfaceCard.applySurface(fill: Design.Surface.ground, radius: .control, border: Design.Surface.border)
+        let pageStandIn = annotationPageStandIn()
+        let annotationSurface = BrowserAnnotationSurfaceView(frame: .zero)
+        surfaceCard.addSubview(pageStandIn)
+        surfaceCard.addSubview(annotationSurface)
+
         for bar in [findBar, deviceToolbar] as [NSView] {
             bar.widthAnchor.constraint(equalToConstant: 460).isActive = true
         }
         NSLayoutConstraint.activate([
+            editor.widthAnchor.constraint(equalToConstant: 320),
+            surfaceCard.widthAnchor.constraint(equalToConstant: 460),
+            surfaceCard.heightAnchor.constraint(equalToConstant: 120),
+            pageStandIn.topAnchor.constraint(equalTo: surfaceCard.topAnchor),
+            pageStandIn.bottomAnchor.constraint(equalTo: surfaceCard.bottomAnchor),
+            pageStandIn.leadingAnchor.constraint(equalTo: surfaceCard.leadingAnchor),
+            pageStandIn.trailingAnchor.constraint(equalTo: surfaceCard.trailingAnchor),
+            annotationSurface.centerXAnchor.constraint(equalTo: surfaceCard.centerXAnchor),
+            annotationSurface.centerYAnchor.constraint(equalTo: surfaceCard.centerYAnchor),
+            annotationSurface.widthAnchor.constraint(equalToConstant: 220),
+            annotationSurface.heightAnchor.constraint(equalToConstant: 72),
             overlay.widthAnchor.constraint(equalToConstant: 460),
             overlay.heightAnchor.constraint(equalToConstant: 120),
             baselineCard.widthAnchor.constraint(equalToConstant: 460),
@@ -5175,6 +5216,16 @@ final class ComponentGalleryViewController: NSViewController {
                     overlay
                 ),
                 story(
+                    "BrowserAnnotationSurfaceView",
+                    "The annotation plate. Fixed opaque extremes, so it holds its own edge over a page whose colours the theme does not choose.",
+                    surfaceCard
+                ),
+                story(
+                    "BrowserAnnotationEditor",
+                    "The nonmodal note form. Return saves, Escape cancels, and Save stays disabled while the note is empty.",
+                    editor
+                ),
+                story(
                     "BrowserBaselineOverlay",
                     "An approved picture held over a live page. Drag the handle; click anywhere else and the button underneath answers.",
                     baselineCard
@@ -5185,6 +5236,35 @@ final class ComponentGalleryViewController: NSViewController {
 
     @objc private func baselineOverlayPassThroughClicked() {
         showReceipt(L10n.string("The control under BrowserBaselineOverlay took the click."))
+    }
+
+    /// A stand-in for the page under an annotation. The plate's contract is that it keeps its own
+    /// edge over colours the theme does not choose, so the bands run to both opaque extremes and
+    /// through a midtone: a plate that only read well against one of them would look correct over
+    /// a third of this card and wrong on a real page.
+    private func annotationPageStandIn() -> NSImageView {
+        let bands: [NSColor] = [
+            Design.Annotation.lightEdge,
+            Design.Surface.panel,
+            Design.Annotation.darkEdge
+        ]
+        let view = NSImageView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.imageScaling = .scaleAxesIndependently
+        view.image = NSImage(size: NSSize(width: 460, height: 120), flipped: false) { bounds in
+            let height = bounds.height / CGFloat(bands.count)
+            for (index, colour) in bands.enumerated() {
+                colour.setFill()
+                NSRect(
+                    x: bounds.minX,
+                    y: bounds.minY + CGFloat(index) * height,
+                    width: bounds.width,
+                    height: height
+                ).fill()
+            }
+            return true
+        }
+        return view
     }
 
     /// A stand-in capture: two bands, so a seam dragged across it is visibly a seam.

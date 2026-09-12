@@ -549,6 +549,13 @@ the following cases genuinely need to be visible, and they are skipped by name i
 - `BrowserCaptureGeometryTests` (the whole class) — the same platform question asked of a
   window's geometry rather than its capture, and it needs the window server to answer for the
   same reason.
+- `BrowserAnnotationEditingTests/testEditorTakesKeyboardAndEscapeReturnsItToCanvas()` — the one
+  test in that class about where the keystrokes go. Its siblings park a borderless window at
+  (-10,000, -10,000) and stay in `fast`; this one cannot, for the reason in the next paragraph but
+  one, so its fixture sits at (120,120) and it asks for the front itself. It shipped asserting
+  `isKeyWindow` on the parked panel and failed four assertions on every run, in `fast` and `all`
+  alike, while every responder assertion beside them passed — the component was right and the
+  fixture could not observe it.
 - `SidebarRevealFocusTests` (the whole class) — proves that revealing the native sidebar moves
   keyboard ownership into its selected row. AppKit exposes no key window while the test host is
   inactive, so the fixture must activate the host and order its main window or key panel on

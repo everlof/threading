@@ -65,7 +65,8 @@
     {
       "skippedTests" : [
         "BrowserAgentBridgeIntegrationTests",
-        "BrowserCaptureGeometryTests",
+        "BrowserAnnotationEditingTests\/testEditorTakesKeyboardAndEscapeReturnsItToCanvas()",
+          "BrowserCaptureGeometryTests",
         "BrowserOffScreenCaptureTests",
         "SidebarRevealFocusTests",
         "CommandPaletteFocusTests/testEscapeReturnsKeyboardToTerminalInKeyWindow()",
