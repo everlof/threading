@@ -657,7 +657,7 @@ final class ShareChatOptionsView: NSView {
 
     private static func label(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Design.Typography.subheading()
+        label.applyFont(.subheading)
         label.textColor = Design.Text.secondary
         label.preferredMaxLayoutWidth = ShareSheetDefaults.accessoryWidth
         return label
