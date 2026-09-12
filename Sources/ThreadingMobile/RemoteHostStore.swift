@@ -97,6 +97,11 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
         return result
     }
 
+    var hostedDeviceID: String? {
+        if isOwnerDevice { return RemoteDeviceIdentity.current }
+        return shareID.map { RemoteInvitationWebLink.guestDeviceID(shareID: $0) }
+    }
+
     var isOwnerDevice: Bool { scope == nil || scope == "all" }
 
     var candidateLinks: [RemoteConnectionLink] {

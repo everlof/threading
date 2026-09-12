@@ -233,3 +233,51 @@ into a public issue or interpolate it into an agent instruction. The diagnostic 
 content-free event/field vocabulary shared with the apps; raw unified logs, `.ips` payloads,
 terminal output, prompts, paths, credentials, and notification text are not accepted by the
 intake schema.
+
+## Guest invitation links
+
+`GET /join` offers **Continue in browser** and **Open in Threading**. Invitations are carried
+only in URL fragments; neither page requests nor referrers contain the Mac capability.
+`GET /.well-known/apple-app-site-association` associates `/join` with
+`SMQ3E8Y57T.codes.threading.mobile`. Refresh the iPhone provisioning profile for Associated
+Domains and verify an actual tap separately from browser fallback.
+
+The public client reuses `Sources/Threading/Resources/RemoteClient` with a browser WebRTC adapter
+in `web/`. `npm run build:invitations` copies the shipping assets and bundles the adapter into
+ignored `.wrangler/invitation-assets`. It does not fork the chat UI. HTTP and live WebSocket
+traffic cross the native binary tunnel to the Mac, never an application proxy in this service.
+
+The Mac issues `invite-<share ID>` service credentials for unused invitations and
+`guest-<share ID>` credentials for accepted guest reconnects. The Mac's separate guest capability
+and physical device binding remain the authority for chat requests. No guest account or service
+schema migration is required. Browser storage namespaces are per invitation rather than per
+shared public origin; provisioning saves the acceptance receipt before switching transport.
+
+`/join/rendezvous` verifies the browser Origin, receives only the service credential in a bounded
+WebSocket subprotocol, then forwards the signaling handshake to the same service origin's fixed
+`/v1/rendezvous/device` endpoint with Authorization. It cannot select another upstream, proxy
+remote HTTP, or carry live chat bytes. The response selects `threading.rendezvous.v1`, without
+echoing the credential. Existing authentication and signaling limits apply unchanged.
+
+The separate `threading-invitations` Worker is deployed with `npm run deploy:invitations`.
+Routes cover `/join`, `/join/*`, and the association file on both domains. Only allowlisted
+client assets, `/join/chat`, and `/join/rendezvous` are served under the wildcard. It has no
+service secrets or database; API readiness and `/v1` remain on the existing service Workers.
+The core API also uses the shared landing-page response for local development.
+
+Run `npm test` for the service and browser protocol tests. For a real browser/native proof:
+
+```sh
+npm run build:invitations
+node scripts/browser-native-proof.mjs
+# In the repo root, in another shell:
+THREADING_BROWSER_PROOF_URL=http://127.0.0.1:18891 swift test \
+  --package-path Packages/ThreadingPeerTransport --filter PeerBrowserInteropTests
+```
+
+Open the fixture's printed URL, wait for its session list, reload the page without the invitation
+fragment, then open **Browser connection test**. The test passes when the native tunnel carries
+fresh guest acceptance, a reload with the same membership, and authenticated live chat. It uses
+loopback-only fake signaling and a fake Mac API, but the real native host listener, WebRTC,
+byte-stream bridge and shipping browser UI. Cross-network NAT/TURN and permission enforcement
+remain separate checks. The fixture does not launch an agent or send a real chat message.

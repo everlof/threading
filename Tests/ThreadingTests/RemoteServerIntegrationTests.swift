@@ -3182,6 +3182,28 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )).status, 403, "a session guest cannot upload host diagnostics custody")
     }
 
+    func testHostedCredentialRouteAdmitsOnlyTheBoundGuestWithoutRetiringOwnerPairing() throws {
+        let commands = HostedGuestCommandSpy()
+        server.hostCommands = commands
+        authority.set(RemoteAuthorization(shareID: "membership", capability: .view,
+            scope: .session(SessionID()), principal: .guest,
+            member: RemoteMember(id: "membership", displayName: "Guest", deviceID: "test-device")),
+            forToken: "guest-transport-test")
+        let body = try JSONEncoder().encode(RemoteHostedDeviceCredentialRequestDTO())
+        let response = try XCTUnwrap(post(RemoteRouter.hostedDeviceCredentialPath,
+            bearer: "guest-transport-test", body: body))
+        XCTAssertEqual(response.status, 201)
+        let credential = try JSONDecoder().decode(RemoteHostedDeviceCredentialDTO.self, from: response.body)
+        XCTAssertEqual(credential.deviceID, "guest-membership")
+        XCTAssertEqual(commands.accessToken, "guest-transport-test")
+        XCTAssertEqual(commands.deviceID, "test-device")
+        XCTAssertFalse(commands.completedOwnerBootstrap)
+        XCTAssertEqual(try XCTUnwrap(post(RemoteRouter.hostedDeviceCredentialPath,
+            bearer: "guest-transport-test", body: body,
+            headers: ["X-Threading-Device": "another-device"])).status, 401)
+        XCTAssertEqual(commands.issueCount, 1)
+    }
+
     func testInvitationAcceptanceIsIdempotentForAnExistingBearer() throws {
         let request = try JSONEncoder().encode(
             RemoteAcceptInvitationRequestDTO(displayName: "Test iPhone")
@@ -5657,6 +5679,30 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
         XCTAssertEqual(afterRestart.access(for: sessionID).members.map(\.displayName), ["Anna"])
     }
 
+    func testGuestAcceptanceRetriesOnlyOnItsDeviceAndCannotSurviveRevocation() throws {
+        let sessionID = SessionID()
+        let url = URL(string: "https://dev.remote.threading.codes/join#fixture")!
+        let store = InMemoryRemoteGuestShareStore(shares: [RemoteGuestShareRecord(
+            id: "guest-retry", sessionID: sessionID.uuidString, invitationToken: invitationToken,
+            hostedInvitationURL: url, capability: .interact, canApprovePermissions: false,
+            createdAt: Date(), expiresAt: Date(timeIntervalSinceNow: 3600), members: [])])
+        let coordinator = makeCoordinator(guestShareStore: store)
+        XCTAssertEqual(coordinator.access(for: sessionID).links.first?.url, url)
+        let accepted = try XCTUnwrap(coordinator.redeemInvitation(token: invitationToken,
+            deviceID: "guest-phone", displayName: "Guest", persistsOwnerDevice: false))
+        let retried = try XCTUnwrap(coordinator.redeemInvitation(token: invitationToken,
+            deviceID: "guest-phone", displayName: "Guest", persistsOwnerDevice: false))
+        XCTAssertEqual(accepted.accessToken, retried.accessToken)
+        XCTAssertEqual(accepted.authorization.scope, .session(sessionID))
+        XCTAssertFalse(accepted.authorization.canManageHost)
+        XCTAssertFalse(accepted.authorization.canApprovePermissions)
+        XCTAssertNil(coordinator.redeemInvitation(token: invitationToken,
+            deviceID: "other-phone", displayName: "Other", persistsOwnerDevice: false))
+        coordinator.revokeSessionShares(sessionID)
+        XCTAssertNil(coordinator.redeemInvitation(token: invitationToken,
+            deviceID: "guest-phone", displayName: "Guest", persistsOwnerDevice: false))
+    }
+
     func testUnreadableGuestPersistenceFailsClosedWithoutConsumingAnInvitation() {
         let store = FailingGuestShareStore()
         let coordinator = makeCoordinator(guestShareStore: store)
@@ -5788,4 +5834,31 @@ final class RemoteAPNSConfigurationTests: XCTestCase {
             "THREADING_APNS_TOPIC": "codes.threading.mobile",
         ]
     }
+}
+
+@MainActor
+private final class HostedGuestCommandSpy: RemoteHostCommanding {
+    var accessToken: String?
+    var deviceID: String?
+    var issueCount = 0
+    var completedOwnerBootstrap = false
+
+    func issueHostedDeviceCredential(accessToken: String, deviceID: String) async throws
+        -> RemoteHostedDeviceCredentialDTO {
+        self.accessToken = accessToken
+        self.deviceID = deviceID
+        issueCount += 1
+        return RemoteHostedDeviceCredentialDTO(serviceURL: "https://dev.remote.threading.codes",
+            hostID: "host", deviceID: "guest-membership", credential: "test-credential",
+            expiresAt: Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000)
+    }
+    func completeHostedPairingBootstrap() { completedOwnerBootstrap = true }
+    func createSessionShare(for sessionID: SessionID, capability: RemoteCapability,
+        canApprovePermissions: Bool) -> Result<RemoteCreatedShare, RemoteSharePreparationError> {
+        .failure(.remoteAccessUnavailable)
+    }
+    func revokeSessionShares(_ sessionID: SessionID) {}
+    func createTerminalShare(for terminalID: TerminalID, capability: RemoteCapability)
+        -> Result<RemoteCreatedShare, RemoteSharePreparationError> { .failure(.remoteAccessUnavailable) }
+    func revokeTerminalShares(_ terminalID: TerminalID) {}
 }

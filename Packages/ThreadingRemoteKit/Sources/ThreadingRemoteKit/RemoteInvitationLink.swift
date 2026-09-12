@@ -35,7 +35,12 @@ public enum RemoteInvitation: Equatable, Sendable {
     public static let maximumEncodedBytes = HostedPairingLink.maximumEncodedBytes
 
     public init?(payload: String, now: Date = Date()) {
-        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        let input = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        let webPayload = RemoteInvitationWebLink.appPayload(from: input)
+        if let url = URL(string: input), url.scheme == "https",
+           [RemoteInvitationWebLink.productionOrigin.host, RemoteInvitationWebLink.developmentOrigin.host].contains(url.host),
+           url.path == "/join", webPayload == nil { return nil }
+        let trimmed = webPayload ?? input
         guard !trimmed.isEmpty, trimmed.utf8.count <= Self.maximumEncodedBytes else { return nil }
         if let hosted = HostedPairingLink(string: trimmed, now: now) {
             self = .hostedPairing(hosted)
@@ -94,28 +99,14 @@ public extension RemoteConnectionLink {
     }
 }
 
-/// The one composition of what an invitation looks like when it leaves Threading.
-///
-/// The Mac copies a share link from two menus and the iPhone puts one into the system share
-/// sheet and onto the pasteboard. All four wrote `url.absoluteString` and nothing else, so the
-/// recipient received a bare `https://192.168.1.181:8760/#…` with no way to know it wanted the
-/// app, wanted their network, or would open on a certificate warning. Four call sites composing
-/// their own sentence is four sentences; this is one.
-///
-/// The guidance sentence is passed in because each application localizes through its own
-/// catalog. The *order and shape* of the message is what lives here, which is what could
-/// otherwise drift.
+/// Copies one HTTPS invitation. Existing callers may still supply their localized guidance;
+/// that argument is retained for source compatibility, but explanatory copy now belongs to the
+/// share sheet and the landing page rather than to the clipboard. Already-hosted invitations
+/// pass through unchanged; private links keep their original capability and certificate pin.
 public enum RemoteInvitationShare {
-    private static let lineSeparator = "\n"
-
     public static func text(for link: RemoteConnectionLink, guidance: String) -> String {
-        [
-            guidance,
-            link.appOpenPayload,
-            link.shareURL.absoluteString,
-        ]
-        .filter { !$0.isEmpty }
-        .joined(separator: lineSeparator)
+        RemoteInvitationWebLink.url(appPayload: link.appOpenPayload)?.absoluteString
+            ?? link.appOpenPayload
     }
 
     /// The same message from the URL a freshly minted share hands back.
@@ -123,6 +114,7 @@ public enum RemoteInvitationShare {
     /// A share URL that cannot be read back as a link is written through unchanged rather than
     /// dropped: an invitation the recipient cannot use is worse than one without its sentence.
     public static func text(shareURL: URL, guidance: String) -> String {
+        if RemoteInvitationWebLink.appPayload(from: shareURL.absoluteString) != nil { return shareURL.absoluteString }
         guard let link = RemoteConnectionLink(url: shareURL) else {
             return shareURL.absoluteString
         }
@@ -149,4 +141,40 @@ extension Data {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
+}
+
+/// A public landing page carries the invitation only in its fragment. The HTTP service and
+/// link-preview crawlers never receive the capability. Only our associated domains unwrap it.
+public enum RemoteInvitationWebLink {
+    public static let productionOrigin = URL(string: "https://remote.threading.codes")!
+    public static let developmentOrigin = URL(string: "https://dev.remote.threading.codes")!
+
+    public static func url(appPayload: String, origin: URL = productionOrigin) -> URL? {
+        guard appPayload.utf8.count <= RemoteInvitation.maximumEncodedBytes,
+              RemoteInvitation.isAppScheme(appPayload),
+              origin == productionOrigin || origin == developmentOrigin else { return nil }
+        var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
+        components.path = "/join"
+        components.fragment = Data(appPayload.utf8).base64URLEncodedString()
+        guard let url = components.url,
+              url.absoluteString.utf8.count <= RemoteInvitation.maximumEncodedBytes else { return nil }
+        return url
+    }
+
+    public static func appPayload(from value: String) -> String? {
+        guard value.utf8.count <= RemoteInvitation.maximumEncodedBytes,
+              let components = URLComponents(string: value),
+              components.scheme == "https",
+              [productionOrigin.host, developmentOrigin.host].contains(components.host),
+              components.user == nil, components.password == nil, components.port == nil,
+              components.path == "/join", components.query == nil,
+              let fragment = components.fragment,
+              let data = Data(base64URLEncoded: fragment, maximumBytes: RemoteInvitation.maximumEncodedBytes),
+              let payload = String(data: data, encoding: .utf8),
+              RemoteInvitation.isAppScheme(payload) else { return nil }
+        return payload
+    }
+
+    /// One service identity per guest membership, independent of every owner and other share.
+    public static func guestDeviceID(shareID: String) -> String { "guest-" + shareID }
 }

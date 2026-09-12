@@ -129,37 +129,52 @@ final class MobileInvitationRouteTests: XCTestCase {
 
     // MARK: - What the recipient is sent
 
-    func testTheSharedTextCarriesTheSentenceAndBothForms() throws {
-        let link = try makeLink()
-
-        let text = SharedSessionLinkCopy.sharedText(for: link.shareURL)
-        let lines = text.split(separator: "\n").map(String.init)
-
-        XCTAssertEqual(lines.count, 3)
-        XCTAssertEqual(lines[0], SharedSessionLinkCopy.guidance)
-        XCTAssertEqual(lines[1], link.appOpenPayload)
-        XCTAssertEqual(
-            lines[2],
-            link.shareURL.absoluteString,
-            "the https line stays as the carrier for clients that will not linkify a scheme"
-        )
-        XCTAssertTrue(
-            SharedSessionLinkCopy.guidance.contains("Threading"),
-            "the sentence has to say which app opens it"
-        )
-    }
-
-    func testTheAppLineInASharedMessageParsesBackIntoTheSameInvitation() throws {
+    func testSharedHTTPSLinkOpensThePairingScreenAndPreservesThePin() throws {
         let link = try makeLink()
         let text = SharedSessionLinkCopy.sharedText(for: link.shareURL)
-
-        let appLine = try XCTUnwrap(
-            text.split(separator: "\n").map(String.init).first { $0.hasPrefix("threading://") }
-        )
-        guard case .connection(let parsed)? = MobileInvitationRoute(payload: appLine) else {
-            return XCTFail("what we send has to be what we can read")
+        XCTAssertFalse(text.contains("\n"))
+        let url = try XCTUnwrap(URL(string: text))
+        XCTAssertEqual(url.scheme, "https")
+        guard case .connection(let parsed)? = MobileInvitationRoute(url: url) else {
+            return XCTFail("the universal link must resolve to the pinned invitation")
         }
         XCTAssertEqual(parsed, link)
+        let model = RemoteAppModel()
+        XCTAssertTrue(model.open(url))
+        XCTAssertTrue(model.isPairing)
+        XCTAssertEqual(model.takePendingInvitation(), text)
+        XCTAssertNil(model.takePendingInvitation())
+    }
+
+    func testHostedGuestUniversalLinkReachesHostedAcceptance() throws {
+        let hosted = try XCTUnwrap(HostedPairingLink(serviceURL: RemoteInvitationWebLink.developmentOrigin,
+            hostID: "mac", deviceID: "invite-1", rendezvousCredential: "transport",
+            bootstrapToken: "chat-only", expiresAt: Date().addingTimeInterval(600)))
+        let url = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: hosted.scannablePayload,
+            origin: RemoteInvitationWebLink.developmentOrigin))
+        guard case .hostedPairing(let route)? = MobileInvitationRoute(url: url) else {
+            return XCTFail("guest invitations must negotiate Hosted Direct before redeeming")
+        }
+        XCTAssertEqual(route.bootstrapToken, "chat-only")
+        XCTAssertEqual(route.deviceID, "invite-1")
+        let model = RemoteAppModel()
+        XCTAssertTrue(model.open(url))
+        XCTAssertEqual(model.pendingInvitation, url.absoluteString)
+    }
+
+    func testGuestTransportIdentitySurvivesPersistenceAndIsSeparatePerMembership() throws {
+        let guest = PairedRemoteHost(id: "mac:share:membership", hostID: "mac", shareID: "membership",
+            scope: "session", name: "Mac", link: try makeLink(), lastConnectedAt: Date())
+        let restored = try JSONDecoder().decode(PairedRemoteHost.self, from: JSONEncoder().encode(guest))
+        XCTAssertFalse(restored.isOwnerDevice)
+        XCTAssertEqual(restored.hostedDeviceID, "guest-membership")
+        var other = restored
+        other.shareID = "other"
+        XCTAssertNotEqual(other.hostedDeviceID, restored.hostedDeviceID)
+        var owner = restored
+        owner.scope = "all"
+        XCTAssertEqual(owner.hostedDeviceID, RemoteDeviceIdentity.current)
+        XCTAssertNotEqual(owner.hostedDeviceID, restored.hostedDeviceID)
     }
 
     // MARK: - The words on the link-ready sheet

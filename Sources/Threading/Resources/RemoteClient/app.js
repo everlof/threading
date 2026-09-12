@@ -299,10 +299,22 @@
 
   localizeDocument();
 
+  // The public browser client supplies the same API over Hosted Direct. Private/LAN pages
+  // retain native fetch/WebSocket and their existing origin-scoped storage.
+  var transport = window.ThreadingTransport;
+  var fetch = transport ? transport.fetch : window.fetch.bind(window);
+  var WebSocket = transport ? transport.WebSocket : window.WebSocket;
+  function browserStorage(name) {
+    try { return window[name]; } catch (error) {
+      return { getItem: function () { return null; }, setItem: function () {}, removeItem: function () {} };
+    }
+  }
+  var localStorage = transport ? transport.localStorage : browserStorage("localStorage");
+  var sessionStorage = transport ? transport.sessionStorage : browserStorage("sessionStorage");
   var PROTOCOL = { version: 1, minimum: 1 };
   var tokenStorageKey = "threading.capability";
   var membershipStorageKey = "threading.membership";
-  var fragmentToken = location.hash.slice(1);
+  var fragmentToken = transport ? transport.initialToken : location.hash.slice(1);
   var token = fragmentToken;
   var storedMembership = "";
   try {

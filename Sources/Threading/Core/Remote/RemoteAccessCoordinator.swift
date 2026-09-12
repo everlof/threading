@@ -411,6 +411,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private struct SessionShare {
         let id: String
         var invitationToken: String?
+        var hostedInvitationURL: URL? = nil
         let capability: RemoteCapability
         let canApprovePermissions: Bool
         let createdAt: Date
@@ -508,13 +509,24 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         hostedService.canIssueDeviceCredentials
     }
 
-    func issueHostedDeviceCredential(deviceID: String) async throws
+    func issueHostedDeviceCredential(accessToken: String, deviceID: String) async throws
         -> RemoteHostedDeviceCredentialDTO
     {
-        guard let serviceURL = hostedService.serviceURL else {
-            throw PeerControlPlaneError.invalidEndpoint
+        guard let authorization = authority.authorization(forToken: accessToken),
+              authorization.isBound(to: deviceID),
+              authorization.canManageHost || authorization.member != nil else {
+            throw PeerControlPlaneError.invalidCredential
         }
-        let issued = try await hostedService.issueDeviceCredential(deviceID: deviceID)
+        let service = hostedService
+        guard let serviceURL = service.serviceURL else { throw PeerControlPlaneError.invalidEndpoint }
+        let routeDeviceID = authorization.canManageHost ? deviceID
+            : RemoteInvitationWebLink.guestDeviceID(shareID: authorization.shareID)
+        let issued = try await service.issueDeviceCredential(deviceID: routeDeviceID)
+        guard !Task.isCancelled, service === hostedService,
+              authority.authorization(forToken: accessToken) == authorization else {
+            service.revokeDevice(deviceID: routeDeviceID)
+            throw PeerControlPlaneError.invalidCredential
+        }
         return issued.credential.withValue { credential in
             RemoteHostedDeviceCredentialDTO(
                 serviceURL: serviceURL.absoluteString,
@@ -932,9 +944,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// remains valid until sharing is stopped. Copying the invite can therefore never leak the
     /// dashboard or another session.
     ///
-    /// Synchronous, because every input is already known: a door is bound or it is not. It used
-    /// to queue the request behind a relay process starting up, which is what the pending-share
-    /// machinery and its timeout existed for.
+    /// The synchronous private-network minting path. UI and remote owners call
+    /// `prepareSessionShare` to prefer Hosted Direct and return a public app-opening link.
     func createSessionShare(
         for sessionID: SessionID,
         capability: RemoteCapability,
@@ -959,6 +970,66 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             return .failure(.remoteAccessUnavailable)
         }
         return .success(created)
+    }
+
+    /// One bounded service request per explicit copy action. The bearer still redeems only
+    /// on this Mac; the hosted credential grants transport, never session authority.
+    func prepareSessionShare(
+        for sessionID: SessionID,
+        capability: RemoteCapability,
+        canApprovePermissions: Bool
+    ) async -> Result<RemoteCreatedShare, RemoteSharePreparationError> {
+        guard hostedService.state == .ready else {
+            return createSessionShare(for: sessionID, capability: capability,
+                                      canApprovePermissions: canApprovePermissions).map { created in
+                let origin = hostedService.serviceURL == RemoteInvitationWebLink.developmentOrigin
+                    ? RemoteInvitationWebLink.developmentOrigin : RemoteInvitationWebLink.productionOrigin
+                let url = RemoteConnectionLink(url: created.url).flatMap {
+                    RemoteInvitationWebLink.url(appPayload: $0.appOpenPayload, origin: origin)
+                } ?? created.url
+                return RemoteCreatedShare(url: url, expiresAt: created.expiresAt,
+                                          canApprovePermissions: created.canApprovePermissions)
+            }
+        }
+        guard case .listening = status,
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+              let token = Self.randomToken() else { return .failure(.remoteAccessUnavailable) }
+        let service = hostedService
+        let shareID = UUID().uuidString.lowercased()
+        let deviceID = "invite-" + shareID
+        do {
+            let issued = try await service.issueDeviceCredential(
+                deviceID: deviceID,
+                lifetimeSeconds: Int(RemoteAccessDefaults.defaultShareExpiry)
+            )
+            guard !Task.isCancelled, service === hostedService,
+                  case .listening = status,
+                  RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+                  let origin = service.serviceURL,
+                  let link = issued.credential.withValue({ credential in
+                      HostedPairingLink(serviceURL: origin, hostID: issued.hostID,
+                                        deviceID: issued.deviceID, rendezvousCredential: credential,
+                                        bootstrapToken: token, expiresAt: issued.expiresAt)
+                  }),
+                  let url = RemoteInvitationWebLink.url(
+                      appPayload: link.scannablePayload,
+                      origin: origin == RemoteInvitationWebLink.developmentOrigin
+                          ? RemoteInvitationWebLink.developmentOrigin : RemoteInvitationWebLink.productionOrigin
+                  ),
+                  let created = createSessionShareNow(
+                      for: sessionID, capability: capability,
+                      canApprovePermissions: canApprovePermissions,
+                      preparedToken: token, preparedID: shareID, hostedURL: url,
+                      hostedExpiry: issued.expiresAt
+                  ) else {
+                service.revokeDevice(deviceID: deviceID)
+                return .failure(.remoteAccessUnavailable)
+            }
+            return .success(created)
+        } catch {
+            service.revokeDevice(deviceID: deviceID)
+            return .failure(.remoteAccessUnavailable)
+        }
     }
 
     /// Mints an exact-terminal invitation. `interact` grants PTY control; unlike chat shares it
@@ -1033,29 +1104,34 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private func createSessionShareNow(
         for sessionID: SessionID,
         capability: RemoteCapability,
-        canApprovePermissions requestedPermissionApproval: Bool
+        canApprovePermissions requestedPermissionApproval: Bool,
+        preparedToken: String? = nil,
+        preparedID: String? = nil,
+        hostedURL: URL? = nil,
+        hostedExpiry: Date? = nil
     ) -> RemoteCreatedShare? {
-        guard let invitationToken = Self.randomToken() else {
+        guard let invitationToken = preparedToken ?? Self.randomToken() else {
             ThreadingLogger.remote.error(
                 "Remote credential generation failed stage=guest_invitation"
             )
             return nil
         }
-        let id = UUID().uuidString.lowercased()
+        let id = preparedID ?? UUID().uuidString.lowercased()
         let createdAt = Date()
-        let expiresAt = createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
+        let expiresAt = hostedExpiry ?? createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
         let canApprovePermissions =
             requestedPermissionApproval && capability == .interact
         let share = SessionShare(
             id: id,
             invitationToken: invitationToken,
+            hostedInvitationURL: hostedURL,
             capability: capability,
             canApprovePermissions: canApprovePermissions,
             createdAt: createdAt,
             expiresAt: expiresAt,
             members: [:]
         )
-        guard let url = invitationURL(token: invitationToken) else { return nil }
+        guard let url = hostedURL ?? invitationURL(token: invitationToken) else { return nil }
         var candidate = sessionShares
         candidate[sessionID, default: []].append(share)
         guard persistGuestShares(candidate) else { return nil }
@@ -1097,7 +1173,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
         let now = Date()
         pairingRedemptions = pairingRedemptions.filter { $0.value.expiresAt > now }
-        if let cached = pairingRedemptions[token], cached.deviceID == normalizedDeviceID {
+        if let cached = pairingRedemptions[token], cached.deviceID == normalizedDeviceID,
+           authority.authorization(forToken: cached.redemption.accessToken) == cached.redemption.authorization {
             return cached.redemption
         }
         if token == pairingBootstrapToken {
@@ -1183,15 +1260,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             guard persistGuestShares(candidate) else { return nil }
             sessionShares = candidate
             authority.set(authorization, forToken: accessToken)
+            retireHostedInvitation(share)
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             mirrors.sessionSharingChanged()
             ThreadingLogger.remote.notice(
                 "Remote guest invitation redeemed session=\(sessionID.rawValue, privacy: .public) capability=\(share.capability.rawValue, privacy: .public) permission_approval=\(share.canApprovePermissions, privacy: .public)"
             )
-            return RemoteInvitationRedemption(
-                accessToken: accessToken,
-                authorization: authorization
-            )
+            return cacheGuestRedemption(invitation: token, deviceID: normalizedDeviceID,
+                accessToken: accessToken, authorization: authorization, now: now)
         }
         for terminalID in Array(terminalShares.keys) {
             guard var shares = terminalShares[terminalID],
@@ -1226,16 +1302,42 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             guard persistTerminalGuestShares(candidate) else { return nil }
             terminalShares = candidate
             authority.set(authorization, forToken: accessToken)
+            retireHostedInvitation(share)
             sharingChanged()
             ThreadingLogger.remote.notice(
                 "Remote terminal invitation redeemed terminal=\(terminalID.rawValue, privacy: .public) capability=\(share.capability.rawValue, privacy: .public)"
             )
-            return RemoteInvitationRedemption(
-                accessToken: accessToken,
-                authorization: authorization
-            )
+            return cacheGuestRedemption(invitation: token, deviceID: normalizedDeviceID,
+                accessToken: accessToken, authorization: authorization, now: now)
         }
         return nil
+    }
+
+    private func retireHostedInvitation(_ share: SessionShare) {
+        guard share.hostedInvitationURL != nil else { return }
+        let service = hostedService
+        let deviceID = "invite-" + share.id
+        // Preserve the acceptance/provisioning response and its bounded retry window, then free
+        // the temporary transport slot. The accepted member has an independent service identity.
+        DispatchQueue.main.asyncAfter(deadline: .now() + RemoteAccessDefaults.pairingRetrySeconds) {
+            service.revokeDevice(deviceID: deviceID)
+        }
+    }
+
+    private func cacheGuestRedemption(
+        invitation: String, deviceID: String, accessToken: String,
+        authorization: RemoteAuthorization, now: Date
+    ) -> RemoteInvitationRedemption {
+        // A lost acceptance/provisioning response may retry on the same device, never consume
+        // the invitation on a second device. Revocation is rechecked when reading the cache.
+        if pairingRedemptions.count >= 64,
+           let oldest = pairingRedemptions.min(by: { $0.value.expiresAt < $1.value.expiresAt })?.key {
+            pairingRedemptions[oldest] = nil
+        }
+        let redemption = RemoteInvitationRedemption(accessToken: accessToken, authorization: authorization)
+        pairingRedemptions[invitation] = PairingRedemption(deviceID: deviceID, redemption: redemption,
+            expiresAt: now.addingTimeInterval(RemoteAccessDefaults.pairingRetrySeconds))
+        return redemption
     }
 
     private func pairNewOwnerDevice(
@@ -1337,7 +1439,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 canApprovePermissions: share.canApprovePermissions,
                 createdAt: share.createdAt,
                 expiresAt: share.expiresAt,
-                url: invitationURL(token: invitationToken)
+                url: share.hostedInvitationURL ?? invitationURL(token: invitationToken)
             ))
         }
 
@@ -1451,6 +1553,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         else {
             return false
         }
+        let hosted = shares[index].hostedInvitationURL != nil
         shares[index].invitationToken = nil
         if shares[index].members.isEmpty {
             shares.remove(at: index)
@@ -1459,6 +1562,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         candidate[sessionID] = shares.isEmpty ? nil : shares
         guard persistGuestShares(candidate) else { return false }
         sessionShares = candidate
+        if hosted { hostedService.revokeDevice(deviceID: "invite-" + shareID) }
         sharingChanged()
         ThreadingLogger.remote.notice(
             "Remote guest invitation revoked session=\(sessionID.rawValue, privacy: .public)"
@@ -1473,6 +1577,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard persistGuestShares(candidate) else { return }
         sessionShares = candidate
         for share in removed {
+            if share.hostedInvitationURL != nil { hostedService.revokeDevice(deviceID: "invite-" + share.id) }
             for member in share.members.values {
                 revoke(member)
             }
@@ -1490,6 +1595,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard persistTerminalGuestShares(candidate) else { return }
         terminalShares = candidate
         for share in removed {
+            if share.hostedInvitationURL != nil { hostedService.revokeDevice(deviceID: "invite-" + share.id) }
             for member in share.members.values {
                 revoke(member)
             }
@@ -1501,6 +1607,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private func revoke(_ member: MemberRecord) {
+        hostedService.revokeDevice(deviceID: RemoteInvitationWebLink.guestDeviceID(shareID: member.authorization.shareID))
         authority.set(nil, forToken: member.token)
         notifications.revoke(shareID: member.authorization.shareID)
         server.revokeConnections(shareID: member.authorization.shareID)
@@ -1553,6 +1660,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 let share = SessionShare(
                     id: record.id,
                     invitationToken: invitation,
+                    hostedInvitationURL: record.hostedInvitationURL,
                     capability: record.capability,
                     canApprovePermissions: record.targetKind == .projectTerminal
                         ? false : record.canApprovePermissions,
@@ -1621,6 +1729,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                     id: share.id,
                     sessionID: sessionID.uuidString,
                     invitationToken: share.invitationToken,
+                    hostedInvitationURL: share.hostedInvitationURL,
                     capability: share.capability,
                     canApprovePermissions: share.canApprovePermissions,
                     createdAt: share.createdAt,
@@ -1645,6 +1754,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                     targetKind: .projectTerminal,
                     sessionID: terminalID.uuidString,
                     invitationToken: share.invitationToken,
+                    hostedInvitationURL: share.hostedInvitationURL,
                     capability: share.capability,
                     canApprovePermissions: false,
                     createdAt: share.createdAt,

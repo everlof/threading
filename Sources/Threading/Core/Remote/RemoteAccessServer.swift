@@ -2006,7 +2006,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
-        guard authorization.canManageHost else {
+        guard authorization.canManageHost || authorization.member != nil else {
             respond(.respond(RemoteRouter.error(
                 403,
                 "Owner access required",
@@ -2031,6 +2031,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     return
                 }
                 let credential = try await hostCommands.issueHostedDeviceCredential(
+                    accessToken: RemoteRouter.bearerToken(from: request) ?? "",
                     deviceID: deviceID
                 )
                 respond(.respond(RemoteRouter.json(
@@ -2039,7 +2040,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     reason: "Created",
                     maximumBytes: 16 * 1024
                 )))
-                hostCommands.completeHostedPairingBootstrap()
+                if authorization.canManageHost { hostCommands.completeHostedPairingBootstrap() }
             } catch {
                 ThreadingLogger.remote.error(
                     "Hosted device credential issue failed code=service"
@@ -2822,7 +2823,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         let capability = choice.capability
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             guard let hostCommands = self.hostCommands else {
                 respond(.respond(RemoteRouter.error(
                     503,
@@ -2831,7 +2832,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 )))
                 return
             }
-            switch hostCommands.createSessionShare(
+            switch await hostCommands.prepareSessionShare(
                 for: sessionID,
                 capability: capability,
                 canApprovePermissions: choice.canApprovePermissions

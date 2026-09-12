@@ -667,7 +667,7 @@ final class RemoteSessionMirrorRegistry {
             features.append(RemoteRESTFeature.usageDashboard.rawValue)
             features.append(RemoteRESTFeature.usageCapacity.rawValue)
         }
-        if authorization.canManageHost,
+        if (authorization.canManageHost || authorization.member != nil),
            RemoteAccessCoordinator.shared.canIssueHostedDeviceCredentials
         {
             features.append(RemoteRESTFeature.hostedPeerTransport.rawValue)

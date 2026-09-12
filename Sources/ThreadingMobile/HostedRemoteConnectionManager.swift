@@ -87,11 +87,10 @@ actor HostedRemoteConnectionManager {
         for host: PairedRemoteHost,
         trace: String? = nil
     ) async throws -> HostedRemoteRoute? {
-        guard host.isOwnerDevice,
-              let serviceURL = host.hostedServiceURL,
+        guard let serviceURL = host.hostedServiceURL,
               let credential = host.hostedCredential,
               credential.hostID == host.hostID,
-              credential.deviceID == RemoteDeviceIdentity.current,
+              credential.deviceID == host.hostedDeviceID,
               credential.expiresAt > Date().addingTimeInterval(60)
         else {
             return nil

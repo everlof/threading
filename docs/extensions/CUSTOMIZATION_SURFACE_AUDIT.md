@@ -24,6 +24,8 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
+| Public browser guest client | deliberately host-only | existing RemoteClient UI with transport adapter | invitation decoding, service origin, membership/device binding, scope, approval, expiry and revocation | Implemented |
+| Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
 | Main window content | `application.main-window@1` | around-hook | window chrome, input routing | Implemented |
 | Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count | Implemented |

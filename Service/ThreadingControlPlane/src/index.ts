@@ -1,3 +1,4 @@
+import { publicInvitationResponse } from "./invitation-worker";
 import type { Env, RendezvousPrincipal } from "./environment";
 import { HttpError } from "./environment";
 import {
@@ -47,6 +48,8 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       const url = new URL(request.url);
+      const invitation = publicInvitationResponse(request);
+      if (invitation) return invitation;
       if (request.method === "GET" && url.pathname === "/health") {
         return json({
           status: "ok",

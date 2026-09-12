@@ -108,17 +108,42 @@ final class RemoteInvitationLinkTests: XCTestCase {
 
     // MARK: - One composition
 
-    func testSharedTextCarriesTheSentenceAndBothForms() {
+    func testSharedTextIsOnePublicHTTPSLink() throws {
         let link = makeLink()
-        let guidance = "Öppna i Threading-appen."
+        let text = RemoteInvitationShare.text(for: link, guidance: "ignored")
+        let url = try XCTUnwrap(URL(string: text))
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "remote.threading.codes")
+        XCTAssertEqual(url.path, "/join")
+        XCTAssertNil(url.query)
+        XCTAssertFalse(text.contains("\n"))
+        XCTAssertEqual(RemoteInvitation(payload: text), .connection(link))
+    }
 
-        let text = RemoteInvitationShare.text(for: link, guidance: guidance)
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    func testHostedGuestInvitationRoundTripsOnBothAssociatedDomains() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        for origin in [RemoteInvitationWebLink.productionOrigin, RemoteInvitationWebLink.developmentOrigin] {
+            let hosted = try XCTUnwrap(HostedPairingLink(serviceURL: origin, hostID: "host",
+                deviceID: "invite-123", rendezvousCredential: "transport-secret",
+                bootstrapToken: "one-chat-secret", expiresAt: now.addingTimeInterval(3600), now: now))
+            let url = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: hosted.scannablePayload, origin: origin))
+            XCTAssertEqual(RemoteInvitation(payload: url.absoluteString, now: now), .hostedPairing(hosted))
+            XCTAssertNil(RemoteInvitation(payload: url.absoluteString, now: now.addingTimeInterval(3601)))
+            XCTAssertEqual(RemoteInvitationShare.text(shareURL: url, guidance: "ignored"), url.absoluteString)
+        }
+    }
 
-        XCTAssertEqual(lines.count, 3)
-        XCTAssertEqual(lines[0], guidance)
-        XCTAssertEqual(lines[1], link.appOpenPayload)
-        XCTAssertEqual(lines[2], link.shareURL.absoluteString)
+    func testPublicWrapperRejectsUnknownDomainsCredentialsQueriesAndOversizedInput() throws {
+        let url = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: makeLink().appOpenPayload))
+        for bad in [
+            url.absoluteString.replacingOccurrences(of: "remote.threading.codes", with: "evil.example"),
+            url.absoluteString.replacingOccurrences(of: "https://", with: "https://user@"),
+            url.absoluteString.replacingOccurrences(of: "/join#", with: "/join?token=bad#"),
+            url.absoluteString.replacingOccurrences(of: "/join#", with: ":443/join#"),
+            "https://remote.threading.codes/join#" + String(repeating: "A", count: 8192)
+        ] { XCTAssertNil(RemoteInvitationWebLink.appPayload(from: bad)) }
+        XCTAssertNil(RemoteInvitation(payload: "https://remote.threading.codes/join#broken"))
+        XCTAssertNil(RemoteInvitationWebLink.url(appPayload: "javascript:alert(1)"))
     }
 
     func testComposingFromAMintedShareURLMatchesComposingFromTheLink() {
@@ -143,11 +168,8 @@ final class RemoteInvitationLinkTests: XCTestCase {
         let link = makeLink()
         let text = RemoteInvitationShare.text(for: link, guidance: "Open in the Threading app.")
 
-        let appLine = try XCTUnwrap(
-            text.split(separator: "\n").first { $0.hasPrefix("threading://") }
-        )
-        guard case .connection(let parsed)? = RemoteInvitation(payload: String(appLine)) else {
-            return XCTFail("the app line in a shared message must parse")
+        guard case .connection(let parsed)? = RemoteInvitation(payload: text) else {
+            return XCTFail("the shared link must parse")
         }
         XCTAssertEqual(parsed, link)
     }

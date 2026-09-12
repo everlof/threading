@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "npm run check && vitest run && node --test scripts/*.test.mjs",
+    "test": "npm run build:invitations && npm run check && vitest run && node --test scripts/*.test.mjs && npm run test:browser",
     "test:load": "THREADING_RENDEZVOUS_LOAD=1 THREADING_RENDEZVOUS_LOAD_HOSTS=100 vitest run test/rendezvous-load.test.ts",
     "dev": "node scripts/local-dev.mjs",
     "dev:cloud-config": "wrangler dev --config wrangler.jsonc",
@@ -20,16 +20,21 @@
     "verify:development": "node scripts/verify-development.mjs",
     "deploy": "node scripts/deploy-production.mjs",
     "deploy:development": "node scripts/deploy-development.mjs",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "deploy:invitations": "npm run build:invitations && npm run check && npm run test:browser && vitest run test/invitation-page.test.ts && wrangler deploy --config wrangler.invitations.jsonc",
+    "build:invitations": "node scripts/build-invitation-client.mjs",
+    "test:browser": "node --test web/*.test.mjs"
   },
   "dependencies": {
     "jose": "6.2.8"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260811.1",
     "@cloudflare/vitest-pool-workers": "0.21.1",
+    "@cloudflare/workers-types": "5.20260811.1",
+    "esbuild": "0.28.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10",
-    "wrangler": "4.121.0"
+    "wrangler": "4.121.0",
+    "ws": "8.21.0"
   }
 }

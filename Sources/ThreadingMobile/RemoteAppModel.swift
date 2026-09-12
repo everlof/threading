@@ -1114,8 +1114,7 @@ final class RemoteAppModel: ObservableObject {
             : "\(hostID):share:\(me.share.label)"
         var hostedServiceURL = hosts.first(where: { $0.id == id })?.hostedServiceURL
         var hostedCredential = hosts.first(where: { $0.id == id })?.hostedCredential
-        if me.share.scope == .all,
-           me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true
+        if me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true
         {
             let provisioningStartedAt = MobileDiagnostics.monotonicNow()
             let provisioningFields = pairingFields.merging([
@@ -1131,7 +1130,9 @@ final class RemoteAppModel: ObservableObject {
                 let issued = try await RemoteClient(link: link).issueHostedDeviceCredential()
                 (hostedServiceURL, hostedCredential) = try Self.validateHostedCredential(
                     issued,
-                    expectedHostID: hostID
+                    expectedHostID: hostID,
+                    expectedDeviceID: me.share.scope == .all ? RemoteDeviceIdentity.current
+                        : RemoteInvitationWebLink.guestDeviceID(shareID: me.share.label)
                 )
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,
@@ -1154,6 +1155,7 @@ final class RemoteAppModel: ObservableObject {
                         ),
                     ]) { _, new in new }
                 )
+                if transport == .hosted { throw error }
                 // Pairing and the private routes this Mac advertised remain valid. The Mac will
                 // advertise the feature again so a later refresh can retry provisioning.
                 hostedProvisioningRetryAfter[id] = Date().addingTimeInterval(
@@ -2824,8 +2826,7 @@ final class RemoteAppModel: ObservableObject {
             }
         }
         let localCandidates = localCandidateLanes.flatMap { $0 }
-        let hasHostedRoute = host.isOwnerDevice
-            && host.hostedServiceURL != nil
+        let hasHostedRoute = host.hostedServiceURL != nil
             && host.hostedCredential != nil
         let isOnlyCandidateInRace = localCandidates.count + (hasHostedRoute ? 1 : 0) == 1
 
@@ -3239,8 +3240,7 @@ final class RemoteAppModel: ObservableObject {
                 host.candidates(preferring: discoveredAddresses[host.id]),
                 origin: { $0.link.baseURL }
             ),
-            hasHostedRoute: host.isOwnerDevice
-                && host.hostedServiceURL != nil
+            hasHostedRoute: host.hostedServiceURL != nil
                 && host.hostedCredential != nil,
             hostID: hostID,
             lastConnection: lastConnection,
@@ -3511,8 +3511,7 @@ final class RemoteAppModel: ObservableObject {
         trace: String
     ) async {
         guard activeHostID == hostID, refreshGeneration == generation,
-              let index = hosts.firstIndex(where: { $0.id == hostID }),
-              hosts[index].isOwnerDevice else { return }
+              let index = hosts.firstIndex(where: { $0.id == hostID }) else { return }
 
         let advertised = response.features?.contains(
             RemoteRESTFeature.hostedPeerTransport.rawValue
@@ -3552,7 +3551,8 @@ final class RemoteAppModel: ObservableObject {
             let issued = try await RemoteClient(link: successfulLink).issueHostedDeviceCredential()
             let (serviceURL, credential) = try Self.validateHostedCredential(
                 issued,
-                expectedHostID: hosts[index].hostID ?? hostID
+                expectedHostID: hosts[index].hostID ?? hostID,
+                expectedDeviceID: hosts[index].hostedDeviceID
             )
             guard activeHostID == hostID, refreshGeneration == generation,
                   let currentIndex = hosts.firstIndex(where: { $0.id == hostID })
@@ -3636,10 +3636,11 @@ final class RemoteAppModel: ObservableObject {
 
     private static func validateHostedCredential(
         _ response: RemoteHostedDeviceCredentialDTO,
-        expectedHostID: String
+        expectedHostID: String,
+        expectedDeviceID: String?
     ) throws -> (URL, PeerDeviceServiceCredential) {
         guard response.hostID == expectedHostID,
-              response.deviceID == RemoteDeviceIdentity.current,
+              response.deviceID == expectedDeviceID,
               response.expiresAt.isFinite,
               let rawURL = URL(string: response.serviceURL)
         else {

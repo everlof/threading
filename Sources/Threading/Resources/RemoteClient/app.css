@@ -880,3 +880,17 @@ body {
     font-size: 13px;
   }
 }
+
+/* Connection recovery uses the same theme vocabulary as the existing remote client. */
+.connection-retry {
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--elevated);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.connection-retry:hover { background: var(--panel-hover); }
+.connection-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

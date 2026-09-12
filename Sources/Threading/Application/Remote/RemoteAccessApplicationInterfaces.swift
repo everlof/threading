@@ -132,9 +132,14 @@ protocol RemoteEventRecording: Sendable {
 /// routing so the transport neither locates nor retains that concrete composition owner.
 @MainActor
 protocol RemoteHostCommanding: AnyObject, Sendable {
-    func issueHostedDeviceCredential(deviceID: String) async throws
+    func issueHostedDeviceCredential(accessToken: String, deviceID: String) async throws
         -> RemoteHostedDeviceCredentialDTO
     func completeHostedPairingBootstrap()
+    func prepareSessionShare(
+        for sessionID: SessionID,
+        capability: RemoteCapability,
+        canApprovePermissions: Bool
+    ) async -> Result<RemoteCreatedShare, RemoteSharePreparationError>
     func createSessionShare(
         for sessionID: SessionID,
         capability: RemoteCapability,
@@ -252,5 +257,16 @@ struct RemoteAccessServerServices {
         self.usageLimit = usageLimit
         self.usageResetOffer = usageResetOffer
         self.usageResetConsumer = usageResetConsumer
+    }
+}
+
+extension RemoteHostCommanding {
+    func prepareSessionShare(
+        for sessionID: SessionID,
+        capability: RemoteCapability,
+        canApprovePermissions: Bool
+    ) async -> Result<RemoteCreatedShare, RemoteSharePreparationError> {
+        createSessionShare(for: sessionID, capability: capability,
+                           canApprovePermissions: canApprovePermissions)
     }
 }

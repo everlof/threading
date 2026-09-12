@@ -24,6 +24,7 @@ struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
     let targetKind: TargetKind?
     let sessionID: String
     var invitationToken: String?
+    var hostedInvitationURL: URL?
     let capability: RemoteCapability
     let canApprovePermissions: Bool
     let createdAt: Date
@@ -35,6 +36,7 @@ struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
         targetKind: TargetKind? = nil,
         sessionID: String,
         invitationToken: String?,
+        hostedInvitationURL: URL? = nil,
         capability: RemoteCapability,
         canApprovePermissions: Bool,
         createdAt: Date,
@@ -45,6 +47,7 @@ struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
         self.targetKind = targetKind
         self.sessionID = sessionID
         self.invitationToken = invitationToken
+        self.hostedInvitationURL = hostedInvitationURL
         self.capability = capability
         self.canApprovePermissions = canApprovePermissions
         self.createdAt = createdAt

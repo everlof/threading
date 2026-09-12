@@ -2640,7 +2640,8 @@ restart, and whether it works away from home.
     tailnet address directly. Turning it on publishes this Mac's name and your tailnet name in
     public certificate logs, so it is off unless you want the browser. Its own status line says
     where it is serving, or which admin-console setting is missing, with the button that opens it.
-- **Threading Direct**. Future, and shown only when this Mac is signed in to Threading's service.
+- **Threading Direct**. Available after signing in under **Hosted Direct**. Paired iPhones and
+  invited chat guests can connect across networks without a VPN while this Mac is online.
 
 In a Debug build or Threading's internal `/Applications` build, **Advanced > Developer Settings >
 Hosted service** selects **Production** or the isolated **Development** service. Switching it
@@ -2675,17 +2676,21 @@ key rather than the ordinary way to change certificates.
 Pairing is for your own trusted devices: a paired owner can see your unarchived chats, manage
 them, and approve bounded Native permission requests. To involve somebody else, use a session's
 **… > Share Chat…** and
-choose an invitation for that chat alone. **The person you send it to needs the Threading app and
-a way onto one of your networks**, the same Wi-Fi or your tailnet: the invitation points at a way
-in you have switched on, and carries the certificate their phone has to pin. With no way in on,
-the sheet says **Turn on a way in first** rather than producing a link nobody can open. Sending a
-chat to somebody who only has a browser is not possible at present; that used to travel over a
-public relay, which Threading no longer runs. The sheet names each grant and what it withholds:
-**View only** follows the chat but cannot type, prompt, or answer a permission request;
-**Collaborator** adds typing and prompts while permission requests still come to you; and
-**Collaborator + approval** adds answering those requests, which lets the agent run commands and
-change files without asking you. View only needs the chat to be running — watching alone never
-starts an agent — so its button waits, and says why. The invitation works once and expires after
+choose **View** or **Collaborate**, optionally enable **Allow approving agent requests**, then
+press **Copy Link**. The copied invitation is one HTTPS link. It opens Threading on iPhone, or a
+webpage with **Continue in browser** and **Open in Threading**. Browser guests do not need an
+account or installed app. Keep the link or bookmark the joined page to return to that chat from
+the same browser; clearing its site data removes the saved access.
+
+With **Hosted Direct** ready, a chat invitation works across networks without Tailscale. Otherwise
+the sheet says the recipient needs access to your Wi-Fi or tailnet. The Mac must remain online
+and awake. **View** follows the chat; **Collaborate** also allows typing and sending prompts.
+Approval separately allows answering permission requests, letting the agent run commands and
+change files without asking you. View requires a running chat, so a dormant chat starts the
+selector at Collaborate with approval off. The sheet stays open while preparing the link, with
+Cancel available, and reports a preparation failure in place.
+
+The invitation works once and expires after
 24 hours only if unused. Acceptance creates a device-bound membership that lasts until
 **Stop Sharing** or explicit member revocation. Unused invitations and accepted memberships are
 kept in the Mac's protected Keychain when this build can access it, so disabling Remote Access or

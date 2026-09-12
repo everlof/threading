@@ -6339,6 +6339,17 @@
         }
       }
     },
+    "Allow approving agent requests" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt godkännande av agentens förfrågningar"
+          }
+        }
+      }
+    },
     "Allow for Session" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7123,6 +7134,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillämpar temat"
+          }
+        }
+      }
+    },
+    "Approval lets the agent run commands and change files without asking you." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkännande låter agenten köra kommandon och ändra filer utan att fråga dig."
           }
         }
       }
@@ -12023,6 +12045,17 @@
         }
       }
     },
+    "Collaborate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samarbeta"
+          }
+        }
+      }
+    },
     "Collaborative" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12063,6 +12096,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Samarbetspartner + godkännande"
+          }
+        }
+      }
+    },
+    "Collaborators can start this chat and send prompts. View is available while the chat is running." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samarbetspartners kan starta chatten och skicka instruktioner. Visning är tillgänglig medan chatten körs."
           }
         }
       }
@@ -14820,6 +14864,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skapade pull request #%lld."
+          }
+        }
+      }
+    },
+    "Creating invitation…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapar inbjudan…"
           }
         }
       }
@@ -22208,6 +22263,17 @@
         }
       }
     },
+    "Invite someone in the Threading app, from any network." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bjud in någon i Threading-appen, från vilket nätverk som helst."
+          }
+        }
+      }
+    },
     "Invited" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28638,6 +28704,17 @@
         }
       }
     },
+    "One person · This chat only · Accept within 24 hours\nAccess lasts until you choose Stop Sharing Chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En person · Bara den här chatten · Acceptera inom 24 timmar\nÅtkomsten gäller tills du väljer Sluta dela chatt."
+          }
+        }
+      }
+    },
     "One plate, two halves: hover each in turn — the raise stays inside the shared silhouette." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29382,6 +29459,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna i extern app"
+          }
+        }
+      }
+    },
+    "Open in the Threading app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna i Threading-appen."
           }
         }
       }
@@ -34504,6 +34592,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anrop"
+          }
+        }
+      }
+    },
+    "Requires the Threading app and access to your Wi-Fi or tailnet. Enable Hosted Direct to invite someone outside your network." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kräver Threading-appen och åtkomst till ditt Wi-Fi eller tailnet. Aktivera Hosted Direct för att bjuda in någon utanför ditt nätverk."
           }
         }
       }
@@ -51341,6 +51440,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa skillnader"
+          }
+        }
+      }
+    },
+    "View follows the chat. Collaborate also allows typing and sending prompts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa följer chatten. Samarbeta tillåter också att skriva och skicka instruktioner."
           }
         }
       }

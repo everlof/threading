@@ -577,6 +577,7 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
             appDelegate.openNotification(from: response, origin: .connectingScene)
         }
         open(connectionOptions.urlContexts)
+        for activity in connectionOptions.userActivities { open(activity) }
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = appDelegate.makeRootViewController()
         self.window = window
@@ -588,6 +589,17 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         open(URLContexts)
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        open(userActivity)
+    }
+
+    private func open(_ activity: NSUserActivity) {
+        guard activity.activityType == NSUserActivityTypeBrowsingWeb,
+              let url = activity.webpageURL,
+              let delegate = UIApplication.shared.delegate as? ThreadingMobileAppDelegate else { return }
+        _ = delegate.open(url)
     }
 
     /// Where a tapped `threading://` invitation arrives.

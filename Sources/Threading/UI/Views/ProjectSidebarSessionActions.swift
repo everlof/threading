@@ -499,173 +499,167 @@ enum ShareLinkGrant: CaseIterable {
 }
 
 enum ShareSheetDefaults {
-    /// Matches the permission sheet's diff, so the two alerts that carry an accessory are the
-    /// same width rather than each one the width its own content happened to want.
-    static let accessoryWidth: CGFloat = PermissionDiffDefaults.width
+    static let accessoryWidth: CGFloat = 420
 }
 
-/// What an invitation says when it leaves this Mac.
-///
-/// Both copy actions here and the iPhone's own share sheet compose through
-/// `RemoteInvitationShare`, so the recipient reads the same message whichever end minted the
-/// link. All three used to write `url.absoluteString` and nothing else, which handed somebody a
-/// bare `https://192.168.1.181:8760/#…`: no way to know it wanted the Threading app, no way to
-/// know it wanted their network, and a certificate interstitial waiting if they tapped it in a
-/// browser. The app link goes first because it is the one that works; the https line stays as a
-/// carrier for the messaging clients that will not make a custom scheme tappable.
+/// Sharing is deliberately host-owned: capability grants, revocation, invite expiry and the
+/// route's reachability cannot be replaced by an extension presentation.
+@MainActor
 enum ShareInvitationText {
-    static var guidance: String {
-        L10n.string("Open in the Threading app. Works for someone on your Wi-Fi or tailnet.")
-    }
+    static var guidance: String { L10n.string("Open in the Threading app.") }
 
     static func pasteboard(for shareURL: URL) -> String {
-        RemoteInvitationShare.text(shareURL: shareURL, guidance: guidance)
+        if RemoteInvitationWebLink.appPayload(from: shareURL.absoluteString) != nil {
+            return shareURL.absoluteString
+        }
+        guard let link = RemoteConnectionLink(url: shareURL) else { return shareURL.absoluteString }
+        let origin = AppSettings.shared.remoteHostedServiceEnvironment == .development
+            ? RemoteInvitationWebLink.developmentOrigin : RemoteInvitationWebLink.productionOrigin
+        return RemoteInvitationWebLink.url(appPayload: link.appOpenPayload, origin: origin)?.absoluteString
+            ?? link.appOpenPayload
     }
 }
 
-/// The Share Chat sheet, built without being run.
-///
-/// Separated from the menu handler for the reason `ConfirmationRequest` gives for keeping copy
-/// at the call site: a test can then hold the wording, the button order and the disabled state
-/// to what the action actually does. The handler is a modal and a pasteboard write, neither of
-/// which a test can read through.
 @MainActor
 enum ShareChatSheet {
+    private static var preparation: Task<Void, Never>?
 
-    /// Runs the sheet and puts the resulting invitation on the pasteboard.
-    ///
-    /// Here rather than on the sidebar because two surfaces offer this now — the session's
-    /// context menu and the sharing pane's own button — and a link that expires in 24 hours,
-    /// grants exactly one chat, and is copied rather than shown is too much behaviour to have
-    /// two copies of. The sheet itself stays a value above, so the wording remains testable.
     static func run(for sessionID: SessionID) {
-        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
-        let grants = ShareLinkGrant.allCases
-        let chosen = ConfirmationAlert.choose(request(
+        guard preparation == nil,
+              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        let form = ShareChatOptionsView(isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID))
+        let alert = ConfirmationAlert.makeAlert(request(
             chatTitle: session.displayTitle,
-            isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID)
+            isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID),
+            hosted: RemoteAccessCoordinator.shared.hostedServiceState == .ready,
+            accessory: form
         ))
-        guard let chosen, grants.indices.contains(chosen) else { return }
-        let grant = grants[chosen]
-
-        switch RemoteAccessCoordinator.shared.createSessionShare(
-            for: sessionID,
-            capability: grant.capability,
-            canApprovePermissions: grant.canApprovePermissions
-        ) {
-        case .success(let created):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(
-                ShareInvitationText.pasteboard(for: created.url),
-                forType: .string
-            )
-        case .failure(let error):
-            let unavailable = ThemedAlert()
-            unavailable.messageText = L10n.string("This chat cannot be shared yet")
-            unavailable.informativeText = error.localizedDescription
-            unavailable.alertStyle = .warning
-            unavailable.runModal()
+        alert.initialFirstResponder = form.role
+        alert.shouldChooseButton = { index in
+            guard index == 0 else { preparation?.cancel(); return true }
+            guard preparation == nil else { return false }
+            let grant = form.selectedGrant
+            form.setPreparing(true)
+            preparation = Task { @MainActor in
+                defer { preparation = nil }
+                let result = await RemoteAccessCoordinator.shared.prepareSessionShare(
+                    for: sessionID, capability: grant.capability,
+                    canApprovePermissions: grant.canApprovePermissions
+                )
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .success(let created):
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(ShareInvitationText.pasteboard(for: created.url), forType: .string)
+                    alert.dismiss()
+                case .failure(let error):
+                    form.setPreparing(false, error: error.localizedDescription)
+                }
+            }
+            return false
         }
+        alert.runModal()
+        preparation?.cancel()
+        alert.shouldChooseButton = nil
     }
 
-    static func request(chatTitle: String, isRunning: Bool) -> ChoiceRequest {
-        // Four buttons, and the named modal responses stop at three — so the fourth used to
-        // arrive through `default:`, sharing that branch with every unrelated dismissal.
-        // `choose` reads it back by index.
+    static func request(
+        chatTitle: String, isRunning: Bool, hosted: Bool = false, accessory: NSView? = nil
+    ) -> ChoiceRequest {
         ChoiceRequest(
             prompt: .shareChatLink,
             title: L10n.format("Share “%@”", chatTitle),
-            message: L10n.string(
-                "Share with someone on your Wi-Fi or tailnet who has the Threading app. A "
-                    + "single-use invitation to this one chat. It expires in 24 hours if nobody "
-                    + "accepts it; once accepted, that person keeps access until you choose Stop "
-                    + "Sharing Chat. No link reaches your other chats, projects, or settings."
-            ),
-            options: ShareLinkGrant.allCases.map {
-                ConfirmationOption(
-                    title: $0.buttonTitle,
-                    isEnabled: isRunning || !$0.requiresRunningSession
-                )
-            },
+            message: hosted
+                ? L10n.string("Invite someone in the Threading app, from any network.")
+                : L10n.string("Requires the Threading app and access to your Wi-Fi or tailnet. Enable Hosted Direct to invite someone outside your network."),
+            options: [ConfirmationOption(title: L10n.string("Copy Link"))],
             style: .informational,
-            accessory: grantsAccessory(isRunning: isRunning)
+            accessory: accessory ?? grantsAccessory(isRunning: isRunning)
         )
     }
 
-    /// Each grant named and described, in the order of the buttons underneath — so the sheet
-    /// reads top to bottom as three offers and then three ways to take one.
-    ///
-    /// A grant the session cannot offer yet keeps its place and says why, rather than leaving a
-    /// dimmed button to be guessed at; that is the same rule `ConfirmationOption.isEnabled`
-    /// already states for the button itself.
-    ///
-    /// Sized rather than left to Auto Layout: the alert lays an accessory out by its **frame**,
-    /// so the height has to be measured here, against a width the wrapping labels were told
-    /// about. A stack left at its natural size arrives one line tall with the rest clipped.
     static func grantsAccessory(isRunning: Bool) -> NSView {
+        ShareChatOptionsView(isRunning: isRunning)
+    }
+}
+
+/// A fixed-size permission form: two roles and one independent approval right. No session-sized
+/// content is constructed here; network work begins only after the explicit copy action.
+@MainActor
+final class ShareChatOptionsView: NSView {
+    let role = ThemedPopUp()
+    private(set) var allowsApproval = false
+    private let status = ShareChatOptionsView.label(" ")
+    private lazy var approval = ThemedCheckbox(
+        title: L10n.string("Allow approving agent requests"),
+        changed: { [weak self] state in self?.allowsApproval = state == .on }
+    )
+
+    var selectedGrant: ShareLinkGrant {
+        role.indexOfSelectedItem == 0 ? .view : (allowsApproval ? .collaborateAndApprove : .collaborate)
+    }
+
+    init(isRunning: Bool) {
+        super.init(frame: .zero)
+        role.addItem(ThemedMenuItem(title: L10n.string("View"), isEnabled: isRunning))
+        role.addItem(ThemedMenuItem(title: L10n.string("Collaborate")))
+        role.selectItem(at: isRunning ? 0 : 1)
+        role.target = self
+        role.action = #selector(roleChanged)
+        role.setAccessibilityLabel(L10n.string("Access"))
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
         stack.translatesAutoresizingMaskIntoConstraints = false
-
-        for grant in ShareLinkGrant.allCases {
-            let group = NSStackView()
-            group.orientation = .vertical
-            group.alignment = .leading
-            group.spacing = Design.Spacing.hairline
-            group.translatesAutoresizingMaskIntoConstraints = false
-
-            group.addArrangedSubview(label(
-                grant.name,
-                font: Design.Typography.emphasizedBody(),
-                color: Design.Text.label
-            ))
-            group.addArrangedSubview(label(
-                grant.summary,
-                font: Design.Typography.subheading(),
-                color: Design.Text.secondary
-            ))
-            if grant.requiresRunningSession, !isRunning {
-                group.addArrangedSubview(label(
-                    ShareLinkGrant.unavailableUntilRunning,
-                    font: Design.Typography.subheading(),
-                    color: Design.Text.tertiary
-                ))
-            }
-
-            stack.addArrangedSubview(group)
-            group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let descriptions = [
+            isRunning
+                ? L10n.string("View follows the chat. Collaborate also allows typing and sending prompts.")
+                : L10n.string("Collaborators can start this chat and send prompts. View is available while the chat is running."),
+            L10n.string("Approval lets the agent run commands and change files without asking you."),
+            L10n.string("One person · This chat only · Accept within 24 hours\nAccess lasts until you choose Stop Sharing Chat.")
+        ]
+        stack.addArrangedSubview(role)
+        stack.addArrangedSubview(Self.label(descriptions[0]))
+        stack.addArrangedSubview(approval)
+        stack.addArrangedSubview(Self.label(descriptions[1]))
+        status.stringValue = descriptions[2]
+        stack.addArrangedSubview(status)
+        for view in stack.arrangedSubviews {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-
-        // Measured *before* the container exists, and the container built at that height. Sizing
-        // it afterwards is what an accessory looks like when it renders blank: the stack is laid
-        // out against the height the container had at the time, and pinning its top to a box of
-        // no height puts every label below the bounds that get drawn. Each label carries a
-        // `preferredMaxLayoutWidth`, so the stack can answer for its own height with no ancestor.
-        let container = NSView(frame: NSRect(
-            x: 0,
-            y: 0,
-            width: ShareSheetDefaults.accessoryWidth,
-            height: stack.fittingSize.height
-        ))
-        container.addSubview(stack)
+        stack.widthAnchor.constraint(equalToConstant: ShareSheetDefaults.accessoryWidth).isActive = true
+        frame.size = NSSize(width: ShareSheetDefaults.accessoryWidth, height: stack.fittingSize.height)
+        addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: container.topAnchor)
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor)
         ])
-        container.layoutSubtreeIfNeeded()
-        return container
+        roleChanged()
+        layoutSubtreeIfNeeded()
     }
 
-    private static func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setPreparing(_ preparing: Bool, error: String? = nil) {
+        role.isEnabled = !preparing
+        approval.isEnabled = !preparing && role.indexOfSelectedItem == 1
+        status.stringValue = preparing ? L10n.string("Creating invitation…") : (error ?? " ")
+        NSAccessibility.post(element: status, notification: .valueChanged)
+    }
+
+    @objc private func roleChanged() {
+        approval.isEnabled = role.indexOfSelectedItem == 1
+        if !approval.isEnabled { approval.state = .off; allowsApproval = false }
+    }
+
+    private static func label(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = font
-        label.textColor = color
-        label.isSelectable = false
+        label.font = Design.Typography.subheading()
+        label.textColor = Design.Text.secondary
         label.preferredMaxLayoutWidth = ShareSheetDefaults.accessoryWidth
-        label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }
 }

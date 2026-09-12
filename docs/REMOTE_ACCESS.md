@@ -1138,49 +1138,84 @@ Pairing and sharing are deliberately different actions:
   folder is only the shell's starting directory, not a security boundary. A terminal capability
   can never approve an AI permission request, discover chats or other terminals, manage the host,
   or create another share.
-- **An invitation is addressed to the app, because only the app holds the pin.** The link points
-  at a private door on a LAN address or a tailnet name and carries this Mac's fingerprint in its
-  fragment, so the guest's phone can pin the certificate before its first request. Sent as the
-  bare `https` URL that was unreachable in practice: tapping it opened Safari, and Safari can only
-  offer the certificate interstitial, because the pin lives in the app and no browser can learn
-  it. The owner met exactly that.
+- **One HTTPS invitation opens the app or a public landing page.** `/join#…` on
+  `remote.threading.codes` or `dev.remote.threading.codes` carries a base64url app payload only in
+  the fragment. The Worker serves a static, no-store page and the exact iPhone association at
+  `/.well-known/apple-app-site-association`; it never receives the fragment. The page has no
+  analytics or third-party resources. It offers **Continue in browser** at `/join/chat` and
+  the app handoff. Private invitations instead open the existing Mac-served browser client and
+  name the network/certificate requirement. Universal Links require the updated iPhone entitlement, provisioning and deployed
+  association; the same page also offers the custom-scheme handoff.
 
-  `threading://` is registered by the iPhone app (`CFBundleURLTypes` in
-  `Sources/ThreadingMobile-Info.plist`) and carries two payloads. `THREADING://PAIR#…` is the
-  hosted rendezvous credential the QR code already used; `threading://join#…` is a one-chat
-  invitation, the base64url of the whole `https` URL including its fragment. `RemoteInvitation`
-  in `ThreadingRemoteKit` is the only parser for any of them, so the scanner, the paste field and
-  a tapped link cannot drift apart, and `MobileInvitationRoute` adds the application's own rule
-  that a door must be `https`. The scene delegate is the delivery point, including the cold
-  launch: SwiftUI's `onOpenURL` never fires in this app, because the scene is UIKit's and the
-  SwiftUI tree lives in a hosting controller rather than a `WindowGroup`.
+  `RemoteInvitation` is the parser for scanned, pasted, custom-scheme and universal links.
+  Wrappers accept only the two exact HTTPS service origins, `/join`, no credentials, query or
+  custom port, and at most 8 KiB. `RemoteInvitationWebLink` builds them, and both platforms share
+  one link instead of a guidance paragraph followed by two competing URLs. UIKit's scene
+  delegate handles both warm and cold `NSUserActivity` delivery.
 
-  What is shared is composed once, by `RemoteInvitationShare`, for the Mac's two copy actions and
-  the iPhone's share sheet alike: a sentence naming the app and the network, then the
-  `threading://` line, then the `https` line. **The `https` line stays** because a custom scheme
-  is not reliably tappable everywhere a link travels. `NSDataDetector(types: .link)` does match
-  `threading://join#…` on iOS 26 — measured, on both macOS 26.5 and the iOS 26.5 simulator
-  runtime, and Messages drives that same detector — but third-party clients (WhatsApp, Telegram,
-  Slack) are documented not to linkify custom schemes, Messages leaves links from an unknown
-  sender inert until you reply once, and a message carrying two URLs gets no rich preview either
-  way. A Universal Link is not the alternative here: the entitlement takes a fully qualified
-  domain, the association file is fetched by an Apple CDN that cannot reach a LAN address, and
-  Apple has stated that universal links do not support custom ports. A public `https` redirector
-  is the only established way to make one tap work in every client, and that is a service
-  decision rather than a code change.
+- **Hosted Direct admits guest memberships.** When the hosted listener is ready, the asynchronous
+  chat-share preparation issues a transport credential under `invite-<share ID>` for at most
+  the invitation's 24-hour lifetime. Its payload uses the existing hosted pairing envelope but
+  carries the exact-chat invitation bearer, never the owner bootstrap. The Mac remains the
+  redemption authority and its existing one-use, device-bound capability checks still apply.
+  The invitation URL is persisted alongside the invitation so copying it again or restarting
+  does not silently replace the hosted route with a LAN route. After successful acceptance, the
+  temporary transport is retired after the retry window so it does not occupy a second device slot.
 
-  **Follow-up, not built:** the Mac-served page at
-  `Sources/Threading/Resources/RemoteClient/index.html` is what a browser reaches when somebody
-  taps the `https` line and accepts the interstitial. Its first screen could say that this chat
-  opens in the Threading app and offer the `threading://` link when the user agent is iOS, which
-  would turn the fallback into a bridge.
-- **A guest cannot be somebody with only a browser any more.** That worked because the Cloudflare
-  Quick Tunnel gave Threading a public origin; removing the relay removes the origin, and this is a
-  real capability loss rather than a tidy-up. The browser client is unchanged and still speaks the
-  whole session protocol, so guest links return when it can be served over an ICE data channel;
-  the shim that needs is the same one Hosted Direct needs, and the two are planned together. A
-  proxy route through Threading's own infrastructure is deliberately not the answer: it would put
-  session bytes through a service that promises never to see them.
+  After acceptance, an authenticated guest may obtain a rendezvous credential under
+  `guest-<membership ID>`. That identity is derived by the Mac rather than supplied by the guest;
+  it cannot rotate an owner's credential or a different guest's. Issuance checks the membership
+  both before and after the service await. Revocation removes the Mac capability immediately
+  and queues service credential revocation, including active transport closure. The iPhone
+  stores and renews guest credentials and races Hosted Direct on the same bounded connection
+  manager as owner devices. No owner settings, other chats, host route list or certificate
+  rotation authority is added to the guest capability.
+
+  A lost acceptance/provisioning response can retry for the existing pairing retry window on
+  the same device. The guest receipt cache is bounded to 64 records, expires and rechecks the
+  current authorization before returning a receipt. A hosted-only pairing refuses to persist
+  a dead loopback route when credential provisioning failed. Local-only invitations retain
+  their pinned private route and the share sheet names that restriction.
+
+  The share sheet is deliberately host-only: presentation cannot redefine capability grants,
+  approval, expiry, route reachability or revocation. Its fixed form contains two roles and an
+  independent approval checkbox, one Copy Link action, and a cancellable pending/error state.
+  Network provisioning is one bounded asynchronous request per copy action; there are no
+  session-sized view trees. Existing service limits cap active transport credentials at 64 per
+  host; the UI permits only one preparation at a time.
+- **Browser-only guests use the existing client over Hosted Direct.** The public Worker serves
+  the shipping `Resources/RemoteClient` assets; `web/boot.mjs` supplies their fetch/WebSocket and
+  storage adapters without replacing the chat UI. Browser WebRTC uses the native
+  `threading.remote.v1` ordered channel and the v1 12-byte tunnel frame. REST and RFC 6455
+  WebSocket bytes travel inside DTLS to the Mac's existing loopback server. The service never
+  receives chat payloads. No guest account or installed app is required.
+
+  `/join/rendezvous` is only a browser-compatible signaling handshake: it accepts a bounded
+  service credential through `Sec-WebSocket-Protocol`, verifies the exact page Origin, and
+  forwards to the same origin's fixed `/v1/rendezvous/device` endpoint with Authorization.
+  The selected response protocol contains no secret. It cannot proxy arbitrary URLs, `/api`,
+  or chat sockets. The native service's authentication, device binding, rate limits and bounded
+  SDP/ICE envelopes remain authoritative. The Mac capability never enters this request.
+
+  Browser acceptance obtains a `guest-<share ID>` service credential through the encrypted
+  tunnel before moving off the temporary invitation transport. The physical browser device ID
+  and acceptance receipt are saved before provisioning, so a reload retries as the same member.
+  Storage is isolated by a SHA-256 invitation key; at most 32 durable guest namespaces are kept
+  per public origin, with further invitations tab-scoped. An accepted link becomes an opaque
+  local bookmark, without a capability in its URL. Revocation still happens on the Mac.
+
+  The adapter permits 32 streams, 256 KiB receive credit and 512 unread chunks per stream,
+  48 KiB data frames, 2 MiB queued writes, 16 MiB HTTP/WebSocket responses, 32 KiB HTTP headers,
+  64 candidates per peer and a 30-second negotiation deadline. Stream credit is returned only
+  as the reader consumes chunks; stream and connection failures settle pending operations.
+  No background or hidden transcript tree is added. The existing client owns rendering and
+  submission continuity; the Mac owns scope, approval and authority. The public guest surface
+  remains deliberately host-only under the customization gate.
+
+  `web/*.test.mjs` covers framing, fragmentation, masking, HTTP bounds, flow control and failed
+  signaling. `PeerBrowserInteropTests` plus `scripts/browser-native-proof.mjs` exercises the real
+  native host listener from a real browser, including fresh acceptance, page reload and live
+  chat authentication. Its loopback fixture is not a cross-network/TURN release proof.
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. Unused invitations and accepted memberships
   use the same protected-when-available Mac Keychain policy as paired owner devices, so turning
@@ -2295,11 +2330,13 @@ listener-start boundary. Clearing matters for a release installed over a develop
 experimental server had already been enabled. Ordinary uninjected `dev` builds retain the feature
 for development and connection-matrix testing.
 
-Hosted Direct is implemented but not production-deployed by this repository checkout. The
-checked-in Worker configuration contains a deliberately invalid D1 identifier, and the production
-hostname, Cloudflare Realtime key, Sign in with Apple server key, rate-limit namespaces and Apple
-server-notification registration must be provisioned or confirmed before distributed builds can
-use it. A forced TURN-only run and the broader NAT/sleep/handoff matrix remain release gates.
+Production and development services are operated independently of this checkout. The checked-in
+Worker configurations remain templates with deliberately invalid D1 identifiers until rendered
+for deployment; that placeholder is not evidence that a live service is absent. Verify deployed
+readiness and protocol versions, scoped authentication, TURN and Apple registration before
+relying on a new API capability. The public invitation-page Worker has no service credentials
+or database and deploys independently on its invitation, client-asset and association routes. A forced TURN-only run and the
+broader NAT/sleep/handoff matrix remain distributed-release gates.
 
 Every advertised route is stable now, which is what lets a pairing survive a restart: a bound
 address and the sticky port are the same tomorrow, and a phone that finds neither learns the
@@ -2308,9 +2345,9 @@ address has a dead endpoint and no way to learn a live one, so those pairings ha
 once more. An owner paired over the tailnet reconnects after a Mac or app restart without
 rescanning as long as Tailscale is running on both devices.
 
-**Public guest links are gone with the relay.** A guest needs the Threading app and a way onto one
-of your networks; a browser-only guest comes back when the bundled client can be served over an ICE
-data channel.
+**Public guest invitations open the browser client or Threading app.** With Hosted Direct ready,
+chat guests can connect across networks through an encrypted peer connection. A private-route
+invitation still requires access to the Mac’s network. The Mac must remain online.
 
 On iPhone, Tailscale must be connected before this Mac's tailnet address or MagicDNS name is
 reachable. iOS permits only one active packet-tunnel VPN at a time, so another VPN may prevent that

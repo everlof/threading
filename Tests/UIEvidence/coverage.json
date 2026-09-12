@@ -1536,6 +1536,37 @@
       "capture": {
         "glob": "account-appearance-*.png"
       }
+    },
+    {
+      "id": "share-chat",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Share a chat",
+      "description": "The shipping share alert with role selection, approval choice, scope and one copy action.",
+      "states": [
+        "Running chat",
+        "Dormant chat"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Intrinsic share sheet"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ShareChatSheetTests.swift",
+        "test": "ThreadingTests/ShareChatSheetTests/testRendersTheGrantsLightAndDark"
+      },
+      "capture": {
+        "glob": "share-chat-grants-*.png"
+      }
     }
   ]
 }
