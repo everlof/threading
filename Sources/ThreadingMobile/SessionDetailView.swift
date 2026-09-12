@@ -915,10 +915,24 @@ struct SessionDetailView: View {
             let latest = try await model.liveSessionForOpening(id: session.id)
             // Even a previously authenticated warm socket must wait for that catalogue check:
             // an offline launch can restore the same id after its membership or row was revoked.
+            //
+            // A parked socket is a saved handshake, not a live session. The chat can stop while
+            // its transport is held — the agent exits, somebody stops it on the Mac, its process
+            // is handed to `threading-ptyd` — and `sessionResume` starts nothing by itself. So
+            // readiness is asked first, and the pool is used only for a chat that did not need
+            // it: a chat being woken opens on a fresh socket, whose `hello` every Mac completes
+            // through its startup transaction. Reusing the warm socket regardless left the Mac
+            // refusing a chat that the very next tap reopened, and the phone reporting that as
+            // "Session closed on Mac". The 110 ms handshake is nothing beside a process launch,
+            // and a live chat — every warm hit there has ever been — still skips it.
+            let needsWaking = openingStrategy == .resumeIfNeeded && !latest.isAvailable
+            if needsWaking {
+                try await model.makeSessionReady(latest)
+            }
             let pool = MobileSessionConnectionPool.shared
             pool.discardEntries(exceptHostID: hostID)
             let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
-            if let warmed = pool.take(key) as? RemoteSessionConnection {
+            if !needsWaking, let warmed = pool.take(key) as? RemoteSessionConnection {
                 warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
                     workspaceActivity?.receive(event)
                 }
@@ -927,9 +941,6 @@ struct SessionDetailView: View {
                 }
                 connection = warmed
                 return
-            }
-            if openingStrategy == .resumeIfNeeded {
-                try await model.makeSessionReady(latest)
             }
             guard let client = model.client else {
                 throw RemoteClientError.invalidResponse

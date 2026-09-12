@@ -1159,6 +1159,23 @@ phone retains no terminal renderer. Reopening that same chat resumes through the
 and bounded replay/snapshot path. A Mac that does not advertise `sessionConnectionParking` is
 always disconnected normally.
 
+**A parked socket is a saved handshake, not a live session.** The chat can stop while its
+transport is held — its agent exits, somebody stops it on the Mac, or its process is handed to
+`threading-ptyd` — and `sessionResume` starts nothing by itself. Opening a chat therefore settles
+readiness first and reaches for the pool only when the chat did not need waking; a chat being woken
+opens on a fresh socket, whose `hello` every Mac completes through its startup transaction. The
+handshake that costs is nothing beside a process launch, and a live chat — every warm hit there has
+ever been — still skips it. On the Mac, a warm resume now runs that same startup-aware attach, so a
+socket rejoining a chat that is being woken underneath it waits for the startup rather than being
+refused a second before the process exists.
+
+The refusal that remains says which of two different things happened. `sessionClosed` belongs to a
+chat that is gone from this client's world — archived, deleted, or out of scope. A chat that is
+merely asleep answers `sessionDormant`, and the iPhone says "Reopen to resume on your Mac" rather
+than "Session closed on Mac". A shake report on 12 Sep 2026 is why: the phone claimed a chat had
+closed on the Mac, and the same chat opened normally eight seconds later. The host had answered a
+warm resume through a bare attach, which fails identically for both, and had one word for both.
+
 The same page exposes the evidence for changing those defaults: current and peak occupancy,
 reuse hits and misses, hit rate, actual hold timing, holds that ended without reuse, each expiry or
 eviction reason, unsupported hosts, and fixed reuse/unused age buckets. These aggregates persist

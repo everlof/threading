@@ -61,9 +61,14 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
             authorizationIsCurrent: { true },
             didAttach: { XCTFail("a dormant session has no host-owned startup transaction") }
         )
-        guard case .unavailable = result else {
+        // A refusal, not a wait: only a host-owned startup transaction may hold a socket, and a
+        // dormant row names none. The refusal is `.dormant` rather than `.unavailable` because
+        // the chat itself is still there — that is the word a parked socket rejoining gets told,
+        // and it is what keeps the iPhone from reporting a sleeping chat as closed.
+        guard case .dormant = result else {
             return XCTFail("the client must not create an unbounded wait for a dormant session")
         }
+        XCTAssertNotEqual(result, .waitingForStartup)
         XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
     }
 

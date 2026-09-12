@@ -8128,6 +8128,17 @@
         }
       }
     },
+    "Reopen to resume on your Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna igen för att återuppta på din Mac"
+          }
+        }
+      }
+    },
     "Report a problem" : {
       "extractionState" : "manual",
       "localizations" : {

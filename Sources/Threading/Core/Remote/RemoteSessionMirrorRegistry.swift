@@ -318,10 +318,28 @@ final class RemoteSessionMirrorRegistry {
         var viewportLeases = ViewportLeases()
     }
 
-    enum InitialSessionAttach {
+    enum InitialSessionAttach: Equatable {
         case attached
         case waitingForStartup
+        /// The session's row is still there; only its live surface is not, and no host-owned
+        /// startup transaction names it. A client that can ask for a resume should be told to
+        /// ask, because the very next tap on that row opens the chat.
+        case dormant
         case unavailable
+    }
+
+    /// What a parked socket is told when it cannot rejoin the session it left.
+    ///
+    /// Dormant is deliberately a different answer from closed. `sessionClosed` belongs to a chat
+    /// that is genuinely gone from this client's world — archived, deleted, or out of scope — and
+    /// the phone says so in those words. A chat whose agent has merely stopped keeps its row, its
+    /// transcript and its resume route, so saying it closed on the Mac is false, and provably so:
+    /// the next tap on the same row opens it.
+    struct ParkedResumeRefusal: Equatable {
+        /// The `ended` reason carried to the client.
+        let reason: String
+        /// The WebSocket close reason, which is for a log rather than for a person.
+        let close: String
     }
 
     private struct StartupWaiter {
@@ -992,11 +1010,14 @@ final class RemoteSessionMirrorRegistry {
             }
             return .attached
         }
-        guard var starting = startingSessions[sessionID],
-              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
+        guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
         else {
             return .unavailable
         }
+        // Dormant and gone are different answers. A chat whose agent has exited, been stopped,
+        // or been handed to `threading-ptyd` still has its row, its transcript and its resume
+        // route; only archival or deletion takes the chat itself away.
+        guard var starting = startingSessions[sessionID] else { return .dormant }
         let key = ObjectIdentifier(connection)
         starting.waiters[key] = StartupWaiter(
             connection: connection,
@@ -3910,6 +3931,21 @@ extension RemoteSessionContinuation {
             self = .sessionDependency
         case .delegated: self = .delegated
         case .standing: self = .standing
+        }
+    }
+}
+
+extension RemoteSessionMirrorRegistry.InitialSessionAttach {
+    /// What to tell a parked socket that asked to rejoin, or `nil` while it is still in play —
+    /// attached now, or held for a host-owned startup transaction that will attach it.
+    var parkedResumeRefusal: RemoteSessionMirrorRegistry.ParkedResumeRefusal? {
+        switch self {
+        case .attached, .waitingForStartup:
+            return nil
+        case .dormant:
+            return .init(reason: "sessionDormant", close: "Session dormant")
+        case .unavailable:
+            return .init(reason: "sessionClosed", close: "Session not available")
         }
     }
 }

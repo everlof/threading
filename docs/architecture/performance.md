@@ -1204,10 +1204,17 @@ The separate bounded-cache experiment now ships as iOS session connection reuse.
 `sessionPark`; the Mac runs the complete mirror detach path before acknowledging it, so the socket
 receives no PTY output or conversation deltas, owns no viewport or hydration transaction, leaves
 presence/input control, and retains no SwiftTerm renderer. Only the authenticated WebSocket stays
-warm. Push sends `sessionResume`, and the ordinary attach path supplies a new authoritative hello,
-bounded replay or conversation snapshot, collaboration state and hydration boundary. It therefore
-removes the roughly 110 ms TLS/WebSocket/auth handshake without letting stale output or a stale
-grid leak into the new view.
+warm. Push sends `sessionResume`, and the ordinary startup-aware attach path — the same one a
+fresh `hello` takes — supplies a new authoritative hello, bounded replay or conversation snapshot,
+collaboration state and hydration boundary. It therefore removes the roughly 110 ms
+TLS/WebSocket/auth handshake without letting stale output or a stale grid leak into the new view.
+
+Saving the handshake is all it saves. A parked transport cannot start a chat that stopped while it
+was held, so push settles readiness first and consults the pool only for a chat that was already
+live — which is every warm hit the pool has ever recorded. A chat that has to be woken pays the
+handshake, which is immaterial next to launching the process. Reusing the transport regardless
+turned a dormant chat into a refusal the user read as "Session closed on Mac"; see
+[`REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
 
 Its scaling contract is explicit: the default is three parked transports for 60 seconds; the
 device setting is bounded to 0–8 transports and 5–300 seconds. Park, lookup and eviction do O(1)

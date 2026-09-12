@@ -3745,7 +3745,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     )
                 }
             )
-            if case .unavailable = attach {
+            switch attach {
+            case .attached, .waitingForStartup:
+                break
+            case .dormant, .unavailable:
                 connection.sendClose(code: 4004, reason: "Session not available")
             }
         }
@@ -4167,15 +4170,24 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "invalidSessionParking")))
                 return
             }
-            guard self.services.mirrors.attach(
+            // Deliberately the same startup-aware path a fresh `hello` takes. A warm transport
+            // is a saved handshake, never a second, weaker way to reach a session: a chat that
+            // went dormant while this socket was parked and is being woken again must be held
+            // for its host-owned startup transaction here too, exactly as a cold socket is.
+            let attach = self.services.mirrors.attachOrWaitForStartup(
                 connection,
                 to: sessionID,
-                authorization: authorization
-            ) else {
-                connection.sendText(self.encode(RemoteEndedDTO(reason: "sessionClosed")))
-                connection.sendClose(code: 4004, reason: "Session not available")
-                return
-            }
+                authorization: authorization,
+                authorizationIsCurrent: { [weak self] in
+                    self?.authorizer?.isCurrent(authorization) == true
+                },
+                // This socket was recorded as connected when it authenticated, and parking never
+                // retired it. Rejoining is not a new client arriving.
+                didAttach: {}
+            )
+            guard let refusal = attach.parkedResumeRefusal else { return }
+            connection.sendText(self.encode(RemoteEndedDTO(reason: refusal.reason)))
+            connection.sendClose(code: 4004, reason: refusal.close)
         }
     }
 

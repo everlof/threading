@@ -2181,6 +2181,10 @@ final class RemoteSessionConnection: ObservableObject {
             switch ended?.reason {
             case "sessionClosed":
                 phase = .ended(MobileL10n.string("Session closed on Mac"))
+            case "sessionDormant":
+                // The chat did not close: its agent is simply no longer running, and the Mac has
+                // no resume request in flight to wait for. Reopening the row asks for one.
+                phase = .ended(MobileL10n.string("Reopen to resume on your Mac"))
             case "sessionStartupTimedOut":
                 phase = .ended(MobileL10n.string("Couldn’t start session"))
             case "protocolMismatch":
