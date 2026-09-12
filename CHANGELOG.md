@@ -16,10 +16,41 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
-## [Unreleased]
+## [0.2.0]
 
 ### Added
 
+- Threading can now start a chat by itself when something happens outside it. A **trigger** names
+  the project, the instructions to open with, and how far the agent may go; a source reports the
+  events. The first source is Sonda's review-required feed. Every run starts read-only in the
+  provider's own conversation, with the event's text kept separate from your instructions — it is
+  evidence the agent reads, never configuration it obeys. A run can be allowed one further turn to
+  make a local fix, and that is where the grant stops: a trigger cannot push, deploy, open a change
+  request or write back to the source. Agents may draft triggers and propose one, but only you
+  activate it, and activation names one exact revision. Triggers, Activity and Sources are in the
+  sidebar; the configured time limit becomes the session's curfew.
+- **Search across everything, from either device.** One field reaches your projects, chats,
+  transcripts and files, on the Mac and on the iPhone.
+- **Plugins you sign and allow.** Alongside the sandboxed extension tier, Threading can load a
+  native code bundle into its own process — full AppKit, its own pane, and the ability to hand the
+  agent tools of its own. You decide which ones may run; there is no privileged list of ours, and
+  the first party has no powers the third party lacks. A plugin receives the app's whole theme and
+  the real design-system components, so it looks like the rest of the window rather than
+  approximating it.
+- **Workspace navigators.** An extension can contribute a navigator beside the sidebar, built from
+  bounded facts the host publishes and options you set, updating live as those facts change. Ships
+  with reference navigators, including an Activity Inbox and a GitLab one.
+- **The adopted Simulator is yours to drive.** Home, Lock, Side and Volume buttons, press-and-hold,
+  panning that follows your finger continuously instead of lurching between round-trips, and a
+  light/dark toggle. Your consent to control it is remembered across launches.
+- **An agent can ask you a question inline** — a real question with named options, answered in the
+  conversation on the Mac or on your phone, rather than guessed at or resolved by a timer.
+- **Share a chat with someone who does not have Threading**, through a universal link, with the
+  browser reachable directly.
+- **Annotate a live page for an agent.** Pin a spot in the browser, write what it should notice,
+  and the agent reads the pins with the page.
+- A paired iPhone's or a Simulator's **log stream, in a pane of its own** — including an app whose
+  log format Threading has never seen before. It ships as a plugin rather than as built-in chrome.
 - A theme can now put a gradient or a picture under the app's panes — the display panel, the
   browser, Git Review, the audit and the settings subpages — beneath any dot or grid pattern it
   already draws there. Agents set it with the theme tools as `material.backdrop`; a wash has to
@@ -29,6 +60,34 @@ saw the betas.
   paused while the window is hidden and frozen under Reduce Motion, and nothing in it can be
   clicked. Shader surfaces can now follow the app's workload and the time of day as well as the
   active account's remaining usage.
+- Codex banked usage resets can now be reviewed and used from Mac Usage, `/usage`, a limit-recovery
+  strip, or the owner-only iPhone Usage sheet. Threading always confirms the exact account and
+  credit, reads the result back from Codex, and only then releases existing chats that were already
+  waiting to continue on that account.
+- A **Rosé Moon** terminal palette, and Pure now follows the system's appearance.
+
+### Changed
+
+- On iPhone, the account button in a new session's navigation bar now opens one small panel
+  holding both choices: the agents as a row of their own marks, and each login as a row led by
+  its own disc, ringed by how much of its allowance is used and spelling that reading out
+  underneath. Choosing an agent leaves the panel open so the logins beneath can follow it, and
+  choosing a login closes it — where the old menu was a single scrolling list that closed after
+  the first choice, so picking an agent and then a login meant opening it twice. Your keyboard
+  stays up while you choose.
+- Both rows in that panel now answer a press and drag: hold anywhere in the agents or the
+  accounts and slide, and the choice follows your finger with a tick at each one, taking effect
+  where you lift. Tapping still works exactly as before. The whole cell is the target as well,
+  so the space around an agent's mark and name no longer swallows a tap that clearly meant it.
+- **Attachments are grouped by the turn they belong to**, and keep their place while they are still
+  being queued or sent. Movies preview in the chat, on the phone too, and an attachment's full
+  timestamp is available rather than an abbreviation.
+- **The sidebar says more with less.** Every repository has a root row and no longer repeats its
+  branch on every line, uninteresting rows fold away instead of disappearing — so a search or a
+  selected range still has something to land on — and a collapsed sidebar comes back on an edge
+  hover.
+- **A chat can follow its agent into another checkout**, and a chat you continue on a different
+  agent can be started from a paired iPhone.
 
 ### Fixed
 
@@ -37,6 +96,12 @@ saw the betas.
   checkout had changed, naming the checkout the chat had just left, and the earlier relaunch let
   the exiting processes be sampled there too. Both readings are now discarded, and a refused
   reversal is written to the diagnostics log so an audit can count them.
+- Granting a running chat the Manager role now makes its extra tools usable without relaunching
+  it. A provider is told which tools exist when it starts, so promoting it afterwards left those
+  tools permanently invisible to that chat even though the grant was live.
+- Notifications no longer announce a turn that is not over, and a notification whose reason has
+  passed is taken back. A chat that left a shell or a background task running stays marked as
+  working until its result actually arrives.
 - The iPhone's session list no longer downloads the whole catalogue every time it comes back on
   screen or the app returns to the foreground. While the live connection is delivering changes,
   coming back asks nothing; returning to the app asks the Mac one question on the route that
@@ -60,27 +125,10 @@ saw the betas.
 - Reopened chats on the iPhone reuse their warm connection more often: the pool keeps five
   connections for two minutes instead of three for one. Its counters now travel in the phone's
   diagnostics capture, and the Mac records how long it spent attaching each terminal socket.
-
-### Added
-
-- Codex banked usage resets can now be reviewed and used from Mac Usage, `/usage`, a limit-recovery
-  strip, or the owner-only iPhone Usage sheet. Threading always confirms the exact account and
-  credit, reads the result back from Codex, and only then releases existing chats that were already
-  waiting to continue on that account.
-
-### Changed
-
-- On iPhone, the account button in a new session's navigation bar now opens one small panel
-  holding both choices: the agents as a row of their own marks, and each login as a row led by
-  its own disc, ringed by how much of its allowance is used and spelling that reading out
-  underneath. Choosing an agent leaves the panel open so the logins beneath can follow it, and
-  choosing a login closes it — where the old menu was a single scrolling list that closed after
-  the first choice, so picking an agent and then a login meant opening it twice. Your keyboard
-  stays up while you choose.
-- Both rows in that panel now answer a press and drag: hold anywhere in the agents or the
-  accounts and slide, and the choice follows your finger with a tick at each one, taking effect
-  where you lift. Tapping still works exactly as before. The whole cell is the target as well,
-  so the space around an agent's mark and name no longer swallows a tap that clearly meant it.
+- A terminal opened again after a reconnect no longer draws its cursor in the wrong place, and
+  the phone's terminal settles its height properly after the keyboard moves.
+- Launching a chat in a project folder that has gone missing is refused with an explanation
+  instead of failing obscurely, and an idle chat's processes are no longer retained indefinitely.
 
 ## [0.1.0]
 
