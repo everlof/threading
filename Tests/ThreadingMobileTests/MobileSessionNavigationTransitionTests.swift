@@ -172,13 +172,10 @@ final class MobileSessionOpeningTests: XCTestCase {
         let window = hostedWindow(rootViewController: controller)
         defer { window.isHidden = true }
 
-        XCTAssertEqual(
-            accessibilityViews(labelled: MobileL10n.string("Agent and account"), in: window).count,
-            1
-        )
-        XCTAssertTrue(
-            accessibilityViews(labelled: MobileL10n.string("Session actions"), in: window).isEmpty
-        )
+        let bar = try XCTUnwrap(navigationBar(in: controller))
+        let draftItems = trailingItems(in: bar)
+        XCTAssertEqual(draftItems.count, 1)
+        let draftItem = try XCTUnwrap(draftItems.first)
 
         let session = try XCTUnwrap(model.me?.sessions.first)
         model.noteDraftStarted(
@@ -190,17 +187,15 @@ final class MobileSessionOpeningTests: XCTestCase {
         )
         settle(window, for: 0.1)
 
-        XCTAssertTrue(
-            accessibilityViews(
-                labelled: MobileL10n.string("Agent and account"),
-                in: window
-            ).isEmpty,
-            "the fading draft still owns a toolbar item"
-        )
+        let sessionItems = trailingItems(in: bar)
         XCTAssertEqual(
-            accessibilityViews(labelled: MobileL10n.string("Session actions"), in: window).count,
+            sessionItems.count,
             1,
-            "the draft and session contributed two usage controls during their overlap"
+            "the draft and session must contribute exactly one usage control during their overlap"
+        )
+        XCTAssertFalse(
+            sessionItems.contains { $0 === draftItem },
+            "the fading draft still owns a toolbar item"
         )
         let overlapFrame = render(window)
         attach(overlapFrame, named: "draft-session-navbar-overlap")
@@ -245,12 +240,20 @@ final class MobileSessionOpeningTests: XCTestCase {
         window.layoutIfNeeded()
     }
 
-    private func accessibilityViews(labelled label: String, in view: UIView) -> [UIView] {
-        var result = view.accessibilityLabel == label ? [view] : []
-        result.append(
-            contentsOf: view.subviews.flatMap { self.accessibilityViews(labelled: label, in: $0) }
-        )
-        return result
+    private func navigationBar(in controller: UIViewController) -> UINavigationBar? {
+        if let navigation = controller as? UINavigationController {
+            return navigation.navigationBar
+        }
+        return controller.children.lazy.compactMap { self.navigationBar(in: $0) }.first
+    }
+
+    /// SwiftUI's toolbar hosts do not expose their labels through UIView.accessibilityLabel
+    /// in a hosted unit test. Query the actual navigation bar's public item groups instead,
+    /// and keep the draft item's identity so one stale control cannot satisfy the handoff.
+    private func trailingItems(in bar: UINavigationBar) -> [UIBarButtonItem] {
+        guard let item = bar.topItem else { return [] }
+        let grouped = item.trailingItemGroups.flatMap(\.barButtonItems)
+        return grouped.isEmpty ? item.rightBarButtonItems ?? [] : grouped
     }
 
     private func render(_ window: UIWindow) -> UIImage {
