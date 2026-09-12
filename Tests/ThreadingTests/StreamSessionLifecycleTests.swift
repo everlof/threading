@@ -2265,7 +2265,7 @@ final class StreamEventParserTests: XCTestCase {
         // where the hook payload spells it `id`, and the kind as the raw `local_agent` where
         // the hook sends the friendly `subagent`.
         XCTAssertEqual(inFlight, [
-            BackgroundTask(id: "b4vc22id4", kind: .standing),
+            BackgroundTask(id: "b4vc22id4", kind: .shell),
             BackgroundTask(id: "b8x1tqpxz", kind: .delegated)
         ])
 

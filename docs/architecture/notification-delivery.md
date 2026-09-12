@@ -148,6 +148,13 @@ continuation's later automatic result turn stays in the same generation, so it p
 one completion. `SessionActivityDidChange` remains the read/attention presentation channel and
 cannot authorize completion delivery.
 
+Running shells remain pending across every intervening reply, including automatic session-watch
+messages. Seeing the same shell at a second `Stop` does not prove that its result is irrelevant.
+The shared background-work ledger recognizes both hook `shell` and stream `local_bash` types;
+only a later turn boundary without that shell can complete its outcome. The shipping-service
+regression drives parsed hook reports through `AgentRuntime`, the Mac alert observer and the phone
+push sender, proving silence through repeated yields and one alert after the result.
+
 ## One notification tap is one navigation transaction
 
 iOS can describe the same response in two lifecycle places: the user-notification-center

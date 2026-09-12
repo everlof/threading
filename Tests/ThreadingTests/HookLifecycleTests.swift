@@ -421,7 +421,7 @@ final class HookLifecycleTests: XCTestCase {
         ))
 
         XCTAssertEqual(report.backgroundWork, [
-            BackgroundTask(id: "bwf9miuvg", kind: .standing),
+            BackgroundTask(id: "bwf9miuvg", kind: .shell),
             BackgroundTask(id: "b8x1tqpxz", kind: .delegated)
         ])
     }
@@ -462,7 +462,7 @@ final class HookLifecycleTests: XCTestCase {
     /// Every task type the CLI can name, read off the two spellings it uses to name them.
     ///
     /// Taken from 2.1.224's own label table rather than from a list: the hook maps each raw
-    /// discriminant through it, and the stream sends the discriminant untouched. Only the two
+    /// discriminant through it, and the stream sends the discriminant untouched. Shells and
     /// delegated kinds pause a session regardless of age, and anything unrecognised — including
     /// a type added by a later CLI — must read as standing, which is the direction that leaves
     /// today's behaviour alone.
@@ -475,8 +475,11 @@ final class HookLifecycleTests: XCTestCase {
             )
         }
 
+        for shell in ["shell", "local_bash"] {
+            XCTAssertEqual(BackgroundWorkKind(reportedType: shell), .shell)
+        }
+
         for standing in [
-            "shell", "local_bash",
             "monitor", "monitor_mcp", "monitor_ws",
             "MCP task", "mcp_task",
             "teammate", "in_process_teammate",
@@ -1533,6 +1536,19 @@ final class HookLifecycleTests: XCTestCase {
 
     // MARK: - Background Work Ledger
 
+    func testRunningShellRemainsPendingAcrossAThousandInterveningReplies() {
+        for type in ["shell", "local_bash"] {
+            var ledger = BackgroundWorkLedger()
+            let work = [BackgroundTask(id: "test-run", kind: .init(reportedType: type))]
+            // Normally 1–3 boundaries while a command runs; stress 1,000 without retaining
+            // turn history or letting the same outstanding result age into completed work.
+            for _ in 0..<1_000 {
+                XCTAssertTrue(ledger.turnEnded(leaving: work))
+            }
+            XCTAssertFalse(ledger.turnEnded(leaving: []))
+        }
+    }
+
     /// The rule in isolation, without a tracker around it. Both CLIs wake a session when a
     /// background task ends, so "will this speak again" is true of everything in the list and
     /// separates nothing. For work that may stand indefinitely, when it *appeared* separates it.
@@ -1566,27 +1582,27 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertFalse(ledger.turnEnded(leaving: []), "and it ends when the child reports back")
     }
 
-    /// The two rules coexisting, which is the whole point of asking the kind first: a parked dev
-    /// server must not hold the session open, and a subagent running beside it must.
-    func testADelegatedChildPausesEvenBesideAParkedServer() {
+    /// The two rules coexisting, which is the whole point of asking the kind first: a parked
+    /// monitor must not hold the session open, and a subagent running beside it must.
+    func testADelegatedChildPausesEvenBesideAParkedMonitor() {
         var ledger = BackgroundWorkLedger()
 
-        XCTAssertTrue(ledger.turnEnded(leaving: [standingWork("dev-server")]))
+        XCTAssertTrue(ledger.turnEnded(leaving: [standingWork("monitor")]))
         XCTAssertFalse(
-            ledger.turnEnded(leaving: [standingWork("dev-server")]),
-            "the server alone is parked"
+            ledger.turnEnded(leaving: [standingWork("monitor")]),
+            "the monitor alone is parked"
         )
         XCTAssertTrue(
-            ledger.turnEnded(leaving: [standingWork("dev-server"), delegatedWork("child")]),
+            ledger.turnEnded(leaving: [standingWork("monitor"), delegatedWork("child")]),
             "the child is what this turn handed off"
         )
         XCTAssertTrue(
-            ledger.turnEnded(leaving: [standingWork("dev-server"), delegatedWork("child")]),
-            "and it keeps pausing while the server beside it stays parked"
+            ledger.turnEnded(leaving: [standingWork("monitor"), delegatedWork("child")]),
+            "and it keeps pausing while the monitor beside it stays parked"
         )
         XCTAssertFalse(
-            ledger.turnEnded(leaving: [standingWork("dev-server")]),
-            "the child reported back; the server is parked as it always was"
+            ledger.turnEnded(leaving: [standingWork("monitor")]),
+            "the child reported back; the monitor is parked as it always was"
         )
     }
 
@@ -1665,9 +1681,9 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .needsAttention)
     }
 
-    /// The trade-off the ledger exists to remove. A dev server the agent parked keeps running
+    /// The trade-off the ledger exists to remove. A monitor the agent parked keeps running
     /// across every later turn, and holding each of them open behind it would silence the
-    /// session for as long as the server lives. Only the turn that *started* it is waiting.
+    /// session for as long as the monitor lives. Only the turn that *started* it is waiting.
     @MainActor
     func testWorkCarriedOverFromAnEarlierTurnNoLongerHoldsTheSessionOpen() {
         let tracker = SessionActivityTracker()
@@ -1675,21 +1691,21 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
 
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: [standingWork("dev-server")])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("monitor")])
         XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         tracker.noteTurnStarted()
-        tracker.noteTurnFinished(backgroundWork: [standingWork("dev-server")])
+        tracker.noteTurnFinished(backgroundWork: [standingWork("monitor")])
         XCTAssertEqual(
             tracker.activity,
             .needsAttention,
-            "a later turn handed back to the user with the server merely still running"
+            "a later turn handed back to the user with the monitor merely still running"
         )
 
         // And a genuinely new task still pauses, beside the one that was already there.
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(
-            backgroundWork: [standingWork("dev-server"), standingWork("test-run")]
+            backgroundWork: [standingWork("monitor"), standingWork("test-run")]
         )
         XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
     }
@@ -2271,7 +2287,7 @@ final class HookLifecycleTests: XCTestCase {
 
 // MARK: - Background Work Fixtures
 
-/// A shell, a monitor, or anything else whose lifetime the payload does not state — the work
+/// A monitor or another standing task whose lifetime the payload does not state — the work
 /// `BackgroundWorkLedger` has to judge by when it appeared.
 private func standingWork(_ id: String) -> BackgroundTask {
     BackgroundTask(id: id, kind: .standing)

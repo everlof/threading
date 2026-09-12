@@ -183,7 +183,7 @@ final class WireArrayNullRecoveryTests: XCTestCase {
 
         XCTAssertEqual(report.backgroundWork, [
             BackgroundTask(id: "bwf9", kind: .delegated),
-            BackgroundTask(id: "#2", kind: .standing)
+            BackgroundTask(id: "#2", kind: .shell)
         ])
     }
 

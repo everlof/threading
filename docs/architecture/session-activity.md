@@ -616,60 +616,40 @@ The bell is not a second way in for Claude here, and deliberately stays untyped:
 so nothing rings. `recordBell` therefore keeps flagging whatever the pause says — an unattributed
 BEL from some other program on the PTY is exactly the notice that should stay loud.
 
-**Being in flight is not enough, and `BackgroundWorkLedger` is why.** The obvious rule — any
-in-flight work keeps the session out of `idle` — is right for a test run and wrong for a dev
-server: a process that lives for hours would hold *every* later turn open behind it and silence
-the session for as long as it ran. But "will this speak again" is true of everything in the
-list, because both CLIs wake a session when a background task ends, so it separates nothing.
-Two facts do, and **the kind is asked first**:
+**A shell does not become standing work just because another turn passed.**
+`BackgroundWorkLedger` reads the task kind before considering its age:
 
-- **Delegated work always pauses.** A subagent or a workflow is bounded by construction and its
-  result re-enters the conversation, so a turn that ends while one runs has handed nothing to
-  the user — however many turns ago it was started.
-- **Standing work pauses only when it is new.** A shell or a monitor may stand indefinitely and
-  nothing in the payload says which. So work the agent started **in the turn that just ended**
-  is the reason that turn ended early, and that is the pause; work **carried over** from an
-  earlier turn is parked, and the turn really did hand back.
+- **Shells, subagents and workflows keep the outcome pending while reported in flight.**
+  A watch message, a progress question or another task's result can wake the parent while the
+  original task still runs. None is evidence that the outstanding result stopped mattering.
+- **Other standing work pauses only when it is new.** Monitors, teammates and unknown kinds
+  keep the existing carry-over rule. Their ids are replaced at each boundary and forgotten
+  with the process, so removed tasks do not accumulate in the ledger.
 
-So the ledger keeps the ids of the *standing* work that was already in flight at the previous
-boundary, and a boundary pauses the session when it carries delegated work or brings new
-standing work. Both surfaces carry identities and kinds for exactly this —
-`background_tasks[].id`/`type` on the hook, `tasks[].task_id`/`task_type` on the stream — and
-both hold their own ledger, reset with the process. Traced against the transcript that started
-this: three consecutive turns each queued a *new* task, so all three paused correctly; a fourth
-turn with only the old task still running would not have.
+The earlier rule treated shells as standing work: only the first `Stop` with a new shell
+paused, and every later one with the same id could notify. Measured on 12 September 2026 in
+SHIPYARD: a background full-suite run started at 07:49:59; session-watch expirations resumed
+Claude at 08:04:50 and 08:06:08. Both replies checked the still-running tests and yielded,
+yet their `Stop` events at 08:05:02 and 08:07:27 posted unread completion alerts. The last
+screen explicitly showed one shell still running. Task age had been mistaken for completion.
 
-**Age alone was the first rule, and it went blind on exactly the work it most needed to see.** A
-background subagent is in flight at every boundary until it finishes, so by age it is new once
-and carried over forever after: the session showed `working` for the first turn after the child
-was spawned and `idle` for every turn after that, while the child worked on. Reported as "no
-progress circle, but a sub agent working", and measured on CLI 2.1.224 in a session that spent
-13 minutes that way — `turn_duration` records at 20:04, 20:12, 20:15 and 20:17 each carrying
-`pendingBackgroundAgentCount: 1`, the same child in `background_tasks` at all four Stops, and
-only the first raising the mark. It is worse off screen, where the same boundary also hands the
-session an unread mark and a *Finished its turn* notification for a turn whose child has not
-reported. The app knew the whole time: `SubagentSessionState` held that child at `working` from
-its `SubagentStart`, and by design that never reaches the tracker.
+`BackgroundWorkKind.shell` reads both `shell` from the hook and `local_bash` from the stream.
+It stays separate from `.delegated`, which names actual agent/workflow delegation in runtime
+projections and diagnostics. Both kinds hold completion at every boundary. Neither command
+names nor assistant prose decide whether work has finished.
 
-`BackgroundWorkKind` reads the kind, and **it knows both spellings** because the two surfaces
-disagree: the hook sends the friendly label from Claude's own schema (`subagent`, `shell`) and
-the stream sends the raw discriminant (`local_agent`, `local_bash`). That is the same thing
-`ToolIdentity` does for tool names — the behaviour is ours, the spelling is the provider's.
-Anything unrecognised reads as standing, which is the safe direction: a kind wrongly called
-delegated holds `working` for as long as it runs, while one wrongly left standing is judged by
-age, exactly as everything was before kinds were read at all. So a task type a later CLI invents
-behaves no worse than it does today.
+Claude reports a test run and a long-lived development server as the same shell kind. Without
+an explicit provider fact distinguishing an intentionally parked server, both keep completion
+pending until they disappear from the reported in-flight list and the resulting turn finishes.
+This is deliberate: another reply cannot safely prove that a shell's result is irrelevant.
+Monitors still have their own reported kind and retain their standing-work behavior.
 
-Classifying the command instead (`npm run dev` is long-lived, `npm test` is not) was the
-obvious alternative and is worse. It is a name-matching guess where an exact fact is already in
-the payload, it covers only `shell` tasks and not subagents or monitors, and being wrong in the
-long-lived direction re-opens the very bug this closes. Reading the task *type* is not that
-guess: it is the same payload, one key over from the id.
-
-What it still holds open is a turn that starts standing work and is never followed by another
-turn. Nothing further happens in that session to notify about, so what remains is a working
-mark beside a session that does in fact still have something running — which is what the CLI's
-own footer says for exactly as long.
+Both surfaces share this ledger and the same task identities: `background_tasks[].id`/`type`
+on hooks and `tasks[].task_id`/`task_type` on the stream. Classification adds O(1) work per task
+to the existing per-boundary list handling (normally 0–4 tasks); it introduces no transcript,
+process or session scan. A 1,000-boundary regression keeps the same shell pending without
+retaining turn history. Shipping-service coverage exercises parsed reports through the runtime,
+Mac alert observer and remote push sender, then verifies exactly one completion after the result.
 
 The native surface has the same bug and a better signal: the stream sends
 `system` / `background_tasks_changed` carrying the whole in-flight list on every change, so

@@ -453,7 +453,7 @@ final class SessionActivityTracker {
         /// about a fact this side already holds.
         case delegated
 
-        /// A shell or a monitor this turn started. It may stand for hours and nothing in the
+        /// A running shell, or a monitor this turn started. It may stand for hours and nothing in the
         /// payload says which — an `npm test` and an `npm run dev` are the same entry — so
         /// nothing here may assume it will ever end.
         case standing
@@ -850,9 +850,9 @@ final class SessionActivityTracker {
     /// Finishing while the session is on screen needs no flag; the user watched it happen.
     ///
     /// `backgroundWork` is the agent's own account of what it left running — a backgrounded
-    /// shell, a delegated child, an MCP monitor — by identity and kind. A delegated child is
-    /// work the turn handed off and has not heard back from; standing work is the turn's own if
-    /// this turn started it, and parked if an earlier one did. Either way, claiming the session
+    /// shell, a delegated child, an MCP monitor — by identity and kind. Shells and delegated
+    /// children remain pending until their results arrive; other standing work is the turn's
+    /// own if this turn started it, and parked if an earlier one did. Claiming the session
     /// finished posts a notification for an answer nobody has given yet and drops the mark while
     /// the agent is about to speak again. `BackgroundWorkLedger` draws both lines.
     func noteTurnFinished(

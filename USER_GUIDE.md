@@ -858,9 +858,11 @@ states until that work lands. Claude ends its turn straight away in that case an
 conversation back up on its own once the command exits, so a session waiting on its own shell
 has not finished anything and does not notify as though it had.
 
-For a shell or a monitor, only the turn that *started* the work waits on it. Something
-long-lived that the agent parked earlier — a dev server it started three answers ago — does not
-hold later turns open, so those finish and notify as usual while it keeps running.
+Running shells keep completion pending across later replies too. Asking for progress or receiving
+an automatic watch message does not make an unfinished test run complete. Claude reports test
+runs and long-lived servers as the same kind of shell, so a server it leaves running also keeps
+completion pending until it exits. A monitor carried over from an earlier turn can remain parked
+while later turns finish.
 
 A **subagent or workflow** running in the background is different, and keeps the working mark
 for as long as it runs. It is delegated work with an end: it reports back into the conversation

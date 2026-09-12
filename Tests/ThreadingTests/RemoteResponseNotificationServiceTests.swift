@@ -4,6 +4,67 @@ import ThreadingRemoteKit
 
 @MainActor
 final class RemoteResponseNotificationServiceTests: HostedStoreTestCase {
+    func testRunningShellAcrossWatchRepliesNotifiesOnlyAfterItsResult() async throws {
+        let sessionID = try makeSession()
+        let runtime = AgentRuntime.shared
+        let terminal = QuestionTerminal()
+        terminal.activityTracker.markRunning()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(terminal, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+        let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
+        defer { service.reset() }
+        let completed = expectation(description: "Shell result delivered")
+        var kinds: [RemoteNotificationKind] = []
+        service.configureHostedPushSender(
+            serviceURL: { URL(string: "https://example.test")! }, isAvailable: { true }
+        ) { event, _, _ in
+            kinds.append(event.kind)
+            completed.fulfill()
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        register(service, enabledKinds: [.agentQuestion, .turnCompleted])
+        service.setMacApplicationActive(false)
+        var macPosts: [AttentionAlert] = []
+        let observer = AttentionAlertRuntimeObserver(
+            appIsActive: { false }, isSnoozed: { _ in false }
+        ) { event, action in
+            guard event.sessionID == sessionID else { return }
+            if case .post(let alert) = action { macPosts.append(alert) }
+        }
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: sessionID, event: .turnFinished,
+            payload: ["background_tasks": [
+                ["id": "test-run", "type": "shell", "status": "running"]
+            ]]
+        ))
+
+        // The first turn starts the test shell. Two host watch messages then wake Claude,
+        // which checks progress and yields again with that same shell still running.
+        for turn in 0..<3 {
+            terminal.activityTracker.noteTurnStarted()
+            runtime.publishRuntimeChange(sessionID: sessionID)
+            terminal.activityTracker.noteTurnFinished(backgroundWork: report.backgroundWork)
+            runtime.publishRuntimeChange(sessionID: sessionID)
+            XCTAssertEqual(terminal.activityTracker.activity, .readyWithBackgroundWork)
+            terminal.activityTracker.noteAwaitingUser(.idlePrompt)
+            runtime.publishRuntimeChange(sessionID: sessionID)
+            let drained = expectation(description: "Watch reply \(turn) drained")
+            Task { @MainActor in drained.fulfill() }
+            await fulfillment(of: [drained], timeout: 2)
+            XCTAssertTrue(kinds.isEmpty, "a running shell has no completed result to push")
+            XCTAssertTrue(macPosts.isEmpty, "Mac alerts follow the same pending outcome")
+        }
+
+        terminal.activityTracker.noteTurnStarted()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        terminal.activityTracker.noteTurnFinished()
+        runtime.publishRuntimeChange(sessionID: sessionID)
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(kinds, [.turnCompleted])
+        XCTAssertEqual(macPosts, [.unread])
+        withExtendedLifetime(observer) {}
+    }
+
     func testMacObserverDoesNotReannounceRestoredUnreadReceipts() async throws {
         let sessionID = try makeSession()
         let runtime = AgentRuntime.shared
