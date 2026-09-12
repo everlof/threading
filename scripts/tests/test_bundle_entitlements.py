@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import plistlib
+import re
 import sys
 import tempfile
 import unittest
@@ -83,6 +84,26 @@ class BundleEntitlementTests(unittest.TestCase):
         for declaration in checker.HELPER_ENTITLEMENTS.values():
             self.assertTrue((REPOSITORY / declaration).is_file())
             self.assertIn(f'CODE_SIGN_ENTITLEMENTS = "{declaration}";', project)
+
+    def test_every_helper_declaration_in_the_project_is_registered(self) -> None:
+        """A helper target added under Targets/ has to join the verifier.
+
+        The other direction alone let `threading-triggerd` ship a declaration the verifier had
+        never heard of: the manifest listed only files that exist, so nothing noticed the helper
+        that existed without a manifest entry. That is found at build time — the verifier fails
+        closed on an unknown executable in Contents/Helpers — which means it is found after a
+        Release build rather than here.
+        """
+        project = (REPOSITORY / "Threading.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        declared = {
+            pathlib.Path(match)
+            for match in re.findall(
+                r'CODE_SIGN_ENTITLEMENTS = "(Targets/[^"]+\.entitlements)";', project
+            )
+        }
+
+        self.assertTrue(declared, "no helper entitlement declarations found in the project")
+        self.assertEqual(declared - set(checker.HELPER_ENTITLEMENTS.values()), set())
 
     def test_auto_install_and_release_both_run_the_verifier(self) -> None:
         autoinstall = (REPOSITORY / "scripts/autoinstall.sh").read_text(encoding="utf-8")

@@ -29,6 +29,7 @@ HELPER_ENTITLEMENTS = {
     "threading-simulator-helper": Path(
         "Targets/SimulatorHelper/threading-simulator-helper.entitlements"
     ),
+    "threading-triggerd": Path("Targets/TriggerDaemon/threading-triggerd.entitlements"),
 }
 
 # scc is a checked-in third-party executable, not an Xcode helper target. Its checksum and

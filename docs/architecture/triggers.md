@@ -92,3 +92,14 @@ resource fetching are later additions, not implicit v1 authority.
 The cross-process Keychain access group is a signed-Release contract. Unsigned/ad-hoc Debug builds
 can compile and render the feature but cannot prove ServiceManagement registration or credential
 sharing; validate those two behaviors on a signed build.
+
+**A locally auto-installed build is not that build either.** `keychain-access-groups` is
+profile-backed, and the auto-installer deliberately names no provisioning profile, so it derives
+the app's and the daemon's entitlement files with the group removed — the build the developer runs
+all day therefore cannot read a source credential across the process boundary, and
+`TriggerSourceCredentialStore` asks for a group it does not have. Credential sharing is provable
+only on a profile-signed release from `scripts/release.sh`. The release path carries the group
+without any change: the Developer ID profile's entitlements dict already lists it. See
+[`releasing.md`](releasing.md#keeping-applications-on-master) — the first version of
+this entitlement broke the auto-install loop for three days because the derivation matched only
+`com.apple.developer.*`.

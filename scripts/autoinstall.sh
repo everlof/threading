@@ -31,11 +31,13 @@
 # select the isolated hosted service. The public archive does not receive that compile condition
 # and remains locked to production even when both builds share the same defaults domain.
 #
-# **Why an entitlement is dropped.** Any `com.apple.developer.*` app entitlement needs a
-# provisioning profile, which an ordinary local auto-install deliberately does not use. The app's
-# plist is therefore derived inside the disposable build checkout with that family removed.
-# Helpers keep their own target entitlement files: overriding `CODE_SIGN_ENTITLEMENTS` on the
-# xcodebuild command line would replace every helper's declaration and disable their sandboxes.
+# **Why an entitlement is dropped.** A profile-backed entitlement needs a provisioning profile,
+# which an ordinary local auto-install deliberately does not use. Every entitlement plist in the
+# disposable build checkout — the app's and each helper's — is therefore derived with that family
+# removed. Helpers keep their own target entitlement files: overriding the entitlements setting on
+# the xcodebuild command line would replace every helper's declaration and disable their sandboxes.
+# The cost is named where it lands: a locally auto-installed build cannot share a Keychain access
+# group, so trigger source credentials only work in a profile-signed release.
 #
 # **Why it never quits or moves the running app.** Threading hosts live agent sessions in PTYs,
 # and any agent committing to master would otherwise stop your session mid-turn. A completed build
@@ -274,28 +276,53 @@ prepare_round() {
 # Derived from the repository's own entitlements on every build rather than kept as a second copy
 # in the repository, so it cannot drift: whatever the app asks for, this asks for too, minus the
 # keys that need a provisioning profile.
+#
+# Every declaration in the checkout is derived, not only the app's. A helper keeps its own target
+# file — the command line must not override the setting that names it, because one value there
+# would replace every helper's declaration and disable their sandboxes — so the only place a
+# helper's profile-backed key can be dropped is the file itself, inside this disposable checkout.
+# `threading-triggerd` shares a Keychain access group with the app and was the first helper to ask
+# for one.
 derive_entitlements() {
-    python3 - "$CHECKOUT/$ENTITLEMENTS_IN_REPO" <<'PYTHON'
+    python3 - "$CHECKOUT" "$ENTITLEMENTS_IN_REPO" <<'PYTHON'
 import plistlib
 import sys
 from pathlib import Path
 
-source = Path(sys.argv[1])
-with source.open("rb") as handle:
-    entitlements = plistlib.load(handle)
+checkout = Path(sys.argv[1])
+declarations = [checkout / sys.argv[2]] + sorted(checkout.glob("Targets/*/*.entitlements"))
 
-# com.apple.developer.* is the profile-backed family; com.apple.security.* is not. Dropping by
-# prefix means an entitlement added to the app later is handled the same way without an edit here.
-dropped = sorted(key for key in entitlements if key.startswith("com.apple.developer."))
-for key in dropped:
-    del entitlements[key]
+# Two families need a profile. `com.apple.developer.*` is matched by prefix, so a capability added
+# later is handled without an edit here. The rest have no shared prefix and have to be named: a
+# bare `keychain-access-groups` on 2026-09-12 failed four consecutive auto-installs with
+# "requires a provisioning profile" precisely because the prefix rule read as the whole rule.
+# `com.apple.security.*` is otherwise the hardened-runtime family, which needs no profile.
+NAMED_PROFILE_BACKED = {"keychain-access-groups", "com.apple.security.application-groups"}
 
-temporary = source.with_name(source.name + ".autoinstall")
-with temporary.open("wb") as handle:
-    plistlib.dump(entitlements, handle)
-temporary.replace(source)
 
-print(" ".join(dropped))
+def is_profile_backed(key: str) -> bool:
+    return key.startswith("com.apple.developer.") or key in NAMED_PROFILE_BACKED
+
+
+report = []
+for source in declarations:
+    with source.open("rb") as handle:
+        entitlements = plistlib.load(handle)
+
+    dropped = sorted(key for key in entitlements if is_profile_backed(key))
+    if not dropped:
+        continue
+    for key in dropped:
+        del entitlements[key]
+
+    temporary = source.with_name(source.name + ".autoinstall")
+    with temporary.open("wb") as handle:
+        plistlib.dump(entitlements, handle)
+    temporary.replace(source)
+
+    report += [f"{source.stem}:{key}" for key in dropped]
+
+print(" ".join(report))
 PYTHON
 }
 

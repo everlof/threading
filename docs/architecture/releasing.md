@@ -158,21 +158,44 @@ CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: …"
 PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
 ```
 
-Two things make it work. The app's entitlement file is derived in the disposable build checkout
-with every `com.apple.developer.*` key removed, because those are the profile-backed family and an
-ordinary auto-install names no profile. It is deliberately *not* passed as
-`CODE_SIGN_ENTITLEMENTS` on the command line: that setting would apply to every target, replacing
-the extension helpers' sandbox files with the host app's hardened-runtime relaxations. Each helper
-therefore keeps its project-declared file. `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` separately
+Two things make it work. Every entitlement file in the disposable build checkout is derived with
+its profile-backed keys removed, because an ordinary auto-install names no profile. None of them is
+passed as `CODE_SIGN_ENTITLEMENTS` on the command line: that setting would apply to every target,
+replacing the extension helpers' sandbox files with the host app's hardened-runtime relaxations.
+Each helper therefore keeps its project-declared file, which is why the derivation edits the files
+themselves rather than overriding the setting. `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` separately
 strips the `get-task-allow` Xcode otherwise injects, so the app you leave running all day is not
 one any process running as you can attach a debugger to.
 
-`scripts/check_bundle_entitlements.py` then reads the signed product and requires all six
+**"Profile-backed" is wider than one prefix.** `com.apple.developer.*` is the family everyone
+thinks of and is matched by prefix, so a new capability needs no edit. The rest have no shared
+prefix and are named explicitly: `keychain-access-groups` and
+`com.apple.security.application-groups`. Getting that wrong is not a subtle failure. When the
+triggers work gave the app and `threading-triggerd` a shared Keychain access group on 2026-09-12,
+the prefix rule did not match the bare key, and four consecutive auto-installs failed with
+
+```
+error: "Threading" requires a provisioning profile. Select a provisioning profile in the
+       Signing & Capabilities editor.
+```
+
+for three days, leaving `/Applications/Threading.app` at the last commit that happened to build.
+The profile-signed release path is unaffected: the Developer ID profile's entitlements dict
+carries `keychain-access-groups` (see [the Sign in with Apple
+section](#sign-in-with-apple-cannot-be-shipped-by-developer-id) for what that dict actually holds),
+so only the profile-less local loop needs the key dropped. The cost of dropping it belongs in the
+feature's own notes: a locally auto-installed build cannot share a Keychain access group across
+processes, so trigger source credentials work only in a profile-signed release.
+
+`scripts/check_bundle_entitlements.py` then reads the signed product and requires all seven
 first-party helpers to match those files exactly. The auto-installer runs it before accepting a
 build, the release script runs it over the exported bundle, and an executable newly added under
 `Contents/Helpers` fails closed until its declaration joins the verifier. The checked-in `scc`
 binary is the sole exception: it is not an Xcode target and its checksum and architecture have a
-separate gate.
+separate gate. `scripts/tests/test_bundle_entitlements.py` checks the manifest against the project
+in both directions, because the "declared file exists" direction alone passed happily while
+`threading-triggerd` had a declaration the verifier had never heard of — a gap that otherwise
+surfaces only after a Release build.
 
 The result is a bundle whose designated requirement is byte-identical to the shipping one —
 `identifier "codes.threading"` and a Developer ID leaf for the team — which is what makes the
