@@ -97,7 +97,12 @@ struct EmptyJSONObject: Encodable, Sendable {}
 
 struct InitializeResult: Encodable, Sendable {
     struct Capabilities: Encodable, Sendable {
-        let tools = EmptyJSONObject()
+        struct Tools: Encodable, Sendable {
+            /// Grants and the Supervision setting can change a running session's catalogue.
+            let listChanged = true
+        }
+
+        let tools = Tools()
     }
 
     struct ServerInfo: Encodable, Sendable {

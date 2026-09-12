@@ -556,6 +556,65 @@ final class AgentLaunchQuotingTests: XCTestCase {
     /// just gain a `--`.
     // MARK: - Settings research one-shots
 
+    /// `enabled_tools` is fixed for the life of a Codex process, while Manager is a role the
+    /// user can confer after launch. The provider ceiling therefore keeps the exact supervision
+    /// identities even when both the current session grant and the group switch hide them from
+    /// `tools/list`; Threading remains the authority that makes them visible and admits calls.
+    func testCodexLaunchCeilingKeepsToolsNeededByALaterManagerGrant() throws {
+        let settings = AppSettings.shared
+        let supervisionWasEnabled = settings.isToolGroupEnabled(MCPToolCatalog.supervision.id)
+        settings.setToolGroup(MCPToolCatalog.supervision.id, enabled: false)
+        defer {
+            settings.setToolGroup(
+                MCPToolCatalog.supervision.id,
+                enabled: supervisionWasEnabled
+            )
+        }
+
+        let session = AgentSession(kind: .codex, title: "ordinary chat")
+        defer { MCPSessionRegistry.remove(sessionID: session.id) }
+
+        let supervisionNames = Set(MCPTools.supervisionTools)
+        XCTAssertTrue(
+            Set(MCPToolCatalog.toolNames(for: session.id)).isDisjoint(with: supervisionNames),
+            "a disabled group leaked into the live session catalogue"
+        )
+
+        var command = ShellCommand(word: AgentDefaults.codexExecutable)
+        AgentLauncher.appendMCPFlags(
+            for: session,
+            to: &command,
+            decision: MCPBridgeDecision(
+                isEnabled: false,
+                helperURL: URL(fileURLWithPath: "/missing/threading-mcp-bridge"),
+                socketPath: nil,
+                httpPort: 9
+            )
+        )
+        let words = try Self.tokenizing("'cd' '/tmp' && 'exec' \(command.source)")
+        let prefix = "mcp_servers.threading.enabled_tools="
+        let override = try XCTUnwrap(words.first { $0.hasPrefix(prefix) })
+        let array = Data(override.dropFirst(prefix.count).utf8)
+        let launchNames = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: array) as? [String]
+        )
+
+        XCTAssertEqual(
+            Set(launchNames).intersection(supervisionNames),
+            supervisionNames,
+            "the fixed provider filter would prevent a live Manager promotion"
+        )
+        XCTAssertTrue(words.contains(
+            "mcp_servers.threading.tools.spawn_session.approval_mode=\"approve\""
+        ))
+
+        settings.setToolGroup(MCPToolCatalog.supervision.id, enabled: true)
+        XCTAssertTrue(
+            Set(MCPToolCatalog.toolNames(for: session.id)).isDisjoint(with: supervisionNames),
+            "the provider ceiling itself conferred Manager authority"
+        )
+    }
+
     /// Projects are folders, not necessarily repositories. The helper must therefore opt out
     /// of Codex's Git preflight without weakening the read-only sandbox that bounds the run.
     func testCodexProjectResearchSupportsNonRepositoryFoldersReadOnly() throws {

@@ -2009,7 +2009,10 @@ The project composer offers `Chat` and `Manager` as roles, but the stored sessio
 project grant before launch, so its first MCP initialization sees the correct catalogue. **New
 Manager…** is the preset path; an existing row can be given or stripped of the same role through
 **Make Manager** / **Revoke Manager Role**. Only user-authored commands confer authority, and
-revocation leaves the conversation intact.
+revocation leaves the conversation intact. Existing provider processes keep the closed
+Supervision identities in their launch-time filter but do not see them until Threading announces
+`tools/list_changed` and a fresh session-filtered catalogue observes the grant; initialization
+declares that capability explicitly.
 
 `Supervision` — manager id, child id, brief, assignment, state and outcome — is distinct from
 `forkedFrom` and `ConversationHandoff`. It means **who is currently responsible for this chat**,

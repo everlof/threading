@@ -791,11 +791,28 @@ enum MCPToolCatalog {
     return builtIn + external
   }
 
-  /// The launch pre-approval list is exactly the list the same session will receive from
-  /// `tools/list`; it cannot independently admit a missing, duplicate, or malformed tool.
+  /// The globally enabled catalogue before per-session authority is applied.
   @MainActor
   static var enabledToolNames: [String] {
     enabledDefinitions.map(\.name)
+  }
+
+  /// Exact identities a provider may need during the lifetime of one launched process.
+  ///
+  /// This is deliberately a ceiling rather than a snapshot of one session's current
+  /// `tools/list`. The user can confer or revoke Manager while that process is running, and can
+  /// toggle the Supervision group before or after doing so. Those identities therefore have to
+  /// survive the provider's fixed launch-time filter even when they are initially hidden.
+  /// `definitions(for:)` remains the live visibility policy and `admits(_:for:)` rechecks it on
+  /// every call, so inclusion here grants no authority by itself.
+  @MainActor
+  static var providerLaunchToolNames: [String] {
+    let enabled = enabledToolNames
+    let enabledSet = Set(enabled)
+    let liveGrantDerived = MCPBuiltInToolRegistry.descriptors
+      .filter { $0.family == .supervision && !enabledSet.contains($0.definition.name) }
+      .map(\.definition.name)
+    return enabled + liveGrantDerived
   }
 
   @MainActor

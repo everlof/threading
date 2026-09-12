@@ -804,18 +804,33 @@ enum AgentLauncher {
     /// Deliberately not `--strict-mcp-config`: that would suppress the user's own MCP servers
     /// for every session Threading launches, which is a much larger change than adding one.
     ///
-    /// The exact Threading tools exposed to this session are pre-approved. Tools that need finer
+    /// Exact Threading tool identities are pre-approved. The launch list is a lifetime ceiling,
+    /// not the session's current catalogue: Manager can be conferred while the process is
+    /// running, so its grant-derived names must already be accepted by the provider. The MCP
+    /// server still owns live visibility and re-authorizes every call. Tools that need finer
     /// trust boundaries enforce them in the app: in particular, browser access is origin-gated
     /// and form submissions are confirmed because WKWebView may hold credentials the shell does
     /// not.
     private static func appendMCPFlags(for session: AgentSession, to command: inout ShellCommand) {
-        // Which tools are exposed is the user's choice on the Tools settings page. With every
-        // group switched off there is nothing to register — and an empty `enabled_tools` list is
-        // ambiguous to Codex (it can read as "all"), so the server is skipped outright rather than
-        // handed an empty allowlist.
-        let enabledTools = MCPToolCatalog.toolNames(for: session.id)
-        guard !enabledTools.isEmpty else { return }
-        let mcpDecision = liveMCPDecision()
+        appendMCPFlags(
+            for: session,
+            to: &command,
+            decision: liveMCPDecision()
+        )
+    }
+
+    /// Internal seam for launch-contract tests. The decision is already a main-actor snapshot;
+    /// production resolves it once in the wrapper above.
+    static func appendMCPFlags(
+        for session: AgentSession,
+        to command: inout ShellCommand,
+        decision mcpDecision: MCPBridgeDecision
+    ) {
+        // Codex interprets `enabled_tools` as a fixed allowlist. Use the provider-lifetime
+        // ceiling, including live grant-derived identities, while `tools/list` remains the
+        // session-specific source of what is actually visible now.
+        let launchTools = MCPToolCatalog.providerLaunchToolNames
+        guard !launchTools.isEmpty else { return }
 
         switch session.kind {
         case .claude:
@@ -829,7 +844,7 @@ enum AgentLauncher {
             command.append(flag: "--mcp-config", value: configPath)
             command.append(
                 flag: "--allowedTools",
-                value: MCPDefaults.allowedToolsArgument(enabledTools)
+                value: MCPDefaults.allowedToolsArgument(launchTools)
             )
 
         case .codex:
@@ -845,11 +860,11 @@ enum AgentLauncher {
             appendCodexServerAddress(binding, under: server, to: &command)
             appendCodexConfigOverride(
                 "\(server).enabled_tools",
-                tomlValue: tomlArray(enabledTools),
+                tomlValue: tomlArray(launchTools),
                 to: &command
             )
 
-            for tool in enabledTools {
+            for tool in launchTools {
                 appendCodexConfigOverride(
                     "\(server).tools.\(tool).approval_mode",
                     string: "approve",

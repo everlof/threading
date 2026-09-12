@@ -92,6 +92,11 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
             Self.string(handshake, "result", "serverInfo", "name"),
             MCPDefaults.serverName
         )
+        XCTAssertEqual(
+            Self.bool(handshake, "result", "capabilities", "tools", "listChanged"),
+            true,
+            "the real server did not advertise its grant-change notifications"
+        )
 
         let listing = try roundTrip(bridge, request: Self.toolsList(id: 2), id: 2)
         let tools = try XCTUnwrap(
@@ -631,6 +636,14 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
             current = (current as? [String: Any])?[key]
         }
         return current as? String
+    }
+
+    private static func bool(_ object: [String: Any], _ path: String...) -> Bool? {
+        var current: Any? = object
+        for key in path {
+            current = (current as? [String: Any])?[key]
+        }
+        return current as? Bool
     }
 
     // MARK: - Measurement helpers

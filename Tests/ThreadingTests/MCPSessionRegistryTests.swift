@@ -151,6 +151,23 @@ final class MCPSessionRegistryTests: XCTestCase {
     XCTAssertTrue(event.hasSuffix("\n\n"), "an SSE event ends with one empty line")
   }
 
+  func testInitializeAdvertisesThatTheToolListCanChange() throws {
+    let result = InitializeResult(
+      protocolVersion: MCPDefaults.protocolVersion,
+      serverInfo: InitializeResult.ServerInfo(
+        name: MCPDefaults.serverName,
+        version: MCPDefaults.serverVersion
+      ),
+      instructions: ""
+    )
+    let data = try JSONEncoder().encode(result)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let capabilities = try XCTUnwrap(object["capabilities"] as? [String: Any])
+    let tools = try XCTUnwrap(capabilities["tools"] as? [String: Any])
+
+    XCTAssertEqual(tools["listChanged"] as? Bool, true)
+  }
+
   func testConcurrentMintAndLookupPreservesBidirectionalMapping() {
     let sessionIDs = (0..<128).map { _ in SessionID() }
     let resultLock = NSLock()

@@ -82,7 +82,10 @@ session kind. `ControlGrantStore` resolves the active grant and owns the durable
 between manager and child. Revocation timestamps the grant instead of deleting it, releases its
 active children, invalidates the cached catalogue, and causes the live MCP connection to emit
 `notifications/tools/list_changed`. The next call reads current authority even if a client ignores
-that notification.
+that notification. `initialize` advertises `tools.listChanged`, and a provider's fixed launch-time
+tool filter retains the exact Supervision identities as a ceiling, so conferring Manager on an
+already-running chat can make those tools discoverable after the notification without granting
+them before it.
 
 Regular sessions retain the implicit contract they had before grants: list, send, steer and watch
 within their own project, and archive or rename themselves. A Manager grant adds the complete

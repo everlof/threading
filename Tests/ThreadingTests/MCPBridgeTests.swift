@@ -70,6 +70,11 @@ final class MCPBridgeTests: XCTestCase {
         let handshake = try runner.reply(to: 1, timeout: Fixture.replyTimeout)
         XCTAssertEqual(Self.string(handshake, "result", "serverInfo", "name"), "threading")
         XCTAssertEqual(Self.string(handshake, "result", "protocolVersion"), Self.protocolVersion)
+        XCTAssertEqual(
+            Self.bool(handshake, "result", "capabilities", "tools", "listChanged"),
+            true,
+            "a client must know that a live Manager promotion changes its catalogue"
+        )
 
         runner.send(Self.toolsListRequest(id: 2))
         let listing = try runner.reply(to: 2, timeout: Fixture.replyTimeout)
@@ -150,6 +155,38 @@ final class MCPBridgeTests: XCTestCase {
         XCTAssertTrue(
             (content.first?["text"] as? String ?? "").contains("Threading is not running"),
             "\(content)"
+        )
+    }
+
+    /// Existing version-one caches may contain the old empty tools capability. The bridge owns
+    /// the reconnect notification and can truthfully upgrade that cached handshake, so a session
+    /// launched while the app is closed still subscribes before Threading returns.
+    func testUpgradesALegacyCachedHandshakeToAdvertiseListChanges() throws {
+        let bridge = try helperURL()
+        let cache = cacheURL()
+        try FileManager.default.createDirectory(
+            at: cache.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let legacy: [String: Any] = [
+            "version": 1,
+            "initializeResult": [
+                "protocolVersion": Self.protocolVersion,
+                "capabilities": ["tools": [:]],
+                "serverInfo": ["name": "threading", "version": "0.1.0"],
+                "instructions": "cached"
+            ],
+            "toolsListResult": ["tools": []]
+        ]
+        try JSONSerialization.data(withJSONObject: legacy).write(to: cache)
+
+        let runner = try run(bridge, socketPath: socketPath(), cache: cache)
+        runner.send(Self.initializeRequest(id: 1))
+        let handshake = try runner.reply(to: 1, timeout: Fixture.replyTimeout)
+
+        XCTAssertEqual(
+            Self.bool(handshake, "result", "capabilities", "tools", "listChanged"),
+            true
         )
     }
 
@@ -498,7 +535,7 @@ final class MCPBridgeTests: XCTestCase {
                 respond(.json(reply(to: message, result: [
                     "protocolVersion": (message["params"] as? [String: Any])?["protocolVersion"]
                         ?? protocolVersion,
-                    "capabilities": ["tools": [:]],
+                    "capabilities": ["tools": ["listChanged": true]],
                     "serverInfo": ["name": "threading", "version": "0.1.0"],
                     "instructions": "You have a display panel."
                 ])))
@@ -534,6 +571,14 @@ final class MCPBridgeTests: XCTestCase {
             current = (current as? [String: Any])?[key]
         }
         return current as? String
+    }
+
+    private static func bool(_ object: [String: Any], _ path: String...) -> Bool? {
+        var current: Any? = object
+        for key in path {
+            current = (current as? [String: Any])?[key]
+        }
+        return current as? Bool
     }
 
     @discardableResult

@@ -296,6 +296,14 @@ final class MCPBridge: @unchecked Sendable {
         if let cached = stateLock.withLock({ snapshot.initializeResult }),
            var object = try? JSONSerialization.jsonObject(with: cached) as? [String: Any] {
             object["protocolVersion"] = version
+            // Version-one caches may predate the server's listChanged declaration. The bridge
+            // itself already forwards and synthesises that notification, so advertise the
+            // capability even when the last cached handshake did not.
+            var capabilities = object["capabilities"] as? [String: Any] ?? [:]
+            var tools = capabilities["tools"] as? [String: Any] ?? [:]
+            tools["listChanged"] = true
+            capabilities["tools"] = tools
+            object["capabilities"] = capabilities
             if let data = JSONRPCLine.encode(object: object) { return data }
         }
 

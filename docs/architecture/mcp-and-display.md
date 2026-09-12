@@ -121,9 +121,10 @@ unchanged.
 a `url` or a `command` plus `args`; they are alternatives, so the stdio form writes
 `mcp_servers.threading.command` and `mcp_servers.threading.args` and **no** `url` — a table
 carrying both would be asking Codex which of two places this server is. `enabled_tools` and the
-per-tool `approval_mode` overrides are unchanged either way, and the settings-research one-shot
-(below) takes the same binding rather than a URL, so its scoped line is pinned word-for-word in
-both forms. ACP's `McpServer` union tags only the extra transports: the HTTP entry keeps its
+per-tool `approval_mode` overrides use the same provider-lifetime ceiling either way, and the
+settings-research one-shot (below) takes the same binding rather than a URL, so its scoped line is
+pinned word-for-word in both forms. ACP's `McpServer` union tags only the extra transports: the
+HTTP entry keeps its
 `type: "http"`, `url` and `headers`, while the stdio entry is the untagged baseline — exactly
 `name`, `command`, `args` and `env` — because `type` is not a member the stdio variant defines.
 Cursor's `initialize` says the same thing from the other side: it advertises
@@ -142,8 +143,10 @@ Nothing else about the bridge is the app's business: it forwards every frame ver
 `POST /mcp/<token>`, answers the handshake from its cache while the socket is unreachable,
 refuses a `tools/call` in that window as a *result* (`isError`) rather than as a transport error
 the model would never see, and re-announces `notifications/tools/list_changed` after any
-reconnect. No tool name is compiled into it — the catalogue is only ever fetched and replayed,
-which is the answer to the drift a second copy of `MCPToolCatalog` would cause.
+reconnect. A version-one cached handshake with the former empty tools capability is upgraded to
+`tools.listChanged: true`, because the bridge itself owns that reconnect announcement; otherwise
+the catalogue is fetched and replayed without compiling a tool name into the helper, which is the
+answer to the drift a second copy of `MCPToolCatalog` would cause.
 
 <!-- MEASUREMENT -->
 
@@ -212,11 +215,17 @@ outranks everything; see the naming ladder in [`sessions.md`](sessions.md).
 
 Three deliberate choices in the launch line:
 
-- **The enabled Threading tools are pre-approved by exact qualified name** in Claude's
+- **Threading tools are pre-approved by exact qualified name** in Claude's
   comma-separated `--allowedTools` value and by a tool-specific `approval_mode="approve"`
   override for Codex, or every image raises a permission prompt and the feature costs more
   attention than it saves. A server-name wildcard is not an identity boundary: MCP permits `__`
   inside a server name, the same delimiter clients use when flattening server and tool names.
+  The list handed to a provider is a process-lifetime ceiling, not a copy of the first
+  `tools/list`: it contains the globally enabled catalogue plus the closed Supervision identities
+  whose grant and group switch may change live. That does not expose or authorize them;
+  session-filtered `tools/list` and dispatch both read the current grant and Settings state.
+  Without the ceiling, Codex's fixed `enabled_tools` filter permanently hid Manager tools from a
+  chat promoted after launch.
   Threading's permission broker independently auto-allows only closed built-ins admitted by
   `MCPBuiltInToolRegistry`; unadvertised lookalikes and open-world extension tools still ask.
 - **No `--strict-mcp-config`**, which would suppress the user's own MCP servers for every
@@ -300,12 +309,14 @@ concrete `Sendable` argument value captured by the generic declaration reaches t
 `MCPBuiltInToolExecuting` implementation without `Any`, string routing, or a command switch. Do
 not bypass that registry with another name list or a direct built-in dispatch switch.
 
-The catalog is also the runtime admission policy. `tools/list`, launch preapproval and
-`MCPServer` dispatch consume the same enabled definitions. A valid built-in command whose group
-is disabled still decodes for diagnostics, but `MCPToolCatalog.admits` refuses it before the
-application handler runs. External extension tools use a separate open-world path and are
-omitted when their names are blank, duplicate another enabled external tool, or collide with a
-built-in.
+The catalog is also the runtime admission policy. Session-filtered `tools/list` and `MCPServer`
+dispatch consume the same enabled definitions and current grant. Launch preapproval is derived
+from the same admitted descriptors but is intentionally a ceiling: it additionally retains the
+closed Supervision names that can become visible without relaunching the provider. A valid
+built-in command whose group is disabled still decodes for diagnostics, but
+`MCPToolCatalog.admits` refuses it before the application handler runs. External extension tools
+use a separate open-world path and are omitted when their names are blank, duplicate another
+enabled external tool, or collide with a built-in.
 
 `MCPToolCall` remains only as a compatibility alias at the transport boundary.
 `AgentToolCoordinator` implements the narrow typed execution protocol and common observation
