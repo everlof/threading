@@ -235,7 +235,7 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         let (browser, _, window) = try fixture(width: 760, keyPanel: true)
         defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
         window.makeKey()
-        XCTAssertTrue(waitUntil { window.isKeyWindow }, "the panel never took key status")
+        XCTAssertTrue(pollUntil { window.isKeyWindow }, "the panel never took key status")
         browser.setAnnotationMode(true)
         browser.addAnnotation(atViewportPoint: CGPoint(x: 140, y: 160))
         let overlay = try XCTUnwrap(descendant(BrowserAnnotationOverlay.self, in: browser.view))
@@ -485,14 +485,19 @@ final class BrowserAnnotationEditingTests: XCTestCase {
     private func activateHost() throws {
         guard !NSApp.isActive else { return }
         NSApp.activate(ignoringOtherApps: true)
-        _ = waitUntil { NSApp.isActive }
+        _ = pollUntil { NSApp.isActive }
         try XCTSkipUnless(
             NSApp.isActive,
             "the test host could not come to the front, so no window can hold key status"
         )
     }
 
-    private func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) -> Bool {
+    /// Polls without asserting, so a caller can decide between skipping and failing.
+    ///
+    /// Deliberately *not* an overload of the throwing `waitUntil` above: a non-throwing overload
+    /// with a defaulted first argument wins at every `try waitUntil { … }` call site in this file,
+    /// which silently turned nine assertions into discarded Bools.
+    private func pollUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
             RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))

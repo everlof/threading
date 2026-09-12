@@ -6,7 +6,7 @@ import Security
 import ThreadingExtensionKit
 
 /// A validated extension directory, inspected without executing extension code.
-struct ThreadingExtensionBundle: Equatable {
+struct ThreadingExtensionBundle: Equatable, Sendable {
     let rootURL: URL
     let executableURL: URL
     let sourceURL: URL?
@@ -56,13 +56,13 @@ struct ThreadingExtensionBundle: Equatable {
 /// One font file confirmed parseable at inspection time, with the families it carries — read
 /// from the file rather than declared, so the install disclosure names what registration will
 /// actually make available.
-struct ThreadingExtensionFontFile: Equatable {
+struct ThreadingExtensionFontFile: Equatable, Sendable {
     let url: URL
     let familyNames: [String]
 }
 
 /// One bounded, statically inspected extension translation table.
-struct ThreadingExtensionLocalizationCatalog: Equatable {
+struct ThreadingExtensionLocalizationCatalog: Equatable, Sendable {
     let language: String
     let strings: [String: String]
 }
@@ -73,7 +73,10 @@ struct ThreadingExtensionLocalizationCatalog: Equatable {
 /// (`ext.<identifier>.<contribution id>`), so two packages both shipping a `storm` cannot
 /// collide in the library, and a document that states its own id does not get to impersonate
 /// a stock or custom theme.
-struct ThreadingExtensionThemeDocument: Equatable {
+/// `@unchecked` for one leaf: `AppTheme` stores its roles as `NSColor`, which AppKit does not
+/// declare `Sendable`. The colours here are produced once while inspecting the package and never
+/// mutated, and the rest of this type is checked by the compiler.
+struct ThreadingExtensionThemeDocument: Equatable, @unchecked Sendable {
     let contributionID: String
     let theme: AppTheme
     /// The declared app-icon mark, decoded and re-encoded as PNG at inspection time.
@@ -104,7 +107,7 @@ struct ThreadingExtensionThemeDocument: Equatable {
 }
 
 /// One statically inspected nested companion. No code has run to produce this value.
-struct ThreadingExtensionCompanionBundle: Equatable {
+struct ThreadingExtensionCompanionBundle: Equatable, Sendable {
     let declaration: ExtensionCompanion
     let bundleURL: URL
     let executableURL: URL
