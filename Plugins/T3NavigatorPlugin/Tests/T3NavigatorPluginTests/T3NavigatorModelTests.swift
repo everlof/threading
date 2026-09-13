@@ -211,7 +211,7 @@ final class T3NavigatorModelTests: XCTestCase {
         XCTAssertNotNil(descendant(of: ThemedScrollView.self, in: view))
     }
 
-    func testChangeRequestUpdateKeepsThreeBandRowStableAndPresentsStatus() {
+    func testChangeRequestUpdateKeepsThreeBandRowStableAndPresentsStatus() throws {
         let harness = makeHarness(items: [
             project("one", title: "One"),
             session("first", project: "one", title: "First"),
@@ -266,20 +266,25 @@ final class T3NavigatorModelTests: XCTestCase {
 
         let expectedHeight = ceil(
             Design.Typography.lineHeight(of: Design.Typography.detail())
-                + Design.Spacing.small
-                + Design.Typography.lineHeight(of: Design.Typography.subheading())
                 + Design.Spacing.tight
-                + Design.Typography.lineHeight(of: Design.Typography.caption())
-                + Design.Spacing.inset * 2
+                + Design.Typography.lineHeight(of: Design.Typography.emphasizedBody())
+                + Design.Spacing.hairline
+                + Design.Typography.lineHeight(of: Design.Typography.detail())
+                + Design.Spacing.medium * 2
         )
         XCTAssertEqual(initialHeight, expectedHeight, accuracy: 1)
         XCTAssertEqual(table.rect(ofRow: 1).height, expectedHeight, accuracy: 1)
-        XCTAssertTrue(
+        let receipt = try XCTUnwrap(
+            descendants(of: NSTextField.self, in: table).first { $0.stringValue == "42" }
+        )
+        XCTAssertTrue(receipt.toolTip?.contains("Draft") == true)
+        XCTAssertTrue(receipt.toolTip?.contains("checks running") == true)
+        XCTAssertTrue(receipt.toolTip?.contains("approved") == true)
+        XCTAssertFalse(
             descendants(of: NSTextField.self, in: table).contains {
-                $0.stringValue.contains("#42")
-                    && $0.stringValue.contains("running")
-                    && $0.stringValue.contains("approved")
-            }
+                $0.stringValue.contains("Checks running") || $0.stringValue.contains("approved")
+            },
+            "Provider detail belongs in the compact receipt's tooltip, not the visible row."
         )
     }
 

@@ -234,12 +234,12 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Native plugin workspace navigator",
-      "description": "The bundled T3-inspired AppKit navigator loaded through native plugin discovery and hosted in the real main-window split shell. It is the reference native-extension composition of ThreadingDesignKit pane, search, virtual table, selection, control, menu, popover, typography, spacing, and palette primitives. The evidence covers selected and lifecycle-grouped rows, project and branch metadata, a provider-neutral change-request/check/review receipt, and exact theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
-      "states": ["Selected row", "Pinned, Active, and Archived sections", "Selection-visible Pin and Archive actions", "Project and branch metadata", "Draft change request with checks and reviews", "Search and project-filter controls"],
+      "description": "The bundled T3-inspired AppKit navigator loaded through native plugin discovery and hosted in the real main-window split shell. It is the reference native-extension composition of ThreadingDesignKit pane, search, virtual table, selection, control, menu, popover, typography, spacing, and palette primitives. The evidence covers selected and lifecycle-grouped rows, project and branch metadata, a T3-shaped provider-neutral change-request glyph-and-number receipt with complete detail retained for its tooltip and accessibility, and exact theme delivery without changing the default Native route; host/model tests own the interaction round-trips.",
+      "states": ["Selected row", "Pinned, Active, and Archived sections", "Hover- and focus-revealed row actions", "Project and branch metadata", "Working, Ready and Input statuses", "Thread age in the status slot", "Receded dormant thread", "Compact draft change-request badge", "Search and project-filter controls"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["400-point leading navigator in a 1120×720-point main window", "400×720-point sidebar detail"]
+        "sizes": ["320-point leading navigator in a 1120×720-point main window", "320×720-point sidebar detail"]
       },
       "source": {
         "path": "Tests/ThreadingTests/NativePluginNavigatorRenderTests.swift",

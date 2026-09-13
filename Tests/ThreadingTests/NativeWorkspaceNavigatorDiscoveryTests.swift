@@ -16,7 +16,7 @@ final class NativeWorkspaceNavigatorDiscoveryTests: XCTestCase {
 
         XCTAssertEqual(descriptor.navigatorID, "t3-native")
         XCTAssertEqual(descriptor.title, "T3 Native Threads POC")
-        XCTAssertEqual(descriptor.preferredWidth, 400)
+        XCTAssertEqual(descriptor.preferredWidth, 320)
 
         switch NativePluginCatalog.load(bundleURL) {
         case .success(let plugin):

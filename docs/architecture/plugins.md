@@ -359,11 +359,23 @@ named virtual table row, while search and structural edges rebuild the lightweig
 2,000-thread fixture asserts fewer than 100 live cells.
 
 The proof offers title search, a virtualized project filter, stable Pinned/Active/Archived
-sections, and T3-shaped three-band rows: project/activity, title, then branch plus a compact
-provider-neutral change-request lifecycle/check/review receipt. Hover and keyboard focus replace
-the activity slot with host-owned actions instead of permanently crowding selected rows. The
-proof does not invent T3's snooze or new-thread behavior: those intents are not in the native
-contract yet.
+sections, and T3-shaped three-band rows: project with the live status or the thread's age at its
+far edge, the title, then the branch plus a compact provider-neutral change-request receipt.
+Colour is spent only where it changes what the reader does next. A working, ready, input,
+attention or limit state is a coloured word (working carries the spinner, ready a check mark);
+a quiet thread shows how long since it was active ("now", "5m", "2h", "3d") in tabular digits on
+the tertiary ramp, re-read once a minute for the rows on screen; a dormant thread's title recedes
+to the secondary ramp the way T3 dims a read card. The words "Idle" and "Dormant" were tried
+first and read as dead weight on every row. The branch carries no decorative glyph; the
+change-request receipt follows T3's meaningful mark-and-number shape instead: a pull-request
+glyph plus its number in monospaced digits, coloured by the most urgent lifecycle/check/review
+condition. Spelling out "Draft" beside "Checks running" was tried and crowded the branch at that
+width. The complete normalized reading stays in the receipt's tooltip and the row accessibility
+value. A selected row's accent fill overrides every status hue with the selection's label ink.
+The plugin asks for a 320-point pane so the title-led cards keep T3's compact silhouette without
+weakening Threading's standard controls. Hover and keyboard focus replace the status slot with
+host-owned actions instead of permanently crowding selected rows. The proof does not invent T3's
+snooze or new-thread behavior: those intents are not in the native contract yet.
 
 Throughput is settled for this tier. Replaying a real 24,546-row device capture through the pane:
 

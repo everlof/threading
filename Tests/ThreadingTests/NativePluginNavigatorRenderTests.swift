@@ -35,6 +35,20 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
     private struct Fixture {
         let directory: URL
         let selectedSession: AgentSession
+        /// The other threads, each delivered in a different state so the evidence shows every
+        /// reading the card's status slot can take: a coloured live word, or a quiet age.
+        let workingSession: AgentSession
+        let readySession: AgentSession
+        let inputSession: AgentSession
+        let dormantSession: AgentSession
+        let archivedSession: AgentSession
+    }
+
+    private enum Ages {
+        static let ready: TimeInterval = -25 * 60
+        static let input: TimeInterval = -5 * 60
+        static let dormant: TimeInterval = -2 * 3_600
+        static let archived: TimeInterval = -3 * 86_400
     }
 
     private struct AppearanceFixture {
@@ -98,40 +112,67 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
         settle(content)
         let host = try waitForNativeHost(in: controller)
         XCTAssertNotNil(host.loaded, "the production host did not retain the bundled plugin")
-        let selectedProject = try XCTUnwrap(
-            ProjectStore.shared.project(forSessionID: fixture.selectedSession.id)
-        )
+        let now = Date()
         host.receive(PluginWorkspaceUpdate(
             revision: 10_000,
-            items: [PluginWorkspaceItem(
-                identity: .init(
-                    kind: .session,
-                    identifier: fixture.selectedSession.id.uuidString.lowercased()
+            items: [
+                try workspaceItem(
+                    for: fixture.workingSession,
+                    activity: .working,
+                    lastActiveAt: now,
+                    changeRequest: PluginWorkspaceChangeRequest(
+                        providerName: "Forgejo",
+                        changeRequestName: "pull request",
+                        number: 131,
+                        title: "Ship the 1.4 release notes",
+                        webURL: try XCTUnwrap(URL(
+                            string: "https://forge.example/threading/app/pulls/131"
+                        )),
+                        lifecycle: .open,
+                        successfulChecks: 8,
+                        approvals: 1
+                    )
                 ),
-                parentIdentity: .init(
-                    kind: .project,
-                    identifier: selectedProject.id.uuidString.lowercased()
+                try workspaceItem(
+                    for: fixture.selectedSession,
+                    activity: .idle,
+                    lastActiveAt: now,
+                    changeRequest: PluginWorkspaceChangeRequest(
+                        providerName: "Forgejo",
+                        changeRequestName: "pull request",
+                        number: 128,
+                        title: "Keep provider status inside the native navigator",
+                        webURL: try XCTUnwrap(URL(
+                            string: "https://forge.example/threading/app/pulls/128"
+                        )),
+                        lifecycle: .draft,
+                        successfulChecks: 6,
+                        activeChecks: 1,
+                        approvals: 2,
+                        reviewsRequested: 1
+                    )
                 ),
-                title: fixture.selectedSession.displayTitle,
-                detail: fixture.selectedSession.kind.displayName,
-                branch: fixture.selectedSession.branch,
-                activity: .idle,
-                lastActiveAt: fixture.selectedSession.lastUsedAt,
-                changeRequest: PluginWorkspaceChangeRequest(
-                    providerName: "Forgejo",
-                    changeRequestName: "pull request",
-                    number: 128,
-                    title: "Keep provider status inside the native navigator",
-                    webURL: try XCTUnwrap(URL(
-                        string: "https://forge.example/threading/app/pulls/128"
-                    )),
-                    lifecycle: .draft,
-                    successfulChecks: 6,
-                    activeChecks: 1,
-                    approvals: 2,
-                    reviewsRequested: 1
-                )
-            )]
+                try workspaceItem(
+                    for: fixture.readySession,
+                    activity: .readyWithBackgroundWork,
+                    lastActiveAt: now.addingTimeInterval(Ages.ready)
+                ),
+                try workspaceItem(
+                    for: fixture.inputSession,
+                    activity: .awaitingUser,
+                    lastActiveAt: now.addingTimeInterval(Ages.input)
+                ),
+                try workspaceItem(
+                    for: fixture.dormantSession,
+                    activity: .dormant,
+                    lastActiveAt: now.addingTimeInterval(Ages.dormant)
+                ),
+                try workspaceItem(
+                    for: fixture.archivedSession,
+                    activity: .dormant,
+                    lastActiveAt: now.addingTimeInterval(Ages.archived)
+                ),
+            ]
         ))
         settle(content)
         var changeRequestLabel: NSTextField?
@@ -139,7 +180,7 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
             settle(content)
             changeRequestLabel = self.viewDescendants(of: host.view)
                 .compactMap { $0 as? NSTextField }
-                .first { $0.stringValue.contains("#128") }
+                .first { $0.stringValue == "128" }
             return changeRequestLabel != nil
         }
         let statusLabel = try XCTUnwrap(changeRequestLabel)
@@ -151,30 +192,46 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
         XCTAssertFalse(statusLabel.isHidden)
         XCTAssertGreaterThan(statusLabel.visibleRect.height, 0)
         XCTAssertTrue(statusRow.bounds.contains(statusLabel.convert(statusLabel.bounds, to: statusRow)))
+        XCTAssertTrue(statusLabel.toolTip?.contains("Draft") == true)
+        XCTAssertTrue(statusLabel.toolTip?.contains("checks running") == true)
+        XCTAssertTrue(statusLabel.toolTip?.contains("approved") == true)
         let expectedStatusRowHeight = ceil(
             Design.Typography.lineHeight(of: Design.Typography.detail())
-                + Design.Spacing.small
-                + Design.Typography.lineHeight(of: Design.Typography.subheading())
                 + Design.Spacing.tight
-                + Design.Typography.lineHeight(of: Design.Typography.caption())
-                + Design.Spacing.inset * 2
+                + Design.Typography.lineHeight(of: Design.Typography.emphasizedBody())
+                + Design.Spacing.hairline
+                + Design.Typography.lineHeight(of: Design.Typography.detail())
+                + Design.Spacing.medium * 2
         )
         XCTAssertEqual(statusRow.bounds.height, expectedStatusRowHeight, accuracy: 1)
+        let rowTexts = Set(
+            viewDescendants(of: host.view).compactMap { ($0 as? NSTextField)?.stringValue }
+        )
+        for expected in ["Working", "Ready", "Input", "2h", "3d"] {
+            XCTAssertTrue(
+                rowTexts.contains(expected),
+                "the status slot should read \"\(expected)\" for one of the fixture threads"
+            )
+        }
+        XCTAssertFalse(
+            rowTexts.contains("Dormant") || rowTexts.contains("Idle"),
+            "a quiet thread is dated, not labelled"
+        )
         let sidebarWidth = try XCTUnwrap(
             controller.splitViewController.splitViewItems.first?.viewController.view.bounds.width
         )
-        if abs(sidebarWidth - 400) > 1 {
+        if abs(sidebarWidth - 320) > 1 {
             try waitUntil("native navigator preferred width did not settle") {
                 content.layoutSubtreeIfNeeded()
                 return abs(
                     (controller.splitViewController.splitViewItems.first?
-                        .viewController.view.bounds.width ?? 0) - 400
+                        .viewController.view.bounds.width ?? 0) - 320
                 ) <= 1
             }
         }
         XCTAssertEqual(
             controller.splitViewController.splitViewItems[0].viewController.view.bounds.width,
-            400,
+            320,
             accuracy: 1
         )
 
@@ -250,6 +307,11 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
             kind: .openCode,
             title: "Review plugin permission boundary"
         ))
+        let usage = try XCTUnwrap(store.addSession(
+            to: second.id,
+            kind: .openCode,
+            title: "Wire usage deep links"
+        ))
         let archived = try XCTUnwrap(store.addSession(
             to: second.id,
             kind: .openCode,
@@ -259,13 +321,45 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
         _ = store.update(sessionID: selected.id) { $0.branch = "feature/native-navigator" }
         _ = store.update(sessionID: responsive.id) { $0.branch = "ui/sidebar" }
         _ = store.update(sessionID: permissions.id) { $0.branch = "security/plugin-host" }
+        _ = store.update(sessionID: usage.id) { $0.branch = "ios/usage-links" }
         _ = store.update(sessionID: archived.id) { $0.branch = "archive/wasm-poc" }
         XCTAssertEqual(store.setPinned(true, for: release.id), .applied)
         XCTAssertEqual(store.setArchived(true, for: archived.id), .applied)
 
         return Fixture(
             directory: directory,
-            selectedSession: try XCTUnwrap(store.session(withID: selected.id))
+            selectedSession: try XCTUnwrap(store.session(withID: selected.id)),
+            workingSession: try XCTUnwrap(store.session(withID: release.id)),
+            readySession: try XCTUnwrap(store.session(withID: responsive.id)),
+            inputSession: try XCTUnwrap(store.session(withID: usage.id)),
+            dormantSession: try XCTUnwrap(store.session(withID: permissions.id)),
+            archivedSession: try XCTUnwrap(store.session(withID: archived.id))
+        )
+    }
+
+    /// The host's item for one fixture session, so every delivered row carries the pin and
+    /// archive facts the sidebar already grouped it by and differs only in the state under test.
+    private func workspaceItem(
+        for session: AgentSession,
+        activity: PluginWorkspaceActivity,
+        lastActiveAt: Date,
+        changeRequest: PluginWorkspaceChangeRequest? = nil
+    ) throws -> PluginWorkspaceItem {
+        let project = try XCTUnwrap(ProjectStore.shared.project(forSessionID: session.id))
+        return PluginWorkspaceItem(
+            identity: .init(kind: .session, identifier: session.id.uuidString.lowercased()),
+            parentIdentity: .init(
+                kind: .project,
+                identifier: project.id.uuidString.lowercased()
+            ),
+            title: session.displayTitle,
+            detail: session.kind.displayName,
+            branch: session.branch,
+            activity: activity,
+            isPinned: session.isPinned,
+            isArchived: session.isArchived,
+            lastActiveAt: lastActiveAt,
+            changeRequest: changeRequest
         )
     }
 

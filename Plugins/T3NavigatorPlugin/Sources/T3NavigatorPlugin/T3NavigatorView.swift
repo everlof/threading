@@ -17,6 +17,11 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         case row(T3NavigatorRow)
     }
 
+    private enum AgeRefresh {
+        static let interval: TimeInterval = 60
+        static let tolerance: TimeInterval = 10
+    }
+
     private enum Reuse {
         static let row = NSUserInterfaceItemIdentifier("t3.navigator.thread-row")
         static let section = NSUserInterfaceItemIdentifier("t3.navigator.section-row")
@@ -30,6 +35,10 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private var projectPicker: T3ProjectPickerViewController?
     private let projectPopover = ThemedPopover()
     private var contextMenuSession: AnyObject?
+    /// Quiet rows carry their age ("5m", "2h"); this re-reads the clock for the rows on screen
+    /// so a card does not say "now" an hour later. Bounded to the viewport, and stopped while the
+    /// navigator is off any window.
+    private var ageRefreshTimer: Timer?
 
     private let headingLabel: NSTextField = {
         let label = NSTextField(labelWithString: "Threads")
@@ -154,7 +163,31 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { store.reportVisibleRows([]) }
+        if window == nil {
+            store.reportVisibleRows([])
+            ageRefreshTimer?.invalidate()
+            ageRefreshTimer = nil
+        } else if ageRefreshTimer == nil {
+            // The timer holds the navigator weakly and retires itself once the navigator is
+            // gone, so a torn-down pane leaves no tick behind and `deinit` never has to reach
+            // a main-actor timer from its nonisolated context.
+            let timer = Timer(timeInterval: AgeRefresh.interval, repeats: true) { [weak self] timer in
+                guard self != nil else {
+                    timer.invalidate()
+                    return
+                }
+                MainActor.assumeIsolated { self?.refreshVisibleRowPresentation() }
+            }
+            timer.tolerance = AgeRefresh.tolerance
+            RunLoop.main.add(timer, forMode: .common)
+            ageRefreshTimer = timer
+        }
+    }
+
+    private func refreshVisibleRowPresentation() {
+        for row in visibleTableRows() {
+            updateVisibleRow(at: row)
+        }
     }
 
     private func setupViews() {
@@ -301,17 +334,19 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
         store.reportVisibleRows(rows)
     }
 
-    /// T3's live-thread card is a stable three-band row: project and activity, title, then
-    /// branch and source-control state. A source-control receipt replaces content in the final
-    /// band; it never changes the row's geometry or makes neighbouring threads jump.
+    /// T3's thread card is a stable three-band row: project with status or age, title, then
+    /// branch and source-control receipt. The title is the row's one strong reading; metadata
+    /// stays quiet, and neither a status edge nor a receipt ever changes the row's geometry, so
+    /// neighbouring threads never jump. Ten points above and below is T3's card padding plus
+    /// the gap it keeps between cards.
     private func rowHeight() -> CGFloat {
         ceil(
             Design.Typography.lineHeight(of: Design.Typography.detail())
-                + Design.Spacing.small
-                + Design.Typography.lineHeight(of: Design.Typography.subheading())
                 + Design.Spacing.tight
-                + Design.Typography.lineHeight(of: Design.Typography.caption())
-                + Design.Spacing.inset * 2
+                + Design.Typography.lineHeight(of: Design.Typography.emphasizedBody())
+                + Design.Spacing.hairline
+                + Design.Typography.lineHeight(of: Design.Typography.detail())
+                + Design.Spacing.medium * 2
         )
     }
 
@@ -532,8 +567,73 @@ final class T3NavigatorView: NSView, NSTableViewDataSource, NSTableViewDelegate,
     var headerForTesting: PaneHeaderView { header }
 }
 
+/// How long ago a quiet thread was last active, the way T3 dates a card: a bare count of
+/// minutes, hours or days, and "now" under a minute. There is no "ago" because the label sits
+/// at the far edge of a narrow band and the reader already knows what a trailing age means.
+enum T3ThreadAge {
+    static let minute: TimeInterval = 60
+    static let hour: TimeInterval = 3_600
+    static let day: TimeInterval = 86_400
+    static let nowLabel = "now"
+
+    static func label(since date: Date, now: Date = Date()) -> String {
+        let elapsed = now.timeIntervalSince(date)
+        guard elapsed >= minute else { return nowLabel }
+        if elapsed < hour { return "\(Int(elapsed / minute))m" }
+        if elapsed < day { return "\(Int(elapsed / hour))h" }
+        return "\(Int(elapsed / day))d"
+    }
+
+    static func accessibilityValue(since date: Date, now: Date = Date()) -> String {
+        let label = label(since: date, now: now)
+        return label == nowLabel ? "Last active just now" : "Last active \(label) ago"
+    }
+}
+
+/// One thread in T3's card silhouette.
+///
+/// Three bands: a quiet project line whose far edge carries either a live status or the thread's
+/// age, the title as the row's one strong reading, and a quiet metadata line with the branch and
+/// one source-control receipt. Colour is spent only on words that change what the reader does
+/// next — a working, ready, input, attention or limit state, and the change request's number —
+/// and everything else sits on the chrome's ink ramp so the title stays the loudest thing in the
+/// row. There are no decorative glyphs beside the branch or the receipt: T3's card reads as text,
+/// and every mark it does draw is carrying a state.
 @MainActor
 private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
+    /// What the trailing slot of the project band says while the pointer is elsewhere.
+    private enum Status {
+        enum Tone {
+            case accent, positive, warning, negative
+        }
+
+        /// The mark beside a live word: the working spinner, a symbol, or nothing.
+        enum Mark {
+            case spinner, symbol(String), none
+        }
+
+        /// A live state worth a coloured word, with the mark that belongs beside it.
+        case live(label: String, mark: Mark, tone: Tone)
+        /// A quiet thread, dated by how long since it was active.
+        case age(Date)
+        case none
+    }
+
+    private enum Strings {
+        static let untitled = "Untitled thread"
+        static let working = "Working"
+        static let ready = "Ready"
+        static let input = "Input"
+        static let attention = "Attention"
+        static let limit = "Limit"
+    }
+
+    private enum Symbols {
+        static let project = "folder.fill"
+        static let ready = "checkmark.circle.fill"
+        static let changeRequest = "arrow.triangle.pull"
+    }
+
     private weak var model: T3NavigatorRow?
     private var onPin: ((T3NavigatorRow) -> Void)?
     private var onArchive: ((T3NavigatorRow) -> Void)?
@@ -555,7 +655,6 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
     private let spinner = ThemedSpinner()
     private let activityLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "")
-    private let branchGlyph = GlyphView()
     private let branchLabel = NSTextField(labelWithString: "")
     private let changeRequestGlyph = GlyphView()
     private let changeRequestLabel = NSTextField(labelWithString: "")
@@ -585,7 +684,6 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
     )
     private lazy var activityStack = NSStackView(views: [activitySlot, activityLabel])
     private lazy var projectStack = NSStackView(views: [projectGlyph, projectLabel])
-    private lazy var branchStack = NSStackView(views: [branchGlyph, branchLabel])
     private lazy var changeRequestStack = NSStackView(
         views: [changeRequestGlyph, changeRequestLabel]
     )
@@ -614,8 +712,8 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
 
     private func setupViews() {
         projectGlyph.setSymbol(
-            "folder",
-            slot: Design.Size.extensionDecorationImage,
+            Symbols.project,
+            slot: Design.Size.extensionIconImage,
             role: .control,
             weight: .medium
         )
@@ -624,32 +722,30 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         projectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         activityLabel.applyFont(.detail(weight: .medium))
-        activityLabel.lineBreakMode = .byTruncatingTail
+        activityLabel.lineBreakMode = .byClipping
         activityLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        activityLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        titleLabel.applyFont(.subheading)
+        titleLabel.applyFont(.emphasizedBody)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        branchGlyph.setSymbol(
-            "arrow.triangle.branch",
+        branchLabel.applyFont(.detail())
+        branchLabel.lineBreakMode = .byTruncatingMiddle
+        branchLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        changeRequestGlyph.setSymbol(
+            Symbols.changeRequest,
             slot: Design.Size.extensionDecorationImage,
             role: .control,
             weight: .medium
         )
-        branchLabel.applyFont(.caption)
-        branchLabel.lineBreakMode = .byTruncatingMiddle
-        branchLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        changeRequestLabel.applyFont(.caption)
+        changeRequestLabel.applyFont(.numericDetail(weight: .medium))
         changeRequestLabel.lineBreakMode = .byTruncatingTail
+        changeRequestLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         changeRequestLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        changeRequestGlyph.setSymbol(
-            "arrow.triangle.pull",
-            slot: Design.Size.extensionDecorationImage,
-            role: .control,
-            weight: .semibold
-        )
+
         spinner.translatesAutoresizingMaskIntoConstraints = false
         activityGlyph.translatesAutoresizingMaskIntoConstraints = false
         activitySlot.translatesAutoresizingMaskIntoConstraints = false
@@ -657,22 +753,25 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         activitySlot.addSubview(activityGlyph)
         NSLayoutConstraint.activate([
             activitySlot.widthAnchor.constraint(equalToConstant: Design.Size.extensionIconImage),
+            activitySlot.heightAnchor.constraint(equalToConstant: Design.Size.extensionIconImage),
             spinner.centerXAnchor.constraint(equalTo: activitySlot.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: activitySlot.centerYAnchor),
             activityGlyph.centerXAnchor.constraint(equalTo: activitySlot.centerXAnchor),
             activityGlyph.centerYAnchor.constraint(equalTo: activitySlot.centerYAnchor),
         ])
 
-        for stack in [activityStack, projectStack, branchStack, changeRequestStack] {
+        for stack in [activityStack, projectStack] {
             stack.orientation = .horizontal
             stack.alignment = .centerY
             stack.spacing = Design.Spacing.tight
         }
         projectStack.setHuggingPriority(.defaultLow, for: .horizontal)
         projectStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        branchStack.setHuggingPriority(.defaultLow, for: .horizontal)
-        branchStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        changeRequestStack.orientation = .horizontal
+        changeRequestStack.alignment = .centerY
+        changeRequestStack.spacing = Design.Spacing.hairline
         changeRequestStack.setHuggingPriority(.defaultHigh, for: .horizontal)
+        changeRequestStack.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         actionStack.orientation = .horizontal
         actionStack.alignment = .centerY
@@ -700,23 +799,23 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         projectStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         statusSlot.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-        let bottomRow = NSStackView(views: [branchStack, changeRequestStack])
+        let bottomRow = NSStackView(views: [branchLabel, changeRequestStack])
         bottomRow.orientation = .horizontal
-        bottomRow.alignment = .centerY
+        bottomRow.alignment = .firstBaseline
         bottomRow.spacing = Design.Spacing.small
 
         let content = NSStackView(views: [topRow, titleLabel, bottomRow])
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = Design.Spacing.tight
-        content.setCustomSpacing(Design.Spacing.small, after: topRow)
+        content.spacing = Design.Spacing.hairline
+        content.setCustomSpacing(Design.Spacing.tight, after: topRow)
         content.setHuggingPriority(.defaultLow, for: .horizontal)
         content.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.inset),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.inset),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.medium),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.medium),
             content.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: Design.Spacing.medium
@@ -735,7 +834,7 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
             ),
             bottomRow.heightAnchor.constraint(
                 greaterThanOrEqualToConstant: Design.Typography.lineHeight(
-                    of: Design.Typography.caption()
+                    of: Design.Typography.detail()
                 )
             ),
         ])
@@ -767,18 +866,17 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         self.onPin = onPin
         self.onArchive = onArchive
         self.onOpenChangeRequest = onOpenChangeRequest
-        titleLabel.stringValue = row.title.isEmpty ? "Untitled thread" : row.title
+        titleLabel.stringValue = row.title.isEmpty ? Strings.untitled : row.title
         projectLabel.stringValue = projectTitle
         let branch = row.branch?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         branchLabel.stringValue = branch
-        branchStack.isHidden = branch.isEmpty
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(titleLabel.stringValue)
-        configureActivity(row.activity)
+        configureStatus(status(for: row))
         configureChangeRequest(row.changeRequest)
         setAccessibilityValue([
-            activityLabel.stringValue,
+            statusAccessibilityValue(status(for: row)),
             projectLabel.stringValue,
             branch.isEmpty ? nil : "Branch \(branch)",
             changeRequestAccessibilityValue(row.changeRequest)
@@ -870,24 +968,40 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         return self
     }
 
+    /// Re-derives every colour and the age label from the row's current ground. Called for the
+    /// selection moving, a theme change, a status edge, and the navigator's minute tick, so it
+    /// touches only this row's labels and never reads beyond the model it was given.
     func updatePresentation() {
         let ink = enclosingRow?.contentInk ?? (model?.isSelected == true ? .selection : .chrome)
-        titleLabel.textColor = ink.label
-        projectGlyph.tint = ink.tertiary
+        let isEmphasized = backgroundStyle == .emphasized
+        // A dormant thread has nothing running and nothing waiting: it recedes the way T3 dims
+        // a read card, so the rows that can still surprise the reader are the ones that stand out.
+        let recedes = model?.activity == .dormant && !isEmphasized
+        titleLabel.textColor = recedes ? ink.secondary : ink.label
+        projectGlyph.tint = ink.secondary
         projectLabel.textColor = ink.secondary
-        branchGlyph.tint = ink.quaternary
-        branchLabel.textColor = ink.quaternary
-        let activityInk = activityColor(for: model?.activity, ink: ink)
-        activityGlyph.tint = activityInk
-        activityLabel.textColor = activityInk
-        let requestInk = backgroundStyle == .emphasized
-            ? ink.label : changeRequestColor(model?.changeRequest, ink: ink)
-        changeRequestGlyph.tint = requestInk
-        changeRequestLabel.textColor = requestInk
+        branchLabel.textColor = ink.tertiary
+
+        let status = model.map(status(for:)) ?? .none
+        switch status {
+        case .live(let label, _, let tone):
+            activityLabel.stringValue = label
+            let statusInk = isEmphasized ? ink.label : color(for: tone)
+            activityGlyph.tint = statusInk
+            activityLabel.textColor = statusInk
+        case .age(let date):
+            activityLabel.stringValue = T3ThreadAge.label(since: date)
+            activityLabel.textColor = isEmphasized ? ink.secondary : ink.tertiary
+        case .none:
+            activityLabel.stringValue = ""
+        }
+
+        presentChangeRequest(model?.changeRequest, ink: ink, isEmphasized: isEmphasized)
+
         // `.selection` describes the active accent fill. An inactive row paints a quiet wash and
         // keeps chrome ink; choosing active-selection ink there makes System's white symbols fade
         // into its pale grey row.
-        let selectionGround: InkSource? = backgroundStyle == .emphasized ? .selection : nil
+        let selectionGround: InkSource? = isEmphasized ? .selection : nil
         pinButton.hostGround = selectionGround
         archiveButton.hostGround = selectionGround
         openChangeRequestButton.hostGround = selectionGround
@@ -931,53 +1045,124 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         activityStack.alphaValue = presented ? 0 : 1
     }
 
-    private func configureActivity(_ activity: PluginWorkspaceActivity) {
-        let isWorking = activity == .working
-        spinner.isHidden = !isWorking
-        spinner.isAnimating = isWorking
-        activityGlyph.isHidden = isWorking
-        activityGlyph.setSymbol(
-            activitySymbol(for: activity),
-            slot: Design.Size.extensionDecorationImage,
-            role: .control,
-            weight: activity == .needsAttention || activity == .limitReached ? .semibold : .medium
-        )
-        activityLabel.stringValue = activityLabel(for: activity)
+    // MARK: - Status
+
+    private func status(for row: T3NavigatorRow) -> Status {
+        switch row.activity {
+        case .working:
+            return .live(label: Strings.working, mark: .spinner, tone: .accent)
+        case .readyWithBackgroundWork:
+            return .live(label: Strings.ready, mark: .symbol(Symbols.ready), tone: .positive)
+        case .awaitingUser:
+            return .live(label: Strings.input, mark: .none, tone: .warning)
+        case .needsAttention:
+            return .live(label: Strings.attention, mark: .none, tone: .negative)
+        case .limitReached:
+            return .live(label: Strings.limit, mark: .none, tone: .negative)
+        case .none, .dormant, .idle:
+            guard let date = row.lastActiveAt else { return .none }
+            return .age(date)
+        @unknown default:
+            return .none
+        }
     }
+
+    private func configureStatus(_ status: Status) {
+        switch status {
+        case .live(_, let mark, _):
+            activityLabel.applyFont(.detail(weight: .medium))
+            activityStack.isHidden = false
+            switch mark {
+            case .spinner:
+                activitySlot.isHidden = false
+                spinner.isHidden = false
+                spinner.isAnimating = true
+                activityGlyph.isHidden = true
+            case .symbol(let symbol):
+                activitySlot.isHidden = false
+                spinner.isHidden = true
+                spinner.isAnimating = false
+                activityGlyph.isHidden = false
+                activityGlyph.setSymbol(
+                    symbol,
+                    slot: Design.Size.extensionDecorationImage,
+                    role: .control,
+                    weight: .medium
+                )
+            case .none:
+                activitySlot.isHidden = true
+                spinner.isHidden = true
+                spinner.isAnimating = false
+                activityGlyph.isHidden = true
+            }
+        case .age:
+            activityLabel.applyFont(.numericDetail())
+            activityStack.isHidden = false
+            activitySlot.isHidden = true
+            spinner.isHidden = true
+            spinner.isAnimating = false
+            activityGlyph.isHidden = true
+        case .none:
+            activityStack.isHidden = true
+            activitySlot.isHidden = true
+            spinner.isHidden = true
+            spinner.isAnimating = false
+            activityGlyph.isHidden = true
+        }
+    }
+
+    private func statusAccessibilityValue(_ status: Status) -> String? {
+        switch status {
+        case .live(let label, _, _): return label
+        case .age(let date): return T3ThreadAge.accessibilityValue(since: date)
+        case .none: return nil
+        }
+    }
+
+    private func color(for tone: Status.Tone) -> NSColor {
+        switch tone {
+        case .accent: return Design.Surface.accent
+        case .positive: return Design.Status.positive
+        case .warning: return Design.Status.warning
+        case .negative: return Design.Status.negative
+        }
+    }
+
+    // MARK: - Change request
 
     private func configureChangeRequest(_ request: PluginWorkspaceChangeRequest?) {
         guard let request else {
+            changeRequestStack.isHidden = true
             changeRequestGlyph.isHidden = true
             changeRequestLabel.isHidden = true
             changeRequestLabel.stringValue = ""
-            changeRequestStack.isHidden = true
+            changeRequestStack.toolTip = nil
+            changeRequestLabel.toolTip = nil
+            changeRequestGlyph.toolTip = nil
             return
         }
+        changeRequestStack.isHidden = false
         changeRequestGlyph.isHidden = false
         changeRequestLabel.isHidden = false
-        changeRequestStack.isHidden = false
-        var parts = [
-            "#\(request.number)",
-            changeRequestLifecycleLabel(request.lifecycle)
-        ]
-        let checkCount = request.successfulChecks + request.nonBlockingChecks
-            + request.activeChecks + request.checksNeedingAttention + request.unknownChecks
-        if request.checksNeedingAttention > 0 {
-            parts.append("\(request.checksNeedingAttention) failing")
-        } else if request.activeChecks > 0 {
-            parts.append("\(request.activeChecks) running")
-        } else if checkCount > 0 {
-            let suffix = request.checksAreIncomplete ? "+" : ""
-            parts.append("\(request.successfulChecks + request.nonBlockingChecks)/\(checkCount)\(suffix) checks")
-        }
-        if request.changesRequested > 0 {
-            parts.append("\(request.changesRequested) changes")
-        } else if request.approvals > 0 {
-            parts.append("\(request.approvals) approved")
-        } else if request.reviewsRequested > 0 {
-            parts.append("\(request.reviewsRequested) review")
-        }
-        changeRequestLabel.stringValue = parts.joined(separator: " · ")
+        changeRequestLabel.stringValue = "\(request.number)"
+        let detail = changeRequestAccessibilityValue(request)
+        changeRequestStack.toolTip = detail
+        changeRequestGlyph.toolTip = detail
+        changeRequestLabel.toolTip = detail
+    }
+
+    /// Match T3's row receipt: one semantic pull-request mark and its number. Lifecycle, checks,
+    /// and reviews still choose the colour, but their complete provider-neutral reading belongs
+    /// in the tooltip and accessibility value rather than competing with the branch in every row.
+    private func presentChangeRequest(
+        _ request: PluginWorkspaceChangeRequest?,
+        ink: Design.Ink,
+        isEmphasized: Bool
+    ) {
+        guard let request else { return }
+        let color = isEmphasized ? ink.label : changeRequestColor(request, ink: ink)
+        changeRequestGlyph.tint = color
+        changeRequestLabel.textColor = color
     }
 
     private func changeRequestAccessibilityValue(
@@ -1021,10 +1206,9 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
     }
 
     private func changeRequestColor(
-        _ request: PluginWorkspaceChangeRequest?,
+        _ request: PluginWorkspaceChangeRequest,
         ink: Design.Ink
     ) -> NSColor {
-        guard let request else { return ink.tertiary }
         if request.checksNeedingAttention > 0 || request.changesRequested > 0 {
             return Design.Status.negative
         }
@@ -1036,50 +1220,6 @@ private final class T3NavigatorRowCell: NSTableCellView, ThemeDerivedContent {
         case .draft: return Design.Status.warning
         case .closed: return ink.tertiary
         @unknown default: return ink.tertiary
-        }
-    }
-
-    private func activityLabel(for activity: PluginWorkspaceActivity) -> String {
-        switch activity {
-        case .none: return "Thread"
-        case .dormant: return "Dormant"
-        case .idle: return "Idle"
-        case .working: return "Working"
-        case .readyWithBackgroundWork: return "Ready"
-        case .awaitingUser: return "Waiting"
-        case .needsAttention: return "Attention"
-        case .limitReached: return "Limit"
-        @unknown default: return "Unknown"
-        }
-    }
-
-    private func activitySymbol(for activity: PluginWorkspaceActivity) -> String {
-        switch activity {
-        case .awaitingUser: return "person.crop.circle.badge.questionmark"
-        case .needsAttention: return "exclamationmark.circle.fill"
-        case .limitReached: return "gauge.with.needle.fill"
-        case .readyWithBackgroundWork: return "checkmark.circle.fill"
-        case .working: return "circle"
-        case .none, .dormant, .idle: return "circle.fill"
-        @unknown default: return "circle"
-        }
-    }
-
-    private func activityColor(
-        for activity: PluginWorkspaceActivity?,
-        ink: Design.Ink
-    ) -> NSColor {
-        switch activity {
-        case .working, .readyWithBackgroundWork:
-            return Design.Status.positive
-        case .awaitingUser:
-            return Design.Status.warning
-        case .needsAttention, .limitReached:
-            return Design.Status.negative
-        case .some(.none), .dormant, .idle, nil:
-            return ink.quaternary
-        @unknown default:
-            return ink.quaternary
         }
     }
 }
