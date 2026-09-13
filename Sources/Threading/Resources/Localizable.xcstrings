@@ -41456,17 +41456,6 @@
         }
       }
     },
-    "Source: %@\nEvent: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Källa: %@\nHändelse: %@\nProjekt: %@\nAgent: %@\nLäge: %@\nUtcheckning: %@\nHögsta antal samtidiga körningar: %lld"
-          }
-        }
-      }
-    },
     "Source-control provider" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41474,6 +41463,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Leverantör för källkodskontroll"
+          }
+        }
+      }
+    },
+    "Source: %@\nEvent: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källa: %@\nHändelse: %@\nProjekt: %@\nAgent: %@\nLäge: %@\nUtcheckning: %@\nHögsta antal samtidiga körningar: %lld"
           }
         }
       }
