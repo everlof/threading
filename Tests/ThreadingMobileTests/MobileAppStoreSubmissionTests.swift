@@ -14,18 +14,14 @@ final class MobileAppStoreSubmissionTests: XCTestCase {
     private static let landscapeLeft = "UIInterfaceOrientationLandscapeLeft"
     private static let landscapeRight = "UIInterfaceOrientationLandscapeRight"
 
-    /// ITMS-90474. A universal app that declares no orientations is refused, because iPad
-    /// multitasking requires all four. The app constrains orientation nowhere in code, so the
-    /// declaration states what it already did: every orientation on iPad, all but upside-down on
-    /// iPhone.
-    func testTheBuiltAppDeclaresEveryOrientationIPadMultitaskingRequires() throws {
+    /// The first App Store release is iPhone-only: Apple allows adding iPad support in an update
+    /// but not removing it, and ITMS-90474 refused the universal build for declaring no iPad
+    /// orientations. The app constrains orientation nowhere in code, so the iPhone declaration
+    /// states what it already did: every orientation but upside-down.
+    func testTheBuiltAppIsIPhoneOnlyAndDeclaresItsOrientations() throws {
         let info = try rawInfoPlist()
 
-        XCTAssertEqual(
-            Set(try XCTUnwrap(info["UISupportedInterfaceOrientations~ipad"] as? [String])),
-            [Self.portrait, Self.upsideDown, Self.landscapeLeft, Self.landscapeRight],
-            "App Store Connect refuses a universal app without all four iPad orientations"
-        )
+        XCTAssertEqual(info["UIDeviceFamily"] as? [Int], [1], "an iPad family cannot be withdrawn later")
         XCTAssertEqual(
             Set(try XCTUnwrap(info["UISupportedInterfaceOrientations~iphone"] as? [String])),
             [Self.portrait, Self.landscapeLeft, Self.landscapeRight]

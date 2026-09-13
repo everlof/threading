@@ -1,1 +1,5 @@
+Threading Remote needs no account or sign-in. It is the iPhone companion to Threading, a free Mac app: https://mjukis.dev/threading
 
+To review without a Mac, tap Try the demo on the first screen. It opens an example Mac with sessions, a live terminal, a conversation waiting for approval, and changed files.
+
+To review with a Mac, install Threading for Mac from https://github.com/everlof/threading/releases, open Settings > Remote Access, turn it on, and scan the QR code it shows with the app.

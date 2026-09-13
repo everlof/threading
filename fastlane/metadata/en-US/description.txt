@@ -1,1 +1,18 @@
+Threading Remote shows the coding-agent sessions running on your Mac on your iPhone. When an agent asks before editing a file, you can approve or deny it away from your desk.
 
+It pairs with Threading, the free Mac app that runs Claude Code, Codex, Grok, and OpenCode side by side. Scan the QR code Threading shows on your Mac, and your sessions appear on your phone.
+
+ON YOUR IPHONE
+• The live terminal of each session, with esc, control, option, and tab keys
+• Conversations, including requests waiting for your approval with their diffs
+• Uncommitted changes, and a search across the project's files
+
+HOW IT CONNECTS
+Your iPhone talks to your Mac directly: on the same Wi-Fi, through a VPN into your network, or over Tailscale. Your projects, conversations, and provider sign-ins stay on your Mac. Threading Remote has no analytics or advertising.
+
+TRY IT FIRST
+Tap Try the demo on the first screen to explore an example Mac before you pair.
+
+Requires Threading for Mac with Remote Access turned on.
+
+Privacy Policy: https://mjukis.dev/threading/privacy-policy

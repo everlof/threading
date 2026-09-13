@@ -1014,7 +1014,7 @@ here. The constants carry the same pointer.
 
 The Mac app ships through Sparkle; the iPhone app ships through App Store Connect, driven by
 fastlane (`Gemfile`, `fastlane/`) with `bundle exec fastlane ios <lane>`. The record already
-exists: **Threading: Remote Terminal**, Apple ID `6806755208`, SKU `threading-ios`, bundle
+exists: **Threading Remote** (named "Threading: Remote Terminal" until 2026-09-13), Apple ID `6806755208`, SKU `threading-ios`, bundle
 `codes.threading.mobile` (widget `codes.threading.mobile.glance`), under MJUKIS AB, team
 `SMQ3E8Y57T`. Both bundle IDs carry the App Groups capability, and the app's also carries
 Associated Domains and Push. The Apple Distribution certificate the export signs with expires
@@ -1050,6 +1050,11 @@ to. The Marketeer CLI reads the same three `ASC_*` names, which is why they are 
 | `screenshots_status` | Marketeer's slot-by-slot comparison with the editable version | Reads |
 | `upload_screenshots` | Marketeer's sync plan; `apply:true` performs it | Writes with `apply:true` |
 
+**A version's first `metadata` upload needs an App Review detail.** For version 1.0, `deliver`
+stopped with fastlane's "No data" before writing any field, because the version had no App
+Review detail record to read. Creating that record once through the App Store Connect API
+(`POST /v1/appStoreReviewDetails`, 2026-09-13) fixed it, and later versions inherit it.
+
 **The build number is TestFlight's, not the project's.** `beta` asks TestFlight for its latest
 build number and passes the next one as `CURRENT_PROJECT_VERSION` on the `xcodebuild` command
 line, which reaches the widget extension too, so the two can never disagree. The project keeps
@@ -1083,9 +1088,10 @@ Release archive; the third arrives by email after processing. `MobileAppStoreSub
 asserts all three against the built app.
 
 - **ITMS-90474, no orientations.** A universal app must declare all four iPad orientations for
-  multitasking. The target declared none, and nothing in `Sources/ThreadingMobile` constrains
-  orientation, so the keys now state what the app already did: all four on iPad, all but
-  upside-down on iPhone.
+  multitasking, and the target declared none. The first release is now iPhone-only (decided
+  2026-09-13: Apple lets an update add iPad support but not remove it), so there is no iPad list
+  to declare. Nothing in `Sources/ThreadingMobile` constrains orientation, so the iPhone key
+  states what the app already did: every orientation but upside-down.
 - **ITMS-90592, export compliance code.** `ITSAppUsesNonExemptEncryption` was `YES` with no
   `ITSEncryptionExportComplianceCode`, and no encryption declaration exists in App Store Connect.
   See the decision below.
@@ -1112,10 +1118,10 @@ removed the annual self-classification report for mass-market apps. The one docu
 require is a **French encryption declaration**, and only for distribution on the French App
 Store. TestFlight is not that distribution, so `NO` is accurate today.
 
-**Before the first App Store release, decide France.** Either leave France out of the app's
-availability, or file the declaration (ANSSI), upload it in App Store Connect, and switch to
-`YES` plus the `ITSEncryptionExportComplianceCode` Apple issues. That switch also changes
-`MobileAppStoreSubmissionTests`, deliberately.
+Decided the same day: the first release is available in every territory except France. Adding
+France later means filing the declaration (ANSSI), uploading it in App Store Connect, and
+switching to `YES` plus the `ITSEncryptionExportComplianceCode` Apple issues. That switch also
+changes `MobileAppStoreSubmissionTests`, deliberately.
 
 ### What the privacy manifest declares, and the caveat on "linked"
 
@@ -1144,13 +1150,36 @@ size, linked to app `6806755208`. `screenshots capture:true` runs
 Fastfile), and renders into `build/app-store-screenshots`. Upload goes through Marketeer's own
 checksum-aware sync, not `deliver`, which is why `metadata` passes `skip_screenshots`. The slide
 copy, layout and background are edited in the Marketeer pane or app; the lane only replaces the
-captures. The target is universal, so an App Store submission also needs 13" iPad screenshots,
-which the document does not have.
+captures. The app is iPhone-only, so the document needs no iPad slides.
 
 ### Before the first App Store submission
 
-The record has a name and nothing else. Still needed: description, keywords, subtitle, support
-and privacy policy URLs, category, age rating, App Privacy answers (matching the manifest), content
-rights, price and availability (with the France decision above), review notes (the demo mode
-above), iPad screenshots, and the release-candidate smoke test from
-[What remains open](#what-remains-open).
+**No public Mac build can pair with the iPhone app yet.** `BuildChannel.offersRemoteAccess` is
+true only for `.dev`, so release, beta and nightly Mac builds hide Remote Access and refuse to
+start its listener; its comment says why. TestFlight testers on development builds are
+unaffected, but a customer with Threading 0.1.0 has nothing to pair with. At least the local and
+Tailscale ways in have to reach a public Mac build before the iPhone app is submitted.
+Decided the same day: public builds get the local, VPN and Tailscale ways in, and Threading
+Direct, which needs Sign in with Apple, stays development-only.
+
+Decided 2026-09-13: the app is **Threading Remote**, subtitle "Approve & review coding agents",
+iPhone only, free, in every territory except France, with David Everlöf at support@mjukis.dev as
+the App Review contact. Local use over Wi-Fi, a VPN or Tailscale stays free, as
+[`REMOTE_ACCESS.md`](../REMOTE_ACCESS.md) already records: payment is for operated infrastructure,
+so a subscription arrives with hosted Threading Direct and push once they ship in public builds,
+not as a lock on local pairing. The pricing research and StoreKit design for that subscription are
+in [`ios-hosted-subscription.md`](../feature-drafts/ios-hosted-subscription.md). The name, subtitle
+and keywords carry no provider trademarks, which Anthropic's and OpenAI's brand rules forbid in app
+names; the description names the providers only as compatibility facts. `fastlane/metadata` points
+the support and marketing URLs at `https://mjukis.dev/threading` and the privacy policy at
+`https://mjukis.dev/threading/privacy-policy`, with Developer Tools and Productivity as categories.
+The price (free) and availability (174 of 175 territories, France excluded) were set in App
+Store Connect the same day.
+
+Also set in App Store Connect that day: the age rating, which Apple computes as 4+ with Messaging
+and Chat and User-Generated Content declared for Share Chat's invited guests; content rights (no
+third-party content); and the review contact's phone number.
+
+Still needed: a public Mac release that carries the local ways in; App Privacy answers matching
+the manifest, which only the App Store Connect website accepts; and the release-candidate smoke
+test from [What remains open](#what-remains-open).

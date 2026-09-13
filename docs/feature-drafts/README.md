@@ -141,6 +141,11 @@ reshuffling it is a line move.
   survive a quit under the opt-in `ptyHostEnabled`, which stays off-by-default until TCC
   attribution is verified on a SIP-enabled Mac. The one slice that depended on neither — a grace period on the remote viewport
   lease, so a phone re-entering a chat stops reflowing the agent — shipped with part one.
+- [iPhone subscription for hosted access](ios-hosted-subscription.md) — charge for hosted
+  Threading Direct and push, never for local pairing. Gated on hosted Direct and hosted push
+  shipping in public Mac builds, which a Developer ID build cannot do while it needs Sign in
+  with Apple. Keeps the 2026-09-13 pricing research, the StoreKit 2 design and the App Store
+  Connect checklist from when a subscription-only app was considered and dropped.
 
 ### Shipped — pointers remain
 

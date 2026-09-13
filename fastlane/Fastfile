@@ -9,16 +9,20 @@ require "shellwords"
 
 default_platform(:ios)
 
-REPOSITORY = File.expand_path("..", __dir__)
+# fastlane evaluates this file with fastlane/ as the working directory, where `__dir__` is ".",
+# but runs actions such as deliver from the repository root. A relative path therefore means two
+# different places, so every path is made absolute here, while "." still names fastlane/.
+FASTLANE_DIRECTORY = File.expand_path(__dir__)
+REPOSITORY = File.expand_path("..", FASTLANE_DIRECTORY)
 PROJECT = File.join(REPOSITORY, "Threading.xcodeproj")
 SCHEME = "ThreadingMobile"
 APP_IDENTIFIER = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
 TEAM_ID = CredentialsManager::AppfileConfig.try_fetch_value(:team_id)
 BUILD_DIRECTORY = File.join(REPOSITORY, "build", "testflight")
-METADATA_DIRECTORY = File.join(__dir__, "metadata")
+METADATA_DIRECTORY = File.join(FASTLANE_DIRECTORY, "metadata")
 INTERNAL_GROUP = "MJUKIS"
 
-MARKETEER_DOCUMENT = File.join(__dir__, "marketeer", "Threading.marketeer")
+MARKETEER_DOCUMENT = File.join(FASTLANE_DIRECTORY, "marketeer", "Threading.marketeer")
 MARKETEER_EXPORT_DIRECTORY = File.join(REPOSITORY, "build", "app-store-screenshots")
 MARKETEER_BUNDLED_CLI = File.expand_path(
   "~/Library/Application Support/Threading/Plugins/Marketeer.bundle/Contents/Helpers/marketeer"
