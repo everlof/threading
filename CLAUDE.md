@@ -211,7 +211,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | A launch that did not come back: the marker, the launch ledger and its two-step open, the crash-loop policy, held-back restoration, Recovery Mode and its one-shot launch flags | [`crash-recovery.md`](docs/architecture/crash-recovery.md) |
 | Performance spans, main-thread stalls, MetricKit payloads, `sample`/`xctrace`, and the full/full+ sweep | [`performance.md`](docs/architecture/performance.md) |
 | Entitlements, the TCC grants and who inherits them, the Privacy settings page, Info.plist usage strings | [`permissions.md`](docs/architecture/permissions.md) |
-| Developer ID signing, notarization, `scripts/release.sh`, and the Sparkle automatic-update plan | [`releasing.md`](docs/architecture/releasing.md) |
+| Developer ID signing, notarization, `scripts/release.sh`, the Sparkle automatic-update plan, and the iPhone app's TestFlight/App Store Connect lanes (`fastlane/`) | [`releasing.md`](docs/architecture/releasing.md) |
 | Reclaimable build output, the two deletion gates, bundled project composition and Git activity | [`storage-and-stats.md`](docs/architecture/storage-and-stats.md) |
 | Persistence/wire failure semantics, dependency direction, strict concurrency, bounded work, CI and release gates | [`reliability-and-type-safety.md`](docs/architecture/reliability-and-type-safety.md) |
 | Product-scope classification, application layers, upward dependencies, authoritative registries/projections and architecture health metrics | [`application-structure.md`](docs/architecture/application-structure.md) |

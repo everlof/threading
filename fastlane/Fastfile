@@ -1,0 +1,284 @@
+# ThreadingMobile's release automation: TestFlight builds, the App Store listing, and the App
+# Store screenshots Marketeer renders. docs/architecture/releasing.md, "The iOS companion on
+# TestFlight", records why each lane is shaped the way it is; credentials come from the untracked
+# fastlane/.env it describes.
+
+require "json"
+require "open3"
+require "shellwords"
+
+default_platform(:ios)
+
+REPOSITORY = File.expand_path("..", __dir__)
+PROJECT = File.join(REPOSITORY, "Threading.xcodeproj")
+SCHEME = "ThreadingMobile"
+APP_IDENTIFIER = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
+TEAM_ID = CredentialsManager::AppfileConfig.try_fetch_value(:team_id)
+BUILD_DIRECTORY = File.join(REPOSITORY, "build", "testflight")
+METADATA_DIRECTORY = File.join(__dir__, "metadata")
+INTERNAL_GROUP = "MJUKIS"
+
+MARKETEER_DOCUMENT = File.join(__dir__, "marketeer", "Threading.marketeer")
+MARKETEER_EXPORT_DIRECTORY = File.join(REPOSITORY, "build", "app-store-screenshots")
+MARKETEER_BUNDLED_CLI = File.expand_path(
+  "~/Library/Application Support/Threading/Plugins/Marketeer.bundle/Contents/Helpers/marketeer"
+)
+# The Marketeer document's slides in order, each named by the capture
+# scripts/capture_marketing_ios.sh writes for it.
+SCREENSHOT_CAPTURES = %w[01-sessions 02-claude-tui 03-claude-usage-menu 04-codex-tui 05-settings].freeze
+
+platform :ios do
+  desc "Archive ThreadingMobile in Release and upload it to TestFlight."
+  desc "Refuses an uncommitted tree unless allow_dirty:true. changelog:\"…\" sets What to Test;"
+  desc "wait:false returns before App Store Connect finishes processing."
+  lane :beta do |options|
+    ensure_git_status_clean unless options[:allow_dirty]
+    ipa = build_for_app_store
+    upload_to_testflight(
+      api_key: asc_api_key,
+      app_identifier: APP_IDENTIFIER,
+      ipa: ipa,
+      changelog: options[:changelog] || default_changelog,
+      distribute_external: false,
+      uses_non_exempt_encryption: false,
+      skip_waiting_for_build_processing: options[:wait] == false
+    )
+  end
+
+  desc "Build the IPA beta would upload and have App Store Connect validate it, uploading nothing."
+  lane :validate do
+    ipa = build_for_app_store
+    credentials = asc_credentials
+    # altool finds the key by file name, AuthKey_<id>.p8, in this directory.
+    ENV["API_PRIVATE_KEYS_DIR"] = File.dirname(credentials[:key_path])
+    sh(
+      "xcrun", "altool", "--validate-app", "--file", ipa, "--type", "ios",
+      "--apiKey", credentials[:key_id], "--apiIssuer", credentials[:issuer_id]
+    )
+  end
+
+  desc "Create the internal TestFlight group if it is missing and add THREADING_INTERNAL_TESTERS."
+  lane :internal_testers do
+    asc_api_key
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    UI.user_error!("App Store Connect has no app for #{APP_IDENTIFIER}") unless app
+
+    group = app.get_beta_groups(filter: { name: INTERNAL_GROUP })
+               .find { |candidate| candidate.name == INTERNAL_GROUP }
+    # Not app.create_beta_group: it always sends the public-link limit, and App Store Connect
+    # refuses that attribute on an internal group.
+    group ||= Spaceship::ConnectAPI.client.test_flight_request_client.post(
+      "v1/betaGroups",
+      {
+        data: {
+          type: "betaGroups",
+          attributes: { name: INTERNAL_GROUP, isInternalGroup: true, hasAccessToAllBuilds: true },
+          relationships: { app: { data: { type: "apps", id: app.id } } }
+        }
+      }
+    ).to_models.first
+    UI.user_error!("#{INTERNAL_GROUP} exists but is an external group") unless group.is_internal_group
+
+    testers = ENV.fetch("THREADING_INTERNAL_TESTERS", "").split(",").map(&:strip).reject(&:empty?)
+    UI.user_error!("Set THREADING_INTERNAL_TESTERS in fastlane/.env") if testers.empty?
+    testers.each do |email|
+      present = Spaceship::ConnectAPI.get_beta_testers(filter: { email: email, betaGroups: group.id })
+                                     .to_models
+      if present.any?
+        UI.message("#{email} is already in #{INTERNAL_GROUP}")
+      else
+        Spaceship::ConnectAPI.post_beta_tester_assignment(
+          beta_group_ids: [group.id],
+          attributes: { email: email }
+        )
+        UI.success("Added #{email} to #{INTERNAL_GROUP}")
+      end
+    end
+  end
+
+  desc "Download the App Store listing into fastlane/metadata, replacing the local files."
+  lane :download_metadata do
+    require "deliver"
+    require "deliver/setup"
+    options = FastlaneCore::Configuration.create(
+      Deliver::Options.available_options,
+      {
+        api_key: asc_api_key,
+        app_identifier: APP_IDENTIFIER,
+        platform: "ios",
+        metadata_path: METADATA_DIRECTORY,
+        skip_binary_upload: true,
+        skip_screenshots: true,
+        force: true
+      }
+    )
+    Deliver::Runner.new(options)
+    app = Deliver.cache[:app]
+    version = app.get_latest_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+    Deliver::Setup.new.generate_metadata_files(app, version, METADATA_DIRECTORY, options)
+  end
+
+  desc "Upload fastlane/metadata to the editable App Store version. No binary, no screenshots,"
+  desc "and never a submission for review."
+  lane :metadata do
+    deliver(
+      api_key: asc_api_key,
+      app_identifier: APP_IDENTIFIER,
+      platform: "ios",
+      metadata_path: METADATA_DIRECTORY,
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      force: true,
+      submit_for_review: false,
+      run_precheck_before_submit: false
+    )
+  end
+
+  desc "Place the iOS marketing captures in the Marketeer document and render the screenshots."
+  desc "capture:true runs scripts/capture_marketing_ios.sh first; captures:<dir> uses existing"
+  desc "captures. With neither, it renders the document as it stands."
+  lane :screenshots do |options|
+    captures = options[:captures] && File.expand_path(options[:captures], REPOSITORY)
+    if options[:capture]
+      output = File.join(
+        REPOSITORY, ".build", "marketing-ios", "app-store-#{Time.now.strftime('%Y%m%d-%H%M%S')}"
+      )
+      sh(File.join(REPOSITORY, "scripts", "capture_marketing_ios.sh"), "--theme", "threading",
+         "--output", output)
+      captures = File.join(output, "screenshots")
+    end
+
+    if captures
+      slides = marketeer_slides
+      unless slides.count == SCREENSHOT_CAPTURES.count
+        UI.user_error!("#{MARKETEER_DOCUMENT} has #{slides.count} slides but " \
+                       "SCREENSHOT_CAPTURES names #{SCREENSHOT_CAPTURES.count}")
+      end
+      slides.zip(SCREENSHOT_CAPTURES).each do |slide, capture|
+        image = File.join(captures, "#{capture}.png")
+        UI.user_error!("Missing capture #{image}") unless File.file?(image)
+        sh(marketeer_cli, "set-screenshot", MARKETEER_DOCUMENT,
+           "--device", slide.fetch("devices").first.fetch("id"), image)
+      end
+    end
+
+    FileUtils.rm_rf(MARKETEER_EXPORT_DIRECTORY)
+    sh(marketeer_cli, "export", MARKETEER_DOCUMENT, "--out", MARKETEER_EXPORT_DIRECTORY)
+    UI.success("App Store screenshots: #{MARKETEER_EXPORT_DIRECTORY}")
+  end
+
+  desc "Compare the Marketeer document with the editable App Store version's screenshots."
+  lane :screenshots_status do
+    marketeer_with_credentials("status", MARKETEER_DOCUMENT)
+  end
+
+  desc "Print the screenshot upload plan for App Store Connect; apply:true performs it."
+  lane :upload_screenshots do |options|
+    arguments = ["sync", MARKETEER_DOCUMENT]
+    arguments << "--yes" if options[:apply]
+    marketeer_with_credentials(*arguments)
+  end
+end
+
+# MARK: - App Store Connect credentials
+
+def asc_credentials
+  key_id = ENV.fetch("ASC_KEY_ID", "")
+  issuer_id = ENV.fetch("ASC_ISSUER_ID", "")
+  if key_id.empty? || issuer_id.empty?
+    UI.user_error!("Set ASC_KEY_ID and ASC_ISSUER_ID in fastlane/.env " \
+                   "(docs/architecture/releasing.md, \"The iOS companion on TestFlight\")")
+  end
+  key_path = File.expand_path(
+    ENV.fetch("ASC_KEY_PATH", "~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8")
+  )
+  UI.user_error!("No App Store Connect API key at #{key_path}") unless File.file?(key_path)
+  { key_id: key_id, issuer_id: issuer_id, key_path: key_path }
+end
+
+def asc_api_key
+  credentials = asc_credentials
+  app_store_connect_api_key(
+    key_id: credentials[:key_id],
+    issuer_id: credentials[:issuer_id],
+    key_filepath: credentials[:key_path]
+  )
+end
+
+# Lets xcodebuild create or renew the App Store profiles with the API key rather than with
+# whichever Apple ID Xcode happens to be signed in to.
+def xcodebuild_authentication
+  credentials = asc_credentials
+  [
+    "-allowProvisioningUpdates",
+    "-authenticationKeyPath", credentials[:key_path],
+    "-authenticationKeyID", credentials[:key_id],
+    "-authenticationKeyIssuerID", credentials[:issuer_id]
+  ].shelljoin
+end
+
+# MARK: - Building
+
+# Archives with the build number after TestFlight's latest and exports for App Store Connect.
+# The number is passed to xcodebuild rather than written into the project, so a release changes
+# no tracked file, and the widget extension receives the same number as the app. Returns the IPA.
+def build_for_app_store
+  api_key = asc_api_key
+  build_number = latest_testflight_build_number(
+    api_key: api_key,
+    app_identifier: APP_IDENTIFIER,
+    initial_build_number: 0
+  ).to_i + 1
+  output = File.join(BUILD_DIRECTORY, build_number.to_s)
+  authentication = xcodebuild_authentication
+  build_app(
+    project: PROJECT,
+    scheme: SCHEME,
+    configuration: "Release",
+    destination: "generic/platform=iOS",
+    derived_data_path: File.join(BUILD_DIRECTORY, "DerivedData"),
+    archive_path: File.join(output, "ThreadingMobile.xcarchive"),
+    output_directory: output,
+    output_name: "ThreadingMobile",
+    export_method: "app-store",
+    export_team_id: TEAM_ID,
+    export_options: {
+      signingStyle: "automatic",
+      teamID: TEAM_ID,
+      uploadSymbols: true,
+      manageAppVersionAndBuildNumber: false
+    },
+    # gym appends xcargs to the export command as well as the archive, so the authentication
+    # reaches both from here; repeating it in export_xcargs makes xcodebuild refuse the export.
+    xcargs: "CURRENT_PROJECT_VERSION=#{build_number} #{authentication}",
+    skip_profile_detection: true
+  )
+end
+
+def default_changelog
+  commit = last_git_commit
+  "#{commit[:abbreviated_commit_hash]} #{commit[:message].lines.first.to_s.strip}"
+end
+
+# MARK: - Marketeer
+
+def marketeer_cli
+  cli = File.expand_path(ENV.fetch("MARKETEER_CLI", MARKETEER_BUNDLED_CLI))
+  unless File.executable?(cli)
+    UI.user_error!("No Marketeer CLI at #{cli}; install the Marketeer plugin or set MARKETEER_CLI")
+  end
+  cli
+end
+
+def marketeer_slides
+  output, status = Open3.capture2(marketeer_cli, "info", MARKETEER_DOCUMENT, "--json")
+  UI.user_error!("marketeer info failed for #{MARKETEER_DOCUMENT}") unless status.success?
+  JSON.parse(output).fetch("slides").sort_by { |slide| slide.fetch("index") }
+end
+
+# The Marketeer CLI reads ASC_ISSUER_ID, ASC_KEY_ID and ASC_KEY_PATH itself, so the credentials
+# stay out of the logged command line.
+def marketeer_with_credentials(*arguments)
+  ENV["ASC_KEY_PATH"] = asc_credentials[:key_path]
+  sh(marketeer_cli, *arguments)
+end

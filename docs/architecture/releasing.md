@@ -870,7 +870,9 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
 - The repository now has its public-distribution `origin`. The release and nightly workflows
   remain dormant until the five GitHub Actions secrets named in `release.yml` are installed;
   the nightly schedule is deliberately disabled until then.
-- The iOS companion's pipeline (TestFlight first, the App Store later) is not built. Its Release
+- The iOS companion ships to TestFlight through fastlane
+  ([The iOS companion on TestFlight](#the-ios-companion-on-testflight)); the App Store
+  submission is not done. Its Release
   target now source-controls the private issue-report intake while Debug explicitly names none;
   CI parses both the target configuration and plist placeholder. The App Store pipeline must run
   the release-candidate receipt/pickup/outage smoke test before submission. The
@@ -1007,3 +1009,148 @@ Three rules, in the order they get used:
 `RemoteProtocolTests.testProtocolVersionsChangeOnlyThroughTheReleasingChecklist` pins both
 numbers, so any change fails a test once, deliberately, and the failure message points back
 here. The constants carry the same pointer.
+
+## The iOS companion on TestFlight
+
+The Mac app ships through Sparkle; the iPhone app ships through App Store Connect, driven by
+fastlane (`Gemfile`, `fastlane/`) with `bundle exec fastlane ios <lane>`. The record already
+exists: **Threading: Remote Terminal**, Apple ID `6806755208`, SKU `threading-ios`, bundle
+`codes.threading.mobile` (widget `codes.threading.mobile.glance`), under MJUKIS AB, team
+`SMQ3E8Y57T`. Both bundle IDs carry the App Groups capability, and the app's also carries
+Associated Domains and Push. The Apple Distribution certificate the export signs with expires
+**2026-12-13**; a lapsed one fails `beta` at export, not at archive.
+
+### Credentials live in `fastlane/.env`, which is not tracked
+
+The repository is public, so the lanes read everything that names an account from the
+git-ignored `fastlane/.env`:
+
+| Variable | What it is |
+|---|---|
+| `ASC_KEY_ID` | An App Store Connect **team** API key with Admin or App Manager access |
+| `ASC_ISSUER_ID` | The team's issuer ID, shown above the key list at App Store Connect ▸ Users and Access ▸ Integrations |
+| `ASC_KEY_PATH` | Optional; defaults to `~/.appstoreconnect/private_keys/AuthKey_<id>.p8`. `validate` needs that file name, because `altool` looks keys up by name |
+| `THREADING_INTERNAL_TESTERS` | Comma-separated App Store Connect users for the internal group |
+| `MARKETEER_CLI` | Optional; defaults to the CLI inside the installed Marketeer plugin |
+
+The same key drives `xcodebuild` (`-allowProvisioningUpdates -authenticationKey…`), so a build
+creates or renews its App Store profiles without depending on which Apple ID Xcode is signed in
+to. The Marketeer CLI reads the same three `ASC_*` names, which is why they are spelled its way.
+
+### Lanes
+
+| Lane | Does | Touches App Store Connect |
+|---|---|---|
+| `validate` | Archives and exports exactly what `beta` would, then `altool --validate-app` | Reads; creates profiles if missing |
+| `beta` | The same build, uploaded to TestFlight. Refuses a dirty tree unless `allow_dirty:true` | Uploads a build |
+| `internal_testers` | Creates the internal group `MJUKIS` (access to all builds) and adds the testers | Writes testers |
+| `download_metadata` | Replaces `fastlane/metadata` with the live listing | Reads |
+| `metadata` | Uploads `fastlane/metadata` to the editable version; never submits | Writes the listing |
+| `screenshots` | Places captures into the Marketeer document and renders the App Store PNGs | No |
+| `screenshots_status` | Marketeer's slot-by-slot comparison with the editable version | Reads |
+| `upload_screenshots` | Marketeer's sync plan; `apply:true` performs it | Writes with `apply:true` |
+
+**The build number is TestFlight's, not the project's.** `beta` asks TestFlight for its latest
+build number and passes the next one as `CURRENT_PROJECT_VERSION` on the `xcodebuild` command
+line, which reaches the widget extension too, so the two can never disagree. The project keeps
+`1`, and a release changes no tracked file. `manageAppVersionAndBuildNumber` is off for the same
+reason. The marketing version is still the project's `MARKETING_VERSION`, which is independent of
+the Mac app's (see the previous section).
+
+Because the internal group has access to all builds, a processed upload reaches its testers with
+no distribution step, and internal testing needs no Beta App Review. External testing does, and
+it needs what the record does not have yet: a beta description, a feedback email and a privacy
+policy URL.
+
+### The legal-notice phase cannot be script-sandboxed
+
+`validate` and `beta` build into `build/testflight/DerivedData`, and the first archive there
+failed in **Embed Legal Notices**: `Sandbox: cp deny file-read-data
+…/DerivedData/SourcePackages/checkouts/NativeDiffKit/LICENSE`. `embed_legal_notices.sh` reads the
+package checkouts beside DerivedData, and a sandboxed script may read only its declared inputs.
+Those inputs cannot be declared. In an archive, `BUILD_DIR` sits under
+`Build/Intermediates.noindex/ArchiveIntermediates/<scheme>/…`, and a probe of the archive's build
+settings found none that names the DerivedData root. That is why the input lists name
+`Package.resolved` instead, and why the Mac target already runs with
+`ENABLE_USER_SCRIPT_SANDBOXING = NO`. ThreadingMobile inherited `YES`, and it only ever worked
+from Xcode's default DerivedData location. It now matches the Mac target.
+
+### Three refusals no build reports
+
+Every one of these archives, exports and installs. Apple refuses them afterwards. The first two
+were measured on 2026-09-13 by running `altool --validate-app` on an export of the untouched
+Release archive; the third arrives by email after processing. `MobileAppStoreSubmissionTests`
+asserts all three against the built app.
+
+- **ITMS-90474, no orientations.** A universal app must declare all four iPad orientations for
+  multitasking. The target declared none, and nothing in `Sources/ThreadingMobile` constrains
+  orientation, so the keys now state what the app already did: all four on iPad, all but
+  upside-down on iPhone.
+- **ITMS-90592, export compliance code.** `ITSAppUsesNonExemptEncryption` was `YES` with no
+  `ITSEncryptionExportComplianceCode`, and no encryption declaration exists in App Store Connect.
+  See the decision below.
+- **ITMS-91053, required-reason APIs.** `Sources/ThreadingMobile/PrivacyInfo.xcprivacy`
+  declares UserDefaults `CA92.1`, file timestamps `C617.1` (diagnostic journals and the report
+  outbox, all inside the container), system boot time `35F9.1` (`systemUptime` interval
+  measurement), and disk space `7D9E.1` (available storage in a report the user chooses to
+  send). The statically linked packages count as this binary; `WebRTC.framework` carries its
+  own manifest. The widget calls none of these APIs. The file is excluded from the Mac target
+  like every other `Sources/ThreadingMobile` file, which `check_target_membership.py` enforces.
+
+One thing that looks like a fourth is not. Every iOS icon PNG is RGBA with a fully opaque alpha
+channel, which ITMS-90717's wording ("can't … contain an alpha channel") seems to forbid. The
+same validation accepted them. Re-encoding all 34 without the channel was tried and reverted as
+an unproven change; do not repeat it without a refusal to show for it.
+
+### Encryption: exempt from documentation, unless the app is sold in France
+
+Decided 2026-09-13: `ITSAppUsesNonExemptEncryption = NO`. WebRTC brings its own DTLS/SRTP, which
+is standard encryption not provided by iOS. Apple's
+[export compliance table](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption)
+asks nothing for that in the US (a CCATS is for proprietary algorithms), and BIS's 2021 rule
+removed the annual self-classification report for mass-market apps. The one document it does
+require is a **French encryption declaration**, and only for distribution on the French App
+Store. TestFlight is not that distribution, so `NO` is accurate today.
+
+**Before the first App Store release, decide France.** Either leave France out of the app's
+availability, or file the declaration (ANSSI), upload it in App Store Connect, and switch to
+`YES` plus the `ITSEncryptionExportComplianceCode` Apple issues. That switch also changes
+`MobileAppStoreSubmissionTests`, deliberately.
+
+### What the privacy manifest declares, and the caveat on "linked"
+
+A code audit on 2026-09-13 found no analytics, crash-reporting or tracking SDK. Two flows store
+data on a server MJUKIS AB operates (`remote.threading.codes`):
+
+- **Report a Problem** (user-sent, 30-day R2 retention): the description and optional
+  screenshot (Customer Support), the typed connection journal and versions (Other Diagnostic
+  Data, Product Interaction), and with additional details on, timings, memory and storage
+  (Performance Data).
+- **Hosted push and rendezvous**: the APNs token and the install's random device id, stored
+  against the account (Device ID).
+
+The manifest declares the report types **linked**, conservatively. A report's `peer-` field is an
+unsalted 12-hex-character SHA-256 prefix of the host id, which the service also stores beside an
+account, so the operator could join the two. Salting or dropping that field would make "not
+linked" true; until then, the App Store Connect App Privacy answers must say linked too. The
+manifest and those answers are two declarations of one fact and have to change together.
+
+### Screenshots are Marketeer's
+
+`fastlane/marketeer/Threading.marketeer` is the source: five iPhone 17 Pro slides at the 6.9"
+size, linked to app `6806755208`. `screenshots capture:true` runs
+`scripts/capture_marketing_ios.sh`, puts `01-sessions`, `02-claude-tui`, `03-claude-usage-menu`,
+`04-codex-tui` and `05-settings` into the slides in that order (`SCREENSHOT_CAPTURES` in the
+Fastfile), and renders into `build/app-store-screenshots`. Upload goes through Marketeer's own
+checksum-aware sync, not `deliver`, which is why `metadata` passes `skip_screenshots`. The slide
+copy, layout and background are edited in the Marketeer pane or app; the lane only replaces the
+captures. The target is universal, so an App Store submission also needs 13" iPad screenshots,
+which the document does not have.
+
+### Before the first App Store submission
+
+The record has a name and nothing else. Still needed: description, keywords, subtitle, support
+and privacy policy URLs, category, age rating, App Privacy answers (matching the manifest), content
+rights, price and availability (with the France decision above), review notes (the demo mode
+above), iPad screenshots, and the release-candidate smoke test from
+[What remains open](#what-remains-open).

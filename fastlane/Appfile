@@ -1,0 +1,4 @@
+# Threading ships under MJUKIS AB. Credentials are never here: the App Store Connect API key is
+# named by ASC_KEY_ID / ASC_ISSUER_ID (and optionally ASC_KEY_PATH) in the untracked fastlane/.env.
+app_identifier("codes.threading.mobile")
+team_id("SMQ3E8Y57T")

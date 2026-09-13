@@ -94,6 +94,7 @@
 		A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000202 /* ShareChatFlowTests.swift */; };
 		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
 		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
+		A63300010000000000000003 /* MobileAppStoreSubmissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000004 /* MobileAppStoreSubmissionTests.swift */; };
 		A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */; };
 		A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63500010000000000000002 /* MobileSettingsIdentityTests.swift */; };
 		A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63600010000000000000002 /* RemoteTerminalTapTests.swift */; };
@@ -393,6 +394,7 @@
 		A63100010000000000000202 /* ShareChatFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatFlowTests.swift; sourceTree = "<group>"; };
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
+		A63300010000000000000004 /* MobileAppStoreSubmissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAppStoreSubmissionTests.swift; sourceTree = "<group>"; };
 		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
 		A63500010000000000000002 /* MobileSettingsIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSettingsIdentityTests.swift; sourceTree = "<group>"; };
 		A63600010000000000000002 /* RemoteTerminalTapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalTapTests.swift; sourceTree = "<group>"; };
@@ -503,6 +505,7 @@
 				ThreadingMobile/MobileUsageGlancePublisher.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
 				ThreadingMobile/PairingView.swift,
+				ThreadingMobile/PrivacyInfo.xcprivacy,
 				ThreadingMobile/ProjectTerminalDetailView.swift,
 				ThreadingMobile/RemoteAppModel.swift,
 				ThreadingMobile/RemoteAttachmentGallery.swift,
@@ -788,6 +791,7 @@
 				A63500010000000000000002 /* MobileSettingsIdentityTests.swift */,
 				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
 				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
+				A63300010000000000000004 /* MobileAppStoreSubmissionTests.swift */,
 				A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */,
 				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
 				F10A00010000000000000002 /* MobileConversationQuestionTests.swift */,
@@ -1659,6 +1663,7 @@
 				A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */,
 				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
 				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
+				A63300010000000000000003 /* MobileAppStoreSubmissionTests.swift in Sources */,
 				A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,
 				F10A00010000000000000001 /* MobileConversationQuestionTests.swift in Sources */,
@@ -2250,16 +2255,19 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/ThreadingMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2290,16 +2298,19 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/ThreadingMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
