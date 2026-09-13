@@ -271,7 +271,8 @@ The grouping can be toggled from wherever you notice it, not only from Settings:
 - **Hover a branch heading** — a small gear fades in at its trailing edge, opening a menu
   with both grouping toggles (checked when on) and **All Settings…**
 - **Right-click a project row or a branch heading** — the same toggles sit in the context
-  menu, with checkmarks showing the current state
+  menu, with checkmarks showing the current state. A branch heading's menu leads with
+  **Copy Branch Name**, which puts the branch's name on the clipboard
 - **Settings > General > Group sessions by branch** — the persistent home of the setting
 
 ### The sidebar's top and bottom

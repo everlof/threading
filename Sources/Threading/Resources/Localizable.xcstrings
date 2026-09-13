@@ -14114,6 +14114,17 @@
         }
       }
     },
+    "Copy Branch Name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera grennamn"
+          }
+        }
+      }
+    },
     "Copy Chart Data" : {
       "extractionState" : "manual",
       "localizations" : {

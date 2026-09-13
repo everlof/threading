@@ -4072,14 +4072,8 @@ extension ProjectSidebarViewController {
         let entries: [ThemedMenuEntry]
         if item is ProjectNode {
             entries = projectMenuEntries(row: row)
-        } else if item is BranchGroupNode {
-            // The heading offers the display options that created it, and nothing else — it
-            // is a grouping, not a place.
-            let optionValues = NativeSidebarPipelineOptions.current
-            entries = [
-                branchGroupingEntry(optionValues),
-                loneBranchHeadingsEntry(optionValues),
-            ]
+        } else if let group = item as? BranchGroupNode {
+            entries = branchHeadingMenuEntries(for: group.branch)
         } else if item is RegisteredFactGroupNode {
             entries = arrangementMenuEntries()
         } else if let node = item as? SessionNode,
@@ -4098,6 +4092,28 @@ extension ProjectSidebarViewController {
         let source = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
             ?? outlineView
         return presentSidebarMenu(entries, from: source, anchor: anchor)
+    }
+
+    /// A branch heading's right-click: its name for the pasteboard, then the display options
+    /// that created it. Nothing to open or reveal — it is a grouping, not a place — but its
+    /// label is the string most often retyped elsewhere. The name is captured at build, so a
+    /// checkout switching branch under the open menu still copies the name that was shown.
+    /// Built separately from shown, so a test can choose Copy against a private pasteboard.
+    func branchHeadingMenuEntries(
+        for branch: String,
+        pasteboard: NSPasteboard = .general
+    ) -> [ThemedMenuEntry] {
+        let optionValues = NativeSidebarPipelineOptions.current
+        return [
+            .item(ThemedMenuItem(
+                title: L10n.string("Copy Branch Name"),
+                image: ThemedMenuIcon.symbol("doc.on.doc"),
+                onChoose: { Self.copyToPasteboard(branch, pasteboard: pasteboard) }
+            )),
+            .separator,
+            branchGroupingEntry(optionValues),
+            loneBranchHeadingsEntry(optionValues),
+        ]
     }
 
     func terminalMenuEntries(for terminalID: TerminalID, row: Int) -> [ThemedMenuEntry] {

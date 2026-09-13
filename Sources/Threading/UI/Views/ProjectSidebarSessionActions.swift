@@ -1193,9 +1193,9 @@ extension ProjectSidebarViewController {
 
     /// The one pasteboard write every Copy row shares — cleared first, so a failed set never
     /// leaves the previous clipboard posing as the copied value.
-    static func copyToPasteboard(_ string: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(string, forType: .string)
+    static func copyToPasteboard(_ string: String, pasteboard: NSPasteboard = .general) {
+        pasteboard.clearContents()
+        pasteboard.setString(string, forType: .string)
     }
 
     /// Starts a new group. Skips where the previous group contributed nothing — most of the
