@@ -43,6 +43,17 @@ struct SourceControlProviderConnection: Codable, Equatable, Sendable {
         return url
     }
 
+    /// The credential's bytes read strictly as UTF-8, or `nil` when they are not valid UTF-8.
+    ///
+    /// A token goes into an HTTP header, so a byte sequence that is not text is refused rather
+    /// than repaired. The bytes are already bounded by `ExtensionSecretConstraints`, and the
+    /// check is a pure round-trip comparison, so it is cheap enough for every caller.
+    static func utf8Token(_ credential: Data) -> String? {
+        let decoded = String(decoding: credential, as: UTF8.self)
+        guard decoded.utf8.elementsEqual(credential) else { return nil }
+        return decoded
+    }
+
     func validate() throws {
         var issues: [String] = []
         if id.isEmpty || id.count > 256 { issues.append("connection id") }
@@ -176,7 +187,7 @@ final class SourceControlProviderConnectionStore {
         }
         if let credential {
             try ExtensionSecretConstraints.validate(value: credential)
-            guard let token = String(data: credential, encoding: .utf8),
+            guard let token = SourceControlProviderConnection.utf8Token(credential),
                   !token.isEmpty,
                   !token.unicodeScalars.contains(where: {
                       CharacterSet.whitespacesAndNewlines.contains($0)
@@ -370,7 +381,7 @@ final class SourceControlConnectionNetworkBroker: SourceControlConnectionFetchin
             let usedCredential = connection.authenticationKind != .none
             if usedCredential {
                 guard let credential, !credential.isEmpty,
-                      let token = String(data: credential, encoding: .utf8) else {
+                      let token = SourceControlProviderConnection.utf8Token(credential) else {
                     throw SourceControlProviderConnectionError.credentialRequired
                 }
                 try ExtensionSecretConstraints.validate(value: credential)

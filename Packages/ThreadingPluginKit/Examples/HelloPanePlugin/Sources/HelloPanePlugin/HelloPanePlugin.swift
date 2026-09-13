@@ -15,7 +15,7 @@ public final class HelloPanePlugin: NSObject, ThreadingNativePlugin {
 
     // Keep this a literal. Installed plugins share the host's framework at runtime, so forwarding
     // to ThreadingPluginAPI.version would report the host generation instead of this build's.
-    public static let pluginAPIVersion = 4
+    public static let pluginAPIVersion = 5
 
     public var pluginIdentifier: String { "com.example.hellopane" }
 

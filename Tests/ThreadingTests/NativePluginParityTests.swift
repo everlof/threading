@@ -173,7 +173,8 @@ final class NativePluginParityTests: XCTestCase {
     /// generated getter called `ThreadingPluginAPI.version`, a v4 navigator-only bundle loaded by
     /// a v3 host would report 3 and pass the old host's exact check before its missing required
     /// pane selector was dispatched. The separately compiled binary must carry no reference to
-    /// that runtime getter: its own `pluginAPIVersion` remains 4 regardless of the host framework.
+    /// that runtime getter: its own `pluginAPIVersion` stays the literal it was compiled with
+    /// regardless of the host framework.
     func testV4PluginBinaryEmbedsItsGenerationInsteadOfReadingTheHostGeneration() throws {
         let bundle = try buildTheExampleWithOnlyTheSDK()
         let executable = try XCTUnwrap(Bundle(url: bundle)?.executableURL)

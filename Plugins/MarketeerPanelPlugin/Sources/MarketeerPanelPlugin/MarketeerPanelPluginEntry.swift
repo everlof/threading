@@ -13,7 +13,7 @@ public final class MarketeerPanelPlugin: NSObject, ThreadingNativePlugin {
 
     // This is deliberately a literal so an older host cannot make a newer plugin report the
     // older host framework's generation.
-    public static let pluginAPIVersion = 4
+    public static let pluginAPIVersion = 5
 
     public var pluginIdentifier: String { "codes.threading.marketeer.panel" }
 

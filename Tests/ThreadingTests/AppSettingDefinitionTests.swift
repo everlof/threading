@@ -325,6 +325,9 @@ final class AppSettingDefinitionTests: XCTestCase {
             .appTextSize: .init(key: "appTextSize", valueType: .string),
             .updateChannelSubscription: .init(
                 key: "updateChannelSubscription", valueType: .string
+            ),
+            .sourceControlProviderConnections: .init(
+                key: "sourceControlProviderConnections", valueType: .data
             )
         ]
 

@@ -20,7 +20,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
     // This must remain the generation embedded when the plugin is compiled. Do not forward to
     // ThreadingPluginAPI.version: the installed bundle uses the host's framework at runtime.
-    public static let pluginAPIVersion = 4
+    public static let pluginAPIVersion = 5
 
     public var pluginIdentifier: String { "codes.threading.plugin.devicelogs" }
 

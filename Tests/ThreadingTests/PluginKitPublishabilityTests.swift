@@ -132,7 +132,7 @@ final class PluginKitPublishabilityTests: XCTestCase {
                        "pluginTools", "invokeTool"] {
             XCTAssertTrue(source.contains(member), "the example should demonstrate \(member)")
         }
-        XCTAssertTrue(source.contains("static let pluginAPIVersion = 4"),
+        XCTAssertTrue(source.contains("static let pluginAPIVersion = 5"),
                       "the example must embed the generation it compiled against")
         XCTAssertFalse(source.contains("{ ThreadingPluginAPI.version }"),
                        "a plugin must not read its generation from the host's framework")
