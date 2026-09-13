@@ -1564,9 +1564,15 @@ actor RemoteAPNSPushSender {
         self.configuration = configuration
     }
 
+    /// The explicit Mac-local APNs provider, read from `THREADING_APNS_*`.
+    ///
+    /// A development override, so it is compiled only into Debug and internal builds. A public
+    /// build cannot be pointed at a provider key by its launch environment, which keeps the
+    /// Privacy page's claim true there: without Hosted Direct, no notification reaches Apple.
     nonisolated static func fromEnvironment(
         _ environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> RemoteAPNSPushSender? {
+#if DEBUG || THREADING_INTERNAL
         guard let keyID = environment["THREADING_APNS_KEY_ID"]?.nilIfEmpty,
               let teamID = environment["THREADING_APNS_TEAM_ID"]?.nilIfEmpty,
               let path = environment["THREADING_APNS_PRIVATE_KEY_PATH"]?.nilIfEmpty,
@@ -1586,6 +1592,9 @@ actor RemoteAPNSPushSender {
                 ?? "codes.threading.mobile",
             privateKey: privateKey
         ))
+#else
+        return nil
+#endif
     }
 
     @discardableResult

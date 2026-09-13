@@ -9,8 +9,8 @@ stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and th
 nightly workflows under `.github/workflows/`. The trusted-Mac route is
 `scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete Mac test
 level and Mac release-quality gate before either public ref exists, then proves the clean tested
-commit is still checked out. The downloadable artifact is the Mac app, release builds force
-Remote Access off, and the iPhone companion is not published with it; the release lane therefore
+commit is still checked out. The downloadable artifact is the Mac app, release builds offer
+Remote Access's local ways in but not Hosted Direct, and the iPhone companion is not published with it; the release lane therefore
 does not make an unshipped mobile test a prerequisite. Ordinary CI remains the superset and still
 builds and tests ThreadingMobile. Because the tests are long enough for Keychain state to change,
 it rechecks
@@ -101,6 +101,13 @@ Nothing working was lost by removing it: the entitlement had never been in a dis
 because it never could be. The supported path for direct distribution is the web flow — a Services
 ID with `ASWebAuthenticationSession` — and that is what hosted sign-in needs before the button
 means anything outside a development build.
+
+**What public builds ship.** Decided 2026-09-13: release, beta and nightly builds offer Remote
+Access's local ways in, which need no restricted entitlement, and do not offer Hosted Direct.
+`BuildChannel.offersHostedDirect` is true only for `dev`. A public build holds an inert hosted
+controller (no endpoint, in-memory store), omits the Hosted Direct row and the Threading Direct way
+in, and delivers iPhone notifications Live only. No entitlement was added for it; the web flow above
+is what would let Hosted Direct ship.
 
 **What this bought.** It was the only `com.apple.developer.*` key in the entitlements file, so
 there are now none, and a Developer ID export needs no profile whatsoever: no profile secret in
@@ -337,12 +344,17 @@ Four, of which the release pipeline can stamp three:
 | `nightly` | `scripts/release.sh --channel nightly` with `THREADING_VERSION` | the date as dotted digits, e.g. `2026.8.2` | NIGHTLY |
 | `dev` | every build made any other way | `0.0.0` | DEV |
 
-Remote Access is deliberately offered only by `dev` today. The three distributed channels omit
-its Settings page, clamp the persisted master switch to false, clear an opt-in inherited from a
-development build, and guard the coordinator's final listener start boundary. The runtime guards
-are load-bearing: hiding the page alone would still start the server when a developer installed
-0.1.0 over a dev build that had already enabled it. `release.sh` reads the channel back from the
-exported app, so a mis-stamped shipping bundle fails before notarization.
+Remote Access ships on every channel; Hosted Direct is offered only by `dev`
+(`BuildChannel.offersHostedDirect`). The three distributed channels show the Remote Access page with
+its local ways in — This network, Through a VPN, Tailscale and Tailscale Serve — and omit the Hosted
+Direct row, because [Sign in with Apple cannot be shipped by Developer
+ID](#sign-in-with-apple-cannot-be-shipped-by-developer-id). They hold an inert hosted controller
+with no endpoint and an in-memory store, so they never read a development build's hosted Keychain
+record or contact the hosted service. The master switch stays off by default. A distributed build
+installed over a dev build clears an inherited opt-in once, behind the
+`didClearRemoteAccessForPublicChannel` marker, so it never starts a listener enabled in a different
+build while its own later opt-ins persist. `release.sh` reads the channel back from the exported
+app, so a mis-stamped shipping bundle fails before notarization.
 
 The channel travels the version's road exactly: `release.sh` passes `THREADING_CHANNEL` to
 `xcodebuild archive`, `Info.plist` carries it as `$(THREADING_CHANNEL)` under the
@@ -1154,13 +1166,14 @@ captures. The app is iPhone-only, so the document needs no iPad slides.
 
 ### Before the first App Store submission
 
-**No public Mac build can pair with the iPhone app yet.** `BuildChannel.offersRemoteAccess` is
-true only for `.dev`, so release, beta and nightly Mac builds hide Remote Access and refuse to
-start its listener; its comment says why. TestFlight testers on development builds are
-unaffected, but a customer with Threading 0.1.0 has nothing to pair with. At least the local and
-Tailscale ways in have to reach a public Mac build before the iPhone app is submitted.
-Decided the same day: public builds get the local, VPN and Tailscale ways in, and Threading
-Direct, which needs Sign in with Apple, stays development-only.
+**Public Mac builds can pair with the iPhone app.** Release, beta and nightly Mac builds offer
+Remote Access's local ways in — This network, Through a VPN, Tailscale and Tailscale Serve — so a
+customer's notarized Threading pairs once they turn Remote Access on. Threading Direct, which
+needs Sign in with Apple, stays development-only (`BuildChannel.offersHostedDirect`), so a public
+Mac cannot push to a suspended iPhone: its notifications are Live only. A Mac release carrying
+this has to ship before the iPhone app is submitted, and the first notarized nightly still has to
+be checked for the Local Network and firewall prompts and the protected Keychain (see
+`REMOTE_ACCESS.md`, Distributed-build gate).
 
 Decided 2026-09-13: the app is **Threading Remote**, subtitle "Approve & review coding agents",
 iPhone only, free, in every territory except France, with David Everlöf at support@mjukis.dev as

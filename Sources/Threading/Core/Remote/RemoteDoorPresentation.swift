@@ -14,7 +14,8 @@ enum RemoteAccessWayIn: String, CaseIterable, Sendable {
     case throughAVPN
     /// The `tailscale` door.
     case tailscale
-    /// The hosted rendezvous. Shown only once this Mac is signed in.
+    /// The hosted rendezvous. Shown only by a build that offers Hosted Direct, and only once this
+    /// Mac is signed in (`BuildChannel.offersHostedDirect`).
     case threadingDirect
 
     var title: String {
@@ -141,7 +142,8 @@ struct RemoteAccessDoorsPresentation: Equatable, Sendable {
     /// it, and it never speaks for this Mac in the status row.
     let tailscaleServeIsOn: Bool
     /// Threading Direct is future work and appears only once this Mac is signed in, so a person
-    /// who has not signed in is not offered a way in that cannot carry anything yet.
+    /// who has not signed in is not offered a way in that cannot carry anything yet. A build
+    /// without Hosted Direct never sets it, and its page ignores it.
     let showsThreadingDirect: Bool
     let statuses: [RemoteAccessWayIn: RemoteDoorStatus]
     /// What Serve is doing, and the admin-console page that fixes it when it cannot publish.

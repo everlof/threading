@@ -321,6 +321,33 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
     }
 
+    /// A public build cannot carry Sign in with Apple, so its page has no Hosted Direct row, no
+    /// Apple sign-in button, and no Threading Direct segment — even when it is handed a
+    /// presentation that says this Mac is signed in. The local ways in are unchanged.
+    func testAPublicBuildOmitsHostedDirectAndKeepsTheLocalWaysIn() throws {
+        let development = page(state: .lanBound)
+        XCTAssertNotNil(help(in: development.view, titled: L10n.string("Hosted Direct")))
+        XCTAssertNotNil(view(in: development.view, id: "settings.remote-access.hosted-sign-in"))
+
+        let publicBuild = page(
+            state: .lanBound,
+            showsThreadingDirect: true,
+            hostedDirectIsOffered: false
+        )
+        XCTAssertNil(
+            help(in: publicBuild.view, titled: L10n.string("Hosted Direct")),
+            "a public build offers a sign-in it cannot complete"
+        )
+        XCTAssertFalse(
+            allLabels(in: publicBuild.view).contains { $0.stringValue == L10n.string("Hosted Direct") }
+        )
+        XCTAssertNil(view(in: publicBuild.view, id: "settings.remote-access.hosted-sign-in"))
+        let titles = segmentTitles(in: publicBuild.view)
+        XCTAssertFalse(titles.contains(RemoteAccessWayIn.threadingDirect.title))
+        XCTAssertTrue(titles.contains(RemoteAccessWayIn.thisNetwork.title))
+        XCTAssertTrue(titles.contains(RemoteAccessWayIn.tailscale.title))
+    }
+
     /// Nothing on the page offers, mentions or blames the public relay.
     ///
     /// Two ways in may still say "relay" and mean something true: Tailscale relays encrypted
@@ -1061,7 +1088,8 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                         appearance: appearance,
                         discovery: fixture.discovery,
                         selecting: fixture.wayIn,
-                        showsThreadingDirect: fixture.showsThreadingDirect
+                        showsThreadingDirect: fixture.showsThreadingDirect,
+                        hostedDirectIsOffered: fixture.hostedDirectIsOffered
                     )
                     png = self.pngData(of: page.trimmedToContent().host)
                 }
@@ -1176,11 +1204,13 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         case nothingOn
         /// Signed in, so Threading Direct is a segment.
         case threadingDirect
+        /// A release, beta or nightly build: the local ways in, and no Hosted Direct row.
+        case publicBuild
 
         var state: PageState {
             switch self {
             case .everythingOn, .everythingOnNarrow, .announcedAndCanWake, .cannotWake,
-                 .threadingDirect:
+                 .threadingDirect, .publicBuild:
                 return .lanBound
             case .tailnetServing: return .serveServing
             case .serveNeedsHTTPS: return .serveNeedsHTTPS
@@ -1194,7 +1224,7 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             case .tailnetServing, .serveNeedsHTTPS: return .tailscale
             case .threadingDirect: return .threadingDirect
             case .everythingOn, .everythingOnNarrow, .unreachable, .announcedAndCanWake,
-                 .cannotWake, .nothingOn:
+                 .cannotWake, .nothingOn, .publicBuild:
                 return nil
             }
         }
@@ -1204,6 +1234,8 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         }
 
         var showsThreadingDirect: Bool { self == .threadingDirect }
+
+        var hostedDirectIsOffered: Bool { self != .publicBuild }
 
         var discovery: RemoteDiscoveryPresentation? {
             switch self {
@@ -1224,6 +1256,7 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             case .cannotWake: return "cannot-wake"
             case .nothingOn: return "nothing-on"
             case .threadingDirect: return "threading-direct"
+            case .publicBuild: return "public-build"
             }
         }
     }
@@ -1518,10 +1551,12 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         identity: RemoteIdentityCardPresentation? = nil,
         discovery: RemoteDiscoveryPresentation? = nil,
         selecting wayIn: RemoteAccessWayIn? = nil,
-        showsThreadingDirect: Bool = false
+        showsThreadingDirect: Bool = false,
+        hostedDirectIsOffered: Bool = true
     ) -> Page {
         let controller = RemoteAccessPreferencesViewController(
-            credentialStorageIsShellReachable: credentialStorageIsShellReachable
+            credentialStorageIsShellReachable: credentialStorageIsShellReachable,
+            hostedDirectIsOffered: hostedDirectIsOffered
         )
         let window = NSWindow(
             contentRect: NSRect(

@@ -79,6 +79,25 @@ final class ShareChatSheetTests: XCTestCase {
         XCTAssertTrue(hosted.message.contains("Threading app"))
     }
 
+    /// A development build can point at Hosted Direct; a public build has no Hosted Direct row to
+    /// enable, so it states the private-network requirement and stops there.
+    func testPublicBuildCopyStatesTheNetworkRequirementWithoutHostedDirect() {
+        let development = ShareChatSheet.request(
+            chatTitle: "Fix parser", isRunning: true, hostedDirectIsOffered: true
+        )
+        XCTAssertTrue(development.message.contains("Hosted Direct"))
+
+        let publicBuild = ShareChatSheet.request(
+            chatTitle: "Fix parser", isRunning: true, hostedDirectIsOffered: false
+        )
+        XCTAssertTrue(publicBuild.message.contains("Wi-Fi or tailnet"))
+        XCTAssertTrue(publicBuild.message.contains("Threading app"))
+        XCTAssertFalse(
+            publicBuild.message.contains("Hosted Direct"),
+            "a public build told someone to enable a feature it does not contain"
+        )
+    }
+
     func testViewNeverCarriesApprovalAndDormantChatDefaultsToCollaborating() {
         let running = ShareChatOptionsView(isRunning: true)
         XCTAssertEqual(running.selectedGrant, .view)

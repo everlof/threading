@@ -1021,6 +1021,23 @@ final class RemoteHostedServiceController {
             : InMemoryRemoteHostedServiceStore()
     }
 
+    /// The controller a build that does not offer Hosted Direct holds.
+    ///
+    /// No endpoint, so `start` settles on `.notConfigured` without a request, and nothing can
+    /// issue a device credential, send a hosted push or mint a hosted pairing link. An in-memory
+    /// store, so a public build never reads the hosted Keychain record a development build left
+    /// behind. Both development authentication switches are forced off because they are launch
+    /// environment, and this build does not speak to the service at all.
+    /// See `BuildChannel.offersHostedDirect`.
+    static func notOffered() -> RemoteHostedServiceController {
+        RemoteHostedServiceController(
+            store: InMemoryRemoteHostedServiceStore(),
+            endpoint: nil,
+            localDevelopmentAuthentication: false,
+            developmentBrowserAuthentication: false
+        )
+    }
+
     static func configuredEndpoint(
         preferredEnvironment: RemoteHostedServiceEnvironment = .production,
         bundle: Bundle = .main,

@@ -307,21 +307,22 @@ say "Thinning embedded binaries to $ARCHITECTURE"
 
 # MARK: - Export
 
-# Manual signing, with the profile named explicitly.
+# Manual signing against the Developer ID certificate alone.
 #
-# `automatic` cannot work here and never could. Threading ships
-# `com.apple.developer.applesignin`, a restricted capability, so even a Developer ID build needs
-# a provisioning profile — and automatic signing mints one by asking the Apple ID signed into
-# Xcode. A CI runner has the certificate and no account at all, so the first tagged release
-# would have spent a full build to arrive at:
+# `automatic` cannot work on a CI runner: automatic signing asks the Apple ID signed into Xcode for
+# a profile, and a runner has the certificate and no account, so a tagged release would spend a
+# full build to arrive at:
 #
 #     error: exportArchive Cannot create a Developer ID provisioning profile for "codes.threading".
 #     error: exportArchive No profiles for 'codes.threading' were found
 #
-# Naming the profile removes the account from the picture: the export uses what is installed in
-# ~/Library/MobileDevice/Provisioning Profiles, which the workflow writes from a secret and this
-# machine has from the portal. The profile is a snapshot of the App ID's capabilities when it was
-# issued, so enabling a capability later means re-issuing it — a profile cannot gain one.
+# No profile is named because none is needed: the entitlements file carries no
+# `com.apple.developer.*` key. `com.apple.developer.applesignin` was removed because a Developer ID
+# profile never carries it, so Hosted Direct — the one feature that needed it — is offered only by
+# development builds (`BuildChannel.offersHostedDirect`; see releasing.md, "Sign in with Apple
+# cannot be shipped by Developer ID"). The entitlement preflight above fails in seconds if a
+# restricted key comes back, and a profile is a snapshot of the App ID's capabilities when it was
+# issued, so that key would also mean re-issuing one.
 say "Exporting with Developer ID"
 cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

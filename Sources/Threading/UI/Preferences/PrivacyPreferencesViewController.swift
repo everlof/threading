@@ -287,19 +287,11 @@ final class PrivacyPreferencesViewController: NSViewController {
         return button
     }
 
-    /// Privacy copy for a feature this build does not offer would describe a page the reader
-    /// cannot open. Withheld with the feature rather than reworded, because the honest version of
-    /// these sentences in a build without Remote Access is silence: nothing binds a network
-    /// address, and no notification reaches Apple. See `BuildChannel.offersRemoteAccess`.
-    /// Privacy copy for a feature this build does not offer would describe a page the reader
-    /// cannot open. Withheld with the feature rather than reworded, because the honest version of
-    /// these sentences in a build without Remote Access is silence: nothing binds a network
-    /// address, and no notification reaches Apple. Two properties rather than one because the
-    /// rows belong to different cards, and a row is only honest where it sits.
-    /// See `BuildChannel.offersRemoteAccess`.
+    /// Remote Access ships in every build, so what its listener binds is stated in every build.
+    /// Two properties rather than one because the rows belong to different cards, and a row is
+    /// only honest where it sits.
     private var remoteAccessAttributionRows: [NSView] {
-        guard AppInfo.buildChannel.offersRemoteAccess else { return [] }
-        return [
+        [
             SettingsUI.detailRow(
                 symbol: "network",
                 title: "Remote Access binds only the ways in you turn on",
@@ -311,8 +303,12 @@ final class PrivacyPreferencesViewController: NSViewController {
         ]
     }
 
+    /// A notification reaches Apple only through Hosted Direct's push broker (or a development
+    /// build's explicit APNs override), so a build without Hosted Direct says nothing here: the
+    /// honest sentence there is silence, because live notifications travel only over the
+    /// authenticated connection to the phone. See `BuildChannel.offersHostedDirect`.
     private var remoteAccessEgressRows: [NSView] {
-        guard AppInfo.buildChannel.offersRemoteAccess else { return [] }
+        guard settings.hostedDirectIsOffered else { return [] }
         return [
             SettingsUI.detailRow(
                 symbol: "bell.badge",

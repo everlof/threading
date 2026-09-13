@@ -2666,8 +2666,10 @@ restart, and whether it works away from home.
     tailnet address directly. Turning it on publishes this Mac's name and your tailnet name in
     public certificate logs, so it is off unless you want the browser. Its own status line says
     where it is serving, or which admin-console setting is missing, with the button that opens it.
-- **Threading Direct**. Available after signing in under **Hosted Direct**. Paired iPhones and
-  invited chat guests can connect across networks without a VPN while this Mac is online.
+- **Threading Direct** (development builds only). Available after signing in under **Hosted
+  Direct**. Paired iPhones and invited chat guests can connect across networks without a VPN while
+  this Mac is online. Release, beta and nightly builds do not include Hosted Direct: their page has
+  no Hosted Direct row, and a phone pairs over This network, a VPN or Tailscale.
 
 In a Debug build or Threading's internal `/Applications` build, **Advanced > Developer Settings >
 Hosted service** selects **Production** or the isolated **Development** service. Switching it
@@ -2708,9 +2710,10 @@ webpage with **Continue in browser** and **Open in Threading**. Browser guests d
 account or installed app. Keep the link or bookmark the joined page to return to that chat from
 the same browser; clearing its site data removes the saved access.
 
-With **Hosted Direct** ready, a chat invitation works across networks without Tailscale. Otherwise
-the sheet says the recipient needs access to your Wi-Fi or tailnet. The Mac must remain online
-and awake. **View** follows the chat; **Collaborate** also allows typing and sending prompts.
+With **Hosted Direct** ready (development builds only), a chat invitation works across networks
+without Tailscale. Otherwise, and always in release, beta and nightly builds, the sheet says the
+recipient needs access to your Wi-Fi or tailnet, and a browser guest opens the client this Mac
+serves over that network. The Mac must remain online and awake. **View** follows the chat; **Collaborate** also allows typing and sending prompts.
 Approval separately allows answering permission requests, letting the agent run commands and
 change files without asking you. View requires a running chat, so a dormant chat starts the
 selector at Collaborate with approval off. The sheet stays open while preparing the link, with
@@ -3129,8 +3132,9 @@ Threading does not claim to detect secrets; leave it off for the generic **Finis
 body. Opening one goes directly to its chat;
 permission details and Allow/Deny stay behind the authenticated chat rather than appearing on the
 lock screen. Terminal UI prompts are not parsed, so use the app's **@** control when a person
-needs attention. With APNs provider credentials the notification reaches a suspended phone;
-otherwise the settings page marks the connection **Live only**. For `notify_user`, “me” follows
+needs attention. With Hosted Direct's push service (development builds) the notification reaches a
+suspended phone; otherwise, and always with a release, beta or nightly Mac, the settings page marks
+the connection **Live only**: notifications arrive while Threading on iPhone is connected. For `notify_user`, “me” follows
 whoever wrote the current turn; an explicit request can instead target the owner, everyone in
 this chat, or a named member. Open sessions show the device-aware live roster and **Name is
 typing…** without locking anyone out of a composer; the iPhone exposes separate switches for

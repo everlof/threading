@@ -877,6 +877,11 @@ foregrounds do not reread the store. One latest notification/widget navigation i
 restoration; duplicate notification callbacks retain their existing deduplication contract. The
 recovery screen is host-owned credential custody UI.
 
+The hosted-service record (Hosted Direct's account session and host credential) is its own
+Keychain item, and only a development build opens it. A release, beta or nightly build does not
+offer Hosted Direct, so its hosted controller uses an in-memory store and never reads the record a
+development build left in the same Keychain (`BuildChannel.offersHostedDirect`).
+
 APNs registrations use a third, separate versioned Keychain item under the same storage policy.
 It contains only device-bound delivery metadata — share id, device id, APNs token, environment,
 and enabled/sounding kinds — never a bearer or authorization. On every Remote Access start the

@@ -22,7 +22,7 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
     }
 
     func testDeveloperEnvironmentChoicePersistsAndDefaultsToProduction() {
-        let settings = AppSettings(defaults: defaults, remoteAccessIsOffered: true)
+        let settings = AppSettings(defaults: defaults, hostedDirectIsOffered: true)
 
         XCTAssertEqual(settings.remoteHostedServiceEnvironment, .production)
         settings.remoteHostedServiceEnvironment = .development

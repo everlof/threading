@@ -270,6 +270,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "didMigrateRemoteAccessDoors",
                 valueType: .boolean
             ),
+            .remoteAccessPublicChannelMigration: .init(
+                key: "didClearRemoteAccessForPublicChannel",
+                valueType: .boolean
+            ),
             .remoteAccessTailscaleEnabled: .init(
                 key: "remoteAccessTailscaleEnabled",
                 valueType: .boolean
@@ -459,6 +463,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         // The migration marker is deliberately unseeded: `containsValue` answers for a
         // registered default too, so seeding it would mark every install already migrated.
         XCTAssertNil(defaults["didMigrateRemoteAccessDoors"])
+        XCTAssertNil(defaults["didClearRemoteAccessForPublicChannel"])
         XCTAssertEqual(defaults["preventsIdleSystemSleepWhileAgentsWork"] as? Bool, false)
         XCTAssertEqual(defaults["appTextSize"] as? String, AppTextSize.standard.rawValue)
 
@@ -545,6 +550,23 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
             "Reports from your phone", "Hosted Direct"
         ])
+        // A public build's page has no Hosted Direct sign-in, so its catalogue does not promise
+        // one; every other row is the same on every channel.
+        let publicRemoteAccess = AppSettingDefinitions.definitions(on: .release)
+            .flatMap(\.presentations)
+            .filter { $0.pageID == "remote-access" }
+            .sorted { $0.catalogueOrder < $1.catalogueOrder }
+            .map(\.rowAnchor)
+        XCTAssertEqual(publicRemoteAccess, [
+            "Remote Access", "This network", "Tailscale",
+            "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
+            "Reports from your phone"
+        ])
+        XCTAssertEqual(
+            AppSettingDefinitions.definitions(on: .dev),
+            AppSettingDefinitions.all,
+            "a hosted test bundle is a development build, and must list what one lists"
+        )
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])
         XCTAssertEqual(actual["privacy"], [
             "Files & Folders", "Notifications", "Accessibility", "Screen Recording",

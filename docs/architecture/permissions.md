@@ -124,6 +124,16 @@ require Local Network access (Apple's TN3179 table), which is why the LAN door w
 discovery existed. The `0.0.0.0` handling in `ListeningPort.swift` is about detecting what a
 *user's* dev server binds to, a feature and not one of our own binds.
 
+**The Application Firewall is a separate question, and public builds now ask it.** Remote Access
+ships in release, beta and nightly builds, so a notarized Developer ID build can bind a routable
+address for the first time. The firewall filters incoming connections per application when it is
+on; depending on its settings a listener is allowed, prompted for, or silently blocked, and a
+self-connection to this Mac's own LAN address is not filtered, so the Mac cannot observe the
+verdict. `RemoteFirewallProbe` reads `socketfilterfw` as a hint the page states without ever
+claiming reachability. Whether a notarized build with the default "automatically allow signed
+software" setting is admitted without a prompt has not yet been observed on a nightly; a
+development-signed build is not evidence either way.
+
 What does require it is **advertising**: registering the `_threading._tcp` service that lets a
 phone find a moved Mac is a Bonjour operation, and every Bonjour operation needs the privilege.
 Measured on macOS 26 (see `docs/REMOTE_ACCESS.md`, Discovery): the same binary registers when

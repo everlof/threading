@@ -88,11 +88,12 @@ final class AppSettings {
     /// behaviour. Production still resolves this to `.standard`; hosted tests get the same
     /// per-process scratch suite as every other recorded choice.
     private let userChoiceDefaults: UserDefaults
-    /// A distributed channel currently withholds Remote Access. Keep that policy beside the
-    /// persisted master switch as well as in Settings: a developer may install a release over a
-    /// dev build whose switch was already on, and hiding the page cannot make that stored `true`
-    /// safe. Injected so the shipping case is testable from a hosted dev test bundle.
-    private let remoteAccessIsOffered: Bool
+    /// Whether this build offers Hosted Direct. Remote Access's local ways in ship on every
+    /// channel; the hosted half needs an entitlement Developer ID cannot carry, so only `.dev`
+    /// offers it (`BuildChannel.offersHostedDirect`). Read by the coordinator, the Remote Access
+    /// page, the Privacy page and the share sheet, so a hosted dev test bundle can build a public
+    /// build's graph by injecting `false` here.
+    let hostedDirectIsOffered: Bool
     private let workspaceNavigatorPersistence:
         RecoverableDefaultsStore<WorkspaceNavigatorSelection>
     private var cachedWorkspaceNavigatorSelection: WorkspaceNavigatorSelection
@@ -100,7 +101,7 @@ final class AppSettings {
     init(
         defaults: UserDefaults = .standard,
         legacyPreferences: [String: Any] = [:],
-        remoteAccessIsOffered: Bool = AppInfo.buildChannel.offersRemoteAccess,
+        hostedDirectIsOffered: Bool = AppInfo.buildChannel.offersHostedDirect,
         userChoiceDefaults: UserDefaults? = nil
     ) {
         let workspaceNavigatorPersistence =
@@ -112,7 +113,7 @@ final class AppSettings {
             )
         self.defaults = defaults
         self.userChoiceDefaults = userChoiceDefaults ?? defaults
-        self.remoteAccessIsOffered = remoteAccessIsOffered
+        self.hostedDirectIsOffered = hostedDirectIsOffered
         self.workspaceNavigatorPersistence = workspaceNavigatorPersistence
         self.cachedWorkspaceNavigatorSelection = workspaceNavigatorPersistence.load(
             defaultValue: .native,
@@ -123,7 +124,7 @@ final class AppSettings {
         migrateClosingConfirmation()
         migrateAttentionAlertSoundSwitch()
         migrateRemoteAccessConnectionMode()
-        disableRemoteAccessWhenUnavailable()
+        clearRemoteAccessInheritedByAPublicBuild()
     }
 
     // MARK: - Settings
@@ -1239,16 +1240,8 @@ final class AppSettings {
     /// default: even the loopback-only first milestone exposes interactive terminal access to
     /// any process holding its private link, so it exists only when the user turns it on.
     var remoteAccessEnabled: Bool {
-        get {
-            remoteAccessIsOffered
-                && (AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) ?? false)
-        }
-        set {
-            AppSettingDefinitions.remoteAccessEnabled.write(
-                remoteAccessIsOffered && newValue,
-                to: defaults
-            )
-        }
+        get { AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.remoteAccessEnabled.write(newValue, to: defaults) }
     }
 
     /// The first-party hosted service selected by a developer-enabled build.
@@ -1666,20 +1659,33 @@ final class AppSettings {
         marker.write(true, to: defaults, notifying: false)
     }
 
-    /// A release installed over a development build inherits that build's defaults domain.
-    /// Clear an old opt-in rather than merely masking it, so a later channel that offers Remote
-    /// Access cannot silently resurrect a server the person last enabled in an experimental
-    /// build. Writes no value for the ordinary already-off case.
-    private func disableRemoteAccessWhenUnavailable() {
-        guard !remoteAccessIsOffered,
-              AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) == true else {
+    /// A public build installed over a development build inherits that build's defaults domain,
+    /// including a Remote Access switch turned on while the feature was development-only. Clear
+    /// that opt-in once, so the first public launch never opens a listener the person enabled in a
+    /// different build; the marker then records that the public build has taken ownership of the
+    /// switch, and every later opt-in made in a public build persists like any other setting.
+    ///
+    /// A development build offers Hosted Direct and inherits nothing it did not already offer, so
+    /// it runs nothing here and writes no marker. The marker is written last and never seeded, so
+    /// an interrupted run repeats; a repeat finds the marker and stops. Writes suppress
+    /// notification because this runs while the settings object is still being built, and a
+    /// hosted test bundle's real defaults domain is left alone for the reason
+    /// `migrateRemoteAccessConnectionMode` states.
+    private func clearRemoteAccessInheritedByAPublicBuild() {
+        guard !hostedDirectIsOffered,
+              defaults != .standard || Self.importsLegacyPreferencesForSharedProcess else {
             return
         }
-        AppSettingDefinitions.remoteAccessEnabled.write(
-            false,
-            to: defaults,
-            notifying: false
-        )
+        let marker = AppSettingDefinitions.remoteAccessPublicChannelMigration
+        guard !marker.containsValue(in: defaults) else { return }
+        if AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) == true {
+            AppSettingDefinitions.remoteAccessEnabled.write(
+                false,
+                to: defaults,
+                notifying: false
+            )
+        }
+        marker.write(true, to: defaults, notifying: false)
     }
 
     /// The stored values the retired connection mode left behind, named once so the migration

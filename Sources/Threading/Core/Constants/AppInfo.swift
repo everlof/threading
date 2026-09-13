@@ -78,24 +78,27 @@ public enum BuildChannel: String, CaseIterable {
         self = (infoValue as? String).flatMap(BuildChannel.init(rawValue:)) ?? .dev
     }
 
-    /// Whether a build on this channel offers Remote Access at all.
+    /// Whether a build on this channel offers Hosted Direct — Threading Direct's Sign in with
+    /// Apple enrollment, hosted rendezvous and TURN, hosted push, hosted device credentials and
+    /// the hosted pairing link.
     ///
-    /// The feature works and is tested, but it is not something the first distributed builds
-    /// support, so they do not show the door. The same decision is enforced at the persisted
-    /// setting and coordinator start boundary: installing a release over a development build
-    /// that had Remote Access enabled clears the old opt-in and cannot start a listener. Nothing
-    /// is stripped, nothing has to be put back, and a development build keeps the feature.
+    /// Remote Access itself ships on every channel. Its local ways in — This network, Through a
+    /// VPN, Tailscale and the Tailscale Serve browser convenience — are listeners this Mac binds
+    /// and certificates it holds, so a notarized build can pair the Threading iPhone app with
+    /// nothing the distribution method withholds. They stay off until the person turns Remote
+    /// Access on.
     ///
-    /// A distributed build could not offer the whole feature anyway. Hosted Direct needs
-    /// `com.apple.developer.applesignin` to enroll the Mac as a host, and that entitlement never
-    /// reaches a Developer ID provisioning profile — see `releasing.md`, "Sign in with Apple
-    /// cannot be shipped by Developer ID". So a notarized build's Remote Access page could only
-    /// ever advertise the local and Tailscale doors while the pairing story it is named for
-    /// silently did not work. Showing that is worse than showing nothing.
+    /// Hosted Direct cannot ship that way. Enrolling the Mac as a host needs
+    /// `com.apple.developer.applesignin`, and that entitlement never reaches a Developer ID
+    /// provisioning profile — see `releasing.md`, "Sign in with Apple cannot be shipped by
+    /// Developer ID". A public build therefore builds an inert hosted controller: no endpoint, an
+    /// in-memory store, no Keychain read of a development build's hosted record and no request to
+    /// the hosted service. Its Settings page omits the Hosted Direct row rather than offering a
+    /// sign-in button that cannot work.
     ///
-    /// `.dev` is the channel every uninjected build lands on, so working on Remote Access needs
+    /// `.dev` is the channel every uninjected build lands on, so working on Hosted Direct needs
     /// no flag: build it the ordinary way and it is there.
-    public var offersRemoteAccess: Bool {
+    public var offersHostedDirect: Bool {
         switch self {
         case .dev: true
         case .nightly, .beta, .release: false

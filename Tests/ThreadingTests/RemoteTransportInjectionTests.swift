@@ -93,30 +93,10 @@ final class RemoteTransportInjectionTests: XCTestCase {
         XCTAssertGreaterThan(tailnet.stopCount, 0)
     }
 
-    func testUnavailableBuildRefusesAProgrammaticEnableBeforeStartingAnything() {
-        let activity = RecordingRemoteAccessProcessActivity()
-        let settings = isolatedAppSettings(remoteAccessIsOffered: false)
-        let coordinator = RemoteAccessCoordinator(
-            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
-            appSettings: settings,
-            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
-            tailnetTransport: RecordingTailnetTransport(),
-            processActivity: activity
-        )
-
-        coordinator.setEnabled(true)
-
-        XCTAssertFalse(settings.remoteAccessEnabled)
-        XCTAssertEqual(activity.beginCount, 0, "the listener start boundary was crossed")
-    }
-
-    private func isolatedAppSettings(remoteAccessIsOffered: Bool = true) -> AppSettings {
+    private func isolatedAppSettings() -> AppSettings {
         let name = "RemoteTransportInjectionTests.\(UUID().uuidString)"
         suiteNames.append(name)
-        return AppSettings(
-            defaults: UserDefaults(suiteName: name)!,
-            remoteAccessIsOffered: remoteAccessIsOffered
-        )
+        return AppSettings(defaults: UserDefaults(suiteName: name)!)
     }
 }
 
@@ -237,6 +217,35 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
 
         coordinator.setTailscaleServeEnabled(false)
         XCTAssertGreaterThan(tailnet.stopCount, 0, "switching Serve off left it running")
+    }
+
+    /// Public builds ship the local ways in. A build that does not offer Hosted Direct crosses the
+    /// same listener start boundary a development build does, starts no child, and leaves its
+    /// hosted half inert.
+    func testAPublicBuildStartsTheListenerWhileHostedDirectStaysInert() throws {
+        let activity = RecordingRemoteAccessProcessActivity()
+        let tailnet = RecordingTailnetTransport()
+        let settings = isolatedAppSettings(hostedDirectIsOffered: false)
+        settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
+        settings.remoteAccessDoors = []
+        settings.remoteAccessTailscaleEnabled = false
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            tailnetTransport: tailnet,
+            processActivity: activity
+        )
+        coordinators.append(coordinator)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+
+        XCTAssertTrue(settings.remoteAccessEnabled)
+        XCTAssertEqual(activity.beginCount, 1, "the public build never crossed the start boundary")
+        XCTAssertEqual(tailnet.startedPorts, [], "a way in that is off started its transport")
+        XCTAssertEqual(coordinator.hostedServiceState, .notConfigured)
+        XCTAssertFalse(coordinator.canIssueHostedDeviceCredentials)
     }
 
     func testRemoteAccessPreventsAppNapOnlyWhileItsListenerIsAvailable() throws {
@@ -377,12 +386,12 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         XCTFail("the listener never reported itself listening: \(coordinator.status)")
     }
 
-    private func isolatedAppSettings() -> AppSettings {
+    private func isolatedAppSettings(hostedDirectIsOffered: Bool = true) -> AppSettings {
         let name = "RemoteAccessDoorTransportTests.\(UUID().uuidString)"
         suiteNames.append(name)
         let defaults = UserDefaults(suiteName: name)!
         defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
-        return AppSettings(defaults: defaults)
+        return AppSettings(defaults: defaults, hostedDirectIsOffered: hostedDirectIsOffered)
     }
 }
 

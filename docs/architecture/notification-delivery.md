@@ -4,6 +4,13 @@ Read this with [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), which owns the user
 notification and privacy contract. This note owns the implementation seams that must remain true
 when routine turn-completion delivery changes.
 
+**A public Mac build is Live only.** Push to a suspended iPhone goes through the hosted broker,
+which only a development build offers (`BuildChannel.offersHostedDirect`). A release, beta or
+nightly build's hosted controller has no endpoint, so `canSendHostedPush` is false and the push and
+retraction sinks report unavailable; `RemoteAPNSPushSender.fromEnvironment` is compiled only into
+Debug and internal builds. Every policy below still runs, and delivery reaches the phone over the
+authenticated live connection alone.
+
 ## Explicit lifetimes share one activity source and transport
 
 `RemoteNotificationKind.lifecycle` exhaustively classifies each kind as a completed turn, an

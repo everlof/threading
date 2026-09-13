@@ -67,6 +67,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteNotificationMacActivityWindow
     case remoteHostedServiceEnvironment
     case remoteAccessDoorMigration
+    case remoteAccessPublicChannelMigration
     case remoteAccessTailscaleEnabled
     case remoteAccessTailscaleServeEnabled
     case remoteAccessListenerPort
@@ -1196,6 +1197,18 @@ enum AppSettingDefinitions {
         absence: .falseValue,
         notification: .none
     )
+    /// Written the first time a public build (one that does not offer Hosted Direct) launches,
+    /// after it has cleared a Remote Access switch inherited from a development build.
+    ///
+    /// Never seeded, because `containsValue` answers for a registered default too and a seeded
+    /// marker would skip the clear on every install. Its presence is what lets a later opt-in in a
+    /// public build survive the next launch.
+    static let remoteAccessPublicChannelMigration = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessPublicChannelMigration,
+        persistenceKey: "didClearRemoteAccessForPublicChannel",
+        absence: .falseValue,
+        notification: .none
+    )
     /// The port the listener tries first.
     ///
     /// Editable because the port is now sticky: a sticky port that collides with something else
@@ -1434,6 +1447,7 @@ enum AppSettingDefinitions {
         .init(remoteAccessEnabled),
         .init(remoteHostedServiceEnvironment),
         .init(remoteAccessDoorMigration),
+        .init(remoteAccessPublicChannelMigration),
         .init(remoteAccessListenerPort),
         .init(remoteViewportLeaseGraceSeconds),
         // In catalogue order: the ways in, then the browser convenience under the tailnet one.
@@ -1486,8 +1500,9 @@ enum AppSettingDefinitions {
                   "rate limit", "session limit"),
         // Sign-in rather than a stored setting, so it is surfaced instead of persisted. It used
         // to borrow the connection mode's second presentation, and that descriptor is now a
-        // migration record with no row of its own.
-        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 7,
+        // migration record with no row of its own. Only a channel that offers Hosted Direct
+        // lists it; see `definitions(on:)`.
+        surfaced(hostedDirectIdentity, pageID: "remote-access", order: 7,
                   section: "Connection", title: "Hosted Direct",
                   "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,
@@ -1533,8 +1548,21 @@ enum AppSettingDefinitions {
                   "install", "symlink", "PATH", "terminal", "threading-ptyd", ".local/bin")
     ]
 
-    static let all: [AppSettingDefinition] =
-        persistedDescriptors.map(\.definition) + surfaceDefinitions
+    /// The Hosted Direct sign-in row's identity. The row describes a control a public build's
+    /// Remote Access page does not contain, so a search there must not promise it.
+    static let hostedDirectIdentity = "remoteAccess.hostedDirect"
+
+    /// Every definition a build on `channel` carries, in catalogue order.
+    ///
+    /// Takes the channel rather than reading it, so a test can ask what a public build lists
+    /// without the host bundle being one — a hosted test bundle carries no channel and is `.dev`.
+    static func definitions(on channel: BuildChannel) -> [AppSettingDefinition] {
+        persistedDescriptors.map(\.definition) + surfaceDefinitions.filter { definition in
+            channel.offersHostedDirect || definition.identity != hostedDirectIdentity
+        }
+    }
+
+    static let all: [AppSettingDefinition] = definitions(on: AppInfo.buildChannel)
 
     private static let catalogue = AppSettingDefinitionCatalogue(definitions: all)
     private static let persistedByIdentity = Dictionary(

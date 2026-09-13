@@ -23,6 +23,10 @@ struct RemoteCredentialStoragePresentation: Equatable {
 final class RemoteAccessPreferencesViewController: NSViewController {
 
     private let credentialStorageIsShellReachable: Bool
+    /// Whether this build offers Hosted Direct. A build that does not — every public channel —
+    /// omits the Hosted Direct row, never creates the Sign in with Apple helper, and never offers
+    /// Threading Direct as a way in. See `BuildChannel.offersHostedDirect`.
+    private let hostedDirectIsOffered: Bool
 
     // MARK: - Controls
 
@@ -98,7 +102,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let identityPrepareButton = ThemedButton()
     private let identityActivateButton = ThemedButton()
     private var identityTask: Task<Void, Never>?
-    private let hostedSignInButton = HostedServiceSignInButton()
+    /// Lazy so a build without Hosted Direct never constructs Apple's sign-in button.
+    private lazy var hostedSignInButton = HostedServiceSignInButton()
     private let hostedSignOutButton = ThemedButton()
     private let hostedDeleteAccountButton = ThemedButton()
     private let hostedStatusLabel = NSTextField(labelWithString: "")
@@ -123,7 +128,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
-    private let hostedAppleSignIn = RemoteHostedAppleSignIn()
+    private let hostedAppleSignIn: RemoteHostedAppleSignIn?
     private var hostedAccountTask: Task<Void, Never>?
     private var hostedAccountError: String?
     private let appEvents = AppEventObservations()
@@ -131,9 +136,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     init(
-        credentialStorageIsShellReachable: Bool = KeychainStoragePolicy.isShellReachable
+        credentialStorageIsShellReachable: Bool = KeychainStoragePolicy.isShellReachable,
+        hostedDirectIsOffered: Bool = AppSettings.shared.hostedDirectIsOffered
     ) {
         self.credentialStorageIsShellReachable = credentialStorageIsShellReachable
+        self.hostedDirectIsOffered = hostedDirectIsOffered
+        hostedAppleSignIn = hostedDirectIsOffered ? RemoteHostedAppleSignIn() : nil
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -250,29 +258,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             "settings.remote-access.identity-activate"
         )
 
-        hostedSignInButton.configure(target: self, action: #selector(signInHostedService))
-        hostedSignInButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-in")
-        hostedSignOutButton.title = L10n.string("Sign Out")
-        hostedSignOutButton.target = self
-        hostedSignOutButton.action = #selector(signOutHostedService)
-        hostedSignOutButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-out")
-        hostedDeleteAccountButton.title = L10n.string("Delete Account")
-        hostedDeleteAccountButton.target = self
-        hostedDeleteAccountButton.action = #selector(deleteHostedServiceAccount)
-        hostedDeleteAccountButton.setAccessibilityIdentifier(
-            "settings.remote-access.hosted-delete-account"
-        )
-        hostedStatusLabel.applyFont(.subheading)
-        hostedStatusLabel.textColor = Design.Text.secondary
-        hostedSpinner.setAccessibilityLabel(L10n.string("Connecting…"))
-        hostedAccountControls.orientation = .horizontal
-        hostedAccountControls.alignment = .centerY
-        hostedAccountControls.spacing = Design.Spacing.small
-        hostedAccountControls.addArrangedSubview(hostedSpinner)
-        hostedAccountControls.addArrangedSubview(hostedStatusLabel)
-        hostedAccountControls.addArrangedSubview(hostedSignInButton)
-        hostedAccountControls.addArrangedSubview(hostedSignOutButton)
-        hostedAccountControls.addArrangedSubview(hostedDeleteAccountButton)
+        if hostedDirectIsOffered { configureHostedAccountControls() }
 
         inputControlDefault.configure(
             titles: RemoteInputControlDefault.allCases.map(\.title),
@@ -559,10 +545,38 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         )
     }
 
+    /// The Hosted Direct account row's controls. Configured only in a build that offers Hosted
+    /// Direct, because the row that holds them exists only there.
+    private func configureHostedAccountControls() {
+        hostedSignInButton.configure(target: self, action: #selector(signInHostedService))
+        hostedSignInButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-in")
+        hostedSignOutButton.title = L10n.string("Sign Out")
+        hostedSignOutButton.target = self
+        hostedSignOutButton.action = #selector(signOutHostedService)
+        hostedSignOutButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-out")
+        hostedDeleteAccountButton.title = L10n.string("Delete Account")
+        hostedDeleteAccountButton.target = self
+        hostedDeleteAccountButton.action = #selector(deleteHostedServiceAccount)
+        hostedDeleteAccountButton.setAccessibilityIdentifier(
+            "settings.remote-access.hosted-delete-account"
+        )
+        hostedStatusLabel.applyFont(.subheading)
+        hostedStatusLabel.textColor = Design.Text.secondary
+        hostedSpinner.setAccessibilityLabel(L10n.string("Connecting…"))
+        hostedAccountControls.orientation = .horizontal
+        hostedAccountControls.alignment = .centerY
+        hostedAccountControls.spacing = Design.Spacing.small
+        hostedAccountControls.addArrangedSubview(hostedSpinner)
+        hostedAccountControls.addArrangedSubview(hostedStatusLabel)
+        hostedAccountControls.addArrangedSubview(hostedSignInButton)
+        hostedAccountControls.addArrangedSubview(hostedSignOutButton)
+        hostedAccountControls.addArrangedSubview(hostedDeleteAccountButton)
+    }
+
     // MARK: - Connection
 
     private func connectionCard() -> SettingsCard {
-        SettingsCard(rows: [
+        var rows: [NSView] = [
             SettingsUI.row(
                 title: "Remote Access",
                 subtitle: "Turning it off closes every connection and shared-chat link.",
@@ -575,8 +589,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     ]
                 ),
                 control: remoteAccessToggle
-            ),
-            SettingsUI.row(
+            )
+        ]
+        // A public build cannot carry the Sign in with Apple entitlement, so it offers no sign-in
+        // row rather than a button that could never enroll this Mac.
+        if hostedDirectIsOffered {
+            rows.append(SettingsUI.row(
                 title: "Hosted Direct",
                 subtitle: "Uses Threading’s service only to introduce this Mac and iPhone.",
                 help: HelpTopic(
@@ -589,9 +607,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     ]
                 ),
                 control: hostedAccountControls
-            ),
-            SettingsUI.fullRow(connectionStatusRow())
-        ])
+            ))
+        }
+        rows.append(SettingsUI.fullRow(connectionStatusRow()))
+        return SettingsCard(rows: rows)
     }
 
     private func connectionStatusRow() -> NSView {
@@ -1080,7 +1099,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         openLocallyButton.isHidden = coordinator.localURL == nil
         openLocallyButton.isEnabled = coordinator.localURL != nil
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
-        updateHostedAccount(coordinator)
+        if hostedDirectIsOffered { updateHostedAccount(coordinator) }
         apply(doors)
         apply(discoveryPresentation(coordinator))
 
@@ -1176,14 +1195,17 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 state: doorState,
                 facts: facts
             )
-            statuses[.threadingDirect] = .threadingDirect(coordinator.hostedServiceState)
+            if hostedDirectIsOffered {
+                statuses[.threadingDirect] = .threadingDirect(coordinator.hostedServiceState)
+            }
             serve = .tailscaleServe(
                 isEnabled: coordinator.isTailscaleServeEnabled,
                 transport: coordinator.tailscaleServeStatus,
                 readiness: coordinator.tailscaleServeReadiness
             )
         } else {
-            for wayIn in RemoteAccessWayIn.allCases where wayIn != .throughAVPN {
+            for wayIn in RemoteAccessWayIn.allCases where wayIn != .throughAVPN
+                && (wayIn != .threadingDirect || hostedDirectIsOffered) {
                 statuses[wayIn] = .remoteAccessOff()
             }
             serve = .remoteAccessOff()
@@ -1193,7 +1215,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             thisNetworkIsOn: coordinator.isThisNetworkDoorEnabled,
             tailscaleIsOn: coordinator.isTailscaleDoorEnabled,
             tailscaleServeIsOn: coordinator.isTailscaleServeEnabled,
-            showsThreadingDirect: coordinator.canIssueHostedDeviceCredentials,
+            showsThreadingDirect: hostedDirectIsOffered
+                && coordinator.canIssueHostedDeviceCredentials,
             statuses: statuses,
             serveStatus: serve,
             serveRemedy: RemoteDoorStatus.serveRemedy(coordinator.tailscaleServeReadiness),
@@ -1255,9 +1278,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         tailscaleServeToggle.state = doors.tailscaleServeIsOn ? .on : .off
 
         // Threading Direct joins the run when this Mac signs in, and takes the selection with it
-        // only if the segment somebody was on has gone.
+        // only if the segment somebody was on has gone. A build without Hosted Direct never
+        // offers it, whatever presentation it is handed.
         var offered: [RemoteAccessWayIn] = [.thisNetwork, .tailscale]
-        if doors.showsThreadingDirect { offered.append(.threadingDirect) }
+        if hostedDirectIsOffered && doors.showsThreadingDirect { offered.append(.threadingDirect) }
         waysIn = offered
         if !offered.contains(selectedWayIn) { selectedWayIn = offered[0] }
 
@@ -1467,7 +1491,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     }
 
     @objc private func signInHostedService() {
-        guard hostedAccountTask == nil, let window = view.window else { return }
+        guard hostedDirectIsOffered, hostedAccountTask == nil, let window = view.window,
+              let hostedAppleSignIn else { return }
         hostedAccountError = nil
         refresh()
         hostedAccountTask = Task { [weak self] in
@@ -1490,7 +1515,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     }
 
     @objc private func signOutHostedService() {
-        guard hostedAccountTask == nil else { return }
+        guard hostedDirectIsOffered, hostedAccountTask == nil else { return }
         hostedAccountError = nil
         refresh()
         hostedAccountTask = Task { [weak self] in
@@ -1506,7 +1531,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     }
 
     @objc private func deleteHostedServiceAccount() {
-        guard hostedAccountTask == nil else { return }
+        guard hostedDirectIsOffered, hostedAccountTask == nil else { return }
         let request = ConfirmationRequest(
             prompt: .deleteHostedServiceAccount,
             title: L10n.string("Delete hosted account?"),

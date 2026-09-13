@@ -532,6 +532,7 @@ enum ShareChatSheet {
             chatTitle: session.displayTitle,
             isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID),
             hosted: RemoteAccessCoordinator.shared.hostedServiceState == .ready,
+            hostedDirectIsOffered: AppSettings.shared.hostedDirectIsOffered,
             accessory: form
         ))
         alert.initialFirstResponder = form.role
@@ -563,15 +564,22 @@ enum ShareChatSheet {
         alert.shouldChooseButton = nil
     }
 
+    /// `hostedDirectIsOffered` decides whether the private-network sentence may point at Hosted
+    /// Direct: a public build has no Hosted Direct row to enable, so it states the requirement
+    /// and stops. See `BuildChannel.offersHostedDirect`.
     static func request(
-        chatTitle: String, isRunning: Bool, hosted: Bool = false, accessory: NSView? = nil
+        chatTitle: String, isRunning: Bool, hosted: Bool = false,
+        hostedDirectIsOffered: Bool = AppInfo.buildChannel.offersHostedDirect,
+        accessory: NSView? = nil
     ) -> ChoiceRequest {
         ChoiceRequest(
             prompt: .shareChatLink,
             title: L10n.format("Share “%@”", chatTitle),
             message: hosted
                 ? L10n.string("Invite someone in the Threading app, from any network.")
-                : L10n.string("Requires the Threading app and access to your Wi-Fi or tailnet. Enable Hosted Direct to invite someone outside your network."),
+                : hostedDirectIsOffered
+                    ? L10n.string("Requires the Threading app and access to your Wi-Fi or tailnet. Enable Hosted Direct to invite someone outside your network.")
+                    : L10n.string("Requires the Threading app and access to your Wi-Fi or tailnet."),
             options: [ConfirmationOption(title: L10n.string("Copy Link"))],
             style: .informational,
             accessory: accessory ?? grantsAccessory(isRunning: isRunning)

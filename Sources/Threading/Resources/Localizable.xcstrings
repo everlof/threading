@@ -35467,6 +35467,17 @@
         }
       }
     },
+    "Requires the Threading app and access to your Wi-Fi or tailnet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kräver Threading-appen och åtkomst till ditt Wi-Fi eller tailnet."
+          }
+        }
+      }
+    },
     "Requires the Threading app and access to your Wi-Fi or tailnet. Enable Hosted Direct to invite someone outside your network." : {
       "extractionState" : "manual",
       "localizations" : {

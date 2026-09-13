@@ -192,11 +192,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         hostedServiceWasInjected = hostedService != nil
-        self.hostedService = hostedService ?? RemoteHostedServiceController(
-            endpoint: RemoteHostedServiceController.configuredEndpoint(
-                preferredEnvironment: appSettings.remoteHostedServiceEnvironment
+        // A build that does not offer Hosted Direct holds an inert controller rather than none,
+        // so every hosted branch — push, the pairing link, guest invitations, device credentials
+        // — resolves through the `.notConfigured` state it already handles, and nothing reads the
+        // hosted Keychain record or contacts the service.
+        self.hostedService = hostedService ?? (appSettings.hostedDirectIsOffered
+            ? RemoteHostedServiceController(
+                endpoint: RemoteHostedServiceController.configuredEndpoint(
+                    preferredEnvironment: appSettings.remoteHostedServiceEnvironment
+                )
             )
-        )
+            : RemoteHostedServiceController.notOffered())
         self.processActivity = processActivity ?? RemoteAccessProcessActivity()
         server.authorizer = authority
         server.invitationRedeemer = self
@@ -488,6 +494,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         authorizationCode: String,
         rawNonce: String
     ) async throws {
+        // The page offers no sign-in in a build without Hosted Direct; this refuses a caller that
+        // reaches it anyway, before any Apple credential is sent anywhere.
+        guard appSettings.hostedDirectIsOffered else { throw PeerControlPlaneError.invalidEndpoint }
         try await hostedService.signInWithApple(
             identityToken: identityToken,
             authorizationCode: authorizationCode,
@@ -496,11 +505,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     func signOutHostedService() async throws {
+        guard appSettings.hostedDirectIsOffered else { throw PeerControlPlaneError.invalidEndpoint }
         try await hostedService.signOut()
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
     func deleteHostedServiceAccount() async throws {
+        guard appSettings.hostedDirectIsOffered else { throw PeerControlPlaneError.invalidEndpoint }
         try await hostedService.deleteAccount()
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
@@ -1871,7 +1882,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// connections, and the Threading process stay alive.
     func setHostedServiceEnvironment(_ environment: RemoteHostedServiceEnvironment) {
 #if DEBUG || THREADING_INTERNAL
-        guard !hostedServiceWasInjected,
+        guard appSettings.hostedDirectIsOffered,
+              !hostedServiceWasInjected,
               !RemoteHostedServiceController.hasConfiguredEndpointOverride(),
               appSettings.remoteHostedServiceEnvironment != environment else { return }
         appSettings.remoteHostedServiceEnvironment = environment
@@ -1985,9 +1997,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private func start() {
-        // This is the last runtime boundary, not a UI assumption. Distributed builds clamp the
-        // stored switch off, including when installed over a dev build that had it enabled; a
-        // future caller added inside this type still cannot open a listener on those channels.
+        // This is the last runtime boundary, not a UI assumption: no caller inside this type opens
+        // a listener unless the persisted master switch is on. Every channel may turn it on. A
+        // public build clears a switch it inherited from a development build once, at launch
+        // (`AppSettings`), so it never starts a listener somebody enabled in a different build.
         guard appSettings.remoteAccessEnabled else { return }
         switch status {
         case .disabled:
