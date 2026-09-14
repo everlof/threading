@@ -100,6 +100,15 @@ final class SimulatorScreenView: ThemedControl {
         }
     }
 
+    /// Input made visible — tap ripples and swipe trails over the framebuffer. Driven by the pane
+    /// from the same touches it sends (yours and the agent's).
+    var touchIndicators: SimulatorTouchIndicators? {
+        didSet {
+            guard touchIndicators != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     /// While on, a click pins or selects a note instead of touching the device.
     var isAnnotatingNotes = false
 
@@ -187,6 +196,13 @@ final class SimulatorScreenView: ThemedControl {
 
         drawAnnotations(in: target)
         drawNoteMarks(in: target)
+
+        if let touchIndicators {
+            NSGraphicsContext.saveGraphicsState()
+            ThemedSurface.Shape(rect: target, radius: Design.Radius.control).path.addClip()
+            SimulatorTouchMarks.draw(touchIndicators, in: target)
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 
     /// The person's numbered note pins, in the app's shared annotation vocabulary. The view is not

@@ -211,6 +211,23 @@ final class SimulatorPaneViewController: NSViewController {
 
     private var captureMenuSession: AnyObject?
 
+    private lazy var showTouchesButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "hand.point.up.left",
+            accessibility: L10n.string("Show touches"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Show taps and swipes on the device")
+        button.onPress = { [weak self] in self?.toggleShowTouches() }
+        button.setAccessibilityIdentifier("simulator.showTouches")
+        return button
+    }()
+
+    private let touchOverlayModel = SimulatorTouchOverlayModel()
+    private var showTouches = false
+    private var touchDisplayTimer: Timer?
+
     private lazy var exportNotesButton: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: "square.and.arrow.up",
@@ -259,7 +276,7 @@ final class SimulatorPaneViewController: NSViewController {
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
         trailing: [
-            captureButton, annotateButton, exportNotesButton, inspectButton,
+            captureButton, showTouchesButton, annotateButton, exportNotesButton, inspectButton,
             appearanceButton, controlButton, retryButton,
         ]
     )
@@ -1032,6 +1049,7 @@ final class SimulatorPaneViewController: NSViewController {
     /// dropped move is corrected by the next one. `ended` is likewise ordered after the last move.
     private func beginTouchStream(at point: CGPoint) {
         guard let device = lease?.device else { return }
+        feedTouchOverlay { $0.contactBegan(at: point) }
         touchStreamActive = true
         touchStreamSession = nil
         bufferedTouchMove = nil
@@ -1061,6 +1079,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func moveTouchStream(to point: CGPoint) {
         guard touchStreamActive else { return }
+        feedTouchOverlay { $0.contactMoved(to: point) }
         guard let session = touchStreamSession else {
             bufferedTouchMove = point // authorization still in flight; send the latest once ready
             return
@@ -1070,6 +1089,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func endTouchStream(at point: CGPoint) {
         guard touchStreamActive else { return }
+        feedTouchOverlay { $0.contactEnded(at: point) }
         touchStreamActive = false
         bufferedTouchMove = nil
         let session = touchStreamSession
@@ -1078,6 +1098,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func submitInput(_ input: SimulatorBridgeInput) {
+        showInputInOverlay(input)
         if liveCapabilities == nil || effectiveControlDecision != true {
             controlActivity = .connecting
             renderState()
@@ -1131,6 +1152,7 @@ final class SimulatorPaneViewController: NSViewController {
         _ input: SimulatorBridgeInput,
         completion: @escaping @MainActor @Sendable (SimulatorPaneAgentResult<Void>) -> Void
     ) {
+        showInputInOverlay(input)
         sendInput(input, completion: completion)
     }
 
@@ -1634,6 +1656,67 @@ final class SimulatorPaneViewController: NSViewController {
             return nil
         }
         return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+    }
+
+    // MARK: - Show touches
+
+    private func toggleShowTouches() {
+        showTouches.toggle()
+        showTouchesButton.setAccessibilityValue(showTouches ? "on" : "off")
+        showTouchesButton.isSelected = showTouches
+        if !showTouches {
+            touchDisplayTimer?.invalidate()
+            touchDisplayTimer = nil
+            screenView.touchIndicators = nil
+        }
+    }
+
+    /// Record an input event into the touch overlay and make sure it is animating. No-op unless the
+    /// overlay is on, so it costs nothing when hidden.
+    private func feedTouchOverlay(_ apply: (SimulatorTouchOverlayModel) -> Void) {
+        guard showTouches else { return }
+        apply(touchOverlayModel)
+        guard touchDisplayTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickTouchOverlay() }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        touchDisplayTimer = timer
+    }
+
+    private func tickTouchOverlay() {
+        let indicators = touchOverlayModel.indicators()
+        screenView.touchIndicators = indicators.isEmpty ? nil : indicators
+        if !touchOverlayModel.hasActivity {
+            touchDisplayTimer?.invalidate()
+            touchDisplayTimer = nil
+            screenView.touchIndicators = nil
+        }
+    }
+
+    /// Feed the overlay from an input the pane or an agent sends (both routes converge here).
+    private func showInputInOverlay(_ input: SimulatorBridgeInput) {
+        switch input {
+        case .tap(let x, let y):
+            feedTouchOverlay { $0.tap(at: CGPoint(x: x, y: y)) }
+        case .drag(let fromX, let fromY, let toX, let toY, _):
+            feedTouchOverlay {
+                $0.contactBegan(at: CGPoint(x: fromX, y: fromY))
+                $0.contactMoved(to: CGPoint(x: toX, y: toY))
+                $0.contactEnded(at: CGPoint(x: toX, y: toY))
+            }
+        case .touch(let phase, let x, let y):
+            let point = CGPoint(x: x, y: y)
+            feedTouchOverlay {
+                switch phase {
+                case .began: $0.contactBegan(at: point)
+                case .moved: $0.contactMoved(to: point)
+                case .ended, .cancelled: $0.contactEnded(at: point)
+                }
+            }
+        case .text, .button:
+            break
+        }
     }
 
     /// Briefly show a confirmation in the status line, then restore the normal state.

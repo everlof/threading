@@ -40451,6 +40451,17 @@
         }
       }
     },
+    "Show taps and swipes on the device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa tryck och svep på enheten"
+          }
+        }
+      }
+    },
     "Show the QR code for the Claude mobile app" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40546,6 +40557,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa sessionens konfiguration och tokenanvändning"
+          }
+        }
+      }
+    },
+    "Show touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa tryck"
           }
         }
       }
