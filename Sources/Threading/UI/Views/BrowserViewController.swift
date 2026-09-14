@@ -774,6 +774,12 @@ final class BrowserViewController: NSViewController {
         annotationOverlay.onDismiss = { [weak self] in
             self?.setAnnotationMode(false)
         }
+        annotationOverlay.onDelete = { [weak self] identifier in
+            self?.deleteAnnotation(identifier: identifier)
+        }
+        annotationOverlay.onClearAll = { [weak self] in
+            self?.clearAnnotations()
+        }
         annotationOverlay.onTargetProbe = { [weak self] point in
             self?.updateAnnotationTarget(at: point)
         }
@@ -2696,11 +2702,43 @@ final class BrowserViewController: NSViewController {
         editor.onCancel = { [weak self] in self?.finishAnnotationEditing(save: false) }
         editor.onDelete = { [weak self] in
             guard let self, let draft = self.annotationDraft else { return }
-            self.annotationsByPage[draft.url]?.removeAll { $0.id == draft.id }
-            self.finishAnnotationEditing(save: false)
+            self.deleteAnnotation(identifier: draft.id)
         }
         annotationOverlay.showEditor(editor, at: point)
         updateAnnotationOverlay()
+    }
+
+    /// Remove one annotation and refresh — the shared path for the editor's delete button and the
+    /// overlay's Delete key.
+    func deleteAnnotation(identifier: Int) {
+        forgetAnnotations([identifier])
+        if annotationDraft?.id == identifier {
+            annotationDraft = nil
+            annotationOverlay.removeEditor()
+        }
+        updateAnnotationOverlay()
+        refreshAnnotationAnchors()
+        refreshAnnotationTargetUnderPointer()
+    }
+
+    /// Remove every annotation on the active page at once.
+    func clearAnnotations() {
+        let identifiers = annotationsForActivePage.map(\.id)
+        guard !identifiers.isEmpty else { return }
+        forgetAnnotations(identifiers)
+        annotationDraft = nil
+        annotationOverlay.removeEditor()
+        updateAnnotationOverlay()
+        refreshAnnotationAnchors()
+        refreshAnnotationTargetUnderPointer()
+    }
+
+    /// Drop the given annotations from the per-page store, wherever they live.
+    private func forgetAnnotations(_ identifiers: [Int]) {
+        let ids = Set(identifiers)
+        for url in Array(annotationsByPage.keys) {
+            annotationsByPage[url]?.removeAll { ids.contains($0.id) }
+        }
     }
 
     func finishAnnotationEditing(save: Bool) {
@@ -2751,7 +2789,8 @@ final class BrowserViewController: NSViewController {
                 point: CGPoint(
                     x: (annotation.documentPoint.x - offset.x) * browserPageZoom,
                     y: (annotation.documentPoint.y - offset.y) * browserPageZoom
-                )
+                ),
+                note: annotation.note
             )
         }
         if let draft = annotationDraft,

@@ -7,6 +7,8 @@ import AppKit
 struct BrowserAnnotationMarker: Equatable {
     let id: Int
     let point: CGPoint
+    /// The note's text, shown in a badge on hover so it can be read without opening the editor.
+    var note: String = ""
 }
 
 /// The page component under the pointer while a pin is being placed.
@@ -73,6 +75,13 @@ final class BrowserAnnotationOverlay: ThemedControl {
             onSend?()
             return true
         }
+        // ⌘Delete clears every pin — the one gesture that means "remove them all", matched to the
+        // Simulator pane so the two annotation surfaces read the same.
+        if ownsFocus, isAnnotating, editor == nil, modifiers == .command,
+           event.keyCode == 51 || event.keyCode == 117, !markers.isEmpty {
+            onClearAll?()
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 
@@ -137,6 +146,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
             setAccessibilityValue(
                 L10n.format("%lld annotations", Int64(markers.count))
             )
+            if !markers.contains(where: { $0.id == hoveredMarkerID }) { hoveredMarkerID = nil }
             window?.invalidateCursorRects(for: self)
             needsDisplay = true
         }
@@ -180,6 +190,18 @@ final class BrowserAnnotationOverlay: ThemedControl {
     var onAdd: ((CGPoint) -> Void)?
     var onSelect: ((Int) -> Void)?
     var onDismiss: (() -> Void)?
+    /// Delete pressed over a pin (with no editor open) — remove it directly.
+    var onDelete: ((Int) -> Void)?
+    /// ⌘Delete clears every pin at once — the same one-gesture "clear all" the Simulator pane has.
+    var onClearAll: (() -> Void)?
+
+    /// The pin under the pointer while annotating; its note is shown in a badge.
+    private var hoveredMarkerID: Int? {
+        didSet {
+            guard hoveredMarkerID != oldValue else { return }
+            needsDisplay = true
+        }
+    }
     /// Where the pointer is while annotating, and nil when it leaves. The browser answers with a
     /// `target`; the overlay deliberately does not resolve one for itself.
     var onTargetProbe: ((CGPoint?) -> Void)?
@@ -301,9 +323,11 @@ final class BrowserAnnotationOverlay: ThemedControl {
         // `NSView.uncoveredPointerLocation(in:)`.
         guard isAnnotating, let point = uncoveredPointerLocation(in: event) else { return }
         if isOverAnnotationControl(point) {
+            hoveredMarkerID = nil
             onTargetProbe?(nil)
             return
         }
+        hoveredMarkerID = marker(at: point)?.id
         selectsDeepestElement = event.modifierFlags.contains(.option)
         onTargetProbe?(point)
     }
@@ -318,6 +342,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
         super.mouseExited(with: event)
         guard isAnnotating else { return }
         hoveredTarget = nil
+        hoveredMarkerID = nil
         onTargetProbe?(nil)
     }
 
@@ -342,6 +367,13 @@ final class BrowserAnnotationOverlay: ThemedControl {
         if isAnnotating, event.keyCode == 53 {
             if let editor { editor.onCancel?(); return }
             onDismiss?()
+            return
+        }
+        // Delete removes the pin under the pointer — the simple removal. Only when no editor is
+        // open, so a note's text field keeps Delete for its own text.
+        if isAnnotating, editor == nil, event.keyCode == 51 || event.keyCode == 117,
+           let id = hoveredMarkerID {
+            onDelete?(id)
             return
         }
         super.keyDown(with: event)
@@ -386,6 +418,10 @@ final class BrowserAnnotationOverlay: ThemedControl {
         for marker in markers where markerRect(for: marker).intersects(dirtyRect) {
             draw(marker)
         }
+        if isAnnotating, let id = hoveredMarkerID,
+           let marker = markers.first(where: { $0.id == id }) {
+            drawNoteBadge(marker)
+        }
         if isAnnotating {
             // Last, so the badge stays readable over a component outline that covers the page —
             // a highlighted `<body>` is a rectangle the size of everything.
@@ -402,6 +438,42 @@ final class BrowserAnnotationOverlay: ThemedControl {
                 .insetBy(dx: -Layout.markerHitInset, dy: -Layout.markerHitInset)
                 .contains(point)
         }
+    }
+
+    /// The hovered pin's note text in a badge beside it, so a note can be read without opening its
+    /// editor. Drawn in the browser's own annotation chrome. The view is flipped (y down).
+    private func drawNoteBadge(_ marker: BrowserAnnotationMarker) {
+        let text = marker.note.isEmpty
+            ? L10n.string("Empty note — Delete to remove") : marker.note
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Design.Typography.caption(),
+            .foregroundColor: annotationInk,
+        ]
+        let padding = Design.Spacing.small
+        let maxTextWidth: CGFloat = 260
+        let textSize = (text as NSString).boundingRect(
+            with: NSSize(width: maxTextWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin],
+            attributes: attributes
+        ).size
+        var badge = NSRect(
+            x: marker.point.x + Layout.markerDiameter / 2,
+            y: marker.point.y + Layout.markerDiameter / 2,
+            width: ceil(textSize.width) + padding * 2,
+            height: ceil(textSize.height) + padding
+        )
+        let inset = Design.Spacing.small
+        badge.origin.x = min(max(inset, badge.origin.x), max(inset, bounds.width - inset - badge.width))
+        badge.origin.y = min(max(inset, badge.origin.y), max(inset, bounds.height - inset - badge.height))
+
+        let path = NSBezierPath(
+            roundedRect: badge, xRadius: Design.Radius.controlBorder, yRadius: Design.Radius.controlBorder
+        )
+        BrowserAnnotationChrome.fill(path)
+        BrowserAnnotationChrome.stroke(path, width: Design.Radius.border)
+        (text as NSString).draw(
+            in: badge.insetBy(dx: padding, dy: padding / 2), withAttributes: attributes
+        )
     }
 
     private func markerRect(for marker: BrowserAnnotationMarker) -> CGRect {

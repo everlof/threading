@@ -388,6 +388,7 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onAddNote = { [weak self] point in self?.addNote(at: point) }
         preview.onSelectNote = { [weak self] id in self?.selectNote(id) }
         preview.onDeleteNote = { [weak self] id in self?.deleteHoveredNote(id) }
+        preview.onClearAllNotes = { [weak self] in self?.clearAllNotes() }
         preview.onCommandReturn = { [weak self] in self?.sendPendingNotes() }
         return preview
     }()

@@ -131,6 +131,8 @@ final class SimulatorScreenView: ThemedControl {
     var onSelectNote: ((ImageAnnotation.ID?) -> Void)?
     /// Delete pressed over a pin while annotating — remove it directly.
     var onDeleteNote: ((ImageAnnotation.ID) -> Void)?
+    /// ⌘Delete while annotating — clear every note at once.
+    var onClearAllNotes: (() -> Void)?
     /// ⌘Return while annotating — the host sends the pending notes.
     var onCommandReturn: (() -> Void)?
 
@@ -569,6 +571,15 @@ final class SimulatorScreenView: ThemedControl {
            event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .command,
            event.keyCode == 36 || event.keyCode == 76 {
             onCommandReturn?()
+            return true
+        }
+        // ⌘Delete clears every note at once — the one gesture that means "remove them all",
+        // matched to the browser annotation overlay so the two surfaces read the same.
+        if isAnnotatingNotes,
+           event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .command,
+           event.keyCode == 51 || event.keyCode == 117,
+           !(window?.firstResponder is NSText), !noteMarks.isEmpty {
+            onClearAllNotes?()
             return true
         }
         // Delete removes the pin under the pointer (or the selected one) — the simple removal —
