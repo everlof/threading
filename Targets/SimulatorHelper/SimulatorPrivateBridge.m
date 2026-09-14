@@ -580,9 +580,13 @@ static NSDictionary *SimulatorAXBuildNode(id device, id translation, NSInteger d
 
     NSRect frame = NSZeroRect;
     id frameValue = attributes[@(SimulatorAXAttributeFrame)];
-    if ([frameValue isKindOfClass:[NSValue class]] &&
-        [frameValue respondsToSelector:@selector(rectValue)]) {
-        frame = [frameValue rectValue];
+    // Every NSValue answers `rectValue`, so guard on the encoded type: sending it to an NSValue that
+    // wraps something other than a rect (this is a private-API return) would misread its bytes.
+    if ([frameValue isKindOfClass:[NSValue class]]) {
+        const char *encoding = [frameValue objCType];
+        if (encoding != NULL && strstr(encoding, "CGRect") != NULL) {
+            frame = [frameValue rectValue];
+        }
     }
     node[@"frame"] = @[@(frame.origin.x), @(frame.origin.y), @(frame.size.width), @(frame.size.height)];
 
