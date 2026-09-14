@@ -979,6 +979,70 @@ public class ThemedOutlineView:
     /// Nil draws the ordinary indented tree.
     public var flattenedIndentation: FlattenedIndentation?
 
+    /// How far to either side of a row's disclosure chevron a press still folds the row.
+    ///
+    /// AppKit's chevron already spans its row's full height, but it is 13pt wide (measured on
+    /// macOS 26) — so a press a few points beside the mark selected the row instead, which is
+    /// what "the chevron's hitbox is small" meant. Widening the button itself is the obvious
+    /// route, and it moves what the button draws: the system triangle and the authored marker
+    /// (which takes the button's frame) both re-centre in the wider frame. So the button keeps
+    /// its frame and its pixels, and `mouseDown` hands a press in the band around it to that
+    /// same button — expansion then takes AppKit's own route, including `shouldExpandItem`,
+    /// Option-click folding descendants, and the notifications hosts persist collapse from.
+    ///
+    /// **How far is the host's to say**, because the trailing side reaches into the cell and only
+    /// the host knows where its row's content begins. So that side is measured from the cell's
+    /// leading edge, not the chevron's trailing one: the two need not meet — the compact tree
+    /// leaves a point between them — and a reach stated from the chevron stopped that point short
+    /// of the content it was measured against. Zero — every list but the one that opts in —
+    /// leaves AppKit's own target exactly as it was.
+    public struct DisclosureHitOutsets: Equatable {
+        /// Points before the chevron's leading edge.
+        public let beforeChevron: CGFloat
+        /// Points past the leading edge of the row's cell; the target never ends before the
+        /// chevron does.
+        public let intoCell: CGFloat
+
+        public static let zero = DisclosureHitOutsets(beforeChevron: 0, intoCell: 0)
+
+        public init(beforeChevron: CGFloat, intoCell: CGFloat) {
+            self.beforeChevron = beforeChevron
+            self.intoCell = intoCell
+        }
+    }
+
+    public var disclosureHitOutsets: DisclosureHitOutsets = .zero
+
+    /// The disclosure a press at `point`, in this view's coordinates, belongs to: the chevron of
+    /// the row under it, widened by `disclosureHitOutsets` and clipped to that row. Nil for a row
+    /// with nothing to disclose, and for every point while the outsets are zero.
+    func disclosureButton(forPressAt point: NSPoint) -> NSButton? {
+        guard disclosureHitOutsets != .zero else { return nil }
+
+        let row = row(at: point)
+        guard row >= 0,
+              let rowView = rowView(atRow: row, makeIfNecessary: false),
+              let button = disclosureButton(in: rowView),
+              !button.isHidden, button.isEnabled
+        else { return nil }
+
+        let rowFrame = convert(rowView.bounds, from: rowView)
+        let marker = convert(button.frame, from: rowView)
+        let cellLeading = outlineTableColumn
+            .flatMap { column in tableColumns.firstIndex { $0 === column } }
+            .map { frameOfCell(atColumn: $0, row: row).minX }
+            ?? marker.maxX
+        let minX = max(rowFrame.minX, marker.minX - disclosureHitOutsets.beforeChevron)
+        let maxX = min(
+            rowFrame.maxX,
+            max(marker.maxX, cellLeading + disclosureHitOutsets.intoCell)
+        )
+        guard point.x >= minX, point.x < maxX,
+              point.y >= rowFrame.minY, point.y < rowFrame.maxY
+        else { return nil }
+        return button
+    }
+
     private let disclosureEvents = AppEventObservations()
     private let disclosureWindowEvents = AppEventObservations()
 
@@ -1266,6 +1330,17 @@ public class ThemedOutlineView:
             return super.accessibilityPerformShowMenu()
         }
         return onContextMenu(selectedRow, .control)
+    }
+
+    /// A press on the chevron itself never arrives here — the button is hit first. This is the
+    /// band around it; see `disclosureHitOutsets`.
+    public override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let button = disclosureButton(forPressAt: point) {
+            button.performClick(nil)
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     /// Disclosure triangles are controls AppKit inserts into outline rows after the data source

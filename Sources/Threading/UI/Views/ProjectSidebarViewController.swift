@@ -2052,6 +2052,12 @@ extension ProjectSidebarViewController {
     private func applyOutlineIndentation() {
         outlineView.indentationPerLevel = presentedDensity.indentationPerLevel
         outlineView.trailingCellReclaim = presentedDensity.trailingCellReclaim
+        // The chevron's press target runs up to where the row's content begins, and no further,
+        // so the icon and the title keep selecting the row.
+        outlineView.disclosureHitOutsets = .init(
+            beforeChevron: SidebarDefaults.disclosureLeadingHitOutset,
+            intoCell: presentedDensity.rowLeadingInset
+        )
         outlineView.flattenedIndentation = presentedTreeIsCompact
             ? .init(
                 cellLeading: SidebarDefaults.compactCellLeading,

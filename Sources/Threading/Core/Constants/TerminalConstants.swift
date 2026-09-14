@@ -403,6 +403,13 @@ public enum SidebarDefaults {
     /// Where the compact tree's disclosure chevrons sit, all depths alike.
     public static let compactMarkerLeading: CGFloat = Design.Spacing.hairline
 
+    /// How far before a disclosure chevron a press still folds its row — see
+    /// `ThemedOutlineView.disclosureHitOutsets`. A top-level chevron in the indented tree sits
+    /// 12pt in from the column's edge, and that strip used to select the row; this hands all of
+    /// it to the chevron. The trailing side is the row's own leading gutter
+    /// (`SidebarDensity.rowLeadingInset`), which ends where the icon or title begins.
+    public static let disclosureLeadingHitOutset: CGFloat = Design.Spacing.inset
+
     /// The extra height a group-opening row takes in the compact tree, standing in for the
     /// indentation that no longer says where one project ends and the next begins. Centred
     /// content splits it above and below, the same way `headingRowHeight` already reads as
