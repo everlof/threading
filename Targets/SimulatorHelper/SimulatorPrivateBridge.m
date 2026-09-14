@@ -57,10 +57,11 @@ static const NSUInteger SimulatorAXAttributeValue = 53;
 static const NSInteger SimulatorAXMaxDepth = 50;
 static const NSInteger SimulatorAXMaxNodes = 3000;
 
-// AXPUIElementType (numeric guest role) → AX role string. The six confirmed against the live device
-// by zipping idb's ordered string types against these numbers; unmapped values become "AXType<n>" so
-// they stay distinguishable rather than collapsing. The table is verified per Xcode (see the draft's
-// per-Xcode signature note); it is a hint layer, with identifier/label/frame carrying addressing.
+// AXPUIElementType (numeric guest role) → AX role string. Each confirmed against the live device by
+// zipping idb's ordered string types against these numbers (Application/Button/Group/Heading/Image/
+// StaticText from an app; Slider = the SpringBoard Spotlight pill). Unmapped values become "AXType<n>"
+// so they stay distinguishable rather than collapsing. The table is verified per Xcode (see the
+// draft's per-Xcode signature note); it is a hint layer, with identifier/label/frame carrying addressing.
 static NSString *SimulatorAXRoleString(NSNumber *roleNumber) {
     if (![roleNumber isKindOfClass:[NSNumber class]]) { return @"AXUnknown"; }
     switch (roleNumber.integerValue) {
@@ -69,6 +70,7 @@ static NSString *SimulatorAXRoleString(NSNumber *roleNumber) {
         case 5: return @"AXGroup";
         case 6: return @"AXHeading";
         case 7: return @"AXImage";
+        case 13: return @"AXSlider";
         case 14: return @"AXStaticText";
         default: return [NSString stringWithFormat:@"AXType%ld", (long)roleNumber.integerValue];
     }
