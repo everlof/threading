@@ -4,7 +4,7 @@ import XCTest
 @testable import Threading
 
 @MainActor
-final class SimulatorAgentToolTests: XCTestCase {
+final class SimulatorAgentToolTests: HostedStoreTestCase {
     func testSimulatorGroupTellsAgentsToPreferTheAdoptedPanel() throws {
         let group = MCPToolCatalog.simulator
 

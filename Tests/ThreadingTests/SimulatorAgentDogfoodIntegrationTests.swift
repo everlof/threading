@@ -10,7 +10,7 @@ import XCTest
 /// in Threading's right panel. The harness provides an already-booted device and a built iOS app;
 /// cleanup never shuts the device down or opens Simulator.app.
 @MainActor
-final class SimulatorAgentDogfoodIntegrationTests: XCTestCase {
+final class SimulatorAgentDogfoodIntegrationTests: HostedStoreTestCase {
     func testAgentBuildLaunchInspectAndControlStayInTheRightPanel() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let rawDeviceID = environment["THREADING_SIMULATOR_INTEGRATION_UDID"],

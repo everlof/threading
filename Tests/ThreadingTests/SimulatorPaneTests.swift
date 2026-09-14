@@ -4,7 +4,7 @@ import XCTest
 @testable import Threading
 
 @MainActor
-final class SimulatorPaneTests: XCTestCase {
+final class SimulatorPaneTests: HostedStoreTestCase {
     func testHiddenPaneDoesNoWorkAndStopsFramebufferRequestsWhenHidden() async throws {
         let control = SimulatorPaneControlFake()
         let stream = SimulatorPaneStreamCoordinatorFake()
