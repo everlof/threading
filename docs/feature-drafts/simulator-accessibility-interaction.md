@@ -1,6 +1,9 @@
 # Simulator pane: element-level interaction via the accessibility tree
 
-**Status:** draft, **feasibility validated live**. No app integration started. Extends
+**Status:** **Phase 1 implemented** (read path + inspector overlay + `simulator_snapshot` tool),
+building green with tests passing; pending live evaluation of the embedded helper. Phases 2–4
+(tap-by-ref/locator, live pointer hit-test overlay, human annotations) remain. Feasibility was
+validated live and the exact read recipe proven in our own host code (below). Extends
 [`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the signed direct
 helper, framebuffer and Indigo HID input) and deliberately mirrors the agent browser
 ([`agent-browser.md`](../architecture/agent-browser.md)): its accessibility-oriented snapshot,
@@ -250,9 +253,14 @@ Host-owned picking, provenance and focus, exactly as the browser overlay is.
 
 ## Phasing
 
-1. **Read path.** Helper AX-snapshot + hit-test request; automation-mode assertion; the serial-queue
-   + DispatchGroup discipline; a read-only `simulator_snapshot` agent tool. Prove the tree comes
-   back and frames land on the framebuffer (render the bounds as an overlay to verify mapping).
+1. **Read path.** ✅ **Implemented.** Helper AX-snapshot request over the existing signed wire
+   (protocol v3, `accessibilitySnapshot`/`accessibilitySnapshotResult` + `SimulatorAccessibilityElement`);
+   the `AXPTranslator` dance on a dedicated serial queue with the async-`SimDevice` → sync bridge; a
+   read-only `simulator_snapshot` agent tool (role/label/identifier + normalized `tap=(x,y)` per
+   element); and the inspector overlay that outlines every element over the framebuffer to verify the
+   device-points → framebuffer mapping. Point hit-test (`objectAtPoint`) is deferred to Phase 3 with
+   the live pointer overlay. Automation mode: the helper does not toggle it per-read (a per-launch
+   cache; see the finding above); `ApplicationAccessibilityEnabled` handling stays a follow-up.
 2. **Target by ref.** `simulator_tap`/`type` accept ref + semantic locator; fresh snapshot after
    each action.
 3. **Inspector overlay.** Outline-and-name-under-pointer in the pane; optional all-bounds overlay.
