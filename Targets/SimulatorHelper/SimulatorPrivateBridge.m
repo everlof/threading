@@ -240,6 +240,17 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
         return NO;
     }
 
+    // Validate the parent's signature seal rather than only reading its identity.
+    // SecCodeCopyGuestWithAttributes binds to a pid (which can be reused) and SigningInformation
+    // reports only what the signature claims; a validity check additionally refuses a parent whose
+    // code has been tampered with. Both Developer ID and clean-checkout ad-hoc signatures validate,
+    // so this hardens the team/path comparison below without breaking local development builds.
+    if (SecCodeCheckValidity(parentCode, kSecCSDefaultFlags, NULL) != errSecSuccess) {
+        CFRelease(ownCode);
+        CFRelease(parentCode);
+        return NO;
+    }
+
     NSDictionary *own = SigningInformation(ownCode);
     NSDictionary *parent = SigningInformation(parentCode);
     CFRelease(ownCode);
