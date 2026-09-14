@@ -11,6 +11,11 @@ struct SimulatorPaneScreenshot: Sendable {
     let device: SimulatorDevice
 }
 
+struct SimulatorPaneAccessibilitySnapshot: Sendable {
+    let root: SimulatorAccessibilityElement
+    let device: SimulatorDevice
+}
+
 /// Apple Simulator's own chords (its Device and Features menus) for the actions this pane can
 /// perform, so the muscle memory carries over. They apply only while keyboard focus is inside the
 /// pane: several collide with app commands — ⇧⌘B is Browser — and the app's binding wins
@@ -538,6 +543,43 @@ final class SimulatorPaneViewController: NSViewController {
                 completion(.success(SimulatorPaneScreenshot(data: data, device: device)))
             } catch is CancellationError {
                 completion(.failure("The Simulator capture was cancelled."))
+            } catch {
+                completion(.failure(error.localizedDescription))
+            }
+        }
+    }
+
+    /// Read the foreground app's accessibility tree once, over the live direct-pane transport (the
+    /// same session that carries frames). Unlike a screenshot this needs no public CoreSimulator
+    /// transaction, so the stream is left running. When inspection is on, the overlay is refreshed
+    /// with the same tree so the agent's view and the pane's outlines agree.
+    func snapshotForAgent(
+        completion: @escaping @MainActor @Sendable (
+            SimulatorPaneAgentResult<SimulatorPaneAccessibilitySnapshot>
+        ) -> Void
+    ) {
+        guard let device = lease?.device else {
+            completion(.failure("Call simulator_prepare before reading the Simulator's elements."))
+            return
+        }
+        guard let session = streamSession else {
+            completion(.failure(
+                "The Simulator is not streaming live; element reading needs the direct pane transport."
+            ))
+            return
+        }
+        Task { @MainActor [weak self] in
+            do {
+                let root = try await session.requestAccessibilitySnapshot()
+                guard let self, self.lease?.device.id == device.id,
+                      self.streamSession === session else {
+                    completion(.failure("The selected Simulator changed during the read."))
+                    return
+                }
+                if self.isInspecting {
+                    self.screenView.annotations = Self.annotations(from: root)
+                }
+                completion(.success(SimulatorPaneAccessibilitySnapshot(root: root, device: device)))
             } catch {
                 completion(.failure(error.localizedDescription))
             }

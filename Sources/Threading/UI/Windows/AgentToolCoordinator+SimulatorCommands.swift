@@ -1,3 +1,5 @@
+import ThreadingSimulatorKit
+
 @MainActor
 extension AgentToolCoordinator {
     func simulatorPrepare(
@@ -86,9 +88,36 @@ extension AgentToolCoordinator {
         }
     }
 
+    func simulatorSnapshot(
+        _ arguments: SimulatorSnapshotArguments,
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        guard let simulator = adoptedSimulator(for: sessionID) else {
+            completion(.failure("Call simulator_prepare before reading the Simulator's elements."))
+            return
+        }
+
+        _ = displayPaneController.activateSimulator(for: sessionID)
+        revealDisplayPane(for: sessionID)
+        simulator.snapshotForAgent { result in
+            switch result {
+            case .success(let snapshot):
+                completion(SimulatorSnapshotRenderer.result(
+                    root: snapshot.root,
+                    device: snapshot.device,
+                    interactiveOnly: arguments.interactiveOnly ?? true
+                ))
+            case .failure(let message):
+                completion(.failure(message))
+            }
+        }
+    }
+
     private func adoptedSimulator(for sessionID: SessionID) -> SimulatorPaneViewController? {
         displayPaneController.tabs(for: sessionID)
             .compactMap(\.simulator)
             .first
     }
 }
+

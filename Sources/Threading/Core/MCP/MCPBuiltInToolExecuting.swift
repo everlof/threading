@@ -167,6 +167,10 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     _ arguments: SimulatorScreenshotArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func simulatorSnapshot(
+    _ arguments: SimulatorSnapshotArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func simulatorTap(
     _ arguments: SimulatorTapArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
