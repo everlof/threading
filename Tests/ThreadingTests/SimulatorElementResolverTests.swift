@@ -118,4 +118,43 @@ final class SimulatorElementResolverTests: XCTestCase {
         let listed = SimulatorElementListing.listed(sampleRoot(), interactiveOnly: true)
         XCTAssertEqual(listed.map(\.role), ["AXButton", "AXImage"])
     }
+
+    /// A ref must denote the same element whether the snapshot was taken with interactive_only or
+    /// not. When a non-interactive container precedes the interactive controls, the full-listing ref
+    /// of a control is shifted past that container — the resolver must index the same full listing
+    /// the renderer numbered, or an interactive_only=false ref would land on the wrong element.
+    func testRefFromNonInteractiveSnapshotResolvesToTheElementItWasNumberedAgainst() {
+        // Pre-order over the whole tree: e1 = the leading group, e2 = the button, e3 = the image.
+        let root = SimulatorAccessibilityElement(
+            role: "AXApplication",
+            label: "App",
+            frame: frame(0, 0, 100, 100),
+            children: [
+                SimulatorAccessibilityElement(role: "AXGroup", frame: frame(0, 0, 100, 10)),
+                SimulatorAccessibilityElement(
+                    role: "AXButton", label: "Go", frame: frame(40, 40, 20, 20)
+                ),
+                SimulatorAccessibilityElement(
+                    role: "AXImage", label: "Art", frame: frame(0, 80, 100, 20)
+                ),
+            ]
+        )
+        // The renderer numbers these refs the same way in both filter modes.
+        let full = SimulatorElementListing.listed(root, interactiveOnly: false)
+        XCTAssertEqual(full.map(\.role), ["AXGroup", "AXButton", "AXImage"])
+
+        // e2 (the button the agent saw in an interactive_only=false snapshot) resolves to the button,
+        // not to the first *interactive* element — the bug this guards against.
+        guard case .element(let element, _, _) = SimulatorElementResolver.resolveElement(
+            locator(ref: "e2"), in: root
+        ) else { return XCTFail("expected the button element") }
+        XCTAssertEqual(element.role, "AXButton")
+        XCTAssertEqual(element.label, "Go")
+
+        // e1 resolves to the non-interactive container it was numbered against.
+        guard case .element(let group, _, _) = SimulatorElementResolver.resolveElement(
+            locator(ref: "e1"), in: root
+        ) else { return XCTFail("expected the group element") }
+        XCTAssertEqual(group.role, "AXGroup")
+    }
 }

@@ -16,10 +16,22 @@ enum SimulatorSnapshotRenderer {
             return .failure("The Simulator returned an empty accessibility frame.")
         }
         let limit = 250
-        let elements = SimulatorElementListing.listed(root, interactiveOnly: interactiveOnly)
-        let truncated = elements.count > limit
+        // Refs are numbered over the COMPLETE pre-order listing, then only the rows the
+        // interactive_only filter keeps are printed. A given `eN` therefore denotes the same element
+        // whether or not the snapshot was taken with interactive_only, which is exactly the listing
+        // `SimulatorElementResolver` maps a ref back over — so a ref from an interactive_only=false
+        // snapshot resolves to the element the agent actually saw rather than a different one.
+        let allElements = SimulatorElementListing.listed(root, interactiveOnly: false)
         var lines: [String] = []
-        for (offset, element) in elements.prefix(limit).enumerated() {
+        var truncated = false
+        for (offset, element) in allElements.enumerated() {
+            guard SimulatorElementListing.isListed(element, interactiveOnly: interactiveOnly) else {
+                continue
+            }
+            if lines.count >= limit {
+                truncated = true
+                break
+            }
             var parts = ["[e\(offset + 1)] \(element.role)"]
             if let label = element.label, !label.isEmpty {
                 parts.append("\"\(sanitize(label))\"")

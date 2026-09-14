@@ -4,7 +4,9 @@ import ThreadingSimulatorKit
 
 /// The one traversal that assigns `eN` refs, shared by the snapshot renderer (which numbers the
 /// listed elements) and the resolver (which maps a ref back to an element). Keeping it in one place
-/// is what makes a ref the agent saw resolve to the same element on the next read.
+/// is what makes a ref the agent saw resolve to the same element on the next read. Refs are numbered
+/// over the complete listing (`interactiveOnly: false`) and `interactive_only` filters only which
+/// rows are *printed*, so an `eN` denotes the same element whichever filter produced the snapshot.
 enum SimulatorElementListing {
     /// Roles an agent can usefully act on — used to decide which elements the default
     /// `interactive_only` listing keeps.
@@ -79,9 +81,11 @@ enum SimulatorElementResolver {
             return .notFound("The Simulator returned an empty accessibility frame.")
         }
 
-        // Ref mode: index into the default (interactive_only) listing the snapshot numbered.
+        // Ref mode: index into the complete listing the snapshot numbered refs over. It is the full
+        // listing (not the interactive_only subset) so a ref denotes the same element regardless of
+        // the interactive_only filter the snapshot was displayed with.
         if let ref = locator.ref, !ref.isEmpty {
-            let listed = SimulatorElementListing.listed(root, interactiveOnly: true)
+            let listed = SimulatorElementListing.listed(root, interactiveOnly: false)
             guard let index = Int(ref.dropFirst()), index >= 1, index <= listed.count else {
                 return .notFound(
                     "Ref \(ref) is not in the current snapshot (\(listed.count) elements). "
