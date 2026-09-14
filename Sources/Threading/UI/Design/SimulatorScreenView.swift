@@ -49,6 +49,25 @@ final class SimulatorScreenView: ThemedControl {
         }
     }
 
+    /// One element outline drawn over the live framebuffer for the accessibility inspector overlay.
+    /// Kept as a presentation-only value so this Design component never imports the Simulator wire
+    /// types: the feature controller resolves the tree and hands down normalized rectangles.
+    struct ElementAnnotation: Equatable {
+        /// The element's frame in the device's 0…1 space, top-left origin (the same space taps use).
+        let normalizedFrame: CGRect
+        let label: String?
+        /// Interactive elements (buttons, fields) are drawn emphasized; static content is faint.
+        let emphasized: Bool
+    }
+
+    /// Element outlines for the inspector overlay. Empty hides the overlay.
+    var annotations: [ElementAnnotation] = [] {
+        didSet {
+            guard annotations != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     var onTap: ((CGPoint) -> Void)?
     /// Phases of a live, finger-following touch driven by a click-drag or a trackpad scroll. The
     /// feature controller streams these to the device so panning follows the input in real time
@@ -123,6 +142,42 @@ final class SimulatorScreenView: ThemedControl {
         // No hover wash over a live device — it read as an odd white overlay on the real screen.
         // Keyboard focus is still indicated (subtle, and only while typing).
         drawKeyboardFocus(around: shape)
+
+        drawAnnotations(in: target)
+    }
+
+    /// Stroke each element's bounds over the framebuffer. This is the inspector overlay and the
+    /// Phase 1 coordinate-mapping tripwire: a rectangle that does not sit on the control it names
+    /// means the device-points → framebuffer mapping is wrong.
+    private func drawAnnotations(in target: NSRect) {
+        guard !annotations.isEmpty else { return }
+        NSGraphicsContext.saveGraphicsState()
+        ThemedSurface.Shape(rect: target, radius: Design.Radius.control).path.addClip()
+        for annotation in annotations {
+            let normalized = annotation.normalizedFrame
+            // Invert the tap normalization: device space is y-down, the view is y-up.
+            let rect = NSRect(
+                x: target.minX + normalized.minX * target.width,
+                y: target.maxY - (normalized.minY + normalized.height) * target.height,
+                width: normalized.width * target.width,
+                height: normalized.height * target.height
+            ).insetBy(dx: 0.5, dy: 0.5)
+            guard rect.width > 1, rect.height > 1 else { continue }
+            let color = annotation.emphasized ? Design.Surface.accent : Design.Surface.border
+            let path = NSBezierPath(
+                roundedRect: rect,
+                xRadius: Design.Radius.controlBorder,
+                yRadius: Design.Radius.controlBorder
+            )
+            path.lineWidth = annotation.emphasized ? 1.5 : 1
+            color.withAlphaComponent(annotation.emphasized ? 0.9 : 0.5).setStroke()
+            if annotation.emphasized {
+                color.withAlphaComponent(0.08).setFill()
+                path.fill()
+            }
+            path.stroke()
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func mouseDown(with event: NSEvent) {

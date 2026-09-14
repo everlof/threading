@@ -6978,6 +6978,23 @@
         }
       }
     },
+    "Annotations are still pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annotations are still pending"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommentarerna väntar fortfarande"
+          }
+        }
+      }
+    },
     "Annotations on %@ · revision %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14918,6 +14935,17 @@
         }
       }
     },
+    "Couldn’t restart terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte starta om terminalen"
+          }
+        }
+      }
+    },
     "Couldn’t restore the managed workspace" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22540,6 +22568,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inspektera webbläsarens funktioner"
+          }
+        }
+      }
+    },
+    "Inspect elements" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inspektera element"
           }
         }
       }
@@ -30718,6 +30757,17 @@
         }
       }
     },
+    "Outline the on-screen accessibility elements" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rita upp skärmens tillgänglighetselement"
+          }
+        }
+      }
+    },
     "Outline where this page moved while it loaded" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35929,6 +35979,28 @@
         }
       }
     },
+    "Restart Terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta om terminal"
+          }
+        }
+      }
+    },
+    "Restarting terminal…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startar om terminalen…"
+          }
+        }
+      }
+    },
     "Restore" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38395,6 +38467,23 @@
         }
       }
     },
+    "Send (%lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send (%lld)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka (%lld)"
+          }
+        }
+      }
+    },
     "Send Code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38540,6 +38629,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka ett begärt resultat från den här konversationen till den avsedda deltagaren."
+          }
+        }
+      }
+    },
+    "Send pending annotations (⌘Return)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send pending annotations (⌘Return)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka väntande kommentarer (⌘Retur)"
           }
         }
       }
@@ -42413,6 +42519,17 @@
         }
       }
     },
+    "Stopping the agent. The saved conversation will resume." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppar agenten. Den sparade konversationen återupptas."
+          }
+        }
+      }
+    },
     "Stops at its limit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43300,6 +43417,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Terminal i %@"
+          }
+        }
+      }
+    },
+    "Terminal stopped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalen stoppad"
           }
         }
       }
@@ -44680,6 +44808,23 @@
         }
       }
     },
+    "The chat could not accept the annotations. They are saved here; try sending again when the chat is ready." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The chat could not accept the annotations. They are saved here; try sending again when the chat is ready."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten kunde inte ta emot kommentarerna. De är sparade här; försök skicka igen när chatten är redo."
+          }
+        }
+      }
+    },
     "The chat could not be created." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45868,6 +46013,23 @@
         }
       }
     },
+    "The message was typed, but delivery was not confirmed. Check the chat before sending again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The message was typed, but delivery was not confirmed. Check the chat before sending again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelandet skrevs in, men leveransen bekräftades inte. Kontrollera chatten innan du skickar igen."
+          }
+        }
+      }
+    },
     "The model list exceeded the refresh limit." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46008,6 +46170,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anteckningen stannar i Threading och exponeras aldrig för webbsidan."
+          }
+        }
+      }
+    },
+    "The old process could not be confirmed stopped. Try Restart Terminal again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att bekräfta att den gamla processen stoppats. Försök starta om terminalen igen."
           }
         }
       }

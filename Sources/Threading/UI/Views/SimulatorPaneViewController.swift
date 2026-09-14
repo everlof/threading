@@ -162,9 +162,26 @@ final class SimulatorPaneViewController: NSViewController {
     /// flips this and applies it, so the toggle stays in step with what the person last did.
     private var appearanceIsDark = false
 
+    private lazy var inspectButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "viewfinder",
+            accessibility: L10n.string("Inspect elements"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Outline the on-screen accessibility elements")
+        button.onPress = { [weak self] in self?.toggleInspection() }
+        button.setAccessibilityIdentifier("simulator.inspect")
+        return button
+    }()
+
+    /// Whether the accessibility inspector overlay is on. Reading the tree is a host-side call, so
+    /// this is a manual refresh (toggle) in Phase 1 rather than a per-frame poll.
+    private var isInspecting = false
+
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [appearanceButton, controlButton, retryButton]
+        trailing: [inspectButton, appearanceButton, controlButton, retryButton]
     )
 
     private func makeHardwareButton(
@@ -792,6 +809,8 @@ final class SimulatorPaneViewController: NSViewController {
         liveCapabilities = nil
         lastStreamFailure = nil
         screenView.interactionState = .unavailable
+        // A stale overlay must not hang over a disconnected screen; a fresh read follows a reconnect.
+        screenView.annotations = []
     }
 
     // MARK: - Continuous touch streaming
@@ -1103,6 +1122,77 @@ final class SimulatorPaneViewController: NSViewController {
                 self?.appearanceIsDark = !dark
             }
         }
+    }
+
+    // MARK: - Accessibility inspector overlay
+
+    private func toggleInspection() {
+        isInspecting.toggle()
+        inspectButton.setAccessibilityValue(isInspecting ? "on" : "off")
+        if isInspecting {
+            refreshAccessibilityOverlay()
+        } else {
+            screenView.annotations = []
+        }
+    }
+
+    /// Read the foreground app's tree once and outline every element over the framebuffer. Best
+    /// effort: a failure (this Xcode's AX path unavailable, automation off, a disconnected helper)
+    /// simply leaves the overlay empty rather than surfacing an error over a live device.
+    private func refreshAccessibilityOverlay() {
+        guard isInspecting, let session = streamSession else {
+            screenView.annotations = []
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self, let root = try? await session.requestAccessibilitySnapshot() else {
+                self?.screenView.annotations = []
+                return
+            }
+            guard self.isInspecting, self.streamSession === session else { return }
+            self.screenView.annotations = Self.annotations(from: root)
+        }
+    }
+
+    /// Flatten the tree into normalized outlines. The root frame is the device's logical size, so
+    /// every descendant normalizes to `(x/W, y/H, …)` — the same 0…1 space taps use. Off-screen
+    /// elements the guest still reports (a horizontally paged list) are dropped.
+    private static func annotations(
+        from root: SimulatorAccessibilityElement
+    ) -> [SimulatorScreenView.ElementAnnotation] {
+        let width = root.frame.width
+        let height = root.frame.height
+        guard width > 0, height > 0 else { return [] }
+        var annotations: [SimulatorScreenView.ElementAnnotation] = []
+        func visit(_ element: SimulatorAccessibilityElement, isRoot: Bool) {
+            if !isRoot {
+                let normalized = CGRect(
+                    x: element.frame.x / width,
+                    y: element.frame.y / height,
+                    width: element.frame.width / width,
+                    height: element.frame.height / height
+                )
+                if normalized.maxX > 0, normalized.minX < 1,
+                   normalized.maxY > 0, normalized.minY < 1 {
+                    annotations.append(SimulatorScreenView.ElementAnnotation(
+                        normalizedFrame: normalized,
+                        label: element.label,
+                        emphasized: Self.isInteractiveRole(element.role)
+                    ))
+                }
+            }
+            for child in element.children { visit(child, isRoot: false) }
+        }
+        visit(root, isRoot: true)
+        return annotations
+    }
+
+    private static func isInteractiveRole(_ role: String) -> Bool {
+        [
+            "AXButton", "AXTextField", "AXSecureTextField", "AXSearchField", "AXTextArea",
+            "AXSwitch", "AXSlider", "AXLink", "AXCell", "AXPopUpButton", "AXCheckBox",
+            "AXStepper", "AXMenuButton", "AXSegmentedControl"
+        ].contains(role)
     }
 
     private func renderState() {
