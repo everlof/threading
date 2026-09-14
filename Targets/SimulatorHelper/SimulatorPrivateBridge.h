@@ -14,6 +14,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) NSString *coreSimulatorVersion;
 @property(nonatomic, readonly) NSString *simulatorKitVersion;
 @property(nonatomic, readonly) BOOL supportsInput;
+/// Whether the host-side accessibility-translation path loaded and this Xcode exposes the private
+/// selectors the snapshot needs. When NO, `-copyAccessibilitySnapshotWithError:` refuses.
+@property(nonatomic, readonly) BOOL supportsAccessibility;
 
 + (BOOL)hostProcessIsTrusted;
 
@@ -47,6 +50,17 @@ NS_ASSUME_NONNULL_BEGIN
                     down:(BOOL)down
                    error:(NSError * _Nullable * _Nullable)error
     NS_SWIFT_NAME(sendHIDUsage(page:usage:down:));
+
+/// Read the foreground app's accessibility tree host-side through the private `AXPTranslator` path.
+/// Returns a nested tree of plain property-list dictionaries — one per element — with keys:
+/// `role` (NSString, an AX role), `subrole` (NSString, optional), `label` (NSString, optional),
+/// `value` (NSString, optional), `identifier` (NSString, optional), `enabled` (NSNumber bool),
+/// `frame` (NSArray of four NSNumbers: x, y, width, height in device logical points), and
+/// `children` (NSArray of the same shape). Every element carries `role`, `enabled` and `frame`.
+/// The whole call runs on one serial queue (the translator singleton is process-wide and its token
+/// storage is not thread-safe), and each attribute fetch is a synchronous bridge to the guest.
+- (nullable NSDictionary *)accessibilitySnapshotWithError:(NSError * _Nullable * _Nullable)error
+    NS_SWIFT_NAME(accessibilitySnapshot());
 
 @end
 

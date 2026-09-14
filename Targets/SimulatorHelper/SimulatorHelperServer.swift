@@ -8,6 +8,12 @@ import ThreadingSimulatorKit
 /// transport's mapped temp buffers would leak.
 private nonisolated(unsafe) var helperTerminationRequested: sig_atomic_t = 0
 
+// The bridge is already shared across the helper's queues (the capture loop on the state queue, and
+// input through `SimulatorInputSender`), and it serializes its own private-framework work — the
+// accessibility read on a dedicated serial queue, HID input through its own client. Marking it
+// `@unchecked Sendable` lets the snapshot read run off the state queue the same way input does.
+extension SimulatorPrivateBridge: @unchecked Sendable {}
+
 private func installHelperTerminationHandlers() {
     var action = sigaction()
     action.__sigaction_u.__sa_handler = { _ in helperTerminationRequested = 1 }
@@ -166,9 +172,60 @@ final class SimulatorHelperServer: @unchecked Sendable {
                 }
             }
 
+        case .accessibilitySnapshot(let requestID):
+            guard let bridge else {
+                writeControl(.accessibilitySnapshotResult(
+                    requestID: requestID,
+                    root: nil,
+                    error: "The direct Simulator helper is not connected to a device."
+                ))
+                return
+            }
+            // Off the state queue: a cold read is 1–2 orders slower than a warm one, and the bridge
+            // serializes every translator interaction on its own queue anyway.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    let tree = try bridge.accessibilitySnapshot()
+                    self?.writeControl(.accessibilitySnapshotResult(
+                        requestID: requestID,
+                        root: Self.element(from: tree),
+                        error: nil
+                    ))
+                } catch {
+                    self?.writeControl(.accessibilitySnapshotResult(
+                        requestID: requestID,
+                        root: nil,
+                        error: error.localizedDescription
+                    ))
+                }
+            }
+
         case .stop:
             stop()
         }
+    }
+
+    /// Convert the helper bridge's plain-dictionary tree into the wire value tree. Unknown or missing
+    /// keys degrade to sensible defaults rather than failing the whole snapshot.
+    private static func element(from node: [AnyHashable: Any]) -> SimulatorAccessibilityElement {
+        let frameArray = node["frame"] as? [Any] ?? []
+        func number(_ index: Int) -> Double {
+            guard index < frameArray.count, let value = frameArray[index] as? NSNumber else { return 0 }
+            return value.doubleValue
+        }
+        let children = (node["children"] as? [[AnyHashable: Any]] ?? []).map { element(from: $0) }
+        return SimulatorAccessibilityElement(
+            role: node["role"] as? String ?? "AXUnknown",
+            subrole: node["subrole"] as? String,
+            label: node["label"] as? String,
+            value: node["value"] as? String,
+            identifier: node["identifier"] as? String,
+            enabled: (node["enabled"] as? NSNumber)?.boolValue ?? true,
+            frame: SimulatorAccessibilityElement.Frame(
+                x: number(0), y: number(1), width: number(2), height: number(3)
+            ),
+            children: children
+        )
     }
 
     private func establish(_ hello: SimulatorBridgeHello) {

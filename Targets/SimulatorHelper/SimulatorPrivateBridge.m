@@ -31,6 +31,135 @@ static NSError *BridgeError(NSInteger code, NSString *detail) {
                            userInfo:@{NSLocalizedDescriptionKey: detail}];
 }
 
+#pragma mark - Accessibility snapshot support
+
+// The private AXPTranslator path, validated live and recorded in
+// docs/feature-drafts/simulator-accessibility-interaction.md. The host-side framework a host
+// process links (the macOS copy, not the runtime's iOS one).
+static NSString * const SimulatorAXPFrameworkPath =
+    @"/System/Library/PrivateFrameworks/AccessibilityPlatformTranslation.framework/AccessibilityPlatformTranslation";
+
+// AXPTranslator MultipleAttribute request type and the attribute numbers we read. Sourced from idb's
+// SimulatorFrameworkBridge (FBAXPRequestTypeMultipleAttribute = 5; the attribute enum) and confirmed
+// against the live device — the recipe is in the feature draft.
+static const NSUInteger SimulatorAXRequestTypeMultipleAttribute = 5;
+static const NSUInteger SimulatorAXAttributeChildren = 8;
+static const NSUInteger SimulatorAXAttributeFrame = 21;
+static const NSUInteger SimulatorAXAttributeIdentifier = 25;
+static const NSUInteger SimulatorAXAttributeIsEnabled = 27;
+static const NSUInteger SimulatorAXAttributeLabel = 33;
+static const NSUInteger SimulatorAXAttributeRole = 45;
+static const NSUInteger SimulatorAXAttributeSubrole = 51;
+static const NSUInteger SimulatorAXAttributeValue = 53;
+
+// Bounds on a whole-tree read (idb caps depth 50 / 3000 nodes) so a pathological hierarchy cannot
+// stall the helper or exhaust memory.
+static const NSInteger SimulatorAXMaxDepth = 50;
+static const NSInteger SimulatorAXMaxNodes = 3000;
+
+// AXPUIElementType (numeric guest role) → AX role string. The six confirmed against the live device
+// by zipping idb's ordered string types against these numbers; unmapped values become "AXType<n>" so
+// they stay distinguishable rather than collapsing. The table is verified per Xcode (see the draft's
+// per-Xcode signature note); it is a hint layer, with identifier/label/frame carrying addressing.
+static NSString *SimulatorAXRoleString(NSNumber *roleNumber) {
+    if (![roleNumber isKindOfClass:[NSNumber class]]) { return @"AXUnknown"; }
+    switch (roleNumber.integerValue) {
+        case 1: return @"AXApplication";
+        case 2: return @"AXButton";
+        case 5: return @"AXGroup";
+        case 6: return @"AXHeading";
+        case 7: return @"AXImage";
+        case 14: return @"AXStaticText";
+        default: return [NSString stringWithFormat:@"AXType%ld", (long)roleNumber.integerValue];
+    }
+}
+
+// Relay one opaque AXPTranslatorRequest to the guest via `-[SimDevice sendAccessibilityRequestAsync:]`,
+// bridging the async XPC to a synchronous return with a semaphore (5 s timeout). Returns the
+// AXPTranslatorResponse (autoreleased) or nil. This is the single host→guest hop; both the token
+// delegate callback and the per-element attribute fetch go through it.
+static id SimulatorAXRelayRequest(id device, id request) {
+    if (device == nil || request == nil) { return nil; }
+    dispatch_semaphore_t completion = dispatch_semaphore_create(0);
+    __block id response = nil;
+    void (^handler)(id) = ^(id result) {
+        response = [result retain];
+        dispatch_semaphore_signal(completion);
+    };
+    @try {
+        ((void (*)(id, SEL, id, dispatch_queue_t, id))objc_msgSend)(
+            device,
+            NSSelectorFromString(@"sendAccessibilityRequestAsync:completionQueue:completionHandler:"),
+            request,
+            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
+            handler
+        );
+    } @catch (__unused NSException *exception) {
+        dispatch_release(completion);
+        return nil;
+    }
+    long waitResult = dispatch_semaphore_wait(
+        completion, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+    dispatch_release(completion);
+    if (waitResult != 0) { return nil; }
+    return [response autorelease];
+}
+
+// Fetch a fixed set of attributes for one translation object with a single MultipleAttribute request
+// (requestType 5). `clientType` is deliberately left unset — setting it makes the guest answer from a
+// stale automation override and children come back empty. Returns the response's `resultData`
+// dictionary (keyed by NSNumber attribute id) or nil.
+static NSDictionary *SimulatorAXFetchAttributes(id device, id translation) {
+    Class requestClass = NSClassFromString(@"AXPTranslatorRequest");
+    if (requestClass == Nil || translation == nil) { return nil; }
+    id request = ((id (*)(id, SEL, id))objc_msgSend)(
+        requestClass, NSSelectorFromString(@"requestWithTranslation:"), translation);
+    if (request == nil) { return nil; }
+    ((void (*)(id, SEL, NSUInteger))objc_msgSend)(
+        request, NSSelectorFromString(@"setRequestType:"), SimulatorAXRequestTypeMultipleAttribute);
+    NSArray *attributes = @[
+        @(SimulatorAXAttributeChildren), @(SimulatorAXAttributeFrame),
+        @(SimulatorAXAttributeIdentifier), @(SimulatorAXAttributeIsEnabled),
+        @(SimulatorAXAttributeLabel), @(SimulatorAXAttributeRole),
+        @(SimulatorAXAttributeSubrole), @(SimulatorAXAttributeValue)
+    ];
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        request, NSSelectorFromString(@"setParameters:"), @{@"attributes": attributes});
+    id response = SimulatorAXRelayRequest(device, request);
+    if (response == nil) { return nil; }
+    id data = ((id (*)(id, SEL))objc_msgSend)(response, NSSelectorFromString(@"resultData"));
+    return [data isKindOfClass:[NSDictionary class]] ? data : nil;
+}
+
+// The bridge/token delegate the translator calls back into. Its one job is to relay each opaque
+// AXPTranslatorRequest the translator builds to the guest, bridging that async XPC to the
+// translator's synchronous delegate contract. Holds the device unretained — the owning bridge
+// outlives it.
+@interface SimulatorAXBridgeDelegate : NSObject
+@property(nonatomic, assign) id device;
+@end
+
+@implementation SimulatorAXBridgeDelegate
+
+- (id)accessibilityTranslationDelegateBridgeCallbackWithToken:(id)token {
+    SimulatorAXBridgeDelegate *__unsafe_unretained weakSelf = self;
+    id block = ^id(id request) {
+        return SimulatorAXRelayRequest(weakSelf.device, request);
+    };
+    return [[block copy] autorelease];
+}
+
+- (id)accessibilityTranslationRootParentWithToken:(id)token {
+    return nil;
+}
+
+- (CGRect)accessibilityTranslationConvertPlatformFrameToSystem:(CGRect)frame withToken:(id)token {
+    // idb's implementation is identity — the frames already arrive in screen space.
+    return frame;
+}
+
+@end
+
 static id SendObject(id object, NSString *selector) {
     return ((ObjectGetter)objc_msgSend)(object, NSSelectorFromString(selector));
 }
@@ -73,6 +202,15 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     KeyboardMessageBuilder _keyboardMessageBuilder;
     ButtonMessageBuilder _buttonMessageBuilder;
     HIDArbitraryMessageBuilder _hidArbitraryMessageBuilder;
+    // Accessibility snapshot state. `_axQueue` serializes every translator interaction because the
+    // AXPTranslator singleton's token storage is not thread-safe (concurrent use over-releases it →
+    // EXC_BAD_ACCESS). Set up lazily on the first snapshot.
+    void *_axpHandle;
+    id _axTranslator;
+    SimulatorAXBridgeDelegate *_axBridgeDelegate;
+    dispatch_queue_t _axQueue;
+    BOOL _axSetupAttempted;
+    BOOL _axSupported;
 }
 @property(nonatomic, readwrite, copy) NSString *coreSimulatorVersion;
 @property(nonatomic, readwrite, copy) NSString *simulatorKitVersion;
@@ -248,6 +386,7 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     NSBundle *kitBundle = [NSBundle bundleWithPath:[kitPath stringByDeletingLastPathComponent]];
     self.coreSimulatorVersion = [coreBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"unknown";
     self.simulatorKitVersion = [kitBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"unknown";
+    _axQueue = dispatch_queue_create("codes.threading.simulator-helper.accessibility", DISPATCH_QUEUE_SERIAL);
     return self;
 }
 
@@ -411,13 +550,158 @@ static BOOL StaticCodeIsAppleSigned(NSString *path, NSError **error) {
     return completionError == nil;
 }
 
+#pragma mark - Accessibility snapshot
+
+// Build one node's plain-dictionary form from a translation object, recursing on its children.
+// Bounded by depth and a running node count. Returns an autoreleased dictionary, or nil when the
+// element could not be read or a bound was hit.
+static NSDictionary *SimulatorAXBuildNode(id device, id translation, NSInteger depth, NSInteger *nodeCount) {
+    if (depth > SimulatorAXMaxDepth || *nodeCount >= SimulatorAXMaxNodes) { return nil; }
+    NSDictionary *attributes = SimulatorAXFetchAttributes(device, translation);
+    if (attributes == nil) { return nil; }
+    (*nodeCount)++;
+
+    NSMutableDictionary *node = [NSMutableDictionary dictionary];
+    node[@"role"] = SimulatorAXRoleString(attributes[@(SimulatorAXAttributeRole)]);
+
+    id label = attributes[@(SimulatorAXAttributeLabel)];
+    if ([label isKindOfClass:[NSString class]] && [label length] > 0) { node[@"label"] = label; }
+    id value = attributes[@(SimulatorAXAttributeValue)];
+    if ([value isKindOfClass:[NSString class]] && [value length] > 0) { node[@"value"] = value; }
+    id identifier = attributes[@(SimulatorAXAttributeIdentifier)];
+    if ([identifier isKindOfClass:[NSString class]] && [identifier length] > 0) {
+        node[@"identifier"] = identifier;
+    }
+    id subrole = attributes[@(SimulatorAXAttributeSubrole)];
+    if ([subrole isKindOfClass:[NSString class]] && [subrole length] > 0) { node[@"subrole"] = subrole; }
+
+    id enabled = attributes[@(SimulatorAXAttributeIsEnabled)];
+    node[@"enabled"] = @([enabled respondsToSelector:@selector(boolValue)] ? [enabled boolValue] : YES);
+
+    NSRect frame = NSZeroRect;
+    id frameValue = attributes[@(SimulatorAXAttributeFrame)];
+    if ([frameValue isKindOfClass:[NSValue class]] &&
+        [frameValue respondsToSelector:@selector(rectValue)]) {
+        frame = [frameValue rectValue];
+    }
+    node[@"frame"] = @[@(frame.origin.x), @(frame.origin.y), @(frame.size.width), @(frame.size.height)];
+
+    id children = attributes[@(SimulatorAXAttributeChildren)];
+    if ([children isKindOfClass:[NSArray class]] && [children count] > 0) {
+        NSMutableArray *childNodes = [NSMutableArray array];
+        for (id child in children) {
+            if (*nodeCount >= SimulatorAXMaxNodes) { break; }
+            NSDictionary *childNode = SimulatorAXBuildNode(device, child, depth + 1, nodeCount);
+            if (childNode != nil) { [childNodes addObject:childNode]; }
+        }
+        if ([childNodes count] > 0) { node[@"children"] = childNodes; }
+    }
+    return node;
+}
+
+- (BOOL)ensureAccessibilityReadyLocked {
+    if (_axSetupAttempted) { return _axSupported; }
+    _axSetupAttempted = YES;
+
+    _axpHandle = dlopen(SimulatorAXPFrameworkPath.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL);
+    Class translatorClass = NSClassFromString(@"AXPTranslator");
+    Class requestClass = NSClassFromString(@"AXPTranslatorRequest");
+    SEL sharedSelector = NSSelectorFromString(@"sharedmacOSInstance");
+    SEL frontmostSelector = NSSelectorFromString(@"frontmostApplicationWithDisplayId:bridgeDelegateToken:");
+    SEL tokenSelector = NSSelectorFromString(@"accessibilityPlatformTranslationToken");
+    SEL relaySelector = NSSelectorFromString(@"sendAccessibilityRequestAsync:completionQueue:completionHandler:");
+    if (_axpHandle == NULL || translatorClass == Nil || requestClass == Nil ||
+        ![translatorClass respondsToSelector:sharedSelector] ||
+        ![translatorClass instancesRespondToSelector:frontmostSelector] ||
+        ![translatorClass instancesRespondToSelector:NSSelectorFromString(@"setBridgeDelegate:")] ||
+        ![translatorClass instancesRespondToSelector:NSSelectorFromString(@"setSupportsDelegateTokens:")] ||
+        ![requestClass respondsToSelector:NSSelectorFromString(@"requestWithTranslation:")] ||
+        _device == nil ||
+        ![_device respondsToSelector:tokenSelector] ||
+        ![_device respondsToSelector:relaySelector]) {
+        _axSupported = NO;
+        return NO;
+    }
+
+    id translator = ((id (*)(id, SEL))objc_msgSend)(translatorClass, sharedSelector);
+    if (translator == nil) { _axSupported = NO; return NO; }
+    _axTranslator = [translator retain];
+
+    if ([_axTranslator respondsToSelector:NSSelectorFromString(@"setAccessibilityEnabled:")]) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(
+            _axTranslator, NSSelectorFromString(@"setAccessibilityEnabled:"), YES);
+    }
+    if ([_axTranslator respondsToSelector:NSSelectorFromString(@"enableAccessibility")]) {
+        @try { SendObject(_axTranslator, @"enableAccessibility"); } @catch (__unused NSException *e) {}
+    }
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        _axTranslator, NSSelectorFromString(@"setSupportsDelegateTokens:"), YES);
+
+    _axBridgeDelegate = [[SimulatorAXBridgeDelegate alloc] init];
+    _axBridgeDelegate.device = _device;
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        _axTranslator, NSSelectorFromString(@"setBridgeDelegate:"), _axBridgeDelegate);
+    if ([_axTranslator respondsToSelector:NSSelectorFromString(@"setBridgeTokenDelegate:")]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            _axTranslator, NSSelectorFromString(@"setBridgeTokenDelegate:"), _axBridgeDelegate);
+    }
+
+    _axSupported = YES;
+    return YES;
+}
+
+- (BOOL)supportsAccessibility {
+    __block BOOL supported = NO;
+    dispatch_sync(_axQueue, ^{ supported = [self ensureAccessibilityReadyLocked]; });
+    return supported;
+}
+
+- (NSDictionary *)accessibilitySnapshotWithError:(NSError **)error {
+    __block NSDictionary *result = nil;
+    __block NSError *failure = nil;
+    dispatch_sync(_axQueue, ^{
+        if (![self ensureAccessibilityReadyLocked]) {
+            failure = [BridgeError(40, @"This Xcode does not expose the accessibility-translation path.") retain];
+            return;
+        }
+        id token = SendObject(_device, @"accessibilityPlatformTranslationToken");
+        id root = ((id (*)(id, SEL, int, id))objc_msgSend)(
+            _axTranslator,
+            NSSelectorFromString(@"frontmostApplicationWithDisplayId:bridgeDelegateToken:"),
+            0, token);
+        if (root == nil) {
+            failure = [BridgeError(41, @"No foreground application is available to snapshot.") retain];
+            return;
+        }
+        NSInteger nodeCount = 0;
+        NSDictionary *tree = SimulatorAXBuildNode(_device, root, 0, &nodeCount);
+        if (tree == nil) {
+            failure = [BridgeError(42, @"The accessibility tree could not be read (automation may be off).") retain];
+            return;
+        }
+        result = [tree retain];
+    });
+    if (result == nil) {
+        if (error != NULL) { *error = [failure autorelease]; }
+        else { [failure release]; }
+        return nil;
+    }
+    [failure release];
+    return [result autorelease];
+}
+
 - (void)dealloc {
     [_coreSimulatorVersion release];
     [_simulatorKitVersion release];
     [_hidClient release];
     [_screenProxy release];
     [_deviceScreen release];
+    [_axTranslator release];
+    [_axBridgeDelegate release];
+    if (_axQueue != NULL) { dispatch_release(_axQueue); }
     [_device release];
+    // `_axpHandle` is intentionally not dlclosed: the translator singleton it vends is process-wide
+    // and may still be referenced; the helper process is short-lived and exits right after.
     if (_simulatorKitHandle != NULL) { dlclose(_simulatorKitHandle); }
     [super dealloc];
 }

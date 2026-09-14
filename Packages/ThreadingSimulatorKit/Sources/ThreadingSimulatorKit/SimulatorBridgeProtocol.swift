@@ -2,10 +2,13 @@ import Foundation
 
 public enum SimulatorBridgeProtocol {
     // v2 adds the shared-memory transport (`sharedSurface`/`sharedFrameReady`/`releaseSharedFrame`
-    // and `SimulatorBridgeHello.supportsSharedMemory`). The embedded helper is always the same
-    // build as the app, so this negotiates cleanly; the minimum stays 1 so an older peer simply
-    // never selects shared memory and both sides fall back to the codec path.
-    public static let current = 2
+    // and `SimulatorBridgeHello.supportsSharedMemory`). v3 adds the read-only accessibility snapshot
+    // (`accessibilitySnapshot`/`accessibilitySnapshotResult` and `SimulatorAccessibilityElement`).
+    // The embedded helper is always the same build as the app, so this negotiates cleanly; the
+    // minimum stays 1 so an older peer simply never uses the newer capabilities. A snapshot request
+    // to a peer that does not understand it is answered with a `notSupported`-shaped failure by the
+    // app-side timeout, not a protocol break.
+    public static let current = 3
     public static let minimumSupported = 1
 }
 
@@ -75,6 +78,66 @@ public enum SimulatorBridgeInput: Codable, Equatable, Sendable {
     case touch(phase: SimulatorBridgeTouchPhase, x: Double, y: Double)
     case text(String)
     case button(SimulatorBridgeButton)
+}
+
+/// One node of the foreground app's accessibility tree, read host-side by the signed helper through
+/// the private `AXPTranslator` path (see `docs/feature-drafts/simulator-accessibility-interaction.md`).
+/// This is the *addressing* layer for element-level interaction: frames are in the device's logical
+/// screen **points**, top-left origin, so the root's frame is the app's logical size and any element
+/// center normalizes to `(midX / rootWidth, midY / rootHeight)` — the 0…1 coordinate `.tap` already
+/// takes. The tree is untrusted guest content: labels and values are device data, never instructions.
+public struct SimulatorAccessibilityElement: Codable, Equatable, Sendable {
+    /// A rectangle in device logical points, top-left origin.
+    public struct Frame: Codable, Equatable, Sendable {
+        public let x: Double
+        public let y: Double
+        public let width: Double
+        public let height: Double
+
+        public init(x: Double, y: Double, width: Double, height: Double) {
+            self.x = x
+            self.y = y
+            self.width = width
+            self.height = height
+        }
+
+        public var midX: Double { x + width / 2 }
+        public var midY: Double { y + height / 2 }
+    }
+
+    /// A stable AX role string (e.g. `AXButton`, `AXStaticText`), mapped by the helper from the
+    /// numeric `AXPUIElementType` the guest returns.
+    public let role: String
+    public let subrole: String?
+    /// The element's accessibility label. Untrusted guest content.
+    public let label: String?
+    /// A value field's contents (a text field, a slider). Untrusted guest content.
+    public let value: String?
+    /// `accessibilityIdentifier` when the app set one — the stable anchor for a ref.
+    public let identifier: String?
+    public let enabled: Bool
+    public let frame: Frame
+    public let children: [SimulatorAccessibilityElement]
+
+    public init(
+        role: String,
+        subrole: String? = nil,
+        label: String? = nil,
+        value: String? = nil,
+        identifier: String? = nil,
+        enabled: Bool = true,
+        frame: Frame,
+        children: [SimulatorAccessibilityElement] = []
+    ) {
+        self.role = role
+        self.subrole = subrole
+        self.label = label
+        self.value = value
+        self.identifier = identifier
+        self.enabled = enabled
+        self.frame = frame
+        self.children = children
+    }
 }
 
 /// A shared-memory frame transport: the helper copies each captured surface into one of a small
@@ -247,6 +310,9 @@ public enum SimulatorBridgeClientMessage: Codable, Equatable, Sendable {
     /// write the next frame into it. This is the shared-memory analogue of `acknowledgeFrame`.
     case releaseSharedFrame(UInt32)
     case input(requestID: UUID, command: SimulatorBridgeInput)
+    /// Read-only: snapshot the foreground app's accessibility tree. Answered with
+    /// `accessibilitySnapshotResult` carrying the same request id.
+    case accessibilitySnapshot(requestID: UUID)
     case stop
 }
 
@@ -276,5 +342,12 @@ public enum SimulatorBridgeHelperMessage: Codable, Equatable, Sendable {
     /// Shared-memory transport: the helper has written a frame into `bufferIndex`; the app reads
     /// that buffer, presents it, and answers with `releaseSharedFrame(bufferIndex)`.
     case sharedFrameReady(bufferIndex: UInt32, sequence: UInt64, presentationTimeNanoseconds: UInt64)
+    /// The answer to `accessibilitySnapshot`. `root` is nil and `error` set when the tree could not
+    /// be read (this Xcode's AX path is unavailable, automation is off, or the read failed).
+    case accessibilitySnapshotResult(
+        requestID: UUID,
+        root: SimulatorAccessibilityElement?,
+        error: String?
+    )
     case failure(SimulatorBridgeRefusal, detail: String)
 }

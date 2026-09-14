@@ -68,6 +68,9 @@ protocol SimulatorLiveStreamSession: AnyObject, Sendable {
     /// gating each one on a round-trip ack is what made panning lag. The ordered, reliable socket
     /// guarantees delivery; a lost ack does not matter because the next move corrects the position.
     func streamInput(_ input: SimulatorBridgeInput)
+    /// Read the foreground app's accessibility tree once. Read-only; returns the tree root or throws
+    /// when this helper/Xcode cannot read it. See the Simulator accessibility feature draft.
+    func requestAccessibilitySnapshot() async throws -> SimulatorAccessibilityElement
     func stop()
 }
 
@@ -76,6 +79,13 @@ extension SimulatorLiveStreamSession {
     // fire-and-forget send.
     func streamInput(_ input: SimulatorBridgeInput) {
         Task { try? await sendInput(input) }
+    }
+
+    // Default keeps test doubles simple; the real client overrides with the wire round-trip.
+    func requestAccessibilitySnapshot() async throws -> SimulatorAccessibilityElement {
+        throw SimulatorLiveStreamError.helperUnavailable(
+            "This Simulator session cannot read the accessibility tree."
+        )
     }
 }
 

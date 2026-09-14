@@ -32,6 +32,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     private var handshake: CheckedContinuation<Void, Error>?
     private var handshakeSpan: PerformanceSpan?
     private var pendingInput: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var pendingSnapshot: [UUID: CheckedContinuation<SimulatorAccessibilityElement, Error>] = [:]
     private var didStop = false
     private var didCompleteHandshake = false
     private var didStartDiagnostics = false
@@ -144,6 +145,29 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         stateQueue.async { [weak self] in
             guard let self, !self.didStop, self.didCompleteHandshake else { return }
             self.send(.input(requestID: UUID(), command: input))
+        }
+    }
+
+    func requestAccessibilitySnapshot() async throws -> SimulatorAccessibilityElement {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<SimulatorAccessibilityElement, Error>) in
+            stateQueue.async { [weak self] in
+                guard let self, !didStop, didCompleteHandshake else {
+                    continuation.resume(throwing: SimulatorLiveStreamError.disconnected)
+                    return
+                }
+                let id = UUID()
+                pendingSnapshot[id] = continuation
+                send(.accessibilitySnapshot(requestID: id))
+                // A cold read hits every attribute lazily over the wire; give it a generous ceiling
+                // rather than the 3 s an input ack gets.
+                stateQueue.asyncAfter(deadline: .now() + 8) { [weak self] in
+                    guard let continuation = self?.pendingSnapshot.removeValue(forKey: id) else {
+                        return
+                    }
+                    continuation.resume(throwing: SimulatorLiveStreamError.inputTimedOut)
+                }
+            }
         }
     }
 
@@ -344,6 +368,16 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
                 continuation.resume()
             }
 
+        case let .accessibilitySnapshotResult(requestID, root, error):
+            guard let continuation = pendingSnapshot.removeValue(forKey: requestID) else { return }
+            if let root {
+                continuation.resume(returning: root)
+            } else {
+                continuation.resume(throwing: SimulatorLiveStreamError.helperUnavailable(
+                    error ?? "The Simulator accessibility tree could not be read."
+                ))
+            }
+
         case .statistics(let statistics):
             latestStatistics = statistics
             SimulatorStreamDiagnostics.shared.update(id: diagnosticID, statistics: statistics)
@@ -430,6 +464,10 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
             continuation.resume(throwing: SimulatorLiveStreamError.disconnected)
         }
         pendingInput.removeAll()
+        for continuation in pendingSnapshot.values {
+            continuation.resume(throwing: SimulatorLiveStreamError.disconnected)
+        }
+        pendingSnapshot.removeAll()
         writeQueue.sync {}
         if readDescriptor >= 0 { close(readDescriptor) }
         readDescriptor = -1
