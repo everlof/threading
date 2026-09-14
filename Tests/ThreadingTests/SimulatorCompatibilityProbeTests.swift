@@ -45,6 +45,13 @@ final class SimulatorCompatibilityProbeTests: XCTestCase {
 
     func testProbeRecordsTheSignedHelperHandshakeAndAFlowingStream() async throws {
         let session = SimulatorCompatibilitySessionFake()
+        session.snapshotToReturn = SimulatorAccessibilityElement(
+            role: "AXApplication",
+            frame: .init(x: 0, y: 0, width: 2, height: 3),
+            children: [
+                SimulatorAccessibilityElement(role: "AXButton", frame: .init(x: 0, y: 0, width: 1, height: 1))
+            ]
+        )
         let coordinator = SimulatorCompatibilityCoordinatorFake(session: session)
         let request = SimulatorCompatibilityProbeRequest(
             deviceID: simulatorCompatibilityDeviceID,
@@ -58,7 +65,7 @@ final class SimulatorCompatibilityProbeTests: XCTestCase {
             timeout: .seconds(1)
         )
 
-        XCTAssertEqual(report.schemaVersion, 1)
+        XCTAssertEqual(report.schemaVersion, 2)
         XCTAssertEqual(report.outcome, "compatible")
         XCTAssertEqual(report.protocolVersion, SimulatorBridgeProtocol.current)
         XCTAssertEqual(report.codec, "h264")
@@ -67,8 +74,32 @@ final class SimulatorCompatibilityProbeTests: XCTestCase {
         XCTAssertEqual(report.frameWidth, 2)
         XCTAssertEqual(report.frameHeight, 3)
         XCTAssertNil(report.failure)
+        // The accessibility read is proven too: the tree came back and was counted.
+        XCTAssertEqual(report.accessibility, "ok")
+        XCTAssertEqual(report.accessibilityElementCount, 2)
+        XCTAssertNil(report.accessibilityFailure)
         XCTAssertEqual(session.visibilityChanges, [true, false])
         XCTAssertTrue(session.didStop)
+    }
+
+    func testProbeRecordsWhenTheAccessibilityReadIsUnavailable() async throws {
+        // A session that streams frames but cannot read the tree (the AXPTranslator path drifted) is
+        // still a compatible stream, but the report flags the accessibility read as unavailable.
+        let session = SimulatorCompatibilitySessionFake()
+        let coordinator = SimulatorCompatibilityCoordinatorFake(session: session)
+        let report = await SimulatorCompatibilityProbe.run(
+            request: SimulatorCompatibilityProbeRequest(
+                deviceID: simulatorCompatibilityDeviceID,
+                reportURL: URL(fileURLWithPath: "/tmp/unused.json")
+            ),
+            bundle: Bundle(for: Self.self),
+            coordinator: coordinator,
+            timeout: .seconds(1)
+        )
+        XCTAssertEqual(report.outcome, "compatible")
+        XCTAssertEqual(report.accessibility, "unavailable")
+        XCTAssertNil(report.accessibilityElementCount)
+        XCTAssertNotNil(report.accessibilityFailure)
     }
 
     /// The shipped encoder once froze after its first picture while the helper stayed alive;
@@ -239,6 +270,14 @@ private final class SimulatorCompatibilitySessionFake: SimulatorLiveStreamSessio
     }
 
     func sendInput(_ input: SimulatorBridgeInput) async throws {}
+
+    /// When set, the probe's accessibility check reads this back; nil makes it throw (unavailable).
+    var snapshotToReturn: SimulatorAccessibilityElement?
+
+    func requestAccessibilitySnapshot() async throws -> SimulatorAccessibilityElement {
+        if let snapshotToReturn { return snapshotToReturn }
+        throw SimulatorLiveStreamError.helperUnavailable("no accessibility in this fake")
+    }
 
     func stop() {
         lock.withLock { stopped = true }

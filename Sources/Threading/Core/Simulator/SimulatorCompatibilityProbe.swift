@@ -46,7 +46,9 @@ enum SimulatorCompatibilityProbeArguments {
 }
 
 struct SimulatorCompatibilityProbeReport: Codable, Equatable, Sendable {
-    static let schemaVersion = 1
+    // v2 adds the accessibility-snapshot evidence, so a shift in the private AXPTranslator ABI on a
+    // new Xcode surfaces as `accessibility != "ok"` instead of silently returning empty trees.
+    static let schemaVersion = 2
 
     let schemaVersion: Int
     let outcome: String
@@ -61,9 +63,14 @@ struct SimulatorCompatibilityProbeReport: Codable, Equatable, Sendable {
     let frameHeight: Int?
     let elapsedMilliseconds: Int
     let failure: String?
+    /// "ok" when the accessibility tree read back, "unavailable" when the read failed, or
+    /// "not-attempted" when the stream itself was incompatible so no read was tried.
+    let accessibility: String
+    let accessibilityElementCount: Int?
+    let accessibilityFailure: String?
 
     private enum CodingKeys: String, CodingKey {
-        case outcome, codec, failure
+        case outcome, codec, failure, accessibility
         case schemaVersion = "schema_version"
         case protocolVersion = "protocol_version"
         case hostBundleIdentifier = "host_bundle_identifier"
@@ -74,6 +81,8 @@ struct SimulatorCompatibilityProbeReport: Codable, Equatable, Sendable {
         case frameWidth = "frame_width"
         case frameHeight = "frame_height"
         case elapsedMilliseconds = "elapsed_milliseconds"
+        case accessibilityElementCount = "accessibility_element_count"
+        case accessibilityFailure = "accessibility_failure"
     }
 }
 
@@ -129,11 +138,16 @@ enum SimulatorCompatibilityProbe {
             }
             session.setVisible(true)
             let evidence = try await flowingStream(from: session, timeout: timeout)
+            // The stream is compatible; now check the accessibility read on the same session. A
+            // failure here does not make the device incompatible — it is a separate capability — but
+            // it is recorded so private-AX-ABI drift is caught rather than silently degrading.
+            let accessibility = await probeAccessibility(session: session)
             return report(
                 bundle: bundle,
                 startedAt: startedAt,
                 outcome: "compatible",
                 evidence: evidence,
+                accessibility: accessibility,
                 failure: nil
             )
         } catch {
@@ -142,9 +156,45 @@ enum SimulatorCompatibilityProbe {
                 startedAt: startedAt,
                 outcome: "incompatible",
                 evidence: nil,
+                accessibility: AccessibilityEvidence(status: "not-attempted", count: nil, failure: nil),
                 failure: error.localizedDescription
             )
         }
+    }
+
+    private struct AccessibilityEvidence: Sendable {
+        let status: String
+        let count: Int?
+        let failure: String?
+    }
+
+    /// Read the foreground app's accessibility tree once and count it, so the report proves the
+    /// private AXPTranslator path still works on this Xcode. Bounded by its own timeout.
+    private static func probeAccessibility(
+        session: any SimulatorLiveStreamSession,
+        timeout: Duration = .seconds(10)
+    ) async -> AccessibilityEvidence {
+        do {
+            let root = try await withThrowingTaskGroup(of: SimulatorAccessibilityElement.self) { group in
+                group.addTask { try await session.requestAccessibilitySnapshot() }
+                group.addTask {
+                    try await Task.sleep(for: timeout)
+                    throw ProbeError.timedOut
+                }
+                defer { group.cancelAll() }
+                guard let first = try await group.next() else { throw ProbeError.timedOut }
+                return first
+            }
+            return AccessibilityEvidence(status: "ok", count: elementCount(root), failure: nil)
+        } catch {
+            return AccessibilityEvidence(
+                status: "unavailable", count: nil, failure: error.localizedDescription
+            )
+        }
+    }
+
+    private static func elementCount(_ element: SimulatorAccessibilityElement) -> Int {
+        1 + element.children.reduce(0) { $0 + elementCount($1) }
     }
 
     static func write(
@@ -236,6 +286,7 @@ enum SimulatorCompatibilityProbe {
         startedAt: ContinuousClock.Instant,
         outcome: String,
         evidence: Evidence?,
+        accessibility: AccessibilityEvidence,
         failure: String?
     ) -> SimulatorCompatibilityProbeReport {
         let elapsed = startedAt.duration(to: .now)
@@ -254,7 +305,10 @@ enum SimulatorCompatibilityProbe {
             frameWidth: evidence?.width,
             frameHeight: evidence?.height,
             elapsedMilliseconds: milliseconds,
-            failure: failure
+            failure: failure,
+            accessibility: accessibility.status,
+            accessibilityElementCount: accessibility.count,
+            accessibilityFailure: accessibility.failure
         )
     }
 
