@@ -20,7 +20,7 @@ enum SimulatorAgentCommandService {
         case button(Button)
     }
 
-    enum Button: String, Sendable {
+    enum Button: String, Sendable, CaseIterable {
         case home
         case lock
         case side
@@ -298,7 +298,8 @@ enum SimulatorAgentCommandService {
             return .rejected(.failure("Missing required argument: button"))
         }
         guard let button = Button(rawValue: rawValue) else {
-            return .rejected(.failure("button must be home, lock, or side."))
+            let valid = Button.allCases.map(\.rawValue).joined(separator: ", ")
+            return .rejected(.failure("button must be one of: \(valid)."))
         }
         return .accepted(.button(button))
     }
