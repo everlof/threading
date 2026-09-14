@@ -57,6 +57,20 @@ final class SimulatorHelperServer: @unchecked Sendable {
     /// Non-nil when the app negotiated the shared-memory transport; the capture loop then copies
     /// each surface into a shared buffer instead of encoding it.
     private var sharedProvider: SimulatorSharedMemoryProvider?
+    /// The surface dimensions the fixed-geometry transports (shared memory, H.264) were negotiated
+    /// for. The app under test rotating changes the surface size, which those buffers and the
+    /// encoder cannot accept — copying a rotated surface under the old stride/height renders
+    /// garbage. When it changes the capture loop ends the stream so the app reconnects and
+    /// re-negotiates the new size. Nil for JPEG, which re-reads dimensions from every frame.
+    private var captureGeometry: CaptureGeometry?
+    private struct CaptureGeometry: Equatable {
+        let width: Int
+        let height: Int
+        init(_ surface: IOSurface) {
+            width = IOSurfaceGetWidth(surface)
+            height = IOSurfaceGetHeight(surface)
+        }
+    }
     private var framesPerSecond = 30
     private var timer: DispatchSourceTimer?
     private var nextSequence: UInt64 = 1
@@ -305,6 +319,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
            let provider = SimulatorSharedMemoryProvider(surface: firstSurface, bufferCount: 3) {
             self.bridge = bridge
             self.sharedProvider = provider
+            self.captureGeometry = CaptureGeometry(firstSurface)
             self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge) : nil
             framesPerSecond = hello.requestedFramesPerSecond
             writeControl(.hello(SimulatorBridgeHelloReply(
@@ -337,6 +352,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
 
         self.bridge = bridge
         self.encoder = selectedEncoder
+        // H.264 is created for one fixed size; JPEG re-reads each frame, so only guard the former.
+        self.captureGeometry = selectedEncoder.codec == .h264 ? CaptureGeometry(firstSurface) : nil
         self.inputSender = bridge.supportsInput ? SimulatorInputSender(bridge: bridge) : nil
         framesPerSecond = hello.requestedFramesPerSecond
         writeControl(.hello(SimulatorBridgeHelloReply(
@@ -380,10 +397,26 @@ final class SimulatorHelperServer: @unchecked Sendable {
         }
     }
 
+    /// Ends the stream when a fixed-geometry transport is running and the live surface no longer
+    /// matches the size it was negotiated for (the app under test rotated). The app receives the
+    /// failure through the same path as a lost helper — a reason, the screenshot fallback and a
+    /// retry — and the retry re-negotiates the stream at the new size. Returns true when it ended
+    /// the stream so the caller stops processing this capture.
+    private func endStreamIfGeometryChanged(_ surface: IOSurface) -> Bool {
+        guard let captureGeometry, captureGeometry != CaptureGeometry(surface) else { return false }
+        writeControl(.failure(
+            .internalFailure,
+            detail: "The Simulator surface size changed (the app rotated); reconnecting at the new size."
+        ))
+        stop()
+        return true
+    }
+
     private func capture() {
         guard isVisible, let bridge else { return }
         if let sharedProvider {
             guard let surface = bridge.copyCurrentSurface() else { return }
+            if endStreamIfGeometryChanged(surface) { return }
             guard let bufferIndex = sharedProvider.write(surface: surface) else {
                 // Every buffer is still held by the app; drop this capture (latest-frame-wins).
                 statistics = SimulatorBridgeStatistics(
@@ -411,6 +444,7 @@ final class SimulatorHelperServer: @unchecked Sendable {
         }
         guard !isEncoding, let encoder,
               let surface = bridge.copyCurrentSurface() else { return }
+        if endStreamIfGeometryChanged(surface) { return }
         isEncoding = true
         let sequence = nextSequence
         nextSequence &+= 1
