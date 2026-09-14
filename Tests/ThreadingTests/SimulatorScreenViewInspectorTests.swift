@@ -13,7 +13,7 @@ final class SimulatorScreenViewInspectorTests: XCTestCase {
     }
 
     private func annotation(_ frame: CGRect, name: String) -> SimulatorScreenView.ElementAnnotation {
-        .init(normalizedFrame: frame, label: name, name: name, emphasized: true)
+        .init(normalizedFrame: frame, label: name, name: name, copyText: name, emphasized: true)
     }
 
     func testHoverPicksTheSmallestContainingElement() {

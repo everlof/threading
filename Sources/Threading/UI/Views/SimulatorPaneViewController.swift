@@ -174,7 +174,7 @@ final class SimulatorPaneViewController: NSViewController {
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Outline the on-screen accessibility elements")
+        button.toolTip = L10n.string("Outline the accessibility elements — click one to copy its target")
         button.onPress = { [weak self] in self?.toggleInspection() }
         button.setAccessibilityIdentifier("simulator.inspect")
         return button
@@ -1259,8 +1259,17 @@ final class SimulatorPaneViewController: NSViewController {
         let height = root.frame.height
         guard width > 0, height > 0 else { return [] }
         var annotations: [SimulatorScreenView.ElementAnnotation] = []
+        // Number refs over the same interactive_only listing simulator_snapshot uses, in preorder,
+        // so a ref shown in the badge is the same eN the agent tools resolve — even for elements
+        // that fall off-screen and get no outline.
+        var refIndex = 0
         func visit(_ element: SimulatorAccessibilityElement, isRoot: Bool) {
             if !isRoot {
+                var ref: String?
+                if SimulatorElementListing.isListed(element, interactiveOnly: true) {
+                    refIndex += 1
+                    ref = "e\(refIndex)"
+                }
                 let normalized = CGRect(
                     x: element.frame.x / width,
                     y: element.frame.y / height,
@@ -1269,11 +1278,11 @@ final class SimulatorPaneViewController: NSViewController {
                 )
                 if normalized.maxX > 0, normalized.minX < 1,
                    normalized.maxY > 0, normalized.minY < 1 {
-                    let name = element.label.map { "\(element.role) · \($0)" } ?? element.role
                     annotations.append(SimulatorScreenView.ElementAnnotation(
                         normalizedFrame: normalized,
                         label: element.label,
-                        name: name,
+                        name: Self.badgeName(ref: ref, element: element),
+                        copyText: Self.copyTarget(element: element, normalized: normalized),
                         emphasized: Self.isInteractiveRole(element.role)
                     ))
                 }
@@ -1282,6 +1291,28 @@ final class SimulatorPaneViewController: NSViewController {
         }
         visit(root, isRoot: true)
         return annotations
+    }
+
+    /// The hover badge text: `e5 · AXButton · Kronaby`, or the role alone when there is no ref/label.
+    static func badgeName(ref: String?, element: SimulatorAccessibilityElement) -> String {
+        var parts: [String] = []
+        if let ref { parts.append(ref) }
+        parts.append(element.role)
+        if let label = element.label, !label.isEmpty { parts.append(label) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A paste-ready handle for the clipboard: the durable, human-readable target plus the exact
+    /// normalized tap point, so it can be dropped straight into a prompt.
+    static func copyTarget(
+        element: SimulatorAccessibilityElement,
+        normalized: CGRect
+    ) -> String {
+        var target = element.label.map { "\"\($0)\" (\(element.role))" } ?? element.role
+        if let identifier = element.identifier, !identifier.isEmpty { target += " #\(identifier)" }
+        return String(
+            format: "%@ at (%.3f, %.3f)", target, normalized.midX, normalized.midY
+        )
     }
 
     private static func isInteractiveRole(_ role: String) -> Bool {

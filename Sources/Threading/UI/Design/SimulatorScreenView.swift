@@ -56,8 +56,11 @@ final class SimulatorScreenView: ThemedControl {
         /// The element's frame in the device's 0…1 space, top-left origin (the same space taps use).
         let normalizedFrame: CGRect
         let label: String?
-        /// A short display name (role + label) shown in the badge when this element is hovered.
+        /// A short display name (ref + role + label) shown in the badge when this element is hovered.
         let name: String?
+        /// A paste-ready target string copied when the element is clicked in inspect mode — a handle
+        /// to hand the agent ("the Kronaby button, tap (0.9, 0.1)").
+        let copyText: String?
         /// Interactive elements (buttons, fields) are drawn emphasized; static content is faint.
         let emphasized: Bool
     }
@@ -76,6 +79,9 @@ final class SimulatorScreenView: ThemedControl {
     /// against the fetched tree (smallest containing rect), so pointer motion needs no round-trip.
     private var hoveredAnnotationIndex: Int?
     private var inspectionTrackingArea: NSTrackingArea?
+    /// Briefly true after an inspect-mode copy, so the badge confirms it.
+    private var showingCopyConfirmation = false
+    private var copyConfirmationTimer: Timer?
 
     /// The person's own pinned notes, drawn as numbered pins over the framebuffer. Distinct from the
     /// accessibility overlay above: these are user-authored, the pins use the app's shared annotation
@@ -227,8 +233,9 @@ final class SimulatorScreenView: ThemedControl {
                 path.fill()
                 Design.Surface.accent.setStroke()
                 path.stroke()
-                if let name = annotation.name, !name.isEmpty {
-                    drawBadge(name, above: rect, in: target)
+                let badgeText = showingCopyConfirmation ? L10n.string("Copied") : annotation.name
+                if let badgeText, !badgeText.isEmpty {
+                    drawBadge(badgeText, above: rect, in: target)
                 }
             }
         }
@@ -329,6 +336,23 @@ final class SimulatorScreenView: ThemedControl {
         }
     }
 
+    private func flashCopyConfirmation() {
+        showingCopyConfirmation = true
+        needsDisplay = true
+        copyConfirmationTimer?.invalidate()
+        // `.common` mode so it fires during mouse tracking; `assumeIsolated` because it is added to
+        // this main-thread run loop.
+        let timer = Timer(timeInterval: 1.2, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.showingCopyConfirmation = false
+                self.needsDisplay = true
+            }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        copyConfirmationTimer = timer
+    }
+
     private func updateHover(at point: CGPoint) {
         let index = annotationIndex(under: point)
         if index != hoveredAnnotationIndex {
@@ -374,6 +398,18 @@ final class SimulatorScreenView: ThemedControl {
                 for: location, in: imageRect, isFlipped: false
             ) {
                 onAddNote?(point)
+            }
+            return
+        }
+
+        // Inspect mode grabs targets rather than driving the device: a click copies the hovered
+        // element's paste-ready handle to the clipboard. Turn the overlay off to tap again.
+        if !annotations.isEmpty {
+            if let index = hoveredAnnotationIndex, annotations.indices.contains(index),
+               let copyText = annotations[index].copyText {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(copyText, forType: .string)
+                flashCopyConfirmation()
             }
             return
         }

@@ -30768,6 +30768,17 @@
         }
       }
     },
+    "Outline the accessibility elements — click one to copy its target" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rita upp tillgänglighetselementen – klicka på ett för att kopiera dess mål"
+          }
+        }
+      }
+    },
     "Outline the on-screen accessibility elements" : {
       "extractionState" : "manual",
       "localizations" : {
