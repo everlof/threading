@@ -1,12 +1,11 @@
 # Simulator pane: element-level interaction via the accessibility tree
 
-**Status:** **Phases 1–3 implemented.** Phase 1 (read path + inspector overlay + `simulator_snapshot`)
-and Phase 2 (tap/type by `eN` ref or semantic locator) are **verified live** on the running build —
-tap-by-ref opened an app, an ambiguous label was refused with candidates, and a role-narrowed label
-resolved and tapped. Phase 3 (live pointer hit-test overlay: outline-and-name the element under the
-pointer, client-side, plus all-bounds context) is built and unit-tested, pending a relaunch to see
-it live. Phase 4 (human annotations) remains. The exact read recipe was proven in our own host code
-(below). Extends
+**Status:** **All four phases implemented.** Phases 1–2 (read path + `simulator_snapshot`; tap/type by
+`eN` ref or semantic locator) are **verified live** on the running build. Phase 3 (live pointer
+hit-test overlay) and Phase 4 (human pinned notes + read-only `simulator_annotations`) are built and
+unit-tested. The exact read recipe was proven in our own host code (below). *Remaining: migrate the
+durable helper/wire/trust decisions into [`simulator-pane.md`](../architecture/simulator-pane.md),
+leaving this draft as the research record.* Extends
 [`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the signed direct
 helper, framebuffer and Indigo HID input) and deliberately mirrors the agent browser
 ([`agent-browser.md`](../architecture/agent-browser.md)): its accessibility-oriented snapshot,
@@ -277,7 +276,13 @@ Host-owned picking, provenance and focus, exactly as the browser overlay is.
    The hit-test is client-side against the already-fetched tree (smallest containing rect), so
    pointer motion needs no round-trip; the `mouseMoved` override reads its position through
    `NSView.uncoveredPointerLocation(in:)` so a covering surface withholds it.
-4. **Human annotations.** Pinned notes with provenance, mirroring the browser. *(Not started.)*
+4. **Human annotations.** ✅ **Implemented.** A `note.text` toggle puts the pane in annotate mode:
+   a click pins a numbered note at that normalized point, clicking a pin edits or deletes it (the
+   reusable `BrowserAnnotationEditor` placed at the pin), and notes persist per device in a
+   `SimulatorAnnotationStore`. Pins use the app's shared `ImageAnnotation` vocabulary drawn over the
+   live framebuffer. A read-only `simulator_annotations` tool returns them as `user_authored` JSON —
+   numbered pin, normalized `(x, y)` for `simulator_tap`, and text — kept separate from the untrusted
+   accessibility tree; only the person creates, edits, or deletes them.
 
 ## Risks and boundaries
 
