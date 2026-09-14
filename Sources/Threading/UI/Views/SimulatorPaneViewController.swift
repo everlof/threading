@@ -193,6 +193,20 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    private lazy var exportNotesButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "square.and.arrow.up",
+            accessibility: L10n.string("Copy annotated frame"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Copy the current frame with your notes drawn on it")
+        button.onPress = { [weak self] in self?.exportAnnotatedFrame() }
+        button.setAccessibilityIdentifier("simulator.annotate.export")
+        button.isHidden = true
+        return button
+    }()
+
     /// Whether the person is placing their own note pins on the device.
     private var isAnnotatingNotes = false
     /// The floating note editor while one is open, and the note it edits.
@@ -206,6 +220,7 @@ final class SimulatorPaneViewController: NSViewController {
     /// sent and again whenever its text changes — the browser's exact sent-vs-pending rule.
     private var sentNoteTexts: [ImageAnnotation.ID: String] = [:]
     private var isSendingNotes = false
+    private var exportConfirmationTimer: Timer?
 
     private lazy var noteSendBar: AnnotationSendBar = {
         let bar = AnnotationSendBar()
@@ -225,7 +240,10 @@ final class SimulatorPaneViewController: NSViewController {
 
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [annotateButton, inspectButton, appearanceButton, controlButton, retryButton]
+        trailing: [
+            annotateButton, exportNotesButton, inspectButton,
+            appearanceButton, controlButton, retryButton,
+        ]
     )
 
     private func makeHardwareButton(
@@ -1512,11 +1530,31 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func updateSendBar() {
-        guard isAnnotatingNotes else {
+        if isAnnotatingNotes {
+            noteSendBar.setPending(count: pendingNotes.count, sending: isSendingNotes)
+        } else {
             noteSendBar.isHidden = true
-            return
         }
-        noteSendBar.setPending(count: pendingNotes.count, sending: isSendingNotes)
+        exportNotesButton.isHidden = !isAnnotatingNotes || screenView.noteMarks.isEmpty
+    }
+
+    /// Flatten the current frame with the note pins burned in and copy it to the clipboard, to share
+    /// a marked-up screenshot. Reuses the app's shared flattening, so the pins match everywhere.
+    private func exportAnnotatedFrame() {
+        guard isAnnotatingNotes, let image = screenView.image, !screenView.noteMarks.isEmpty,
+              let flattened = ImageAnnotationFlattening.flattened(
+                image, annotations: screenView.noteMarks
+              ) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([flattened])
+        statusLabel.stringValue = L10n.string("Copied annotated frame")
+        statusLabel.textColor = Design.Text.secondary
+        exportConfirmationTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.8, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.renderState() }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        exportConfirmationTimer = timer
     }
 
     /// Hand the pending notes to the session as a message, mirroring the browser's send: save any

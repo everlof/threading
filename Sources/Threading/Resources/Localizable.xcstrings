@@ -14142,6 +14142,17 @@
         }
       }
     },
+    "Copied annotated frame" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopierade annoterad bild"
+          }
+        }
+      }
+    },
     "Copy" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14395,6 +14406,17 @@
         }
       }
     },
+    "Copy annotated frame" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera annoterad bild"
+          }
+        }
+      }
+    },
     "Copy git apply command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14435,6 +14457,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera diagrammet som bild"
+          }
+        }
+      }
+    },
+    "Copy the current frame with your notes drawn on it" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera aktuell bild med dina anteckningar inritade"
           }
         }
       }
