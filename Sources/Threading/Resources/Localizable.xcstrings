@@ -14153,6 +14153,17 @@
         }
       }
     },
+    "Copied snapshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopierade ögonblicksbild"
+          }
+        }
+      }
+    },
     "Copy" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14391,6 +14402,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera konversations-ID"
+          }
+        }
+      }
+    },
+    "Copy Snapshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera ögonblicksbild"
           }
         }
       }
@@ -14733,6 +14755,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte återställa"
+          }
+        }
+      }
+    },
+    "Could not save the snapshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte spara ögonblicksbilden"
           }
         }
       }
@@ -37240,6 +37273,39 @@
         }
       }
     },
+    "Save Snapshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara ögonblicksbild"
+          }
+        }
+      }
+    },
+    "Save Snapshot As…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara ögonblicksbild som…"
+          }
+        }
+      }
+    },
+    "Save a snapshot of the device (right-click for options)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara en ögonblicksbild av enheten (högerklicka för alternativ)"
+          }
+        }
+      }
+    },
     "Save as Baseline" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37273,6 +37339,17 @@
         }
       }
     },
+    "Save snapshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara ögonblicksbild"
+          }
+        }
+      }
+    },
     "Saved" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37291,6 +37368,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparat iPhone-underlag"
+          }
+        }
+      }
+    },
+    "Saved snapshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparade ögonblicksbild"
           }
         }
       }

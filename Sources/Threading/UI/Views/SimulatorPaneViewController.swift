@@ -193,6 +193,24 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    private lazy var captureButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "camera",
+            accessibility: L10n.string("Save snapshot"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Save a snapshot of the device (right-click for options)")
+        button.onPress = { [weak self] in self?.saveSnapshot() }
+        button.onContextMenu = { [weak self] anchor in
+            self?.presentCaptureMenu(from: anchor) ?? false
+        }
+        button.setAccessibilityIdentifier("simulator.capture")
+        return button
+    }()
+
+    private var captureMenuSession: AnyObject?
+
     private lazy var exportNotesButton: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: "square.and.arrow.up",
@@ -241,7 +259,7 @@ final class SimulatorPaneViewController: NSViewController {
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
         trailing: [
-            annotateButton, exportNotesButton, inspectButton,
+            captureButton, annotateButton, exportNotesButton, inspectButton,
             appearanceButton, controlButton, retryButton,
         ]
     )
@@ -1547,7 +1565,80 @@ final class SimulatorPaneViewController: NSViewController {
               ) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([flattened])
-        statusLabel.stringValue = L10n.string("Copied annotated frame")
+        flashStatus(L10n.string("Copied annotated frame"))
+    }
+
+    // MARK: - Capture (snapshot)
+
+    private func saveSnapshot() {
+        guard let device = lease?.device, let data = currentFramePNG() else { return }
+        let name = SimulatorCaptureSaver.suggestedName(device: device, fileExtension: "png")
+        guard let url = SimulatorCaptureSaver.write(data, suggestedName: name, video: false) else {
+            flashStatus(L10n.string("Could not save the snapshot"))
+            return
+        }
+        SimulatorCaptureSaver.reveal(url)
+        flashStatus(L10n.string("Saved snapshot"))
+    }
+
+    private func copySnapshot() {
+        guard let image = screenView.image else { return }
+        SimulatorCaptureSaver.copyImage(image)
+        flashStatus(L10n.string("Copied snapshot"))
+    }
+
+    private func saveSnapshotAs() {
+        guard let device = lease?.device, let data = currentFramePNG() else { return }
+        SimulatorCaptureSaver.saveAs(
+            suggestedName: SimulatorCaptureSaver.suggestedName(device: device, fileExtension: "png"),
+            contentType: .png,
+            video: false,
+            from: view.window
+        ) { url in SimulatorCaptureSaver.writeData(data, to: url) }
+    }
+
+    private func presentCaptureMenu(from anchor: ThemedMenuAnchor) -> Bool {
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Save Snapshot"),
+                onChoose: { [weak self] in self?.saveSnapshot() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Copy Snapshot"),
+                onChoose: { [weak self] in self?.copySnapshot() }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Save Snapshot As…"),
+                onChoose: { [weak self] in self?.saveSnapshotAs() }
+            )),
+        ]
+        captureMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 220),
+            from: captureButton,
+            anchor: anchor,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.captureMenuSession = nil }
+        )
+        return captureMenuSession != nil
+    }
+
+    private func currentFramePNG() -> Data? {
+        guard let image = screenView.image else { return nil }
+        return Self.pngData(image)
+    }
+
+    /// `nonisolated`: a one-frame PNG encode, not main-actor work.
+    private nonisolated static func pngData(_ image: NSImage) -> Data? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+    }
+
+    /// Briefly show a confirmation in the status line, then restore the normal state.
+    private func flashStatus(_ text: String) {
+        statusLabel.stringValue = text
         statusLabel.textColor = Design.Text.secondary
         exportConfirmationTimer?.invalidate()
         let timer = Timer(timeInterval: 1.8, repeats: false) { [weak self] _ in
