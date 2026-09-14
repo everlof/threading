@@ -38,6 +38,54 @@ whole loop came back real:
 So the design below is not speculative; the remaining work is doing the same fetch **in our signed
 helper** instead of shelling out to idb, then wiring refs, the agent tools, and the overlay.
 
+### Proven in our own host code (standalone spike, not idb)
+
+A throwaway host-side ObjC tool — *our* code, no idb, no XCUITest — drove the whole private path
+against the booted device and confirmed each load-bearing selector on this exact toolchain
+(Xcode 26.5, macOS 26 host, iOS 26.5 runtime). It:
+
+1. `dlopen`s `CoreSimulator`, the active Xcode's `SimulatorKit`, and the **host-side**
+   `/System/Library/PrivateFrameworks/AccessibilityPlatformTranslation.framework` (the macOS copy a
+   host process links — *not* the runtime's iOS copy).
+2. Resolves the `SimDevice` through the same `SimServiceContext` →
+   `defaultDeviceSetWithError:` → `devicesByUDID` path the helper already uses.
+3. Takes `+[AXPTranslator sharedmacOSInstance]` (the concrete host singleton is
+   `AXPTranslator_macOS`), sets `setAccessibilityEnabled:`/`enableAccessibility` and
+   `setSupportsDelegateTokens:YES`, and installs a bridge delegate via `setBridgeDelegate:`.
+4. Implements the **`AXPTranslationTokenDelegateHelper`** delegate: its
+   `accessibilityTranslationDelegateBridgeCallbackWithToken:` returns a block
+   `(AXPTranslatorRequest*) -> AXPTranslatorResponse*` that relays each opaque request to
+   `-[SimDevice sendAccessibilityRequestAsync:completionQueue:completionHandler:]` and blocks on a
+   semaphore (the async-XPC → sync-delegate bridge the draft calls mandatory). The relay
+   round-trips were logged: real `AXPTranslatorRequest`/`AXPTranslatorResponse` objects come back
+   from the guest.
+5. Resolves the foreground app: `device.accessibilityPlatformTranslationToken` →
+   `frontmostApplicationWithDisplayId:bridgeDelegateToken:` (returns an `AXPTranslationObject`) →
+   `platformElementFromTranslation:` (returns an `AXPMacPlatformElement` reporting role
+   `AXApplication`).
+
+Two findings that shape the helper implementation:
+
+- **The full tree comes from an AX *tree dump*, not a recursive `AXChildren` walk.** Walking the
+  `AXPMacPlatformElement` via NSAccessibility (`accessibilityChildren` / legacy
+  `accessibilityAttributeValue:@"AXChildren"`) returned the root only — empty children — whereas idb
+  returns the whole flat 23-element array live at the same moment. idb (and we should) issue a
+  **tree-dump-typed request** relayed through `sendAccessibilityRequestAsync:` and read
+  `-[AXPTranslatorResponse treeDumpResponse]`; the flat array carries `AXFrame`, `AXUniqueId`,
+  `AXLabel`, `role`/`type`, `AXValue`, `enabled`, `role_description`, `custom_actions` per node.
+  The translator's own `generateAXTreeDumpTypeOnBackgroundThread:completionHandler:` is **abstract**
+  on `AXPTranslator_macOS` (`cannot be sent to an abstract object … Create a concrete instance!`) —
+  it is not the host entry point; the request goes to the guest. This is the one piece to port
+  verbatim from idb's open source (`AXTranslationDispatcher.swift`, `FBAccessibilityKeys.swift`)
+  rather than re-derive.
+- **`AutomationEnabled` is a per-app-launch cache, not a live gate.** idb returned the full tree
+  with the guest's `com.apple.Accessibility AutomationEnabled = 0`; toggling it to `1` did not
+  change our recursive-walk result, and `ApplicationAccessibilityEnabled` was already `1`. So the
+  identifier/fidelity difference the draft cites is about what the *foreground app* cached when it
+  launched, and the reliable read path (tree dump) does not depend on flipping the pref at read
+  time. The helper should still assert `ApplicationAccessibilityEnabled`, but automation mode is
+  best treated as a launch-time setting for apps we install, not a per-read toggle.
+
 ## The tree is reachable from our helper directly — no idb, no XCUITest
 
 The decisive finding: the live accessibility hierarchy of the **foreground** app in a booted
