@@ -1,6 +1,6 @@
 # Simulator pane: element-level interaction via the accessibility tree
 
-**Status:** draft. Researched; no implementation started. Extends
+**Status:** draft, **feasibility validated live**. No app integration started. Extends
 [`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the signed direct
 helper, framebuffer and Indigo HID input) and deliberately mirrors the agent browser
 ([`agent-browser.md`](../architecture/agent-browser.md)): its accessibility-oriented snapshot,
@@ -18,6 +18,25 @@ tools address elements by ref or by a rerender-safe **semantic locator** (role +
 test-id), and returns a fresh snapshot after every action. We want the same for the Simulator: an
 element tree the agent targets by ref, and a pane overlay that outlines and names the element under
 the pointer — an Accessibility-Inspector-grade surface, host-owned.
+
+## Validated live (2026-09, iPhone 17 Pro, iOS 26.5, Xcode 26.5)
+
+`idb ui describe-all` / `describe-point` were run against the booted device's foreground app as a
+feasibility spike (idb is a reference implementation of the exact host-side call we would make). The
+whole loop came back real:
+
+- **Snapshot:** 23 elements for the app — `Application` root at `402×874` points, then `Button`,
+  `Image`, `StaticText`, `Heading`, `Group`, each with `role`, `AXLabel`, `AXFrame`, and
+  `AXUniqueId` (= `accessibilityIdentifier`) where the app set one (`hybrid_level_1` etc.).
+- **Hit-test:** `describe-point 66 146` returned the correct element (Image "1 vibration",
+  `hybrid_level_1`) — the overlay's "element under the pointer" mechanism.
+- **Coordinate mapping to our existing tap:** normalized center = `(frame.midX/W, frame.midY/H)`
+  with `W×H` = the app's logical point size — e.g. the "Try notification backend" button →
+  `tap(0.905, 0.096)`. That feeds `simulator_tap` (normalized) directly, so **tap-by-ref reuses the
+  Indigo HID path already shipped.**
+
+So the design below is not speculative; the remaining work is doing the same fetch **in our signed
+helper** instead of shelling out to idb, then wiring refs, the agent tools, and the overlay.
 
 ## The tree is reachable from our helper directly — no idb, no XCUITest
 
