@@ -6,6 +6,13 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index. Forge detection, pull/merge requ
 and managed publication live behind the separate
 [source-control provider boundary](source-control.md); this file owns local Git only.
 
+Git discovery requires the requested path to exist before walking its ancestors. A saved
+project whose nested worktree was removed must not inherit the containing checkout’s repository
+identity or branch. After the normal cache invalidation, it resolves as unavailable and the
+sidebar retains the saved project name and chats outside the parent repository group. Existing
+subdirectories still resolve to their containing checkout. `GitMissingCheckoutTests` covers
+the missing path, refresh after deletion, and the production sidebar tree.
+
 `GitInfo` reads git metadata from disk rather than shelling out. Three layouts matter, and
 only the first has a `.git` *directory*:
 

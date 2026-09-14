@@ -28,6 +28,10 @@ enum GitInfo {
     /// Returns the repository root containing `path`, or nil when not inside a git repository.
     static func repositoryRoot(for path: String) -> URL? {
         var directory = URL(fileURLWithPath: path).standardizedFileURL
+        // A removed nested worktree is not a subdirectory of its former containing
+        // checkout. Walking up from a missing path would borrow that checkout's branch
+        // and repository identity for a saved project that no longer exists.
+        guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
 
         while directory.path != "/" {
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
