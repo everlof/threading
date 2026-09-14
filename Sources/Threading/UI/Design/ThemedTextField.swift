@@ -263,6 +263,29 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
         }
     }
 
+    /// The well's fill.
+    ///
+    /// Period fields are their own semantic surface. Windows 98's 98.css field is a white writable
+    /// well against the button-face chrome (and its disabled field falls back to that chrome);
+    /// using the generic control face here erased that distinction even though `fieldSurface` was
+    /// already authored by every retro material. 98.css treats read-only inputs the same way as
+    /// disabled ones, so a non-editable field is not allowed to keep advertising a writable white
+    /// well either.
+    private var wellFill: NSColor {
+        isEnabled && isEditable ? Design.Surface.field : Design.Surface.controlResting
+    }
+
+    /// The opaque ground selected text in this field lands on: the well, over whatever is behind
+    /// the field.
+    ///
+    /// Asked only while a field editor is lent to the field, which is exactly when the well is
+    /// drawn — `.onInteraction` included. `resolvedGround()` alone answers for the pane behind the
+    /// field, because the well is painted in `draw(_:)` and never recorded; a selection measured
+    /// there was measured against a colour it is not painted on.
+    public func textSelectionGround() -> NSColor {
+        wellFill.composited(over: resolvedGround())
+    }
+
     private func drawSurface() {
         if surfacePresentation == .onInteraction, !isEditing {
             guard isHovered else { return }
@@ -280,13 +303,7 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
         // material reads sunken rather than raised.
         let shape = ThemedSurface.draw(
             bounds,
-            // Period fields are their own semantic surface. Windows 98's 98.css field is a
-            // white writable well against the button-face chrome (and its disabled field falls
-            // back to that chrome); using the generic control face here erased that distinction
-            // even though `fieldSurface` was already authored by every retro material. 98.css
-            // treats read-only inputs the same way as disabled ones, so a non-editable field is
-            // not allowed to keep advertising a writable white well either.
-            fill: isEnabled && isEditable ? Design.Surface.field : Design.Surface.controlResting,
+            fill: wellFill,
             border: isEditing ? Design.Surface.accent : Design.Surface.border,
             bevel: .sunken
         )

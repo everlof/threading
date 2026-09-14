@@ -28,6 +28,14 @@ import AppKit
 /// `SelectionSurface.stated`: the theme's own fill, and the ink measured against it. The result
 /// inverts on its own — white on Windows 98's navy, the ordinary near-black on Christmas's wash.
 ///
+/// **Readable ink was not the whole promise either.** A highlight is a highlight only if it can be
+/// seen. Pure's night `#292929` — right for a row over a black sidebar — stood ΔE 11.9 from the
+/// browser address field's `#101010` well, so a URL selected in a focused field kept perfectly
+/// legible white text on a grey the eye could hardly separate from the field. Text therefore takes
+/// `SelectionSurface.distinct`, which raises a selection standing too close to its ground; and a
+/// field's selection is measured over the **well the field paints**, which `resolvedGround()`
+/// cannot see because the well is drawn rather than recorded.
+///
 /// Dynamic colours, so a live theme switch is answered at the next draw — the attributes
 /// dictionary is set once and never rebuilt. The **ground** is dynamic for the same reason and is
 /// therefore passed as a closure: what a text view sits on moves with the theme too.
@@ -39,12 +47,21 @@ public enum ThemedTextSelection {
     /// text view own itself.
     public static func attributes(over host: NSView?) -> [NSAttributedString.Key: Any] {
         let selection = SelectionSurface.dynamic { [weak host] in
-            host?.resolvedGround() ?? Design.Surface.ground
+            ground(under: host)
         }
         return [
             .backgroundColor: selection.fill,
             .foregroundColor: selection.ink.label
         ]
+    }
+
+    /// What a selection inside `host` is painted over. A themed field draws its well in `draw(_:)`
+    /// rather than recording it, so it answers for itself; anything else is measured.
+    private static func ground(under host: NSView?) -> NSColor {
+        if let field = host as? ThemedTextField {
+            return field.textSelectionGround()
+        }
+        return host?.resolvedGround() ?? Design.Surface.ground
     }
 
     /// The same statement for a field editor — the `NSTextView` AppKit lends an `NSTextField`

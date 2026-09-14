@@ -35,6 +35,9 @@ import AppKit
 /// ground should. Telling all of them would be a second set of inks in every list in the app,
 /// which is exactly the work `ThemedTableRowView`'s own documentation says a themed list does not
 /// have to do. So the row takes the strength that keeps that promise true.
+///
+/// A run of selected text takes `distinct`, which is `stated` held to a second promise: that the
+/// fill can be *seen* on its ground, not only that the ink can be read on the fill.
 public struct SelectionSurface {
 
     /// What to paint.
@@ -65,9 +68,7 @@ extension SelectionSurface {
     /// navy with white ink on it; under Christmas it is the pale wash with the ordinary near-black.
     /// Neither is a constant, and neither call site has to know which it got.
     public static func stated(over hostGround: NSColor) -> SelectionSurface {
-        let fill = authored
-        let ground = fill.composited(over: hostGround)
-        return SelectionSurface(fill: fill, ground: ground, ink: Design.Text.on(ground))
+        inked(authored, over: hostGround)
     }
 
     /// The same fill **held back until the chrome's own label reads on it**, ink untouched.
@@ -109,7 +110,51 @@ extension SelectionSurface {
         return full
     }
 
-    /// `stated`, as **dynamic colours**, for a surface that states its colours once and never
+    /// `stated`, **raised until it can be told from the ground it is painted on**.
+    ///
+    /// For a run of selected text. `stated` promises that the ink reads on the fill and nothing
+    /// about the fill reading on its ground — and a highlight that cannot be seen has stopped
+    /// saying what is selected, however legible the text inside it stays. Pure's night selection
+    /// is `#292929`, right for a row over its black sidebar and ΔE 11.9 over the `#101010` well of
+    /// the browser's address field: a URL selected in a focused field looked like the system's
+    /// *inactive* highlight, white text on a grey hardly anyone could find.
+    ///
+    /// Raised in the theme's own terms first: a translucent wash gains its own strength, keeping
+    /// the hue the theme chose. Only a fill still too close at full strength moves, toward
+    /// whichever pole is further from the ground — lighter on a dark field, darker on paper. A
+    /// theme whose selection already stands apart is returned exactly as `stated` answers it.
+    public static func distinct(over hostGround: NSColor) -> SelectionSurface {
+        let full = stated(over: hostGround)
+        guard !standsApart(full.ground, from: hostGround) else { return full }
+
+        let authored = Self.authored.usingColorSpace(.sRGB) ?? Self.authored
+        let steps = Defaults.raiseSteps
+
+        if authored.alphaComponent < 1 {
+            for step in 1...steps {
+                let alpha = authored.alphaComponent
+                    + (1 - authored.alphaComponent) * CGFloat(step) / CGFloat(steps)
+                let fill = authored.withAlphaComponent(alpha)
+                guard standsApart(fill.composited(over: hostGround), from: hostGround) else { continue }
+                return inked(fill, over: hostGround)
+            }
+        }
+
+        // The pole is chosen as the far end from the ground, so it sits at least half the
+        // lightness range away from any ground at all — the last step always passes, and the
+        // first step that does is simply taken.
+        let opaque = authored.withAlphaComponent(1)
+        let lightens = ThemeContrast.ratio(.white, hostGround) >= ThemeContrast.ratio(.black, hostGround)
+        var fill = opaque
+        for step in 1...steps {
+            let amount = CGFloat(step) / CGFloat(steps)
+            fill = opaque.lightened(by: lightens ? amount : -amount)
+            if standsApart(fill.composited(over: hostGround), from: hostGround) { break }
+        }
+        return inked(fill, over: hostGround)
+    }
+
+    /// `distinct`, as **dynamic colours**, for a surface that states its colours once and never
     /// rebuilds them.
     ///
     /// `NSTextView.selectedTextAttributes` is set at construction and read by TextKit for the life
@@ -138,7 +183,7 @@ extension SelectionSurface {
                 // careful and be strictly worse: a provider reached off the main thread would
                 // trap where the rest of the palette merely answers.
                 appearance.performAsCurrentDrawingAppearance {
-                    colour = tier(stated(over: hostGround()))
+                    colour = tier(distinct(over: hostGround()))
                 }
                 return colour
             }
@@ -162,8 +207,18 @@ extension SelectionSurface {
     /// The palette's `selection` role. **The one read of it in the app** — see the type's note.
     private static var authored: NSColor { AppThemePalette.color(.selection) }
 
+    /// `fill` over `hostGround`, with the ink measured against what that paints.
+    private static func inked(_ fill: NSColor, over hostGround: NSColor) -> SelectionSurface {
+        let ground = fill.composited(over: hostGround)
+        return SelectionSurface(fill: fill, ground: ground, ink: Design.Text.on(ground))
+    }
+
     private static func readsLabel(on ground: NSColor) -> Bool {
         ThemeContrast.ratio(Design.Text.label, ground) >= Defaults.minimumLabelRatio
+    }
+
+    private static func standsApart(_ selection: NSColor, from ground: NSColor) -> Bool {
+        ThemeContrast.perceptualDistance(selection, ground) >= Defaults.minimumTextDistance
     }
 
     public enum Defaults {
@@ -177,9 +232,24 @@ extension SelectionSurface {
         /// latitude it extends to somebody else's palette.
         public static let minimumLabelRatio: CGFloat = 4.5
 
+        /// How far apart, as CIE76 ΔE, a run of selected text stands from the ground under it.
+        ///
+        /// Calibrated against the platform rather than picked: on macOS 26 a focused text view's
+        /// highlight stands ΔE 28.1 (light) and 39.5 (dark) from the text background, and an
+        /// unfocused one 12.2 and 18.5. The floor sits above both inactive values and below both
+        /// active ones, so a themed selection may be as quiet as the system's quietest *active*
+        /// highlight and never reads as an inactive one. `ThemeContrast.minimumBoldDistance` (15)
+        /// answers "two inks, not one", which is too low a bar for a mark whose only job is to be
+        /// seen.
+        public static let minimumTextDistance: CGFloat = 24
+
         /// How finely the hold-back walks down from the authored strength. Twenty-four steps put
         /// the granularity below a percentage point of alpha, which is finer than any theme's
         /// authored value is meaningful to.
         public static let holdBackSteps = 24
+
+        /// How finely `distinct` walks up — first through alpha, then toward the pole. The same
+        /// granularity as the hold-back, for the same reason.
+        public static let raiseSteps = 24
     }
 }

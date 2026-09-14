@@ -248,7 +248,7 @@ final class ThemeLeakSweepTests: XCTestCase {
 
             XCTAssertEqual(
                 ground.resolvedColour(),
-                SelectionSurface.stated(over: Design.Surface.ground).fill.resolvedColour(),
+                SelectionSurface.distinct(over: Design.Surface.ground).fill.resolvedColour(),
                 "selected text should fill with the theme's selection role"
             )
             XCTAssertNotEqual(
@@ -263,6 +263,9 @@ final class ThemeLeakSweepTests: XCTestCase {
     /// the window, and hands it over only for the moment a field is being edited — so the
     /// statement has to be made at that hand-off. Driven through the cell's real entry point
     /// rather than by calling the helper, since the hand-off is the part that can be forgotten.
+    ///
+    /// Measured over the **well** the field paints while edited, not the view behind it: the
+    /// address field's selection was once measured against the pane and painted on the well.
     func testAFieldEditorIsToldTheSameThing() throws {
         try withTheme(try canaryTheme()) {
             let field = ThemedTextField()
@@ -280,10 +283,11 @@ final class ThemeLeakSweepTests: XCTestCase {
                 editor.selectedTextAttributes[.backgroundColor] as? NSColor,
                 "the field editor should be told what a selection looks like"
             )
+            let well = Design.Surface.field.composited(over: Design.Surface.ground)
             XCTAssertEqual(
                 ground.resolvedColour(),
-                SelectionSurface.stated(over: Design.Surface.ground).fill.resolvedColour(),
-                "a field editor's selection should be the theme's, not the system's"
+                SelectionSurface.distinct(over: well).fill.resolvedColour(),
+                "a field editor's selection should be the theme's, measured over the field's well"
             )
         }
     }

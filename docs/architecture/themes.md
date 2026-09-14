@@ -1428,7 +1428,10 @@ Decisions worth knowing before touching one:
   `ThemedTableRowSelectionTests` by painting literally nothing on that fixture's white ground,
   which is the honest reading of a translucent *white* selection: it only exists over dark
   pixels. Stating the rendered value keeps the appearance and makes it true everywhere. The day
-  variant states `#D6D6D6` for the mirrored reason.
+  variant states `#D6D6D6` for the mirrored reason. Neither value is brightened to suit a text
+  field: both stand only ~ΔE 12 from the field well, and selected *text* goes through
+  `SelectionSurface.distinct`, which raises a selection that close rather than asking the theme to
+  restate a value its rows are right with (see `design-system.md`).
 - **Cappuccino and Solarized are adaptive**, the second and third stock styles after Christmas
   to author both appearances — for Christmas's reason: the identity is a pairing (milk and
   espresso; one hue set over two grounds), and pinning either appearance would make half the

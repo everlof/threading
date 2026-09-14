@@ -203,6 +203,99 @@ final class SelectionSurfaceTests: XCTestCase {
         XCTAssertLessThan(washInk, 0.5, "a 20% wash should be written on in dark ink")
     }
 
+    // MARK: - Distinct: a run of selected text
+
+    /// The ground a field's selected text lands on: the well the field paints, over the pane.
+    private func fieldWell() -> NSColor {
+        Design.Surface.field.composited(over: Design.Surface.background)
+    }
+
+    /// A highlight is a highlight only if it is seen. `stated` holds the ink to the fill; this
+    /// holds the fill to its ground, over both grounds selected text actually sits on — a field's
+    /// well and the pane a transparent text view is laid over — and keeps the ink promise too.
+    func testEveryStockThemeSetsSelectedTextApartFromItsGround() throws {
+        let floor = SelectionSurface.Defaults.minimumTextDistance
+        for (theme, appearance) in try styledThemesAndAppearances() {
+            withTheme(theme, under: appearance) {
+                for (name, ground) in [("field well", fieldWell()), ("pane", Design.Surface.background)] {
+                    let distinct = SelectionSurface.distinct(over: ground)
+                    let distance = ThemeContrast.perceptualDistance(distinct.ground, ground)
+                    let ratio = ThemeContrast.ratio(distinct.ink.label, distinct.ground)
+                    let context = "\(theme.name) [\(appearance.name.rawValue)] over the \(name)"
+
+                    XCTAssertGreaterThanOrEqual(
+                        distance,
+                        floor,
+                        "\(context): selected text stands ΔE \(String(format: "%.1f", distance)) "
+                            + "from its ground"
+                    )
+                    XCTAssertGreaterThanOrEqual(
+                        ratio,
+                        SelectionSurface.Defaults.minimumLabelRatio,
+                        "\(context): selected text reads at \(String(format: "%.2f", ratio)):1"
+                    )
+                }
+            }
+        }
+    }
+
+    /// A theme whose selection already stands apart is painted exactly as authored — the rule
+    /// raises the faint cases and restyles nothing else.
+    func testASelectionThatAlreadyStandsApartIsLeftAsStated() throws {
+        var untouched = 0
+        for (theme, appearance) in try styledThemesAndAppearances() {
+            withTheme(theme, under: appearance) {
+                let ground = fieldWell()
+                let stated = SelectionSurface.stated(over: ground)
+                guard ThemeContrast.perceptualDistance(stated.ground, ground)
+                    >= SelectionSurface.Defaults.minimumTextDistance else { return }
+
+                untouched += 1
+                assertSameColour(
+                    SelectionSurface.distinct(over: ground).fill,
+                    stated.fill,
+                    "\(theme.name): a selection that already stood apart was raised anyway"
+                )
+            }
+        }
+
+        XCTAssertGreaterThan(untouched, 0, "no theme exercised the leave-it-alone path")
+    }
+
+    /// The reported case: a URL selected in the browser's address field under Pure's night
+    /// variant, `#292929` over the `#101010` well — ΔE 11.9, the distance macOS keeps for an
+    /// *inactive* highlight. It is raised clear of the floor, lighter, and keeps light ink.
+    func testTheReportedAddressFieldSelectionIsRaised() throws {
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let floor = SelectionSurface.Defaults.minimumTextDistance
+
+        withTheme(AppThemeStyles.pure, under: appearance) {
+            let ground = fieldWell()
+            let stated = SelectionSurface.stated(over: ground)
+            let distinct = SelectionSurface.distinct(over: ground)
+
+            XCTAssertLessThan(
+                ThemeContrast.perceptualDistance(stated.ground, ground),
+                floor,
+                "the fixture no longer reproduces the reported case"
+            )
+            XCTAssertGreaterThanOrEqual(
+                ThemeContrast.perceptualDistance(distinct.ground, ground),
+                floor
+            )
+            XCTAssertGreaterThan(
+                IconBackplate.tone(of: distinct.ground),
+                IconBackplate.tone(of: stated.ground),
+                "a selection on a dark well should be raised lighter"
+            )
+            XCTAssertGreaterThan(
+                IconBackplate.tone(of: distinct.ink.label),
+                0.5,
+                "a raised dark selection should still be written on in light ink"
+            )
+        }
+    }
+
     // MARK: - Dynamic: a surface that states its colours once
 
     /// `selectedTextAttributes` is set at construction and read by TextKit for the life of the

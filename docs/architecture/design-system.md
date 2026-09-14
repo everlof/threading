@@ -2274,6 +2274,27 @@ through a call site that could resolve a colour again — so `SelectionSurface.d
 pair as dynamic `NSColor`s over a **closure** for the ground, since what a text view sits on moves
 with the theme too.
 
+**Readable ink was half of a highlight; being seen is the other half.** Pure's night `selection`
+(`#292929`) is right for a row over its black sidebar, and a URL selected in the browser's address
+field painted it over the field's `#101010` well: ΔE 11.9, the distance macOS keeps for an
+*inactive* highlight (measured on macOS 26: active 28.1 light / 39.5 dark, inactive 12.2 / 18.5).
+The text stayed legible and the selection could hardly be found. Two defects, both fixed in the
+component:
+
+- `SelectionSurface.distinct` is `stated` held to `Defaults.minimumTextDistance` (ΔE 24, between
+  every inactive and every active system value) against its ground. A translucent wash first gains
+  its own strength, keeping the theme's hue; only a fill still too close at full strength moves
+  toward the far pole. A selection already standing apart is returned exactly as `stated`.
+  `dynamic`, and therefore every `ThemedTextSelection`, resolves through it. Rows and menus keep
+  `stated`/`quiet`: the complaint and the calibration are about selected *text*.
+- The ground was wrong as well. `ThemedTextSelection` measured a field's selection with
+  `resolvedGround()`, which reads only *recorded* fills — and `ThemedTextField` draws its well in
+  `draw(_:)`, so the ink and the distance were measured against the pane behind the field. A
+  themed field now answers `textSelectionGround()`: the same `wellFill` `drawSurface` paints,
+  composited over the pane.
+
+`SelectionSurfaceTests` sweeps every stock theme × appearance over both a field well and the pane.
+
 `SelectionSurfaceTests` states the promise over every stock theme × every appearance it ships,
 which is the part that was missing: `ThemedTableRowView`'s own documentation had claimed "the
 accent held far enough back that the row's own label tiers still read over it" since it was
