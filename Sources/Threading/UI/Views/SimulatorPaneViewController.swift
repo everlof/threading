@@ -1216,9 +1216,11 @@ final class SimulatorPaneViewController: NSViewController {
                 )
                 if normalized.maxX > 0, normalized.minX < 1,
                    normalized.maxY > 0, normalized.minY < 1 {
+                    let name = element.label.map { "\(element.role) · \($0)" } ?? element.role
                     annotations.append(SimulatorScreenView.ElementAnnotation(
                         normalizedFrame: normalized,
                         label: element.label,
+                        name: name,
                         emphasized: Self.isInteractiveRole(element.role)
                     ))
                 }

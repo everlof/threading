@@ -56,6 +56,8 @@ final class SimulatorScreenView: ThemedControl {
         /// The element's frame in the device's 0…1 space, top-left origin (the same space taps use).
         let normalizedFrame: CGRect
         let label: String?
+        /// A short display name (role + label) shown in the badge when this element is hovered.
+        let name: String?
         /// Interactive elements (buttons, fields) are drawn emphasized; static content is faint.
         let emphasized: Bool
     }
@@ -64,9 +66,16 @@ final class SimulatorScreenView: ThemedControl {
     var annotations: [ElementAnnotation] = [] {
         didSet {
             guard annotations != oldValue else { return }
+            if annotations.isEmpty { hoveredAnnotationIndex = nil }
+            updateInspectionTracking()
             needsDisplay = true
         }
     }
+
+    /// The element under the pointer while inspecting — outlined and named. Client-side hit-test
+    /// against the fetched tree (smallest containing rect), so pointer motion needs no round-trip.
+    private var hoveredAnnotationIndex: Int?
+    private var inspectionTrackingArea: NSTrackingArea?
 
     var onTap: ((CGPoint) -> Void)?
     /// Phases of a live, finger-following touch driven by a click-drag or a trackpad scroll. The
@@ -146,38 +155,163 @@ final class SimulatorScreenView: ThemedControl {
         drawAnnotations(in: target)
     }
 
-    /// Stroke each element's bounds over the framebuffer. This is the inspector overlay and the
-    /// Phase 1 coordinate-mapping tripwire: a rectangle that does not sit on the control it names
-    /// means the device-points → framebuffer mapping is wrong.
+    /// Draw the inspector overlay: every element's bounds faintly as context (the Phase 1
+    /// coordinate-mapping tripwire — a rectangle that does not sit on the control it names means the
+    /// device-points → framebuffer mapping is wrong), and the hovered element outlined bright with a
+    /// name badge.
     private func drawAnnotations(in target: NSRect) {
         guard !annotations.isEmpty else { return }
         NSGraphicsContext.saveGraphicsState()
         ThemedSurface.Shape(rect: target, radius: Design.Radius.control).path.addClip()
-        for annotation in annotations {
-            let normalized = annotation.normalizedFrame
-            // Invert the tap normalization: device space is y-down, the view is y-up.
-            let rect = NSRect(
-                x: target.minX + normalized.minX * target.width,
-                y: target.maxY - (normalized.minY + normalized.height) * target.height,
-                width: normalized.width * target.width,
-                height: normalized.height * target.height
-            ).insetBy(dx: 0.5, dy: 0.5)
+
+        for (index, annotation) in annotations.enumerated() where index != hoveredAnnotationIndex {
+            let rect = viewRect(for: annotation.normalizedFrame, in: target).insetBy(dx: 0.5, dy: 0.5)
             guard rect.width > 1, rect.height > 1 else { continue }
             let color = annotation.emphasized ? Design.Surface.accent : Design.Surface.border
-            let path = NSBezierPath(
-                roundedRect: rect,
-                xRadius: Design.Radius.controlBorder,
-                yRadius: Design.Radius.controlBorder
-            )
-            path.lineWidth = annotation.emphasized ? 1.5 : 1
-            color.withAlphaComponent(annotation.emphasized ? 0.9 : 0.5).setStroke()
-            if annotation.emphasized {
-                color.withAlphaComponent(0.08).setFill()
-                path.fill()
-            }
+            let path = roundedPath(rect)
+            path.lineWidth = 1
+            color.withAlphaComponent(annotation.emphasized ? 0.4 : 0.28).setStroke()
             path.stroke()
         }
+
+        if let index = hoveredAnnotationIndex, annotations.indices.contains(index) {
+            let annotation = annotations[index]
+            let rect = viewRect(for: annotation.normalizedFrame, in: target).insetBy(dx: 0.5, dy: 0.5)
+            if rect.width > 1, rect.height > 1 {
+                let path = roundedPath(rect)
+                path.lineWidth = 1.5
+                Design.Surface.accent.withAlphaComponent(0.12).setFill()
+                path.fill()
+                Design.Surface.accent.setStroke()
+                path.stroke()
+                if let name = annotation.name, !name.isEmpty {
+                    drawBadge(name, above: rect, in: target)
+                }
+            }
+        }
+
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// Map a normalized (device 0…1, y-down) frame to this view's coordinates (y-up), the inverse of
+    /// the tap normalization.
+    private func viewRect(for normalized: CGRect, in target: NSRect) -> NSRect {
+        NSRect(
+            x: target.minX + normalized.minX * target.width,
+            y: target.maxY - (normalized.minY + normalized.height) * target.height,
+            width: normalized.width * target.width,
+            height: normalized.height * target.height
+        )
+    }
+
+    private func roundedPath(_ rect: NSRect) -> NSBezierPath {
+        NSBezierPath(
+            roundedRect: rect,
+            xRadius: Design.Radius.controlBorder,
+            yRadius: Design.Radius.controlBorder
+        )
+    }
+
+    private func drawBadge(_ text: String, above rect: NSRect, in target: NSRect) {
+        let font = Design.Typography.caption()
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: Design.Text.label,
+        ]
+        let padding = Design.Spacing.small
+        let textSize = (text as NSString).size(withAttributes: attributes)
+        var badge = NSRect(
+            x: rect.minX,
+            y: rect.maxY + 2,
+            width: textSize.width + padding * 2,
+            height: textSize.height + padding
+        )
+        // Prefer above the element; drop below when there is no room, and keep it inside the screen.
+        if badge.maxY > target.maxY { badge.origin.y = rect.minY - badge.height - 2 }
+        badge.origin.y = max(target.minY, badge.origin.y)
+        badge.origin.x = min(max(target.minX, badge.origin.x), target.maxX - badge.width)
+
+        let badgePath = roundedPath(badge)
+        Design.Surface.floating.setFill()
+        badgePath.fill()
+        Design.Surface.border.setStroke()
+        badgePath.lineWidth = 1
+        badgePath.stroke()
+        (text as NSString).draw(
+            at: NSPoint(x: badge.minX + padding, y: badge.minY + padding / 2),
+            withAttributes: attributes
+        )
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        updateInspectionTracking()
+    }
+
+    private func updateInspectionTracking() {
+        if let inspectionTrackingArea {
+            removeTrackingArea(inspectionTrackingArea)
+            self.inspectionTrackingArea = nil
+        }
+        guard !annotations.isEmpty else { return }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        inspectionTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard !annotations.isEmpty else {
+            super.mouseMoved(with: event)
+            return
+        }
+        // A position under a covering surface (a menu, a popover) is not this view's to read.
+        guard let point = uncoveredPointerLocation(in: event) else {
+            if hoveredAnnotationIndex != nil {
+                hoveredAnnotationIndex = nil
+                needsDisplay = true
+            }
+            return
+        }
+        updateHover(at: point)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if hoveredAnnotationIndex != nil {
+            hoveredAnnotationIndex = nil
+            needsDisplay = true
+        }
+    }
+
+    private func updateHover(at point: CGPoint) {
+        let index = annotationIndex(under: point)
+        if index != hoveredAnnotationIndex {
+            hoveredAnnotationIndex = index
+            needsDisplay = true
+        }
+    }
+
+    /// The innermost annotation whose bounds contain a view-local point — the smallest containing
+    /// rect, the way Accessibility Inspector picks — or nil off the framebuffer. Internal so the
+    /// hit-test can be verified without AppKit event plumbing.
+    func annotationIndex(under point: CGPoint) -> Int? {
+        let target = imageRect
+        guard !target.isEmpty, target.contains(point) else { return nil }
+        var best: Int?
+        var bestArea = CGFloat.greatestFiniteMagnitude
+        for (index, annotation) in annotations.enumerated() {
+            let rect = viewRect(for: annotation.normalizedFrame, in: target)
+            guard rect.contains(point) else { continue }
+            let area = rect.width * rect.height
+            if area < bestArea {
+                bestArea = area
+                best = index
+            }
+        }
+        return best
     }
 
     override func mouseDown(with event: NSEvent) {
