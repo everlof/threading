@@ -200,6 +200,25 @@ final class SimulatorPaneViewController: NSViewController {
     private var editingNoteID: ImageAnnotation.ID?
     private let annotationStore = SimulatorAnnotationStore.shared
 
+    /// The session these notes are handed to when the person presses Send. Set by the display pane.
+    var annotationSessionID: SessionID?
+    /// The text each note had when it was last delivered, so a note counts as pending until it is
+    /// sent and again whenever its text changes — the browser's exact sent-vs-pending rule.
+    private var sentNoteTexts: [ImageAnnotation.ID: String] = [:]
+    private var isSendingNotes = false
+
+    private lazy var noteSendBar: AnnotationSendBar = {
+        let bar = AnnotationSendBar()
+        bar.onSend = { [weak self] in self?.sendPendingNotes() }
+        bar.isHidden = true
+        return bar
+    }()
+
+    /// Notes with text that has not been delivered as-is: the "Send (x)" count.
+    private var pendingNotes: [ImageAnnotation] {
+        screenView.noteMarks.filter { !$0.note.isEmpty && sentNoteTexts[$0.id] != $0.note }
+    }
+
     /// Whether the accessibility inspector overlay is on. Reading the tree is a host-side call, so
     /// this is a manual refresh (toggle) in Phase 1 rather than a per-frame poll.
     private var isInspecting = false
@@ -295,6 +314,7 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
         preview.onAddNote = { [weak self] point in self?.addNote(at: point) }
         preview.onSelectNote = { [weak self] id in self?.selectNote(id) }
+        preview.onCommandReturn = { [weak self] in self?.sendPendingNotes() }
         return preview
     }()
 
@@ -358,8 +378,19 @@ final class SimulatorPaneViewController: NSViewController {
         view.addSubview(screenView)
         view.addSubview(hardwareButtonRow)
         view.addSubview(statusLabel)
+        view.addSubview(noteSendBar)
 
         NSLayoutConstraint.activate([
+            // Floats over the framebuffer's bottom-trailing while annotating, like the browser's.
+            noteSendBar.trailingAnchor.constraint(
+                equalTo: screenView.trailingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+            noteSendBar.bottomAnchor.constraint(
+                equalTo: screenView.bottomAnchor,
+                constant: -Design.Spacing.medium
+            ),
+
             controlRow.topAnchor.constraint(
                 equalTo: view.topAnchor,
                 constant: Design.Spacing.medium
@@ -1277,6 +1308,7 @@ final class SimulatorPaneViewController: NSViewController {
             screenView.selectedNoteID = nil
             screenView.noteMarks = []
         }
+        updateSendBar()
     }
 
     private func addNote(at point: CGPoint) {
@@ -1286,6 +1318,7 @@ final class SimulatorPaneViewController: NSViewController {
         screenView.noteMarks.append(annotation)
         screenView.selectedNoteID = annotation.id
         annotationStore.setAnnotations(screenView.noteMarks, for: device)
+        updateSendBar()
         presentNoteEditor(for: annotation.id, isExisting: false)
     }
 
@@ -1366,12 +1399,70 @@ final class SimulatorPaneViewController: NSViewController {
     private func finishNoteEditing() {
         dismissNoteEditor()
         screenView.selectedNoteID = nil
+        updateSendBar()
     }
 
     private func dismissNoteEditor() {
         noteEditor?.removeFromSuperview()
         noteEditor = nil
         editingNoteID = nil
+    }
+
+    private func updateSendBar() {
+        guard isAnnotatingNotes else {
+            noteSendBar.isHidden = true
+            return
+        }
+        noteSendBar.setPending(count: pendingNotes.count, sending: isSendingNotes)
+    }
+
+    /// Hand the pending notes to the session as a message, mirroring the browser's send: save any
+    /// open note first, snapshot the pending set, and mark each delivered so it does not re-send
+    /// unless its text changes.
+    private func sendPendingNotes() {
+        guard isAnnotatingNotes, let device = lease?.device,
+              let sessionID = annotationSessionID else { return }
+        if noteEditor != nil { commitNoteEditor() }
+        let pending = pendingNotes
+        guard !isSendingNotes, !pending.isEmpty else { return }
+        isSendingNotes = true
+        updateSendBar()
+        let text = Self.annotationMessage(
+            allNotes: screenView.noteMarks, pending: pending, device: device
+        )
+        SessionMessageDelivery.deliver(text, to: sessionID) { [weak self] outcome in
+            guard let self else { return }
+            self.isSendingNotes = false
+            switch outcome {
+            case .sentNow, .queuedBehindTurn:
+                for note in pending { self.sentNoteTexts[note.id] = note.note }
+            case .noLiveSurface, .busyTerminal, .typedUnconfirmed, .notTaken:
+                break  // Stay pending; the person can send again when the chat is ready.
+            }
+            self.updateSendBar()
+        }
+    }
+
+    /// The message the agent receives. Notes are numbered by their pin (their position in the full
+    /// list) so the text matches what the person sees, and the normalized point feeds `simulator_tap`.
+    static func annotationMessage(
+        allNotes: [ImageAnnotation],
+        pending: [ImageAnnotation],
+        device: SimulatorDevice
+    ) -> String {
+        let pendingIDs = Set(pending.map(\.id))
+        let entries = allNotes.enumerated().compactMap { index, note -> String? in
+            guard pendingIDs.contains(note.id) else { return nil }
+            return """
+                Annotation \(index + 1)
+                Device: \(device.name) (\(device.id.rawValue))
+                Position: (\(note.point.x), \(note.point.y)) normalized
+                Note: \(note.note)
+                """
+        }
+        // localization-ignore: message content sent to the agent, matching browser annotations.
+        return "Please address these Simulator annotations from me:\n\n"
+            + entries.joined(separator: "\n\n")
     }
 
     private func renderState() {

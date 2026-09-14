@@ -101,6 +101,8 @@ final class SimulatorScreenView: ThemedControl {
     var onAddNote: ((CGPoint) -> Void)?
     /// A click on an existing pin (or empty space, giving nil) while annotating.
     var onSelectNote: ((ImageAnnotation.ID?) -> Void)?
+    /// ⌘Return while annotating — the host sends the pending notes.
+    var onCommandReturn: (() -> Void)?
 
     var onTap: ((CGPoint) -> Void)?
     /// Phases of a live, finger-following touch driven by a click-drag or a trackpad scroll. The
@@ -460,6 +462,18 @@ final class SimulatorScreenView: ThemedControl {
             // momentum note); a scroll that never reported a begin phase is ignored.
             break
         }
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // ⌘Return sends the pending notes while annotating, wherever focus sits in the pane — the
+        // same chord the browser's annotation overlay uses.
+        if isAnnotatingNotes,
+           event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .command,
+           event.keyCode == 36 || event.keyCode == 76 {
+            onCommandReturn?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func keyDown(with event: NSEvent) {

@@ -1028,6 +1028,7 @@ final class DisplayPaneController: NSViewController {
     let controller = browserFactory(contextKind)
     addChild(controller)
     controller.baselineSessionID = sessionID
+    controller.annotationSessionID = sessionID
     controller.onPageChange = { [weak self] in
       guard let self else { return }
       self.persist(sessionID)
@@ -1509,6 +1510,7 @@ final class DisplayPaneController: NSViewController {
       streamCoordinator: simulatorStreamCoordinator,
       inputAuthorizer: simulatorInputAuthorizer
     )
+    controller.annotationSessionID = sessionID
     addChild(controller)
     controller.onSelectedDeviceChange = { [weak self] _ in
       self?.persist(sessionID)
