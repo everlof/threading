@@ -3,7 +3,10 @@ import XCTest
 
 final class SimulatorSharedSurfaceTests: XCTestCase {
     func testProtocolAdvertisesSharedMemoryVersion() {
-        XCTAssertEqual(SimulatorBridgeProtocol.current, 2)
+        // Shared memory arrived in v2; the protocol only moves forward, so assert the capability
+        // floor rather than the exact current version — that keeps this test from rotting every
+        // time a later, unrelated capability (v3's accessibility snapshot, …) bumps `current`.
+        XCTAssertGreaterThanOrEqual(SimulatorBridgeProtocol.current, 2)
         XCTAssertEqual(SimulatorBridgeProtocol.minimumSupported, 1)
         // A v1 peer and a v2 peer still negotiate: neither is below the other's minimum.
         XCTAssertEqual(SimulatorBridgeCompatibility.evaluate(peerVersion: 1, peerMinimum: 1), .compatible)
