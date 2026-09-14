@@ -89,6 +89,8 @@ final class SimulatorScreenView: ThemedControl {
     var noteMarks: [ImageAnnotation] = [] {
         didSet {
             guard noteMarks != oldValue else { return }
+            if !noteMarks.contains(where: { $0.id == hoveredNoteID }) { hoveredNoteID = nil }
+            updateInspectionTracking()
             needsDisplay = true
         }
     }
@@ -110,12 +112,25 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     /// While on, a click pins or selects a note instead of touching the device.
-    var isAnnotatingNotes = false
+    var isAnnotatingNotes = false {
+        didSet {
+            guard isAnnotatingNotes != oldValue else { return }
+            if !isAnnotatingNotes { hoveredNoteID = nil }
+            updateInspectionTracking()
+            needsDisplay = true
+        }
+    }
+
+    /// The note pin under the pointer while annotating — its text is shown in a badge, and Delete
+    /// removes it without opening the editor.
+    private var hoveredNoteID: ImageAnnotation.ID?
 
     /// A click at a normalized point that hit no existing pin — the caller pins a new note there.
     var onAddNote: ((CGPoint) -> Void)?
     /// A click on an existing pin (or empty space, giving nil) while annotating.
     var onSelectNote: ((ImageAnnotation.ID?) -> Void)?
+    /// Delete pressed over a pin while annotating — remove it directly.
+    var onDeleteNote: ((ImageAnnotation.ID) -> Void)?
     /// ⌘Return while annotating — the host sends the pending notes.
     var onCommandReturn: (() -> Void)?
 
@@ -217,6 +232,18 @@ final class SimulatorScreenView: ThemedControl {
             isFlipped: false,
             selected: selectedNoteID
         )
+        // The hovered pin's note text, so you can read a note without opening its editor.
+        if isAnnotatingNotes, let id = hoveredNoteID,
+           let note = noteMarks.first(where: { $0.id == id }) {
+            let pin = ImageAnnotationGeometry.viewPoint(for: note, in: target, isFlipped: false)
+            let text = note.note.isEmpty ? L10n.string("Empty note — Delete to remove") : note.note
+            let pinDiameter = ImageAnnotationDefaults.pinDiameter
+            let pinRect = NSRect(
+                x: pin.x - pinDiameter / 2, y: pin.y - pinDiameter / 2,
+                width: pinDiameter, height: pinDiameter
+            )
+            drawBadge(text, above: pinRect, in: target)
+        }
         NSGraphicsContext.restoreGraphicsState()
     }
 
@@ -318,7 +345,8 @@ final class SimulatorScreenView: ThemedControl {
             removeTrackingArea(inspectionTrackingArea)
             self.inspectionTrackingArea = nil
         }
-        guard !annotations.isEmpty else { return }
+        // Track for the inspector overlay, and for hovering note pins while annotating.
+        guard !annotations.isEmpty || (isAnnotatingNotes && !noteMarks.isEmpty) else { return }
         let area = NSTrackingArea(
             rect: .zero,
             options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
@@ -330,24 +358,42 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard !annotations.isEmpty else {
+        guard !annotations.isEmpty || isAnnotatingNotes else {
             super.mouseMoved(with: event)
             return
         }
         // A position under a covering surface (a menu, a popover) is not this view's to read.
         guard let point = uncoveredPointerLocation(in: event) else {
-            if hoveredAnnotationIndex != nil {
-                hoveredAnnotationIndex = nil
-                needsDisplay = true
-            }
+            clearHovers()
             return
         }
-        updateHover(at: point)
+        if isAnnotatingNotes {
+            updateNoteHover(at: point)
+        } else {
+            updateHover(at: point)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        if hoveredAnnotationIndex != nil {
+        clearHovers()
+    }
+
+    private func clearHovers() {
+        if hoveredAnnotationIndex != nil || hoveredNoteID != nil {
             hoveredAnnotationIndex = nil
+            hoveredNoteID = nil
+            needsDisplay = true
+        }
+    }
+
+    private func updateNoteHover(at point: CGPoint) {
+        let id = imageRect.contains(point)
+            ? ImageAnnotationGeometry.annotationID(
+                at: point, among: noteMarks, in: imageRect, isFlipped: false
+              )
+            : nil
+        if id != hoveredNoteID {
+            hoveredNoteID = id
             needsDisplay = true
         }
     }
@@ -523,6 +569,14 @@ final class SimulatorScreenView: ThemedControl {
            event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .command,
            event.keyCode == 36 || event.keyCode == 76 {
             onCommandReturn?()
+            return true
+        }
+        // Delete removes the pin under the pointer (or the selected one) — the simple removal —
+        // unless a text field is editing, which needs Delete for its own text.
+        if isAnnotatingNotes, event.keyCode == 51 || event.keyCode == 117,
+           !(window?.firstResponder is NSText),
+           let id = hoveredNoteID ?? selectedNoteID {
+            onDeleteNote?(id)
             return true
         }
         return super.performKeyEquivalent(with: event)

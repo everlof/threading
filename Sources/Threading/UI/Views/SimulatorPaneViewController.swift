@@ -234,6 +234,20 @@ final class SimulatorPaneViewController: NSViewController {
     private var showTouches = false
     private var touchDisplayTimer: Timer?
 
+    private lazy var clearNotesButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "trash",
+            accessibility: L10n.string("Clear all notes"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Remove all notes on this device")
+        button.onPress = { [weak self] in self?.clearAllNotes() }
+        button.setAccessibilityIdentifier("simulator.annotate.clear")
+        button.isHidden = true
+        return button
+    }()
+
     private lazy var exportNotesButton: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: "square.and.arrow.up",
@@ -282,8 +296,8 @@ final class SimulatorPaneViewController: NSViewController {
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
         trailing: [
-            captureButton, showTouchesButton, annotateButton, exportNotesButton, inspectButton,
-            appearanceButton, controlButton, retryButton,
+            captureButton, showTouchesButton, annotateButton, exportNotesButton, clearNotesButton,
+            inspectButton, appearanceButton, controlButton, retryButton,
         ]
     )
 
@@ -373,6 +387,7 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
         preview.onAddNote = { [weak self] point in self?.addNote(at: point) }
         preview.onSelectNote = { [weak self] id in self?.selectNote(id) }
+        preview.onDeleteNote = { [weak self] id in self?.deleteHoveredNote(id) }
         preview.onCommandReturn = { [weak self] in self?.sendPendingNotes() }
         return preview
     }()
@@ -1582,7 +1597,30 @@ final class SimulatorPaneViewController: NSViewController {
         } else {
             noteSendBar.isHidden = true
         }
-        exportNotesButton.isHidden = !isAnnotatingNotes || screenView.noteMarks.isEmpty
+        let hasNotes = !screenView.noteMarks.isEmpty
+        exportNotesButton.isHidden = !isAnnotatingNotes || !hasNotes
+        clearNotesButton.isHidden = !isAnnotatingNotes || !hasNotes
+    }
+
+    private func clearAllNotes() {
+        guard isAnnotatingNotes, let device = lease?.device.id,
+              !screenView.noteMarks.isEmpty else { return }
+        dismissNoteEditor()
+        screenView.noteMarks = []
+        screenView.selectedNoteID = nil
+        annotationStore.setAnnotations([], for: device)
+        updateSendBar()
+        flashStatus(L10n.string("Cleared notes"))
+    }
+
+    /// Delete the pin the person is pointing at (or has selected) — the simple removal, no editor.
+    private func deleteHoveredNote(_ id: ImageAnnotation.ID) {
+        guard isAnnotatingNotes, let device = lease?.device.id else { return }
+        if editingNoteID == id { dismissNoteEditor() }
+        screenView.noteMarks.removeAll { $0.id == id }
+        if screenView.selectedNoteID == id { screenView.selectedNoteID = nil }
+        annotationStore.setAnnotations(screenView.noteMarks, for: device)
+        updateSendBar()
     }
 
     /// Flatten the current frame with the note pins burned in and copy it to the clipboard, to share

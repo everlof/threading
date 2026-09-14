@@ -11599,6 +11599,17 @@
         }
       }
     },
+    "Clear all notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa alla anteckningar"
+          }
+        }
+      }
+    },
     "Clear site data" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11639,6 +11650,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rensade %lld webbdataposter för %@."
+          }
+        }
+      }
+    },
+    "Cleared notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensade anteckningar"
           }
         }
       }
@@ -17654,6 +17676,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tomt träd"
+          }
+        }
+      }
+    },
+    "Empty note — Delete to remove" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tom anteckning – tryck Delete för att ta bort"
           }
         }
       }
@@ -34985,6 +35018,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort projekt"
+          }
+        }
+      }
+    },
+    "Remove all notes on this device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort alla anteckningar på den här enheten"
           }
         }
       }
