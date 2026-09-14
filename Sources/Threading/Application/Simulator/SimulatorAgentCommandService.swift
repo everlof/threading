@@ -39,6 +39,108 @@ enum SimulatorAgentCommandService {
         case rejected(MCPToolResult)
     }
 
+    /// A resolved target for a tap or type: an `eN` ref, or a semantic locator (a label/identifier to
+    /// match, optionally narrowed by role). Plain strings only — resolving it to an element needs the
+    /// accessibility tree and so happens in the UI layer, which may import the Simulator wire types.
+    struct ElementLocator: Sendable, Equatable {
+        let ref: String?
+        let role: String?
+        let label: String?
+        let identifier: String?
+
+        var isEmpty: Bool {
+            (ref?.isEmpty ?? true) && (role?.isEmpty ?? true)
+                && (label?.isEmpty ?? true) && (identifier?.isEmpty ?? true)
+        }
+    }
+
+    /// How a tap was addressed. Coordinate mode is validated here; locator mode is resolved against a
+    /// fresh snapshot in the UI layer immediately before acting.
+    enum TapAddressing {
+        case coordinate(x: Double, y: Double)
+        case locator(ElementLocator)
+        case rejected(MCPToolResult)
+    }
+
+    enum TypeAddressing {
+        /// Type into whatever the device currently has focused.
+        case focused(text: String)
+        /// Focus the located element (a tap) before typing.
+        case located(ElementLocator, text: String)
+        case rejected(MCPToolResult)
+    }
+
+    static func tapAddressing(from arguments: SimulatorTapArguments) -> TapAddressing {
+        let hasCoordinate = arguments.x != nil || arguments.y != nil
+        let hasRef = !(arguments.ref?.isEmpty ?? true)
+        let hasSemantic = !(arguments.label?.isEmpty ?? true)
+            || !(arguments.identifier?.isEmpty ?? true)
+        let modes = [hasCoordinate, hasRef, hasSemantic].filter { $0 }.count
+        guard modes == 1 else {
+            return .rejected(.failure(
+                "Provide exactly one target: (x, y), or ref, or a semantic locator "
+                    + "(label and/or identifier, optionally with role)."
+            ))
+        }
+        if hasCoordinate {
+            guard let x = arguments.x, let y = arguments.y else {
+                return .rejected(.failure("A coordinate tap needs both x and y."))
+            }
+            guard validCoordinate(x), validCoordinate(y) else {
+                return .rejected(.failure("Simulator coordinates must be finite values from 0 to 1."))
+            }
+            return .coordinate(x: x, y: y)
+        }
+        if let refFailure = invalidRefFailure(arguments.ref) { return .rejected(refFailure) }
+        return .locator(ElementLocator(
+            ref: arguments.ref,
+            role: arguments.role,
+            label: arguments.label,
+            identifier: arguments.identifier
+        ))
+    }
+
+    static func typeAddressing(from arguments: SimulatorTypeTextArguments) -> TypeAddressing {
+        guard let text = arguments.text, !text.isEmpty else {
+            return .rejected(.failure("Missing required argument: text"))
+        }
+        guard text.count <= 1_024 else {
+            return .rejected(.failure("Simulator text is limited to 1,024 characters per call."))
+        }
+        guard text.allSatisfy(validTextCharacter) else {
+            return .rejected(.failure(
+                "Direct Simulator typing supports printable US-keyboard text, tab, newline, and backspace."
+            ))
+        }
+        let hasRef = !(arguments.ref?.isEmpty ?? true)
+        let hasSemantic = !(arguments.label?.isEmpty ?? true)
+            || !(arguments.identifier?.isEmpty ?? true)
+        if hasRef, hasSemantic {
+            return .rejected(.failure("Provide either ref or a semantic locator to focus, not both."))
+        }
+        guard hasRef || hasSemantic else { return .focused(text: text) }
+        if let refFailure = invalidRefFailure(arguments.ref) { return .rejected(refFailure) }
+        return .located(
+            ElementLocator(
+                ref: arguments.ref,
+                role: arguments.role,
+                label: arguments.label,
+                identifier: arguments.identifier
+            ),
+            text: text
+        )
+    }
+
+    /// A ref is `e` followed by a positive integer, as `simulator_snapshot` emits.
+    private static func invalidRefFailure(_ ref: String?) -> MCPToolResult? {
+        guard let ref, !ref.isEmpty else { return nil }
+        let digits = ref.dropFirst()
+        guard ref.hasPrefix("e"), !digits.isEmpty, digits.allSatisfy(\.isNumber) else {
+            return .failure("ref must look like \"e12\", from a recent simulator_snapshot.")
+        }
+        return nil
+    }
+
     static func requestedDeviceID(
         from arguments: SimulatorPrepareArguments
     ) -> Request<SimulatorDeviceID?> {
@@ -109,16 +211,6 @@ enum SimulatorAgentCommandService {
         )
     }
 
-    static func tapInput(from arguments: SimulatorTapArguments) -> Request<Input> {
-        guard let x = arguments.x, let y = arguments.y else {
-            return .rejected(.failure("Missing required arguments: x and y"))
-        }
-        guard validCoordinate(x), validCoordinate(y) else {
-            return .rejected(.failure("Simulator coordinates must be finite values from 0 to 1."))
-        }
-        return .accepted(.tap(x: x, y: y))
-    }
-
     static func swipeInput(
         from arguments: SimulatorSwipeArguments
     ) -> Request<Input> {
@@ -144,23 +236,6 @@ enum SimulatorAgentCommandService {
             toY: toY,
             durationMilliseconds: duration
         ))
-    }
-
-    static func textInput(
-        from arguments: SimulatorTypeTextArguments
-    ) -> Request<Input> {
-        guard let text = arguments.text, !text.isEmpty else {
-            return .rejected(.failure("Missing required argument: text"))
-        }
-        guard text.count <= 1_024 else {
-            return .rejected(.failure("Simulator text is limited to 1,024 characters per call."))
-        }
-        guard text.allSatisfy(validTextCharacter) else {
-            return .rejected(.failure(
-                "Direct Simulator typing supports printable US-keyboard text, tab, newline, and backspace."
-            ))
-        }
-        return .accepted(.text(text))
     }
 
     static func buttonInput(

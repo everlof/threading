@@ -1621,6 +1621,12 @@ struct SimulatorSnapshotArguments: Codable, Sendable {
 struct SimulatorTapArguments: Codable, Sendable {
   let x: Double?
   let y: Double?
+  /// An `eN` ref from a recent `simulator_snapshot`.
+  let ref: String?
+  /// A semantic locator: a `label`/`identifier` to match, optionally narrowed by `role`.
+  let role: String?
+  let label: String?
+  let identifier: String?
 }
 
 struct SimulatorSwipeArguments: Codable, Sendable {
@@ -1641,6 +1647,12 @@ struct SimulatorSwipeArguments: Codable, Sendable {
 
 struct SimulatorTypeTextArguments: Codable, Sendable {
   let text: String?
+  /// Optionally focus a field before typing: an `eN` ref, or a semantic locator (`label`/
+  /// `identifier`, optionally narrowed by `role`). When omitted, text goes to the focused element.
+  let ref: String?
+  let role: String?
+  let label: String?
+  let identifier: String?
 }
 
 struct SimulatorPressButtonArguments: Codable, Sendable {
@@ -5847,24 +5859,43 @@ enum MCPTools {
       symbol: "hand.tap",
       decodeArguments: { container in
         try container.decodeIfPresent(SimulatorTapArguments.self, forKey: .arguments)
-          ?? SimulatorTapArguments(x: nil, y: nil)
+          ?? SimulatorTapArguments(x: nil, y: nil, ref: nil, role: nil, label: nil, identifier: nil)
       },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
         handler.simulatorTap(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Tap the exact Simulator shown live in Threading's right panel. Coordinates are normalized \
-        over the visible device screen: (0,0) is top-left and (1,1) is bottom-right. The user is \
-        asked once before this device accepts input. Call simulator_prepare first and use \
-        simulator_screenshot when you need pixels for choosing a point.
+        Tap the exact Simulator shown live in Threading's right panel. Give exactly one target: an \
+        element from simulator_snapshot (its ref like "e12", or a semantic locator — label and/or \
+        identifier, optionally narrowed by role), or a normalized coordinate (x and y, where (0,0) \
+        is top-left and (1,1) is bottom-right). Prefer an element over a coordinate: the target is \
+        re-resolved against a fresh snapshot immediately before the tap, so it survives layout \
+        changes and scrolling, and an ambiguous locator fails instead of guessing. The user is \
+        asked once before this device accepts input. Call simulator_prepare first.
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "ref": MCPPropertySchema(
+            type: .string,
+            description: "An element ref from a recent simulator_snapshot, like \"e12\"."
+          ),
+          "label": MCPPropertySchema(
+            type: .string,
+            description: "Element label to match (with role/identifier). An ambiguous match fails."
+          ),
+          "identifier": MCPPropertySchema(
+            type: .string,
+            description: "Element accessibilityIdentifier to match exactly."
+          ),
+          "role": MCPPropertySchema(
+            type: .string,
+            description: "Optional role to narrow a label match, e.g. \"AXButton\"."
+          ),
           "x": MCPPropertySchema(type: .number, description: "Horizontal position from 0 to 1."),
           "y": MCPPropertySchema(type: .number, description: "Vertical position from 0 to 1."),
         ],
-        required: ["x", "y"]
+        required: []
       )
     ),
     MCPToolDefinition(
@@ -5926,24 +5957,45 @@ enum MCPTools {
       symbol: "keyboard",
       decodeArguments: { container in
         try container.decodeIfPresent(SimulatorTypeTextArguments.self, forKey: .arguments)
-          ?? SimulatorTypeTextArguments(text: nil)
+          ?? SimulatorTypeTextArguments(
+            text: nil, ref: nil, role: nil, label: nil, identifier: nil
+          )
       },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
         handler.simulatorTypeText(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Type up to 1,024 printable US-keyboard characters, tabs, newlines, or backspaces into the \
-        focused control on the exact Simulator shown live in Threading's right panel. Tap the \
-        target field first. The user is asked once before this device accepts input; Threading \
-        never forwards arbitrary keyboard events to a helper.
+        Type up to 1,024 printable US-keyboard characters, tabs, newlines, or backspaces on the \
+        exact Simulator shown live in Threading's right panel. To focus a field first, give its \
+        simulator_snapshot ref (like "e12") or a semantic locator (label and/or identifier, \
+        optionally narrowed by role) — it is re-resolved against a fresh snapshot and tapped before \
+        typing, and an ambiguous locator fails instead of guessing. With no target, text goes to \
+        whatever is already focused. The user is asked once before this device accepts input; \
+        Threading never forwards arbitrary keyboard events to a helper.
         """,
       inputSchema: MCPInputSchema(
         properties: [
           "text": MCPPropertySchema(
             type: .string,
             description: "Bounded printable US-keyboard text, tab, newline, or backspace."
-          )
+          ),
+          "ref": MCPPropertySchema(
+            type: .string,
+            description: "Optional element ref from a recent simulator_snapshot to focus first."
+          ),
+          "label": MCPPropertySchema(
+            type: .string,
+            description: "Optional element label to focus first (with role/identifier)."
+          ),
+          "identifier": MCPPropertySchema(
+            type: .string,
+            description: "Optional element accessibilityIdentifier to focus first, matched exactly."
+          ),
+          "role": MCPPropertySchema(
+            type: .string,
+            description: "Optional role to narrow a label match, e.g. \"AXTextField\"."
+          ),
         ],
         required: ["text"]
       )

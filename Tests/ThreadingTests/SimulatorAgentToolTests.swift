@@ -179,7 +179,7 @@ final class SimulatorAgentToolTests: XCTestCase {
 
         let results = [
             await execute(
-                .simulatorTap(SimulatorTapArguments(x: 0.25, y: 0.75)),
+                .simulatorTap(SimulatorTapArguments(x: 0.25, y: 0.75, ref: nil, role: nil, label: nil, identifier: nil)),
                 with: fixture.coordinator,
                 sessionID: fixture.sessionID
             ),
@@ -195,7 +195,7 @@ final class SimulatorAgentToolTests: XCTestCase {
                 sessionID: fixture.sessionID
             ),
             await execute(
-                .simulatorTypeText(SimulatorTypeTextArguments(text: "Hello!\n")),
+                .simulatorTypeText(SimulatorTypeTextArguments(text: "Hello!\n", ref: nil, role: nil, label: nil, identifier: nil)),
                 with: fixture.coordinator,
                 sessionID: fixture.sessionID
             ),
@@ -231,7 +231,7 @@ final class SimulatorAgentToolTests: XCTestCase {
 
         let results = [
             await execute(
-                .simulatorTap(SimulatorTapArguments(x: -0.01, y: 0.5)),
+                .simulatorTap(SimulatorTapArguments(x: -0.01, y: 0.5, ref: nil, role: nil, label: nil, identifier: nil)),
                 with: fixture.coordinator,
                 sessionID: fixture.sessionID
             ),
@@ -247,7 +247,7 @@ final class SimulatorAgentToolTests: XCTestCase {
                 sessionID: fixture.sessionID
             ),
             await execute(
-                .simulatorTypeText(SimulatorTypeTextArguments(text: "nul\u{0}")),
+                .simulatorTypeText(SimulatorTypeTextArguments(text: "nul\u{0}", ref: nil, role: nil, label: nil, identifier: nil)),
                 with: fixture.coordinator,
                 sessionID: fixture.sessionID
             ),

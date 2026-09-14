@@ -2,16 +2,9 @@ import ThreadingSimulatorKit
 /// Renders an accessibility snapshot into the `simulator_snapshot` tool's text result. Kept off the
 /// coordinator so response formatting does not count toward its authority budget.
 enum SimulatorSnapshotRenderer {
-    /// Roles an agent can usefully act on — used to decide which elements the default
-    /// `interactive_only` listing keeps.
-    private static let interactiveRoles: Set<String> = [
-        "AXButton", "AXTextField", "AXSecureTextField", "AXSearchField", "AXTextArea",
-        "AXSwitch", "AXSlider", "AXLink", "AXCell", "AXPopUpButton", "AXCheckBox",
-        "AXStepper", "AXMenuButton", "AXSegmentedControl"
-    ]
-
     /// A compact, ref-tagged list with a normalized tap point per element, so an agent can target a
-    /// control by role/label and tap it with `simulator_tap`.
+    /// control by role/label and tap it with `simulator_tap`. Refs are numbered over the shared
+    /// `SimulatorElementListing`, which is also what resolves an `eN` ref back to an element.
     static func result(
         root: SimulatorAccessibilityElement,
         device: SimulatorDevice,
@@ -23,46 +16,28 @@ enum SimulatorSnapshotRenderer {
             return .failure("The Simulator returned an empty accessibility frame.")
         }
         let limit = 250
+        let elements = SimulatorElementListing.listed(root, interactiveOnly: interactiveOnly)
+        let truncated = elements.count > limit
         var lines: [String] = []
-        var index = 0
-        var truncated = false
-
-        func shouldList(_ element: SimulatorAccessibilityElement) -> Bool {
-            if !interactiveOnly { return true }
-            if interactiveRoles.contains(element.role) { return true }
-            if let label = element.label, !label.isEmpty { return true }
-            if let identifier = element.identifier, !identifier.isEmpty { return true }
-            return false
-        }
-
-        func visit(_ element: SimulatorAccessibilityElement, isRoot: Bool) {
-            if !isRoot, shouldList(element) {
-                if index >= limit {
-                    truncated = true
-                } else {
-                    index += 1
-                    var parts = ["[e\(index)] \(element.role)"]
-                    if let label = element.label, !label.isEmpty {
-                        parts.append("\"\(sanitize(label))\"")
-                    }
-                    if let value = element.value, !value.isEmpty {
-                        parts.append("=\"\(sanitize(value))\"")
-                    }
-                    if let identifier = element.identifier, !identifier.isEmpty {
-                        parts.append("#\(sanitize(identifier))")
-                    }
-                    if !element.enabled { parts.append("(disabled)") }
-                    parts.append(String(
-                        format: "tap=(%.3f,%.3f)",
-                        element.frame.midX / width,
-                        element.frame.midY / height
-                    ))
-                    lines.append(parts.joined(separator: " "))
-                }
+        for (offset, element) in elements.prefix(limit).enumerated() {
+            var parts = ["[e\(offset + 1)] \(element.role)"]
+            if let label = element.label, !label.isEmpty {
+                parts.append("\"\(sanitize(label))\"")
             }
-            for child in element.children { visit(child, isRoot: false) }
+            if let value = element.value, !value.isEmpty {
+                parts.append("=\"\(sanitize(value))\"")
+            }
+            if let identifier = element.identifier, !identifier.isEmpty {
+                parts.append("#\(sanitize(identifier))")
+            }
+            if !element.enabled { parts.append("(disabled)") }
+            parts.append(String(
+                format: "tap=(%.3f,%.3f)",
+                element.frame.midX / width,
+                element.frame.midY / height
+            ))
+            lines.append(parts.joined(separator: " "))
         }
-        visit(root, isRoot: true)
 
         let title = (root.label?.isEmpty == false ? root.label! : device.name)
         let header = "\(sanitize(title)) — \(lines.count) element(s) on \(device.name) "

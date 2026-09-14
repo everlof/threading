@@ -1,3 +1,4 @@
+import CoreGraphics
 import ThreadingSimulatorKit
 
 /// Thin UI routing for the four typed input declarations.
@@ -15,13 +16,25 @@ enum SimulatorAgentInputRouter {
         through coordinator: AgentToolCoordinator,
         _ completion: @escaping Completion
     ) {
-        send(
-            SimulatorAgentCommandService.tapInput(from: arguments),
-            action: "tap",
-            sessionID: sessionID,
-            through: coordinator,
-            completion
-        )
+        switch SimulatorAgentCommandService.tapAddressing(from: arguments) {
+        case .rejected(let result):
+            completion(result)
+        case .coordinate(let x, let y):
+            send(
+                .accepted(.tap(x: x, y: y)),
+                action: "tap",
+                sessionID: sessionID,
+                through: coordinator,
+                completion
+            )
+        case .locator(let locator):
+            resolve(locator, sessionID: sessionID, through: coordinator, completion) {
+                simulator, device, point in
+                simulator.sendInputForAgent(.tap(x: Double(point.x), y: Double(point.y))) { result in
+                    finish(result, action: "tap", device: device, completion)
+                }
+            }
+        }
     }
 
     static func swipe(
@@ -45,13 +58,33 @@ enum SimulatorAgentInputRouter {
         through coordinator: AgentToolCoordinator,
         _ completion: @escaping Completion
     ) {
-        send(
-            SimulatorAgentCommandService.textInput(from: arguments),
-            action: "type_text",
-            sessionID: sessionID,
-            through: coordinator,
-            completion
-        )
+        switch SimulatorAgentCommandService.typeAddressing(from: arguments) {
+        case .rejected(let result):
+            completion(result)
+        case .focused(let text):
+            send(
+                .accepted(.text(text)),
+                action: "type_text",
+                sessionID: sessionID,
+                through: coordinator,
+                completion
+            )
+        case .located(let locator, let text):
+            // Focus the located field with a tap, then type into it.
+            resolve(locator, sessionID: sessionID, through: coordinator, completion) {
+                simulator, device, point in
+                simulator.sendInputForAgent(.tap(x: Double(point.x), y: Double(point.y))) { tap in
+                    switch tap {
+                    case .failure(let message):
+                        completion(.failure(message))
+                    case .success:
+                        simulator.sendInputForAgent(.text(text)) { result in
+                            finish(result, action: "type_text", device: device, completion)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     static func pressButton(
@@ -80,21 +113,72 @@ enum SimulatorAgentInputRouter {
             if case .rejected(let result) = request { completion(result) }
             return
         }
+        guard let (simulator, device) = resolvedSimulator(
+            for: sessionID, through: coordinator, completion
+        ) else { return }
+        simulator.sendInputForAgent(bridgeInput(input)) { result in
+            finish(result, action: action, device: device, completion)
+        }
+    }
+
+    /// Resolve the session's visible Simulator pane and adopted device, revealing and activating it,
+    /// or complete with the standard "prepare first" failure and return nil.
+    private static func resolvedSimulator(
+        for sessionID: SessionID,
+        through coordinator: AgentToolCoordinator,
+        _ completion: @escaping Completion
+    ) -> (SimulatorPaneViewController, SimulatorDevice)? {
         guard let simulator = coordinator.displayPaneController.tabs(for: sessionID)
             .compactMap(\.simulator).first,
               let device = simulator.adoptedDevice else {
             completion(.failure("Call simulator_prepare before controlling the Simulator."))
-            return
+            return nil
         }
         _ = coordinator.displayPaneController.activateSimulator(for: sessionID)
         coordinator.revealDisplayPane(for: sessionID)
-        simulator.sendInputForAgent(bridgeInput(input)) { result in
+        return (simulator, device)
+    }
+
+    /// Take a fresh snapshot and resolve the locator to a normalized point immediately before acting.
+    /// A miss or an ambiguity fails with a helpful message rather than a silent guess.
+    private static func resolve(
+        _ locator: SimulatorAgentCommandService.ElementLocator,
+        sessionID: SessionID,
+        through coordinator: AgentToolCoordinator,
+        _ completion: @escaping Completion,
+        onResolved: @escaping @MainActor @Sendable (
+            SimulatorPaneViewController, SimulatorDevice, CGPoint
+        ) -> Void
+    ) {
+        guard let (simulator, device) = resolvedSimulator(
+            for: sessionID, through: coordinator, completion
+        ) else { return }
+        simulator.snapshotForAgent { result in
             switch result {
-            case .success:
-                completion(SimulatorAgentCommandService.inputResult(action: action, device: device))
             case .failure(let message):
                 completion(.failure(message))
+            case .success(let snapshot):
+                switch SimulatorElementResolver.resolve(locator, in: snapshot.root) {
+                case .point(let point):
+                    onResolved(simulator, device, point)
+                case .notFound(let message), .ambiguous(let message):
+                    completion(.failure(message))
+                }
             }
+        }
+    }
+
+    private static func finish(
+        _ result: SimulatorPaneAgentResult<Void>,
+        action: String,
+        device: SimulatorDevice,
+        _ completion: @escaping Completion
+    ) {
+        switch result {
+        case .success:
+            completion(SimulatorAgentCommandService.inputResult(action: action, device: device))
+        case .failure(let message):
+            completion(.failure(message))
         }
     }
 

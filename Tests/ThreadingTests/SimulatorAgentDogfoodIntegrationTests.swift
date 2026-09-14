@@ -91,7 +91,7 @@ final class SimulatorAgentDogfoodIntegrationTests: XCTestCase {
         XCTAssertTrue(screenshot.text.contains(deviceID.rawValue))
 
         let tap = await execute(
-            .simulatorTap(SimulatorTapArguments(x: 0.5, y: 0.5)),
+            .simulatorTap(SimulatorTapArguments(x: 0.5, y: 0.5, ref: nil, role: nil, label: nil, identifier: nil)),
             coordinator: coordinator,
             sessionID: sessionID
         )
