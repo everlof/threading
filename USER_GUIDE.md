@@ -2925,7 +2925,8 @@ list.
 On your own paired iPhone, open the dashboard's **…** menu and choose **Usage**. The native sheet
 contains the same **Overview** and **Limit History** subjects as the Mac, with independent 7-, 30-
 and 90-day controls. Overview shows measured cost/tokens, provider composition, totals, coverage
-and pricing provenance. Limit History shows one selected account/window's observations,
+and pricing provenance. Changing the Limit History period keeps your scroll position and the
+previous chart visible while the new history loads. Limit History shows one selected account/window's observations,
 projection, reset evidence and **Banked resets**. A positive number is current inventory, zero
 means none are available, and **Unavailable** means the provider did not report a count. A marker
 in the history is separate evidence that a banked reset was previously used. A window that cycles

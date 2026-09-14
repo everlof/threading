@@ -160,7 +160,7 @@ because a rubber band *is* movement, so an elastic viewport never reports that i
 
 macOS and iOS share `UsageDashboardProjector` values, not a view hierarchy. AppKit keeps the
 desktop chart renderer, pointer inspection and theme-specific motion. The iPhone uses a native
-SwiftUI sheet and Swift Charts over the already bounded values, with the same capacity, history,
+SwiftUI sheet over the already bounded values, with the same capacity, history,
 then consumption order. Both renderers present banked-reset inventory as three distinct states:
 positive, authoritative zero, and unavailable (`nil`). Historical `.bankedCredit` evidence and
 the next current-credit expiry remain separately typed markers.
@@ -191,6 +191,21 @@ Both routes authorize before loading report or journal data. A view-only or inte
 guest receives 403 and never sees the feature identifier; a revoked bearer follows the existing
 401 path. The bridge omits raw transcript cells, filesystem paths, provider credentials, credit
 identity and the raw history journal.
+
+The phone's limit chart uses Swift Charts for axes and a single clipped Canvas for the marks.
+Its immutable geometry keeps each observed window in a separate path, closes every area on zero,
+and never joins or stacks across a reset. Native marks per observation were unnecessary SwiftUI
+work for the 280-point / 118-reset envelope. The chart is an equatable child, so loading flags and
+other dashboard changes do not rebuild unchanged history; theme dependencies still refresh it.
+Projection dashes, reset/expiry rules, peak columns and the existing VoiceOver summary remain.
+
+Changing periods keeps the last same-account/window snapshot mounted, with a pending indicator
+over the chart until its replacement arrives. A failure leaves that snapshot and scroll extent
+in place and reports the error. Request generations own result, error and loading publication,
+including a return to the already displayed period while another request is pending. The history
+heading and card form one stable lazy-stack child. This remains a host-only mobile surface:
+Threading owns account/window identity, period selection, data truth, request authority and scroll
+continuity; the remote theme supplies presentation roles.
 
 ### Spending a banked reset
 

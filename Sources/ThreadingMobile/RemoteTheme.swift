@@ -319,6 +319,7 @@ enum MobileDesign {
         /// beneath it, so the reading is the line and the fill only says which side is used.
         static let lineWidth: CGFloat = 2
         static let areaOpacity: Double = 0.12
+        static let pendingSnapshotOpacity: Double = 0.35
         static let projectionDash: [CGFloat] = [5, 4]
         static let markerDash: [CGFloat] = [3, 3]
         static let markerWidth: CGFloat = 1

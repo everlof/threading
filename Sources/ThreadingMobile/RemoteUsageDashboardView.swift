@@ -341,11 +341,23 @@ final class RemoteUsageDashboardModel: ObservableObject {
 
     private let client: RemoteClient
     private let isDemo: Bool
+    private let fetchLimit: @MainActor (String, Int) async throws -> RemoteUsageLimitDTO
     private var presentedLimitKey: String?
+    private var limitRequestGeneration: UInt64 = 0
 
-    init(link: RemoteConnectionLink, isDemo: Bool) {
-        client = RemoteClient(link: link)
+    init(
+        link: RemoteConnectionLink,
+        isDemo: Bool,
+        fetchLimit: (@MainActor (String, Int) async throws -> RemoteUsageLimitDTO)? = nil
+    ) {
+        let client = RemoteClient(link: link)
+        self.client = client
         self.isDemo = isDemo
+        self.fetchLimit = fetchLimit ?? { seriesID, days in
+            isDemo
+                ? try RemoteUsageDemo.limit(seriesID: seriesID, days: days)
+                : try await client.fetchUsageLimit(seriesID: seriesID, days: days)
+        }
     }
 
     func load() async {
@@ -393,22 +405,30 @@ final class RemoteUsageDashboardModel: ObservableObject {
     }
 
     func loadLimit(seriesID: String, days: Int, force: Bool = false) async {
+        limitRequestGeneration &+= 1
+        let generation = limitRequestGeneration
         let key = "\(seriesID)|\(days)"
-        if !force, presentedLimitKey == key, limit != nil { return }
+        if !force, presentedLimitKey == key, limit != nil {
+            isLoadingLimit = false
+            limitErrorMessage = nil
+            return
+        }
         isLoadingLimit = true
         limitErrorMessage = nil
-        defer { isLoadingLimit = false }
+        defer {
+            if generation == limitRequestGeneration { isLoadingLimit = false }
+        }
         do {
-            let value = isDemo
-                ? try RemoteUsageDemo.limit(seriesID: seriesID, days: days)
-                : try await client.fetchUsageLimit(seriesID: seriesID, days: days)
+            let value = try await fetchLimit(seriesID, days)
             guard !Task.isCancelled,
+                  generation == limitRequestGeneration,
                   selectedLimitID == nil || selectedLimitID == seriesID else { return }
             limit = value
             presentedLimitKey = key
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled, generation == limitRequestGeneration else { return }
             limitErrorMessage = error.localizedDescription
         }
     }
@@ -552,7 +572,12 @@ struct RemoteUsageDashboardView: View {
     @State private var pendingBankedReset: RemoteBankedUsageResetOfferDTO?
     @State private var isConfirmingBankedReset = false
 
-    init(link: RemoteConnectionLink, isDemo: Bool, focus: MobileUsageAccountFocus? = nil) {
+    init(
+        link: RemoteConnectionLink,
+        isDemo: Bool,
+        focus: MobileUsageAccountFocus? = nil,
+        model: RemoteUsageDashboardModel? = nil
+    ) {
         self.isDemo = isDemo
         self.focus = focus
 #if DEBUG
@@ -576,7 +601,7 @@ struct RemoteUsageDashboardView: View {
         demoStartsAtLimitHistory = false
 #endif
         _model = StateObject(
-            wrappedValue: RemoteUsageDashboardModel(link: link, isDemo: isDemo)
+            wrappedValue: model ?? RemoteUsageDashboardModel(link: link, isDemo: isDemo)
         )
     }
 
@@ -589,8 +614,10 @@ struct RemoteUsageDashboardView: View {
                         if scope == .accounts {
                             accountsScope
                                 .id(MobileUsageSection.currentCapacity)
-                            limitContent
-                                .id(MobileUsageSection.limitHistory)
+                            VStack(alignment: .leading, spacing: MobileDesign.Spacing.large) {
+                                limitContent
+                            }
+                            .id(MobileUsageSection.limitHistory)
                         } else {
                             overviewContent
                                 .id(MobileUsageSection.consumption)
@@ -1128,7 +1155,7 @@ struct RemoteUsageDashboardView: View {
                 .accessibilityValue(chartSummary(projection))
                 HStack(spacing: MobileDesign.Spacing.medium) {
                     ForEach(legend, id: \.title) { entry in
-                        chartLegend(entry.title, color: entry.color, symbol: "circle.fill")
+                        UsageChartLegend(entry.title, color: entry.color, symbol: "circle.fill")
                     }
                     Spacer(minLength: 0)
                     Text("\(range.activeDayCount) active days")
@@ -1443,7 +1470,22 @@ struct RemoteUsageDashboardView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: MobileDesign.Chart.limitHeight)
                     } else if let detail = selectedLimit {
-                        limitChart(detail)
+                        MobileUsageLimitChart(detail: detail).equatable()
+                            .opacity(detail.days == limitDays ? 1 : MobileDesign.Chart.pendingSnapshotOpacity)
+                            .overlay {
+                                if let message = model.limitErrorMessage {
+                                    Text(message)
+                                        .font(.subheadline)
+                                        .foregroundStyle(theme.secondaryLabel)
+                                        .padding(MobileDesign.Spacing.medium)
+                                        .background(theme.ground)
+                                } else if detail.days != limitDays || model.isLoadingLimit {
+                                    ProgressView("Preparing selected history…")
+                                        .tint(theme.accent)
+                                        .padding(MobileDesign.Spacing.medium)
+                                        .background(theme.ground)
+                                }
+                            }
                         Divider().overlay(theme.divider)
                         limitSummaryRows(detail)
                         if detail.series.canRedeemBankedReset == true {
@@ -1489,8 +1531,9 @@ struct RemoteUsageDashboardView: View {
     }
 
     private var selectedLimit: RemoteUsageLimitDTO? {
-        guard model.limit?.series.id == model.selectedLimitID,
-              model.limit?.days == limitDays else { return nil }
+        // A new period replaces this snapshot atomically. Removing it while waiting shrinks
+        // the scroll extent and makes UIKit clamp the reader back to the top of the sheet.
+        guard model.limit?.series.id == model.selectedLimitID else { return nil }
         return model.limit
     }
 
@@ -1707,266 +1750,6 @@ struct RemoteUsageDashboardView: View {
         )
     }
 
-    /// One window's history in whichever form its density allows: the observed line with its
-    /// resets ruled through it, or — for a window that cycles too often for a line to be read —
-    /// one column per bucket at the highest reading it reached, the ones that reached the limit
-    /// in the negative role. Scheduled resets are not drawn in the column form; a window that
-    /// resets every five hours resets every five hours, and the count stands in the rows below.
-    /// Banked-credit resets and a pending expiry are rarer and stay ruled in both forms.
-    /// The marks one window's chart carries, decided once so the plot, its legend and its
-    /// accessibility summary agree about what is on it.
-    private struct LimitChartPlan {
-        let form: MobileUsageLimitChartProjection.Form
-        let peaks: [MobileUsageLimitChartProjection.Peak]
-        let columns: [PeakColumn]
-        let ruledResets: [RemoteUsageLimitResetDTO]
-        let drawsProjection: Bool
-        let drawsScheduledResets: Bool
-        let hasBankedResets: Bool
-        let drawsExpiry: Bool
-
-        var reachedLimit: Bool { peaks.contains(where: \.reachedLimit) }
-    }
-
-    private func limitChartPlan(_ detail: RemoteUsageLimitDTO) -> LimitChartPlan {
-        let form = MobileUsageLimitChartProjection.form(for: detail)
-        var peaks: [MobileUsageLimitChartProjection.Peak] = []
-        var columns: [PeakColumn] = []
-        if case .peaks(let bucket) = form {
-            peaks = MobileUsageLimitChartProjection.peaks(for: detail, bucket: bucket)
-            let inset = bucket * MobileDesign.Chart.columnGapFraction / 2
-            columns = peaks.map { peak in
-                PeakColumn(
-                    id: peak.id,
-                    from: Date(timeIntervalSince1970: peak.start + inset),
-                    to: Date(timeIntervalSince1970: peak.end - inset),
-                    top: peak.fraction,
-                    color: (peak.reachedLimit ? theme.negative : theme.accent)
-                        .opacity(MobileDesign.Chart.columnOpacity)
-                )
-            }
-        }
-        let isLine = form == .line
-        let domain = MobileUsageLimitChartDomain.range(for: detail)
-        return LimitChartPlan(
-            form: form,
-            peaks: peaks,
-            columns: columns,
-            ruledResets: detail.resets.filter { $0.cause == .bankedCredit || isLine },
-            drawsProjection: isLine && detail.projection != nil,
-            drawsScheduledResets: isLine && detail.resets.contains { $0.cause != .bankedCredit },
-            hasBankedResets: detail.resets.contains { $0.cause == .bankedCredit },
-            drawsExpiry: detail.series.nextBankedResetExpiresAt.map {
-                domain.contains(Date(timeIntervalSince1970: $0))
-            } ?? false
-        )
-    }
-
-    /// One window's history in whichever form its density allows: the observed line with its
-    /// resets ruled through it, or — for a window that cycles too often for a line to be read —
-    /// one column per bucket at the highest reading it reached, the ones that reached the limit
-    /// in the negative role. Scheduled resets are not drawn in the column form; a window that
-    /// resets every five hours resets every five hours, and the count stands in the rows below.
-    /// Banked-credit resets and a pending expiry are rarer and stay ruled in both forms.
-    private func limitChart(_ detail: RemoteUsageLimitDTO) -> some View {
-        let plan = limitChartPlan(detail)
-        return VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
-            Chart {
-                observedMarks(detail, plan: plan)
-                projectionMarks(detail, plan: plan)
-                resetMarks(plan.ruledResets)
-                expiryMarks(detail, plan: plan)
-            }
-            .chartXScale(domain: MobileUsageLimitChartDomain.range(for: detail))
-            .chartYScale(domain: 0...1)
-            // The value axis stands at the leading edge so the last date label has the card's
-            // whole trailing margin to land in; against a trailing axis it was cut to "31 a…".
-            .chartYAxis {
-                AxisMarks(position: .leading, values: [0, 0.5, 1]) { value in
-                    AxisGridLine().foregroundStyle(theme.divider)
-                    AxisValueLabel {
-                        if let fraction = value.as(Double.self) {
-                            Text(fraction, format: .percent.precision(.fractionLength(0)))
-                                .foregroundStyle(theme.tertiaryLabel)
-                        }
-                    }
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: MobileUsageAxisTicks.dates(
-                    in: MobileUsageLimitChartDomain.range(for: detail),
-                    desiredCount: 4
-                )) { _ in
-                    AxisGridLine().foregroundStyle(theme.divider)
-                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
-            }
-            .frame(height: MobileDesign.Chart.limitHeight)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(MobileL10n.string("Limit history chart"))
-            .accessibilityValue(limitChartSummary(detail, form: plan.form, peaks: plan.peaks))
-            limitLegend(plan)
-        }
-    }
-
-    private var observedStroke: StrokeStyle {
-        StrokeStyle(lineWidth: MobileDesign.Chart.lineWidth, lineCap: .round, lineJoin: .round)
-    }
-
-    private var projectionStroke: StrokeStyle {
-        StrokeStyle(
-            lineWidth: MobileDesign.Chart.lineWidth,
-            lineCap: .round,
-            lineJoin: .round,
-            dash: MobileDesign.Chart.projectionDash
-        )
-    }
-
-    private func markerStroke(emphasized: Bool) -> StrokeStyle {
-        StrokeStyle(
-            lineWidth: emphasized
-                ? MobileDesign.Chart.emphasizedMarkerWidth
-                : MobileDesign.Chart.markerWidth,
-            dash: MobileDesign.Chart.markerDash
-        )
-    }
-
-    /// Erased rather than built with a branch: the two forms are different mark types, and the
-    /// chart builder's branching is what the compiler gave up on.
-    private func observedMarks(_ detail: RemoteUsageLimitDTO, plan: LimitChartPlan) -> AnyChartContent {
-        switch plan.form {
-        case .line:
-            return AnyChartContent(ForEach(detail.observed, id: \.at) { point in
-                observedPointMarks(point)
-            })
-        case .peaks:
-            return AnyChartContent(ForEach(plan.columns) { column in
-                columnMark(column)
-            })
-        }
-    }
-
-    /// A rectangle rather than a bar: a bar takes a start and an end on one axis only, and a
-    /// column that spans its bucket needs both edges stated on both.
-    private func columnMark(_ column: PeakColumn) -> some ChartContent {
-        RectangleMark(
-            xStart: .value("From", column.from),
-            xEnd: .value("To", column.to),
-            yStart: .value("Baseline", column.baseline),
-            yEnd: .value("Peak used", column.top)
-        )
-        .foregroundStyle(column.color)
-        .cornerRadius(MobileDesign.Chart.columnRadius, style: .continuous)
-    }
-
-    @ChartContentBuilder
-    private func observedPointMarks(_ point: RemoteUsageLimitPointDTO) -> some ChartContent {
-        let at = Date(timeIntervalSince1970: point.at)
-        AreaMark(
-            x: .value("Observed at", at),
-            y: .value("Used", point.fraction),
-            series: .value("Observed segment", point.segment)
-        )
-        .foregroundStyle(theme.accent.opacity(MobileDesign.Chart.areaOpacity))
-        LineMark(
-            x: .value("Observed at", at),
-            y: .value("Used", point.fraction),
-            series: .value("Observed segment", point.segment)
-        )
-        .foregroundStyle(theme.accent)
-        .lineStyle(observedStroke)
-    }
-
-    @ChartContentBuilder
-    private func projectionMarks(_ detail: RemoteUsageLimitDTO, plan: LimitChartPlan) -> some ChartContent {
-        if plan.drawsProjection, let projection = detail.projection {
-            let from = Date(timeIntervalSince1970: projection.observedAt)
-            let to = Date(timeIntervalSince1970: projection.projectedExhaustionAt ?? projection.resetsAt)
-            let endFraction: Double = projection.projectedExhaustionAt == nil
-                ? projection.projectedFractionAtReset
-                : 1
-            LineMark(
-                x: .value("Projected from", from),
-                y: .value("Projected use", projection.observedFraction),
-                series: .value("Projection", "projection")
-            )
-            .foregroundStyle(theme.warning)
-            .lineStyle(projectionStroke)
-            LineMark(
-                x: .value("Projected to", to),
-                y: .value("Projected use", endFraction),
-                series: .value("Projection", "projection")
-            )
-            .foregroundStyle(theme.warning)
-            .lineStyle(projectionStroke)
-        }
-    }
-
-    @ChartContentBuilder
-    private func resetMarks(_ resets: [RemoteUsageLimitResetDTO]) -> some ChartContent {
-        ForEach(resets) { reset in
-            let isBanked = reset.cause == .bankedCredit
-            RuleMark(x: .value("Reset", Date(timeIntervalSince1970: reset.detectedAt)))
-                .foregroundStyle(isBanked ? theme.positive : theme.secondaryLabel)
-                .lineStyle(markerStroke(emphasized: isBanked))
-        }
-    }
-
-    @ChartContentBuilder
-    private func expiryMarks(_ detail: RemoteUsageLimitDTO, plan: LimitChartPlan) -> some ChartContent {
-        if plan.drawsExpiry, let expiry = detail.series.nextBankedResetExpiresAt {
-            RuleMark(x: .value("Banked reset expiry", Date(timeIntervalSince1970: expiry)))
-                .foregroundStyle(theme.negative)
-                .lineStyle(markerStroke(emphasized: true))
-        }
-    }
-
-    /// Only the marks that are on the chart are keyed: a legend that names a projection or an
-    /// expiry the plot does not carry is a legend that lies about the plot.
-    private func limitLegend(_ plan: LimitChartPlan) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 128), spacing: MobileDesign.Spacing.small)],
-            alignment: .leading,
-            spacing: MobileDesign.Spacing.small
-        ) {
-            switch plan.form {
-            case .line:
-                chartLegend(Text("Observed"), color: theme.accent, symbol: "circle.fill")
-            case .peaks(let bucket):
-                chartLegend(peakLegendTitle(bucket: bucket), color: theme.accent, symbol: "chart.bar.fill")
-                if plan.reachedLimit {
-                    chartLegend(Text("Limit reached"), color: theme.negative, symbol: "chart.bar.fill")
-                }
-            }
-            if plan.drawsProjection {
-                chartLegend(Text("Projection"), color: theme.warning, symbol: "line.diagonal")
-            }
-            if plan.drawsScheduledResets {
-                chartLegend(Text("Reset"), color: theme.secondaryLabel, symbol: "arrow.counterclockwise")
-            }
-            if plan.hasBankedResets {
-                chartLegend(Text("Banked reset"), color: theme.positive, symbol: "bolt.fill")
-            }
-            if plan.drawsExpiry {
-                chartLegend(Text("Expiry"), color: theme.negative, symbol: "hourglass")
-            }
-        }
-    }
-
-    /// What a column stands for, by the bucket it spans: the window itself, a day, or a span of
-    /// days.
-    private func peakLegendTitle(bucket: TimeInterval) -> String {
-        let day = MobileUsageLimitChartProjection.dayBucket
-        if bucket < day {
-            return MobileL10n.string("Peak per window")
-        }
-        let days = Int((bucket / day).rounded())
-        return days <= 1
-            ? MobileL10n.string("Peak per day")
-            : MobileL10n.string("Peak per %lld days", Int64(days))
-    }
-
     private func rangePicker(selection: Binding<Int>) -> some View {
         Picker("Range", selection: selection) {
             Text("7d").tag(7)
@@ -2059,26 +1842,6 @@ struct RemoteUsageDashboardView: View {
         )
     }
 
-    private func limitChartSummary(
-        _ detail: RemoteUsageLimitDTO,
-        form: MobileUsageLimitChartProjection.Form,
-        peaks: [MobileUsageLimitChartProjection.Peak]
-    ) -> String {
-        let observed = MobileL10n.string(
-            "%lld observations, %lld recorded resets, %@ currently used",
-            detail.observed.count,
-            detail.recordedResetCount,
-            detail.series.currentFraction.map(percent) ?? MobileL10n.string("unknown")
-        )
-        guard case .peaks = form else { return observed }
-        let limitHits = peaks.filter(\.reachedLimit).count
-        return observed + ". " + MobileL10n.string(
-            "%lld columns of peak use, %lld reached the limit",
-            Int64(peaks.count),
-            Int64(limitHits)
-        )
-    }
-
     private func bankedResetPresentation(
         _ series: RemoteUsageLimitSeriesSummaryDTO
     ) -> (value: String, detail: String) {
@@ -2125,29 +1888,6 @@ struct RemoteUsageDashboardView: View {
             percent(projection.projectedFractionAtReset),
             MobileL10n.string("Estimate from recent burn")
         )
-    }
-
-    /// One legend key: the mark's colour on its glyph, the words in the quiet text ink. The
-    /// text never wears the series colour — a light hue is illegible as text, and the swatch
-    /// beside it is what carries identity.
-    private func chartLegend(_ title: Text, color: Color, symbol: String) -> some View {
-        Label {
-            title.lineLimit(1)
-        } icon: {
-            if symbol == "circle.fill" {
-                Circle()
-                    .fill(color)
-                    .frame(width: MobileDesign.Chart.legendSwatch, height: MobileDesign.Chart.legendSwatch)
-            } else {
-                Image(systemName: symbol).foregroundStyle(color)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(theme.secondaryLabel)
-    }
-
-    private func chartLegend(_ title: String, color: Color, symbol: String) -> some View {
-        chartLegend(Text(verbatim: title), color: color, symbol: symbol)
     }
 
     private func seriesColor(_ index: Int, isOther: Bool) -> Color {
@@ -2225,6 +1965,332 @@ struct RemoteUsageDashboardView: View {
     }
 }
 
+/// Unit plot coordinates keep resize independent of the source history. Disjoint provider
+/// windows are separate paths, and every fill closes on zero rather than on another window.
+struct MobileUsageLimitLineGeometry {
+    let lines: [Path]
+    let fills: [Path]
+
+    init(observed: [RemoteUsageLimitPointDTO], domain: ClosedRange<Date>) {
+        let start = domain.lowerBound.timeIntervalSince1970
+        let span = max(1, domain.upperBound.timeIntervalSince1970 - start)
+        var segments: [[CGPoint]] = []
+        var previousSegment: Int?
+        for observation in observed where observation.at.isFinite && observation.fraction.isFinite {
+            if previousSegment != observation.segment {
+                segments.append([])
+                previousSegment = observation.segment
+            }
+            segments[segments.count - 1].append(
+                CGPoint(x: (observation.at - start) / span, y: 1 - observation.fraction)
+            )
+        }
+        lines = segments.map { points in
+            Path { path in
+                guard let first = points.first else { return }
+                path.move(to: first)
+                for point in points.dropFirst() { path.addLine(to: point) }
+            }
+        }
+        fills = zip(segments, lines).map { points, line in
+            var path = line
+            if let first = points.first, let last = points.last {
+                path.addLine(to: CGPoint(x: last.x, y: 1))
+                path.addLine(to: CGPoint(x: first.x, y: 1))
+                path.closeSubpath()
+            }
+            return path
+        }
+    }
+}
+
+/// One bounded history snapshot. Unrelated dashboard loading and capacity updates do not
+/// rebuild its marks; environment changes still flow through SwiftUI's own dependency graph.
+struct MobileUsageLimitChart: View, Equatable {
+    @Environment(\.remoteTheme) private var theme
+    let detail: RemoteUsageLimitDTO
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.detail == rhs.detail }
+
+    /// The marks one window's chart carries, decided once so the plot, its legend and its
+    /// accessibility summary agree about what is on it.
+    private struct LimitChartPlan {
+        let form: MobileUsageLimitChartProjection.Form
+        let peaks: [MobileUsageLimitChartProjection.Peak]
+        let columns: [PeakColumn]
+        let ruledResets: [RemoteUsageLimitResetDTO]
+        let drawsProjection: Bool
+        let drawsScheduledResets: Bool
+        let hasBankedResets: Bool
+        let drawsExpiry: Bool
+
+        var reachedLimit: Bool { peaks.contains(where: \.reachedLimit) }
+    }
+
+    private func limitChartPlan(_ detail: RemoteUsageLimitDTO) -> LimitChartPlan {
+        let form = MobileUsageLimitChartProjection.form(for: detail)
+        var peaks: [MobileUsageLimitChartProjection.Peak] = []
+        var columns: [PeakColumn] = []
+        if case .peaks(let bucket) = form {
+            peaks = MobileUsageLimitChartProjection.peaks(for: detail, bucket: bucket)
+            let inset = bucket * MobileDesign.Chart.columnGapFraction / 2
+            columns = peaks.map { peak in
+                PeakColumn(
+                    id: peak.id,
+                    from: Date(timeIntervalSince1970: peak.start + inset),
+                    to: Date(timeIntervalSince1970: peak.end - inset),
+                    top: peak.fraction,
+                    color: (peak.reachedLimit ? theme.negative : theme.accent)
+                        .opacity(MobileDesign.Chart.columnOpacity)
+                )
+            }
+        }
+        let isLine = form == .line
+        let domain = MobileUsageLimitChartDomain.range(for: detail)
+        return LimitChartPlan(
+            form: form,
+            peaks: peaks,
+            columns: columns,
+            ruledResets: detail.resets.filter { $0.cause == .bankedCredit || isLine },
+            drawsProjection: isLine && detail.projection != nil,
+            drawsScheduledResets: isLine && detail.resets.contains { $0.cause != .bankedCredit },
+            hasBankedResets: detail.resets.contains { $0.cause == .bankedCredit },
+            drawsExpiry: detail.series.nextBankedResetExpiresAt.map {
+                domain.contains(Date(timeIntervalSince1970: $0))
+            } ?? false
+        )
+    }
+
+    /// One window's history in whichever form its density allows: the observed line with its
+    /// resets ruled through it, or — for a window that cycles too often for a line to be read —
+    /// one column per bucket at the highest reading it reached, the ones that reached the limit
+    /// in the negative role. Scheduled resets are not drawn in the column form; a window that
+    /// resets every five hours resets every five hours, and the count stands in the rows below.
+    /// Banked-credit resets and a pending expiry are rarer and stay ruled in both forms.
+    var body: some View {
+        let plan = limitChartPlan(detail)
+        return VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+            Chart {}
+            .chartXScale(domain: MobileUsageLimitChartDomain.range(for: detail))
+            .chartYScale(domain: 0...1)
+            .chartPlotStyle { plot in
+                plot.overlay { historyPlot(plan) }.clipped()
+            }
+            // The value axis stands at the leading edge so the last date label has the card's
+            // whole trailing margin to land in; against a trailing axis it was cut to "31 a…".
+            .chartYAxis {
+                AxisMarks(position: .leading, values: [0, 0.5, 1]) { value in
+                    AxisGridLine().foregroundStyle(theme.divider)
+                    AxisValueLabel {
+                        if let fraction = value.as(Double.self) {
+                            Text(fraction, format: .percent.precision(.fractionLength(0)))
+                                .foregroundStyle(theme.tertiaryLabel)
+                        }
+                    }
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: MobileUsageAxisTicks.dates(
+                    in: MobileUsageLimitChartDomain.range(for: detail),
+                    desiredCount: 4
+                )) { _ in
+                    AxisGridLine().foregroundStyle(theme.divider)
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                        .foregroundStyle(theme.tertiaryLabel)
+                }
+            }
+            .frame(height: MobileDesign.Chart.limitHeight)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(MobileL10n.string("Limit history chart"))
+            .accessibilityValue(limitChartSummary(detail, form: plan.form, peaks: plan.peaks))
+            limitLegend(plan)
+        }
+    }
+
+    private var observedStroke: StrokeStyle {
+        StrokeStyle(lineWidth: MobileDesign.Chart.lineWidth, lineCap: .round, lineJoin: .round)
+    }
+
+    private var projectionStroke: StrokeStyle {
+        StrokeStyle(
+            lineWidth: MobileDesign.Chart.lineWidth,
+            lineCap: .round,
+            lineJoin: .round,
+            dash: MobileDesign.Chart.projectionDash
+        )
+    }
+
+    private func markerStroke(emphasized: Bool) -> StrokeStyle {
+        StrokeStyle(
+            lineWidth: emphasized
+                ? MobileDesign.Chart.emphasizedMarkerWidth
+                : MobileDesign.Chart.markerWidth,
+            dash: MobileDesign.Chart.markerDash
+        )
+    }
+
+    /// One drawing surface, not one SwiftUI node per observation and reset. Geometry is
+    /// prepared once per snapshot; scrolling only composites this bounded plot. Every window
+    /// has its own zero baseline, with no stacking or interpolation across a reset gap.
+    private func historyPlot(_ plan: LimitChartPlan) -> some View {
+        let domain = MobileUsageLimitChartDomain.range(for: detail)
+        let start = domain.lowerBound.timeIntervalSince1970
+        let span = max(1, domain.upperBound.timeIntervalSince1970 - start)
+        let geometry = MobileUsageLimitLineGeometry(observed: detail.observed, domain: domain)
+        return Canvas { context, size in
+            context.clip(to: Path(CGRect(origin: .zero, size: size)))
+            let transform = CGAffineTransform(scaleX: size.width, y: size.height)
+            func point(_ at: Double, _ fraction: Double) -> CGPoint {
+                CGPoint(x: (at - start) / span * size.width, y: (1 - fraction) * size.height)
+            }
+            func rule(_ at: Double) -> Path {
+                Path { path in
+                    path.move(to: point(at, 0))
+                    path.addLine(to: point(at, 1))
+                }
+            }
+            switch plan.form {
+            case .line:
+                for fill in geometry.fills {
+                    context.fill(fill.applying(transform),
+                                 with: .color(theme.accent.opacity(MobileDesign.Chart.areaOpacity)))
+                }
+                for line in geometry.lines {
+                    context.stroke(line.applying(transform), with: .color(theme.accent), style: observedStroke)
+                }
+            case .peaks:
+                for column in plan.columns {
+                    let top = point(column.from.timeIntervalSince1970, column.top)
+                    let bottom = point(column.to.timeIntervalSince1970, 0)
+                    let rectangle = CGRect(x: top.x, y: top.y,
+                                           width: max(0, bottom.x - top.x), height: max(0, bottom.y - top.y))
+                    context.fill(Path(roundedRect: rectangle, cornerRadius: MobileDesign.Chart.columnRadius),
+                                 with: .color(column.color))
+                }
+            }
+            if plan.drawsProjection, let projection = detail.projection {
+                let endFraction = projection.projectedExhaustionAt == nil
+                    ? projection.projectedFractionAtReset : 1
+                let path = Path { path in
+                    path.move(to: point(projection.observedAt, projection.observedFraction))
+                    path.addLine(to: point(projection.projectedExhaustionAt ?? projection.resetsAt, endFraction))
+                }
+                context.stroke(path, with: .color(theme.warning), style: projectionStroke)
+            }
+            for reset in plan.ruledResets {
+                let banked = reset.cause == .bankedCredit
+                context.stroke(rule(reset.detectedAt),
+                               with: .color(banked ? theme.positive : theme.secondaryLabel),
+                               style: markerStroke(emphasized: banked))
+            }
+            if plan.drawsExpiry, let expiry = detail.series.nextBankedResetExpiresAt {
+                context.stroke(rule(expiry), with: .color(theme.negative), style: markerStroke(emphasized: true))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// Only the marks that are on the chart are keyed: a legend that names a projection or an
+    /// expiry the plot does not carry is a legend that lies about the plot.
+    private func limitLegend(_ plan: LimitChartPlan) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 128), spacing: MobileDesign.Spacing.small)],
+            alignment: .leading,
+            spacing: MobileDesign.Spacing.small
+        ) {
+            switch plan.form {
+            case .line:
+                UsageChartLegend(Text("Observed"), color: theme.accent, symbol: "circle.fill")
+            case .peaks(let bucket):
+                UsageChartLegend(peakLegendTitle(bucket: bucket), color: theme.accent, symbol: "chart.bar.fill")
+                if plan.reachedLimit {
+                    UsageChartLegend(Text("Limit reached"), color: theme.negative, symbol: "chart.bar.fill")
+                }
+            }
+            if plan.drawsProjection {
+                UsageChartLegend(Text("Projection"), color: theme.warning, symbol: "line.diagonal")
+            }
+            if plan.drawsScheduledResets {
+                UsageChartLegend(Text("Reset"), color: theme.secondaryLabel, symbol: "arrow.counterclockwise")
+            }
+            if plan.hasBankedResets {
+                UsageChartLegend(Text("Banked reset"), color: theme.positive, symbol: "bolt.fill")
+            }
+            if plan.drawsExpiry {
+                UsageChartLegend(Text("Expiry"), color: theme.negative, symbol: "hourglass")
+            }
+        }
+    }
+
+    /// What a column stands for, by the bucket it spans: the window itself, a day, or a span of
+    /// days.
+    private func peakLegendTitle(bucket: TimeInterval) -> String {
+        let day = MobileUsageLimitChartProjection.dayBucket
+        if bucket < day {
+            return MobileL10n.string("Peak per window")
+        }
+        let days = Int((bucket / day).rounded())
+        return days <= 1
+            ? MobileL10n.string("Peak per day")
+            : MobileL10n.string("Peak per %lld days", Int64(days))
+    }
+
+    private func limitChartSummary(
+        _ detail: RemoteUsageLimitDTO,
+        form: MobileUsageLimitChartProjection.Form,
+        peaks: [MobileUsageLimitChartProjection.Peak]
+    ) -> String {
+        let observed = MobileL10n.string(
+            "%lld observations, %lld recorded resets, %@ currently used",
+            detail.observed.count,
+            detail.recordedResetCount,
+            detail.series.currentFraction.map { $0.formatted(.percent.precision(.fractionLength(0))) } ?? MobileL10n.string("unknown")
+        )
+        guard case .peaks = form else { return observed }
+        let limitHits = peaks.filter(\.reachedLimit).count
+        return observed + ". " + MobileL10n.string(
+            "%lld columns of peak use, %lld reached the limit",
+            Int64(peaks.count),
+            Int64(limitHits)
+        )
+    }
+
+}
+
+private struct UsageChartLegend: View {
+    @Environment(\.remoteTheme) private var theme
+    let title: Text
+    let color: Color
+    let symbol: String
+
+    init(_ title: Text, color: Color, symbol: String) {
+        self.title = title
+        self.color = color
+        self.symbol = symbol
+    }
+
+    init(_ title: String, color: Color, symbol: String) {
+        self.init(Text(verbatim: title), color: color, symbol: symbol)
+    }
+
+    var body: some View {
+        Label {
+            title.lineLimit(1)
+        } icon: {
+            if symbol == "circle.fill" {
+                Circle()
+                    .fill(color)
+                    .frame(width: MobileDesign.Chart.legendSwatch, height: MobileDesign.Chart.legendSwatch)
+            } else {
+                Image(systemName: symbol).foregroundStyle(color)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(theme.secondaryLabel)
+    }
+}
+
 /// One peak column as the chart draws it: its span with the gap already taken off each side,
 /// its top, and its colour resolved — kept as plain values so the chart body stays simple
 /// enough to type-check.
@@ -2234,7 +2300,6 @@ private struct PeakColumn: Identifiable {
     let to: Date
     let top: Double
     let color: Color
-    let baseline: Double = 0
 }
 
 private struct UsageCard<Content: View>: View {

@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 import ThreadingRemoteKit
 @testable import ThreadingMobile
 
@@ -421,5 +423,299 @@ final class RemoteUsageDashboardTests: XCTestCase {
             bankedResetCount: nil,
             nextBankedResetExpiresAt: nil
         )
+    }
+}
+
+@MainActor
+final class MobileUsageChartRenderingTests: XCTestCase {
+    /// The wire allows 280 observations and 118 resets. Weekly history normally contains
+    /// 2–13 segments; stress uses 119, still inside that same transport envelope. Preparation
+    /// is outside the timer; this measures the shipping chart's mount, layout and raster.
+    func testSegmentedHistoryRendering() throws {
+        for segmentCount in [13, 119] {
+            let detail = Self.detail(segmentCount: segmentCount)
+            var elapsed: [Double] = []
+            for iteration in 0..<4 {
+                let controller = UIHostingController(rootView:
+                    MobileUsageLimitChart(detail: detail)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 240)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .background(Color.black)
+                )
+                let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+                let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+                window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+                let start = CACurrentMediaTime()
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                window.layoutIfNeeded()
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 1
+                let rendered = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image {
+                    window.layer.render(in: $0.cgContext)
+                }
+                elapsed.append((CACurrentMediaTime() - start) * 1_000)
+                if iteration == 3 {
+                    let attachment = XCTAttachment(image: rendered)
+                    attachment.name = "usage-history-\(segmentCount)-segments"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+                window.isHidden = true
+            }
+            let warm = elapsed.dropFirst().sorted()
+            print("USAGE_CHART segments=\(segmentCount) points=\(detail.observed.count) warmMedianMS=\(warm[1]) warmMaxMS=\(warm.last!) coldMS=\(elapsed[0])")
+        }
+    }
+
+    func testResetGapsHaveSeparateZeroBasedFills() {
+        let geometry = MobileUsageLimitLineGeometry(observed: [
+            .init(at: 0, fraction: 0.2, segment: 0),
+            .init(at: 2, fraction: 0.6, segment: 0),
+            .init(at: 5, fraction: 0.1, segment: 1),
+            .init(at: 10, fraction: 0.8, segment: 1)
+        ], domain: Date(timeIntervalSince1970: 0)...Date(timeIntervalSince1970: 10))
+        XCTAssertEqual(geometry.lines.count, 2)
+        XCTAssertEqual(geometry.fills.count, 2)
+        XCTAssertEqual(geometry.lines[0].boundingRect.minX, 0)
+        XCTAssertEqual(geometry.lines[0].boundingRect.maxX, 0.2, accuracy: 0.00001)
+        XCTAssertEqual(geometry.lines[1].boundingRect.minX, 0.5)
+        XCTAssertEqual(geometry.lines[1].boundingRect.minY, 0.2, accuracy: 0.00001)
+        XCTAssertEqual(geometry.fills[0].boundingRect.maxY, 1, accuracy: 0.000001)
+        XCTAssertEqual(geometry.fills[1].boundingRect.maxY, 1, accuracy: 0.000001)
+    }
+
+    func testOutOfDomainInkCannotDrawAboveThePlot() throws {
+        let controller = UIHostingController(rootView:
+            MobileUsageLimitChart(detail: Self.detail(segmentCount: 13, peakFraction: 2))
+                .padding(.horizontal, 16)
+                .padding(.top, 240)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(Color.black)
+        )
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let rendered = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image {
+            window.layer.render(in: $0.cgContext)
+        }
+        func inkCount(_ rect: CGRect) throws -> Int {
+            let crop = try XCTUnwrap(rendered.cgImage?.cropping(to: rect))
+            var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: crop.width, height: crop.height,
+                                                bitsPerComponent: 8, bytesPerRow: crop.width * 4,
+                                                space: CGColorSpaceCreateDeviceRGB(),
+                                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+            return stride(from: 0, to: bytes.count, by: 4).filter {
+                bytes[$0] > 0 || bytes[$0 + 1] > 0 || bytes[$0 + 2] > 0
+            }.count
+        }
+        XCTAssertEqual(try inkCount(CGRect(x: 80, y: 100, width: 280, height: 130)), 0)
+        XCTAssertGreaterThan(try inkCount(CGRect(x: 80, y: 340, width: 280, height: 130)), 100,
+                             "the containment assertion must inspect a rendered chart, not a blank capture")
+    }
+
+    static func detail(segmentCount: Int, peakFraction: Double = 0.95) -> RemoteUsageLimitDTO {
+        let end = 1_800_000_000.0
+        let span = 90.0 * 86_400
+        let start = end - span
+        let points = (0..<280).map { index in
+            let segment = min(segmentCount - 1, index * segmentCount / 280)
+            return RemoteUsageLimitPointDTO(
+                at: start + Double(index) / 279 * span,
+                fraction: index.isMultiple(of: 2) ? 0.2 : peakFraction,
+                segment: segment
+            )
+        }
+        return RemoteUsageLimitDTO(
+            series: .init(id: "weekly", runtimeName: "Claude", accountName: "Fixture",
+                          windowLabel: "Weekly", currentFraction: 0.95, resetsAt: end + 86_400,
+                          windowDuration: 7 * 86_400, bankedResetCount: nil,
+                          nextBankedResetExpiresAt: nil),
+            days: 90, start: start, end: end, observed: points,
+            resets: (1..<segmentCount).map { index in
+                .init(id: "reset-\(index)", detectedAt: start + Double(index) / Double(segmentCount) * span,
+                      previousObservedAt: start + Double(index) / Double(segmentCount) * span - 60,
+                      cause: .scheduled, restoredFraction: 0.8,
+                      elapsedFraction: 1, paceGainFraction: 0)
+            },
+            recordedResetCount: segmentCount - 1, restoredPaceFraction: 0,
+            projection: nil, preparedAt: end
+        )
+    }
+}
+
+@MainActor
+final class MobileUsagePeriodTests: XCTestCase {
+    @MainActor
+    private final class Loader {
+        var pending: [Int: CheckedContinuation<RemoteUsageLimitDTO, Error>] = [:]
+        var heldDays: Set<Int> = []
+        func fetch(_ id: String, _ days: Int) async throws -> RemoteUsageLimitDTO {
+            if heldDays.contains(days) {
+                return try await withCheckedThrowingContinuation { pending[days] = $0 }
+            }
+            return try RemoteUsageDemo.limit(seriesID: id, days: days)
+        }
+        func finish(_ days: Int, id: String) throws {
+            pending.removeValue(forKey: days)?.resume(returning: try RemoteUsageDemo.limit(seriesID: id, days: days))
+        }
+        func fail(_ days: Int) {
+            pending.removeValue(forKey: days)?.resume(throwing: URLError(.timedOut))
+        }
+    }
+
+    func testPeriodRequestKeepsTheShippingSheetsScrollExtent() async throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#usage-test"))
+        let loader = Loader()
+        let model = RemoteUsageDashboardModel(link: link, isDemo: true, fetchLimit: loader.fetch)
+        await model.load()
+        let id = try XCTUnwrap(model.limitSeries.first { $0.windowDuration == 7 * 86_400 }?.id)
+        model.selectedLimitID = id
+        await model.loadLimit(seriesID: id, days: 30)
+        let root = Color.black.sheet(isPresented: .constant(true)) {
+            RemoteUsageDashboardView(link: link, isDemo: true, model: model)
+                .mobileTheme(RemoteThemePalette(nil))
+        }
+        let controller = UIHostingController(rootView: root)
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        await settle(window)
+        let sheet = try XCTUnwrap(controller.presentedViewController)
+        let scroll = try XCTUnwrap(descendants(sheet.view, of: UIScrollView.self).first {
+            $0.contentSize.height > $0.bounds.height
+        })
+        let picker = try XCTUnwrap(descendants(sheet.view, of: UISegmentedControl.self).first {
+            $0.numberOfSegments == 3 && ($0.titleForSegment(at: 0)?.contains("7") == true)
+        })
+        let offset = min(180, scroll.contentSize.height - scroll.bounds.height)
+        XCTAssertGreaterThan(offset, 20, "the fixture must actually scroll")
+        scroll.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+        await settle(window)
+        let beforeOffset = scroll.contentOffset.y
+        let beforeHeight = scroll.contentSize.height
+        capture(window, name: "usage-period-before")
+        loader.heldDays = [7]
+        picker.selectedSegmentIndex = 0
+        picker.sendActions(for: .valueChanged)
+        await settle(window)
+        XCTAssertNotNil(loader.pending[7], "drive the real period control and its request")
+        XCTAssertEqual(scroll.contentSize.height, beforeHeight, accuracy: 1,
+                       "pending history must not remove the chart, legend and summary")
+        XCTAssertEqual(scroll.contentOffset.y, beforeOffset, accuracy: 1)
+        capture(window, name: "usage-period-loading")
+        try loader.finish(7, id: id)
+        await settle(window)
+        XCTAssertEqual(model.limit?.days, 7)
+        XCTAssertEqual(scroll.contentOffset.y, beforeOffset, accuracy: 1)
+
+        loader.heldDays.insert(90)
+        picker.selectedSegmentIndex = 2
+        picker.sendActions(for: .valueChanged)
+        await settle(window)
+        XCTAssertNotNil(loader.pending[90])
+        loader.fail(90)
+        await settle(window)
+        XCTAssertNotNil(model.limitErrorMessage)
+        XCTAssertEqual(model.limit?.days, 7, "failure retains the last displayed history")
+        XCTAssertEqual(scroll.contentOffset.y, beforeOffset, accuracy: 1)
+        capture(window, name: "usage-period-error")
+    }
+
+    func testAnOlderPeriodResponseCannotReplaceTheLatestRequestOrClearItsLoadingState() async throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#usage-test"))
+        let loader = Loader()
+        let model = RemoteUsageDashboardModel(link: link, isDemo: true, fetchLimit: loader.fetch)
+        await model.load()
+        let id = try XCTUnwrap(model.selectedLimitID)
+        loader.heldDays = [7, 90]
+        let older = Task { await model.loadLimit(seriesID: id, days: 7) }
+        await waitForRequest(7, loader: loader)
+        let newer = Task { await model.loadLimit(seriesID: id, days: 90) }
+        await waitForRequest(90, loader: loader)
+        try loader.finish(7, id: id)
+        await older.value
+        XCTAssertTrue(model.isLoadingLimit, "the older request cannot finish the newer request's spinner")
+        XCTAssertNil(model.limit, "a superseded result cannot be presented")
+        try loader.finish(90, id: id)
+        await newer.value
+        XCTAssertEqual(model.limit?.days, 90)
+        XCTAssertFalse(model.isLoadingLimit)
+    }
+
+    func testReturningToTheDisplayedPeriodRetiresAnInFlightRequest() async throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#usage-test"))
+        let loader = Loader()
+        let model = RemoteUsageDashboardModel(link: link, isDemo: true, fetchLimit: loader.fetch)
+        await model.load()
+        let id = try XCTUnwrap(model.selectedLimitID)
+        await model.loadLimit(seriesID: id, days: 30)
+        loader.heldDays = [7]
+        let pending = Task { await model.loadLimit(seriesID: id, days: 7) }
+        await waitForRequest(7, loader: loader)
+        await model.loadLimit(seriesID: id, days: 30)
+        XCTAssertFalse(model.isLoadingLimit)
+        try loader.finish(7, id: id)
+        await pending.value
+        XCTAssertEqual(model.limit?.days, 30)
+        XCTAssertNil(model.limitErrorMessage)
+    }
+
+    func testSupersededFailureDoesNotCoverTheNewHistory() async throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#usage-test"))
+        let loader = Loader()
+        let model = RemoteUsageDashboardModel(link: link, isDemo: true, fetchLimit: loader.fetch)
+        await model.load()
+        let id = try XCTUnwrap(model.selectedLimitID)
+        loader.heldDays = [7]
+        let pending = Task { await model.loadLimit(seriesID: id, days: 7) }
+        await waitForRequest(7, loader: loader)
+        await model.loadLimit(seriesID: id, days: 90)
+        loader.fail(7)
+        await pending.value
+        XCTAssertEqual(model.limit?.days, 90)
+        XCTAssertNil(model.limitErrorMessage)
+        XCTAssertFalse(model.isLoadingLimit)
+    }
+
+    private func waitForRequest(_ days: Int, loader: Loader) async {
+        for _ in 0..<100 where loader.pending[days] == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(loader.pending[days])
+    }
+
+    private func capture(_ window: UIWindow, name: String) {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func descendants<T: UIView>(_ view: UIView, of type: T.Type) -> [T] {
+        ((view as? T).map { [$0] } ?? [])
+            + view.subviews.flatMap { descendants($0, of: type) }
+    }
+
+    private func settle(_ window: UIWindow) async {
+        for _ in 0..<5 {
+            try? await Task.sleep(for: .milliseconds(50))
+            window.layoutIfNeeded()
+        }
     }
 }

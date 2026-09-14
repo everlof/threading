@@ -436,6 +436,46 @@ It persists both current callbacks and Apple's `pastPayloads`/`pastDiagnosticPay
 so absence of a payload is not evidence that a run was healthy. The immediate recorder and
 MetricKit are complements.
 
+## iPhone Usage history rendering, 2026-09-14
+
+The selected history carries at most 280 observations and 118 reset markers. Normal weekly
+history spans 2–13 reset segments; the adversarial fixture uses 119 segments inside that same
+wire budget. Requests occur on account/window/period selection and explicit refresh. Scrolling
+must retain its offset, and unrelated loading/capacity publication must not rebuild the chart.
+
+The phone previously constructed an area and line mark per observation plus one mark per reset.
+Its default area stacking also let separate provider windows participate in one fill computation.
+`MobileUsageLimitChart` now retains one equatable snapshot, prepares independent normalized line
+and zero-based fill paths, and draws all marks in one clipped Canvas. Swift Charts still owns
+the axes; the existing legend and VoiceOver summary describe the same observations, projection,
+peaks and reset evidence. Drawing is bounded by the selected snapshot, with no per-point views,
+filesystem work or history discovery on a frame callback.
+
+`MobileUsageChartRenderingTests/testSegmentedHistoryRendering` measures mount, layout and raster
+of that production component. Fixture and controller construction are outside the clock. These
+are Debug iPhone 17 Pro Simulator / iOS 26.5 measurements on the same Mac, four runs per case,
+with the first framework-cold run excluded from the three-sample warm median and maximum:
+
+| 280-point case | Native marks median / max | Canvas median / max |
+| --- | ---: | ---: |
+| 13 segments, 12 reset rules | 54.4 / 56.4 ms | 12.8 / 14.9 ms |
+| 119 segments, 118 reset rules | 41.7 / 41.7 ms | 17.1 / 17.1 ms |
+
+Disabling stacking alone was effectively flat in the ordinary case (52.4 ms median), so that
+experiment did not close the performance issue. A preliminary harness called the old chart
+method without installing its environment and spent time logging SwiftUI warnings; those timings
+were discarded. The table uses properly hosted views for both implementations. Simulator Debug
+results establish the removed rendering work, not a physical-iPhone frame-rate claim.
+
+The real sheet fixture also reproduced the period-change jump: dropping the old chart and summary
+reduced content height from 1,046 to 449 points and clamped offset 180 to the top inset, -70.
+The last same-series snapshot now remains mounted during loading and failure, and request
+generations prevent old results/errors/deferred loading cleanup from replacing newer state.
+`MobileUsagePeriodTests` drives the actual segmented control in a presented sheet, checks pending
+and completed scroll continuity, and covers failed and superseded requests and a return to the
+already displayed period. Geometry and raster tests pin reset gaps, independent fill baselines,
+and containment of out-of-domain ink. The `ios-usage` evidence entry covers the shipping sheet.
+
 ## Implementation-time scaling gate
 
 Profiling should confirm an architecture, not be the first time its scaling boundary is named.
