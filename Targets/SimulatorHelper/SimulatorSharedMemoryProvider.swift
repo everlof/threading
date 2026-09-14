@@ -35,8 +35,14 @@ final class SimulatorSharedMemoryProvider {
                 "threading-sim-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)",
                 isDirectory: true
             )
+        // 0700 dir / 0600 files: the buffers hold live framebuffer pixels, so keep them owner-only
+        // rather than leaning solely on the per-user temp container. (Same-user access remains
+        // possible until these are passed as inherited descriptors instead of paths — the planned
+        // hardening noted above — but this closes the world/group-readable window today.)
         guard (try? FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )) != nil else { return nil }
         // `name(forBuffer:)` concatenates this prefix with the index, so buffer i is this exact
         // file path.
@@ -45,8 +51,9 @@ final class SimulatorSharedMemoryProvider {
         var pointers: [UnsafeMutableRawPointer] = []
         for index in 0..<bufferCount {
             let path = "\(namePrefix)\(index)"
-            guard FileManager.default.createFile(atPath: path, contents: nil),
-                  let handle = FileHandle(forUpdatingAtPath: path) else {
+            guard FileManager.default.createFile(
+                atPath: path, contents: nil, attributes: [.posixPermissions: 0o600]
+            ), let handle = FileHandle(forUpdatingAtPath: path) else {
                 Self.teardown(pointers: pointers, length: bufferByteLength, directory: directory)
                 return nil
             }

@@ -41,10 +41,13 @@ public struct SimulatorSharedFrameRing: Equatable, Sendable {
 }
 
 public enum SimulatorSharedSurfaceNaming {
-    /// A short, unguessable POSIX shared-memory name prefix. Darwin caps shm names near 31 bytes,
-    /// so this stays well under: `"/tsim-" + 16 hex + "-"` is 23 characters, leaving room for the
-    /// buffer index. The 64-bit nonce makes the same-user name effectively unguessable for the
-    /// lifetime of one stream.
+    /// A short, random name prefix sized for a real `shm_open` object. **Not yet used:** the
+    /// current provider backs buffers with owner-only (`0600`) `mmap`ed temp files under a random
+    /// per-stream directory and puts that path in the descriptor, so it confers no protection
+    /// today. It is kept for the planned move to true POSIX shared memory / inherited descriptors,
+    /// where the 64-bit nonce keeps the same-user object name unguessable for one stream's lifetime.
+    /// Darwin caps shm names near 31 bytes; `"/tsim-" + 16 hex + "-"` is 23 characters, leaving room
+    /// for the buffer index. Do not describe the shipping transport's security in terms of this.
     public static func randomNamePrefix() -> String {
         var generator = SystemRandomNumberGenerator()
         let nonce = UInt64.random(in: .min ... .max, using: &generator)
