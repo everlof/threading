@@ -34322,6 +34322,28 @@
         }
       }
     },
+    "Record Video (High Quality)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spela in video (hög kvalitet)"
+          }
+        }
+      }
+    },
+    "Record Video with Touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spela in video med tryck"
+          }
+        }
+      }
+    },
     "Record browser trace" : {
       "extractionState" : "manual",
       "localizations" : {

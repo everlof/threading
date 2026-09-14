@@ -211,6 +211,8 @@ final class SimulatorPaneViewController: NSViewController {
 
     private var captureMenuSession: AnyObject?
     private let simctlRecorder = SimulatorSimctlRecorder()
+    /// Non-nil while recording via the stream engine (composites the touch overlay).
+    private var streamRecorder: SimulatorStreamRecorder?
     private var isRecording = false
     private var recordingStartedAt: Date?
     private var recordingTimer: Timer?
@@ -930,6 +932,7 @@ final class SimulatorPaneViewController: NSViewController {
                         }
                     case .frame(let frame):
                         self.screenView.image = NSImage(cgImage: frame.image, size: .zero)
+                        self.feedStreamRecorder(frame.image)
                     case .statistics:
                         break
                     case .failed(let message):
@@ -1629,15 +1632,18 @@ final class SimulatorPaneViewController: NSViewController {
         if isRecording { stopRecording() } else { saveSnapshot() }
     }
 
+    private func videoURL(for device: SimulatorDevice) -> URL {
+        SimulatorCaptureSaver.defaultDirectory(video: true).appendingPathComponent(
+            SimulatorCaptureSaver.suggestedName(device: device, fileExtension: "mov")
+        )
+    }
+
+    /// simctl engine — pristine capture, no touch overlay.
     private func startSimctlRecording() {
         guard !isRecording, let device = lease?.device else { return }
-        let url = SimulatorCaptureSaver.defaultDirectory(video: true)
-            .appendingPathComponent(
-                SimulatorCaptureSaver.suggestedName(device: device, fileExtension: "mov")
-            )
         do {
-            try simctlRecorder.start(deviceID: device.id.rawValue, to: url) { [weak self] finalized in
-                self?.finishRecording(saved: finalized)
+            try simctlRecorder.start(deviceID: device.id.rawValue, to: videoURL(for: device)) {
+                [weak self] finalized in self?.finishRecording(saved: finalized)
             }
             beginRecordingUI()
         } catch {
@@ -1645,13 +1651,38 @@ final class SimulatorPaneViewController: NSViewController {
         }
     }
 
+    /// Stream engine — records our frames with the touch overlay composited in.
+    private func startStreamRecording() {
+        guard !isRecording, let device = lease?.device, let image = screenView.image,
+              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            flashStatus(L10n.string("Could not start recording"))
+            return
+        }
+        guard let recorder = SimulatorStreamRecorder(
+            url: videoURL(for: device), width: cgImage.width, height: cgImage.height
+        ) else {
+            flashStatus(L10n.string("Could not start recording"))
+            return
+        }
+        streamRecorder = recorder
+        beginRecordingUI()
+    }
+
+    private func feedStreamRecorder(_ image: CGImage) {
+        streamRecorder?.append(image: image, indicators: touchOverlayModel.indicators())
+    }
+
     private func stopRecording() {
         guard isRecording else { return }
-        simctlRecorder.stop()
         recordingTimer?.invalidate()
         recordingTimer = nil
         statusLabel.stringValue = L10n.string("Finishing recording…")
-        // finishRecording fires from the recorder's termination handler once the file is complete.
+        if let recorder = streamRecorder {
+            streamRecorder = nil
+            recorder.finish { [weak self] url in self?.finishRecording(saved: url) }
+        } else {
+            simctlRecorder.stop()  // finishRecording fires from its termination handler
+        }
     }
 
     private func beginRecordingUI() {
@@ -1713,7 +1744,11 @@ final class SimulatorPaneViewController: NSViewController {
             )))
         } else {
             entries.append(.item(ThemedMenuItem(
-                title: L10n.string("Record Video"),
+                title: L10n.string("Record Video with Touches"),
+                onChoose: { [weak self] in self?.startStreamRecording() }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Record Video (High Quality)"),
                 onChoose: { [weak self] in self?.startSimctlRecording() }
             )))
         }
@@ -1757,9 +1792,12 @@ final class SimulatorPaneViewController: NSViewController {
     /// Record an input event into the touch overlay and make sure it is animating. No-op unless the
     /// overlay is on, so it costs nothing when hidden.
     private func feedTouchOverlay(_ apply: (SimulatorTouchOverlayModel) -> Void) {
-        guard showTouches else { return }
+        // Fed while the overlay is on (for the live view) or while stream-recording (for the movie),
+        // so touches reach the recording even when the live overlay is off.
+        guard showTouches || streamRecorder != nil else { return }
         apply(touchOverlayModel)
-        guard touchDisplayTimer == nil else { return }
+        // The tick only drives the live display; the recorder pulls indicators per frame.
+        guard showTouches, touchDisplayTimer == nil else { return }
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tickTouchOverlay() }
         }
