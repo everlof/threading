@@ -77,6 +77,31 @@ final class SimulatorScreenView: ThemedControl {
     private var hoveredAnnotationIndex: Int?
     private var inspectionTrackingArea: NSTrackingArea?
 
+    /// The person's own pinned notes, drawn as numbered pins over the framebuffer. Distinct from the
+    /// accessibility overlay above: these are user-authored, the pins use the app's shared annotation
+    /// vocabulary, and they persist per device.
+    var noteMarks: [ImageAnnotation] = [] {
+        didSet {
+            guard noteMarks != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    var selectedNoteID: ImageAnnotation.ID? {
+        didSet {
+            guard selectedNoteID != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// While on, a click pins or selects a note instead of touching the device.
+    var isAnnotatingNotes = false
+
+    /// A click at a normalized point that hit no existing pin — the caller pins a new note there.
+    var onAddNote: ((CGPoint) -> Void)?
+    /// A click on an existing pin (or empty space, giving nil) while annotating.
+    var onSelectNote: ((ImageAnnotation.ID?) -> Void)?
+
     var onTap: ((CGPoint) -> Void)?
     /// Phases of a live, finger-following touch driven by a click-drag or a trackpad scroll. The
     /// feature controller streams these to the device so panning follows the input in real time
@@ -153,6 +178,22 @@ final class SimulatorScreenView: ThemedControl {
         drawKeyboardFocus(around: shape)
 
         drawAnnotations(in: target)
+        drawNoteMarks(in: target)
+    }
+
+    /// The person's numbered note pins, in the app's shared annotation vocabulary. The view is not
+    /// flipped, so `isFlipped: false` matches the framebuffer draw above.
+    private func drawNoteMarks(in target: NSRect) {
+        guard !noteMarks.isEmpty else { return }
+        NSGraphicsContext.saveGraphicsState()
+        ThemedSurface.Shape(rect: target, radius: Design.Radius.control).path.addClip()
+        ImageAnnotationMarks.draw(
+            noteMarks,
+            in: target,
+            isFlipped: false,
+            selected: selectedNoteID
+        )
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// Draw the inspector overlay: every element's bounds faintly as context (the Phase 1
@@ -316,6 +357,25 @@ final class SimulatorScreenView: ThemedControl {
 
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
+
+        // Annotate mode pins or selects a note instead of touching the device.
+        if isAnnotatingNotes {
+            guard imageRect.contains(location) else {
+                onSelectNote?(nil)
+                return
+            }
+            if let hit = ImageAnnotationGeometry.annotationID(
+                at: location, among: noteMarks, in: imageRect, isFlipped: false
+            ) {
+                onSelectNote?(hit)
+            } else if let point = ImageAnnotationGeometry.normalizedPoint(
+                for: location, in: imageRect, isFlipped: false
+            ) {
+                onAddNote?(point)
+            }
+            return
+        }
+
         guard isEnabled,
               interactionState.acceptsPointerRequests,
               imageRect.contains(location) else {
@@ -372,6 +432,7 @@ final class SimulatorScreenView: ThemedControl {
     override func scrollWheel(with event: NSEvent) {
         // Only precise (trackpad) scrolling drives panning; a notched mouse wheel falls through.
         guard isEnabled,
+              !isAnnotatingNotes,
               interactionState.acceptsPointerRequests,
               event.hasPreciseScrollingDeltas else {
             super.scrollWheel(with: event)
@@ -402,7 +463,8 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard interactionState.acceptsKeyboardRequests,
+        guard !isAnnotatingNotes,
+              interactionState.acceptsKeyboardRequests,
               event.modifierFlags.intersection([.command, .control]).isEmpty else {
             super.keyDown(with: event)
             return

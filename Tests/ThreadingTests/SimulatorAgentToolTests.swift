@@ -15,6 +15,7 @@ final class SimulatorAgentToolTests: XCTestCase {
             .simulatorInstallLaunch,
             .simulatorScreenshot,
             .simulatorSnapshot,
+            .simulatorAnnotations,
             .simulatorTap,
             .simulatorSwipe,
             .simulatorTypeText,

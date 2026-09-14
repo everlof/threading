@@ -6917,6 +6917,17 @@
         }
       }
     },
+    "Annotate device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annotera enhet"
+          }
+        }
+      }
+    },
     "AnnotatedImageView / ImageAnnotationRailView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31441,6 +31452,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pinn"
+          }
+        }
+      }
+    },
+    "Pin your own notes on the device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fäst egna anteckningar på enheten"
           }
         }
       }

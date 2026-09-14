@@ -2623,6 +2623,7 @@ enum MCPTools {
   static let simulatorInstallLaunch = MCPBuiltInTool.simulatorInstallLaunch.rawValue
   static let simulatorScreenshot = MCPBuiltInTool.simulatorScreenshot.rawValue
   static let simulatorSnapshot = MCPBuiltInTool.simulatorSnapshot.rawValue
+  static let simulatorAnnotations = MCPBuiltInTool.simulatorAnnotations.rawValue
   static let simulatorTap = MCPBuiltInTool.simulatorTap.rawValue
   static let simulatorSwipe = MCPBuiltInTool.simulatorSwipe.rawValue
   static let simulatorTypeText = MCPBuiltInTool.simulatorTypeText.rawValue
@@ -5842,6 +5843,38 @@ enum MCPTools {
         ],
         required: []
       )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorAnnotations,
+      name: "simulator_annotations",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Read Simulator notes",
+      detail: "Read the user's own pinned notes on the adopted device.",
+      symbol: "note.text",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: true,
+      executeArguments: { handler, _, sessionID, completion in
+        handler.simulatorAnnotations(for: sessionID, completion: completion)
+      },
+      description: """
+        Read the user's own notes pinned on the exact Simulator adopted in Threading's right panel. \
+        Each note has a numbered pin, a normalized (x, y) position on the device screen (feed it to \
+        simulator_tap), and the user's text. These notes are authored explicitly in Threading's UI, \
+        are user-authored guidance rather than device content, and are kept separate from the \
+        accessibility tree. This tool is read-only; only the user creates, edits, or deletes notes. \
+        Call simulator_prepare first.
+        """,
+      inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
     MCPToolDefinition(
       tool: .simulatorTap,

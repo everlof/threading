@@ -180,13 +180,33 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    private lazy var annotateButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "note.text",
+            accessibility: L10n.string("Annotate device"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Pin your own notes on the device")
+        button.onPress = { [weak self] in self?.toggleAnnotating() }
+        button.setAccessibilityIdentifier("simulator.annotate")
+        return button
+    }()
+
+    /// Whether the person is placing their own note pins on the device.
+    private var isAnnotatingNotes = false
+    /// The floating note editor while one is open, and the note it edits.
+    private var noteEditor: BrowserAnnotationEditor?
+    private var editingNoteID: ImageAnnotation.ID?
+    private let annotationStore = SimulatorAnnotationStore.shared
+
     /// Whether the accessibility inspector overlay is on. Reading the tree is a host-side call, so
     /// this is a manual refresh (toggle) in Phase 1 rather than a per-frame poll.
     private var isInspecting = false
 
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [inspectButton, appearanceButton, controlButton, retryButton]
+        trailing: [annotateButton, inspectButton, appearanceButton, controlButton, retryButton]
     )
 
     private func makeHardwareButton(
@@ -273,6 +293,8 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onTouchMoved = { [weak self] point in self?.moveTouchStream(to: point) }
         preview.onTouchEnded = { [weak self] point in self?.endTouchStream(at: point) }
         preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
+        preview.onAddNote = { [weak self] point in self?.addNote(at: point) }
+        preview.onSelectNote = { [weak self] id in self?.selectNote(id) }
         return preview
     }()
 
@@ -1237,6 +1259,119 @@ final class SimulatorPaneViewController: NSViewController {
             "AXSwitch", "AXSlider", "AXLink", "AXCell", "AXPopUpButton", "AXCheckBox",
             "AXStepper", "AXMenuButton", "AXSegmentedControl"
         ].contains(role)
+    }
+
+    // MARK: - Human note annotations
+
+    private static let noteEditorWidth: CGFloat = 240
+
+    private func toggleAnnotating() {
+        guard let device = lease?.device.id else { return }
+        isAnnotatingNotes.toggle()
+        annotateButton.setAccessibilityValue(isAnnotatingNotes ? "on" : "off")
+        screenView.isAnnotatingNotes = isAnnotatingNotes
+        if isAnnotatingNotes {
+            screenView.noteMarks = annotationStore.annotations(for: device)
+        } else {
+            dismissNoteEditor()
+            screenView.selectedNoteID = nil
+            screenView.noteMarks = []
+        }
+    }
+
+    private func addNote(at point: CGPoint) {
+        guard isAnnotatingNotes, let device = lease?.device.id,
+              screenView.noteMarks.count < SimulatorAnnotationStore.maximumCount else { return }
+        let annotation = ImageAnnotation(point: point)
+        screenView.noteMarks.append(annotation)
+        screenView.selectedNoteID = annotation.id
+        annotationStore.setAnnotations(screenView.noteMarks, for: device)
+        presentNoteEditor(for: annotation.id, isExisting: false)
+    }
+
+    private func selectNote(_ id: ImageAnnotation.ID?) {
+        guard isAnnotatingNotes else { return }
+        screenView.selectedNoteID = id
+        if let id, screenView.noteMarks.contains(where: { $0.id == id }) {
+            presentNoteEditor(for: id, isExisting: true)
+        } else {
+            dismissNoteEditor()
+        }
+    }
+
+    private func presentNoteEditor(for id: ImageAnnotation.ID, isExisting: Bool) {
+        dismissNoteEditor()
+        guard let index = screenView.noteMarks.firstIndex(where: { $0.id == id }) else { return }
+        let editor = BrowserAnnotationEditor(
+            identifier: index + 1,
+            note: screenView.noteMarks[index].note,
+            isExisting: isExisting
+        )
+        editor.onSave = { [weak self] in self?.commitNoteEditor() }
+        editor.onCancel = { [weak self] in self?.cancelNoteEditor() }
+        editor.onDelete = { [weak self] in self?.deleteEditedNote() }
+        editingNoteID = id
+        noteEditor = editor
+        view.addSubview(editor)
+        positionNoteEditor()
+        editor.focusNote()
+    }
+
+    private func positionNoteEditor() {
+        guard let editor = noteEditor, let id = editingNoteID,
+              let annotation = screenView.noteMarks.first(where: { $0.id == id }) else { return }
+        let inset = Design.Spacing.small
+        let width = min(Self.noteEditorWidth, max(0, view.bounds.width - inset * 2))
+        editor.frame.size.width = width
+        let height = editor.fittingSize.height
+        let pin = ImageAnnotationGeometry.viewPoint(
+            for: annotation, in: screenView.imageRect, isFlipped: false
+        )
+        let anchor = screenView.convert(pin, to: view)
+        var origin = CGPoint(x: anchor.x + inset, y: anchor.y - height - inset)
+        origin.x = min(max(view.bounds.minX + inset, origin.x), view.bounds.maxX - width - inset)
+        origin.y = min(max(view.bounds.minY + inset, origin.y), view.bounds.maxY - height - inset)
+        editor.frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
+    }
+
+    private func commitNoteEditor() {
+        guard let device = lease?.device.id, let id = editingNoteID, let editor = noteEditor else {
+            return
+        }
+        if let index = screenView.noteMarks.firstIndex(where: { $0.id == id }) {
+            screenView.noteMarks[index].note = editor.note
+        }
+        annotationStore.setAnnotations(screenView.noteMarks, for: device)
+        finishNoteEditing()
+    }
+
+    private func cancelNoteEditor() {
+        // A brand-new note the person never gave text to is discarded rather than left blank.
+        if let device = lease?.device.id, let id = editingNoteID,
+           let index = screenView.noteMarks.firstIndex(where: { $0.id == id }),
+           screenView.noteMarks[index].note.isEmpty {
+            screenView.noteMarks.remove(at: index)
+            annotationStore.setAnnotations(screenView.noteMarks, for: device)
+        }
+        finishNoteEditing()
+    }
+
+    private func deleteEditedNote() {
+        guard let device = lease?.device.id, let id = editingNoteID else { return }
+        screenView.noteMarks.removeAll { $0.id == id }
+        annotationStore.setAnnotations(screenView.noteMarks, for: device)
+        finishNoteEditing()
+    }
+
+    private func finishNoteEditing() {
+        dismissNoteEditor()
+        screenView.selectedNoteID = nil
+    }
+
+    private func dismissNoteEditor() {
+        noteEditor?.removeFromSuperview()
+        noteEditor = nil
+        editingNoteID = nil
     }
 
     private func renderState() {

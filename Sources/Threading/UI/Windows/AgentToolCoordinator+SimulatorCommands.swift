@@ -114,6 +114,19 @@ extension AgentToolCoordinator {
         }
     }
 
+    func simulatorAnnotations(
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        guard let simulator = adoptedSimulator(for: sessionID),
+              let device = simulator.adoptedDevice else {
+            completion(.failure("Call simulator_prepare before reading the Simulator's notes."))
+            return
+        }
+        let notes = SimulatorAnnotationStore.shared.annotations(for: device.id)
+        completion(SimulatorAnnotationRenderer.result(annotations: notes, device: device))
+    }
+
     private func adoptedSimulator(for sessionID: SessionID) -> SimulatorPaneViewController? {
         displayPaneController.tabs(for: sessionID)
             .compactMap(\.simulator)

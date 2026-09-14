@@ -53,6 +53,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case simulatorInstallLaunch
   case simulatorScreenshot
   case simulatorSnapshot
+  case simulatorAnnotations
   case simulatorTap
   case simulatorSwipe
   case simulatorTypeText
