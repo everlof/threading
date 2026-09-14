@@ -1028,7 +1028,6 @@ final class DisplayPaneController: NSViewController {
     let controller = browserFactory(contextKind)
     addChild(controller)
     controller.baselineSessionID = sessionID
-    controller.annotationSessionID = sessionID
     controller.onPageChange = { [weak self] in
       guard let self else { return }
       self.persist(sessionID)
