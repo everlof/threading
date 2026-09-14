@@ -5,6 +5,88 @@ import XCTest
 
 @MainActor
 final class BrowserAnnotationEditingTests: XCTestCase {
+    func testEnterStagesAndCommandReturnSendsToOwningChat() throws {
+        let (browser, host, window) = try fixture(width: 430)
+        defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
+        let overlay = try XCTUnwrap(descendant(BrowserAnnotationOverlay.self, in: browser.view))
+        var messages: [String] = []
+        var complete: (@MainActor (SessionMessageDelivery.Outcome) -> Void)?
+        browser.deliverAnnotations = { text, sessionID, completion in
+            XCTAssertEqual(sessionID, host.sessionID)
+            messages.append(text)
+            complete = completion
+        }
+        browser.setAnnotationMode(true)
+        browser.addAnnotation(atViewportPoint: CGPoint(x: 140, y: 160))
+        let editor = try XCTUnwrap(overlay.editor)
+        editor.noteField.stringValue = "Move this action"
+        XCTAssertTrue(editor.control(editor.noteField, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        XCTAssertTrue(messages.isEmpty)
+        XCTAssertFalse(overlay.sendButton.isHidden)
+        XCTAssertEqual(overlay.sendButton.title, "Send (1)")
+        browser.addAnnotation(atViewportPoint: CGPoint(x: 200, y: 180))
+        try XCTUnwrap(overlay.editor).noteField.stringValue = "Use this second note too"
+        XCTAssertTrue(window.firstResponder === overlay.editor?.noteField.currentEditor())
+        let commandReturn = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command, .capsLock, .numericPad], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "\r",
+            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 76
+        ))
+        XCTAssertTrue(window.performKeyEquivalent(with: commandReturn))
+        try waitUntil { messages.count == 1 }
+        XCTAssertTrue(messages[0].contains("Move this action"))
+        XCTAssertTrue(messages[0].contains("Use this second note too"))
+        XCTAssertTrue(messages[0].contains("threading-annotation://fixture/review"))
+        XCTAssertEqual(overlay.sendButton.title, "Send (2)")
+        XCTAssertFalse(overlay.sendButton.isEnabled)
+        browser.sendPendingAnnotations()
+        XCTAssertEqual(messages.count, 1)
+        complete?(.queuedBehindTurn)
+        XCTAssertTrue(overlay.sendButton.isHidden)
+        XCTAssertEqual(browser.annotationsForActivePage.count, 2)
+        // Reopening an unchanged sent note must not put it back in the pending batch.
+        browser.editAnnotation(identifier: 1)
+        browser.finishAnnotationEditing(save: true)
+        XCTAssertTrue(overlay.sendButton.isHidden)
+    }
+
+    func testFailedSendAndEditsDuringDeliveryKeepPendingNotes() throws {
+        let (browser, _, window) = try fixture(width: 430)
+        defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
+        let overlay = try XCTUnwrap(descendant(BrowserAnnotationOverlay.self, in: browser.view))
+        var complete: (@MainActor (SessionMessageDelivery.Outcome) -> Void)?
+        var failures: [SessionMessageDelivery.Outcome] = []
+        browser.deliverAnnotations = { _, _, completion in complete = completion }
+        browser.onAnnotationSendFailure = { failures.append($0) }
+        browser.setAnnotationMode(true)
+        browser.addAnnotation(atViewportPoint: CGPoint(x: 140, y: 160))
+        try XCTUnwrap(overlay.editor).noteField.stringValue = "Original note"
+        browser.sendPendingAnnotations()
+        try waitUntil { complete != nil }
+        complete?(.busyTerminal)
+        XCTAssertEqual(failures, [.busyTerminal])
+        XCTAssertFalse(overlay.sendButton.isHidden)
+        XCTAssertTrue(overlay.sendButton.isEnabled)
+        complete = nil
+        XCTAssertTrue(overlay.sendButton.performPrimaryAction())
+        try waitUntil { complete != nil }
+        browser.editAnnotation(identifier: 1)
+        try XCTUnwrap(overlay.editor).noteField.stringValue = "Newer edit"
+        browser.finishAnnotationEditing(save: true)
+        complete?(.sentNow)
+        XCTAssertEqual(overlay.sendButton.title, "Send (1)")
+        XCTAssertFalse(overlay.sendButton.isHidden)
+        browser.setAnnotationMode(false)
+        overlay.layoutSubtreeIfNeeded()
+        let buttonPoint = overlay.sendButton.convert(CGPoint(x: 5, y: 5), to: overlay.superview)
+        XCTAssertTrue(overlay.hitTest(buttonPoint) === overlay.sendButton)
+        XCTAssertNil(overlay.hitTest(overlay.convert(CGPoint(x: 30, y: 30), to: overlay.superview)))
+        browser.setAnnotationMode(true)
+        browser.editAnnotation(identifier: 1)
+        XCTAssertTrue(try XCTUnwrap(overlay.editor).deleteButton.performPrimaryAction())
+        XCTAssertTrue(overlay.sendButton.isHidden)
+    }
+
     func testInlineEditingKeepsPageIdentityAndSupportsSaveCancelAndDelete() throws {
         let (browser, host, window) = try fixture(width: 760)
         defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
@@ -309,6 +391,10 @@ final class BrowserAnnotationEditingTests: XCTestCase {
                 AppThemePalette.set(.system)
                 window.appearance = NSAppearance(named: .aqua)
                 browser.finishAnnotationEditing(save: true)
+                AppThemeRefresh.repaint(host.view)
+                host.view.layoutSubtreeIfNeeded()
+                XCTAssertEqual(overlay.sendButton.title, "Send (1)")
+                try writeImage(host.view, browser: browser, to: directory.appendingPathComponent("browser-inline-annotation-pending.png"))
                 browser.editAnnotation(identifier: try XCTUnwrap(browser.annotationsForActivePage.first?.id))
                 XCTAssertFalse(try XCTUnwrap(overlay.editor).deleteButton.isHidden)
                 window.makeFirstResponder(nil)
@@ -371,6 +457,17 @@ final class BrowserAnnotationEditingTests: XCTestCase {
             window.makeFirstResponder(nil)
             AppThemeRefresh.repaint(host.view)
             host.view.layoutSubtreeIfNeeded()
+            // The send affordance is now the shared AnnotationSendBar; its surface is the ground.
+            let sendBar = try XCTUnwrap(overlay.subviews.compactMap { $0 as? AnnotationSendBar }.first)
+            XCTAssertFalse(sendBar.isHidden)
+            XCTAssertLessThanOrEqual(editor.frame.maxY, sendBar.frame.minY - Design.Spacing.small)
+            let sendGround = try XCTUnwrap(sendBar.subviews.compactMap { $0 as? BrowserAnnotationSurfaceView }.first)
+            let groundRep = try XCTUnwrap(sendGround.bitmapImageRepForCachingDisplay(in: sendGround.bounds))
+            sendGround.cacheDisplay(in: sendGround.bounds, to: groundRep)
+            XCTAssertGreaterThanOrEqual(
+                try XCTUnwrap(groundRep.colorAt(x: groundRep.pixelsWide / 2, y: groundRep.pixelsHigh / 2)).alphaComponent,
+                0.99, "Outlined theme buttons must have an opaque app-owned ground over the page"
+            )
             let painted = expectation(description: "contrast page paint")
             browser.webView.takeSnapshot(with: nil) { image, error in
                 XCTAssertNil(error); XCTAssertNotNil(image); painted.fulfill()

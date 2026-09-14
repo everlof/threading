@@ -25,6 +25,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
 
     @MainActor
     private enum Layout {
+        static let returnKeyCodes: Set<UInt16> = [36, 76]
         static let editorMaximumWidth: CGFloat = 360
         static let markerDiameter: CGFloat = Design.Size.chipHeight
         static let markerHitInset: CGFloat = Design.Spacing.tight
@@ -45,6 +46,34 @@ final class BrowserAnnotationOverlay: ThemedControl {
         static let modeBadgePadding: CGFloat = Design.Spacing.small
         static let modeBadgeGlyphGap: CGFloat = Design.Spacing.tight
         static var modeBadgeGlyphSize: CGFloat { Design.Symbol.control }
+    }
+
+    /// The shared "Send (x)" affordance, so the browser and the Simulator pane look and behave the
+    /// same. `sendButton` is forwarded so existing callers and tests keep addressing it directly.
+    private let sendBar = AnnotationSendBar()
+    var sendButton: ThemedButton { sendBar.sendButton }
+    var onSend: (() -> Void)?
+    private var pendingSendState: (count: Int, sending: Bool)?
+
+    func setPendingSend(count: Int, sending: Bool) {
+        guard pendingSendState?.count != count || pendingSendState?.sending != sending else { return }
+        pendingSendState = (count, sending)
+        sendBar.setPending(count: count, sending: sending)
+        setAccessibilityEnabled(isAnnotating || count > 0)
+        needsLayout = true
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask)
+        let responder = window?.firstResponder
+        let ownsFocus = responder === self
+            || (responder as? NSView)?.isDescendant(of: self) == true
+            || (editor?.noteField.currentEditor() != nil && responder === editor?.noteField.currentEditor())
+        if ownsFocus, modifiers == .command, Layout.returnKeyCodes.contains(event.keyCode) {
+            onSend?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     private(set) var editor: BrowserAnnotationEditor?
@@ -93,10 +122,13 @@ final class BrowserAnnotationOverlay: ThemedControl {
         let width = min(Layout.editorMaximumWidth, max(0, bounds.width - inset * 2))
         let height = editor.fittingSize.height
         let x = min(max(inset, editorPoint.x), max(inset, bounds.width - inset - width))
+        let bottom = sendBar.isHidden
+            ? bounds.height - inset
+            : min(bounds.height - inset, sendBar.frame.minY - Design.Spacing.small)
         let below = editorPoint.y + Design.Size.chipHeight
-        let preferredY = below + height <= bounds.height - inset
+        let preferredY = below + height <= bottom
             ? below : editorPoint.y - height - Design.Spacing.small
-        let y = min(max(inset, preferredY), max(inset, bounds.height - inset - height))
+        let y = min(max(inset, preferredY), max(inset, bottom - height))
         editor.frame = CGRect(x: x, y: y, width: width, height: height)
     }
 
@@ -124,7 +156,7 @@ final class BrowserAnnotationOverlay: ThemedControl {
     var isAnnotating = false {
         didSet {
             guard isAnnotating != oldValue else { return }
-            setAccessibilityEnabled(isAnnotating)
+            setAccessibilityEnabled(isAnnotating || !sendButton.isHidden)
             selectsDeepestElement = isAnnotating && NSEvent.modifierFlags.contains(.option)
             if !isAnnotating { hoveredTarget = nil }
             window?.invalidateCursorRects(for: self)
@@ -160,6 +192,18 @@ final class BrowserAnnotationOverlay: ThemedControl {
             L10n.string("Click to annotate. Hold Option to target the innermost element. Scroll to move the page; Escape to finish.")
         )
         setAccessibilityEnabled(false)
+        sendBar.isHidden = true
+        sendBar.sendButton.setAccessibilityIdentifier("browser.annotation.send")
+        sendBar.onSend = { [weak self] in self?.onSend?() }
+        addSubview(sendBar)
+        NSLayoutConstraint.activate([
+            sendBar.trailingAnchor.constraint(
+                equalTo: trailingAnchor, constant: -Design.Spacing.medium
+            ),
+            sendBar.bottomAnchor.constraint(
+                equalTo: bottomAnchor, constant: -Design.Spacing.medium
+            )
+        ])
     }
 
     override var isFlipped: Bool { true }
@@ -177,6 +221,11 @@ final class BrowserAnnotationOverlay: ThemedControl {
            dispatchWindow === window {
             return nil
         }
+        let local = convert(point, from: superview)
+        if isAnnotating, editor?.frame.contains(local) == true { return super.hitTest(point) }
+        if !sendBar.isHidden, sendBar.frame.contains(local) {
+            return sendBar.hitTest(local)
+        }
         guard isAnnotating else { return nil }
         // AppKit converts from the superview's coordinates and routes through the native editor.
         return super.hitTest(point)
@@ -192,9 +241,10 @@ final class BrowserAnnotationOverlay: ThemedControl {
     /// The marks that can be picked up, claimed before the crosshair behind them — the order that
     /// used to be left to AppKit, which documents overlapping rectangles as undefined.
     override var pointerClaims: [PointerClaim] {
-        guard isAnnotating else { return [] }
+        let sendClaim = sendBar.isHidden ? [] : [PointerClaim(sendBar.frame, .arrow)]
+        guard isAnnotating else { return sendClaim }
         let editorClaim = editor.map { [PointerClaim($0.frame, .arrow)] } ?? []
-        return editorClaim + markers.map { marker in
+        return editorClaim + sendClaim + markers.map { marker in
             PointerClaim(
                 markerRect(for: marker)
                     .insetBy(dx: -Layout.markerHitInset, dy: -Layout.markerHitInset),
@@ -238,14 +288,19 @@ final class BrowserAnnotationOverlay: ThemedControl {
     var pointerLocation: CGPoint? {
         guard isAnnotating, isPointerInside, let window else { return nil }
         let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        return editor?.frame.contains(point) == true ? nil : point
+        return isOverAnnotationControl(point) ? nil : point
+    }
+
+    private func isOverAnnotationControl(_ point: CGPoint) -> Bool {
+        editor?.frame.contains(point) == true
+            || (!sendBar.isHidden && sendBar.frame.contains(point))
     }
 
     override func mouseMoved(with event: NSEvent) {
         // A position under an open dropdown is the menu's, not the page's — see
         // `NSView.uncoveredPointerLocation(in:)`.
         guard isAnnotating, let point = uncoveredPointerLocation(in: event) else { return }
-        if editor?.frame.contains(point) == true {
+        if isOverAnnotationControl(point) {
             onTargetProbe?(nil)
             return
         }
@@ -296,9 +351,11 @@ final class BrowserAnnotationOverlay: ThemedControl {
         performPrimaryAction()
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? { editor == nil ? .button : .group }
+    override func accessibilityRole() -> NSAccessibility.Role? { editor == nil && sendButton.isHidden ? .button : .group }
     override func accessibilityChildren() -> [Any]? {
-        editor?.accessibilityChildren() ?? super.accessibilityChildren()
+        var children = editor?.accessibilityChildren() ?? []
+        if !sendButton.isHidden { children.append(sendButton) }
+        return children.isEmpty ? super.accessibilityChildren() : children
     }
     override func accessibilityLabel() -> String? {
         L10n.string("Browser Annotation Canvas")

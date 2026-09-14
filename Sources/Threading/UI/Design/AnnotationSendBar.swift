@@ -49,11 +49,13 @@ final class AnnotationSendBar: NSView {
 
     @objc private func fire() { onSend?() }
 
-    /// Update the count in the title and hide the bar when there is nothing to send.
+    /// Update the count in the title and hide the affordance when there is nothing to send. Both the
+    /// bar and its button are hidden so either can be checked by callers and tests.
     func setPending(count: Int, sending: Bool) {
         pending = (count, sending)
         sendButton.title = L10n.format("Send (%lld)", Int64(count))
         sendButton.isEnabled = !sending
+        sendButton.isHidden = count == 0
         isHidden = count == 0
     }
 
