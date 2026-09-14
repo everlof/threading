@@ -64,6 +64,47 @@ against the booted device and confirmed each load-bearing selector on this exact
    `platformElementFromTranslation:` (returns an `AXPMacPlatformElement` reporting role
    `AXApplication`).
 
+**The full tree now comes back in our own code.** With the mechanism below the spike printed the
+identical 23-element tree idb returns — same labels, frames, and `hybrid_level_1/2/3` identifiers —
+proving the entire Phase 1 read primitive host-side, no idb.
+
+#### Implementation-ready recipe (verbatim from the working spike)
+
+Setup, once per snapshot session (all on one serial queue — the singleton is process-wide):
+
+- `translator = [AXPTranslator sharedmacOSInstance]` (concrete class `AXPTranslator_macOS`).
+- `[translator setAccessibilityEnabled:YES]; [translator enableAccessibility];
+  [translator setSupportsDelegateTokens:YES]; [translator setBridgeDelegate:self];`
+- The bridge delegate implements **`AXPTranslationTokenDelegateHelper`**:
+  `accessibilityTranslationDelegateBridgeCallbackWithToken:` returns a block
+  `(AXPTranslatorRequest*) -> AXPTranslatorResponse*` that relays via the device (below);
+  `accessibilityTranslationRootParentWithToken:` returns nil;
+  `accessibilityTranslationConvertPlatformFrameToSystem:withToken:` is identity.
+- `token = [device accessibilityPlatformTranslationToken];`
+- `root = [translator frontmostApplicationWithDisplayId:0 bridgeDelegateToken:token];` → an
+  `AXPTranslationObject` for the foreground app.
+
+Per element (`root`, then recurse):
+
+- `req = [AXPTranslatorRequest requestWithTranslation:<translationObject>];`
+- `req.requestType = 5;` (**MultipleAttribute** — `FBAXPRequestTypeAttribute` is 2, single).
+- `req.parameters = @{@"attributes": @[@8,@21,@25,@27,@33,@45,@51,@53]};` — **leave `clientType`
+  unset**; setting it makes the guest answer from a stale `automationElements` override and children
+  come back empty (this is exactly why the earlier NSAccessibility walk returned only the root).
+- **Send to the guest, not `processTranslatorRequest:`** (that selector is the *guest-side* entry and
+  returns nil data on the host):
+  `[device sendAccessibilityRequestAsync:req completionQueue:q completionHandler:^(AXPTranslatorResponse *r){…}]`,
+  bridged to sync with a semaphore (5 s timeout).
+- `resultData` is an `NSDictionary` keyed by `NSNumber` attribute id:
+  `8`=Children (an `NSArray` of child translation objects → recurse), `21`=Frame (`NSValue` rect,
+  points, top-left, screen space), `25`=Identifier (= `accessibilityIdentifier`), `27`=IsEnabled,
+  `33`=Label, `45`=Role (numeric `AXPUIElementType`), `51`=Subrole, `53`=Value.
+
+Role arrives as a number; observed values `1`=Application, `2`=Button, `5`=Group, `6`=Heading,
+`7`=Image, `14`=StaticText. The helper carries a static `AXPUIElementType`→AX-role-string map (the
+per-node `platformElementFromTranslation:` + `accessibilityRole` gives the string only for the root,
+so it is not a per-child substitute). Frames land on the framebuffer as `pixels = points × displayScale`.
+
 Two findings that shape the helper implementation:
 
 - **The full tree comes from an AX *tree dump*, not a recursive `AXChildren` walk.** Walking the
