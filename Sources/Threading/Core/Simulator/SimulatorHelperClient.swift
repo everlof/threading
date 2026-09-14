@@ -585,10 +585,13 @@ actor SimulatorLiveStreamCoordinator: SimulatorLiveStreamCoordinating {
         do {
             try await withTaskCancellationHandler {
                 try await client.start()
+                // Inside the handler on purpose: a cancellation landing in the window between a
+                // successful start() and this check would otherwise throw past `onCancel`, freeing
+                // the budget token below while the started helper kept running unreferenced.
+                try Task.checkCancellation()
             } onCancel: {
                 client.stop()
             }
-            try Task.checkCancellation()
             return client
         } catch {
             budget.release(token)
