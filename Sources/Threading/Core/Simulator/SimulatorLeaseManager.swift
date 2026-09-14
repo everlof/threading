@@ -148,6 +148,16 @@ actor SimulatorLeaseManager: SimulatorLeaseManaging {
         }
     }
 
+    /// Releases exactly one reference taken by a matching `acquire`.
+    ///
+    /// **Callers must release exactly once per acquire.** Two panes on the same device share one
+    /// lease *value* (this is deliberate and asserted by the tests: `acquire` twice returns equal
+    /// leases), so the manager cannot tell one holder releasing twice from two holders each
+    /// releasing once — a duplicated release decrements another holder's reference and can shut the
+    /// device out from under it. The `referenceCount > 0` guard only stops the count going negative;
+    /// it cannot recover a reference a double-release stole from a live holder. Pane call sites keep
+    /// the invariant by clearing their retained `lease` before the async release so a later teardown
+    /// cannot release the same value again.
     func release(_ lease: SimulatorDeviceLease) async {
         let deviceID = lease.device.id
         guard var entry = entries[deviceID],
