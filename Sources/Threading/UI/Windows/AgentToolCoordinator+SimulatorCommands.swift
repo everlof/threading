@@ -114,6 +114,28 @@ extension AgentToolCoordinator {
         }
     }
 
+    func simulatorWait(
+        _ arguments: SimulatorWaitArguments,
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        switch SimulatorAgentCommandService.waitRequest(from: arguments) {
+        case .rejected(let result):
+            completion(result)
+        case .accepted(let request):
+            guard let simulator = adoptedSimulator(for: sessionID),
+                  let device = simulator.adoptedDevice else {
+                completion(.failure("Call simulator_prepare before waiting for an element."))
+                return
+            }
+            _ = displayPaneController.activateSimulator(for: sessionID)
+            revealDisplayPane(for: sessionID)
+            SimulatorWaitPoller.run(
+                request, simulator: simulator, device: device, completion: completion
+            )
+        }
+    }
+
     func simulatorAnnotations(
         for sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void

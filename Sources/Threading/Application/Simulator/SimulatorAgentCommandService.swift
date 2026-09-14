@@ -70,6 +70,45 @@ enum SimulatorAgentCommandService {
         case rejected(MCPToolResult)
     }
 
+    enum WaitCondition: Sendable { case appears, disappears }
+
+    struct WaitRequest: Sendable {
+        let locator: ElementLocator
+        let condition: WaitCondition
+        let timeoutMilliseconds: Int
+    }
+
+    static func waitRequest(from arguments: SimulatorWaitArguments) -> Request<WaitRequest> {
+        let hasSemantic = !(arguments.label?.isEmpty ?? true)
+            || !(arguments.identifier?.isEmpty ?? true)
+        guard hasSemantic else {
+            return .rejected(.failure(
+                "Provide a label and/or identifier to wait for, optionally narrowed by role."
+            ))
+        }
+        let condition: WaitCondition
+        switch (arguments.until ?? "appears").lowercased() {
+        case "appears": condition = .appears
+        case "disappears": condition = .disappears
+        default:
+            return .rejected(.failure("until must be \"appears\" or \"disappears\"."))
+        }
+        let timeout = arguments.timeoutMilliseconds ?? 5_000
+        guard (100...30_000).contains(timeout) else {
+            return .rejected(.failure("timeout_ms must be between 100 and 30000."))
+        }
+        return .accepted(WaitRequest(
+            locator: ElementLocator(
+                ref: nil,
+                role: arguments.role,
+                label: arguments.label,
+                identifier: arguments.identifier
+            ),
+            condition: condition,
+            timeoutMilliseconds: timeout
+        ))
+    }
+
     static func tapAddressing(from arguments: SimulatorTapArguments) -> TapAddressing {
         let hasCoordinate = arguments.x != nil || arguments.y != nil
         let hasRef = !(arguments.ref?.isEmpty ?? true)

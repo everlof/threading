@@ -127,6 +127,9 @@ extension AgentCommand {
   static func simulatorAnnotations(_ value: EmptyToolArguments) -> Self {
     builtIn(.simulatorAnnotations, value)
   }
+  static func simulatorWait(_ value: SimulatorWaitArguments) -> Self {
+    builtIn(.simulatorWait, value)
+  }
   static func simulatorTap(_ value: SimulatorTapArguments) -> Self {
     builtIn(.simulatorTap, value)
   }

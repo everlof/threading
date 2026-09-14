@@ -175,6 +175,10 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func simulatorWait(
+    _ arguments: SimulatorWaitArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func simulatorTap(
     _ arguments: SimulatorTapArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void

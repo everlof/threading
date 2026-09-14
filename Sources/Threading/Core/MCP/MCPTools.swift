@@ -1645,6 +1645,20 @@ struct SimulatorSwipeArguments: Codable, Sendable {
   }
 }
 
+struct SimulatorWaitArguments: Codable, Sendable {
+  let role: String?
+  let label: String?
+  let identifier: String?
+  /// "appears" (default) or "disappears".
+  let until: String?
+  let timeoutMilliseconds: Int?
+
+  private enum CodingKeys: String, CodingKey {
+    case role, label, identifier, until
+    case timeoutMilliseconds = "timeout_ms"
+  }
+}
+
 struct SimulatorTypeTextArguments: Codable, Sendable {
   let text: String?
   /// Optionally focus a field before typing: an `eN` ref, or a semantic locator (`label`/
@@ -2624,6 +2638,7 @@ enum MCPTools {
   static let simulatorScreenshot = MCPBuiltInTool.simulatorScreenshot.rawValue
   static let simulatorSnapshot = MCPBuiltInTool.simulatorSnapshot.rawValue
   static let simulatorAnnotations = MCPBuiltInTool.simulatorAnnotations.rawValue
+  static let simulatorWait = MCPBuiltInTool.simulatorWait.rawValue
   static let simulatorTap = MCPBuiltInTool.simulatorTap.rawValue
   static let simulatorSwipe = MCPBuiltInTool.simulatorSwipe.rawValue
   static let simulatorTypeText = MCPBuiltInTool.simulatorTypeText.rawValue
@@ -5875,6 +5890,60 @@ enum MCPTools {
         Call simulator_prepare first.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
+    ),
+    MCPToolDefinition(
+      tool: .simulatorWait,
+      name: "simulator_wait",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Wait for Simulator Element",
+      detail: "Poll the accessibility tree until an element appears or disappears.",
+      symbol: "hourglass",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorWaitArguments.self, forKey: .arguments)
+          ?? SimulatorWaitArguments(
+            role: nil, label: nil, identifier: nil, until: nil, timeoutMilliseconds: nil
+          )
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorWait(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Wait for an element on the exact Simulator adopted in Threading's right panel to appear (or, \
+        with until="disappears", to go away) before you act — poll simulator_snapshot for you instead \
+        of guessing a sleep after a tap. Target it by label and/or identifier, optionally narrowed by \
+        role. Returns once the condition holds, or fails on timeout (timeout_ms, default 5000, bounded \
+        100–30000). Read simulator_snapshot afterwards for the element's fresh ref and tap point. \
+        Call simulator_prepare first.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "label": MCPPropertySchema(type: .string, description: "Element label to wait for."),
+          "identifier": MCPPropertySchema(
+            type: .string,
+            description: "Element accessibilityIdentifier to wait for, matched exactly."
+          ),
+          "role": MCPPropertySchema(
+            type: .string, description: "Optional role to narrow the match, e.g. \"AXButton\"."
+          ),
+          "until": MCPPropertySchema(
+            type: .string,
+            description: "\"appears\" (default) or \"disappears\"."
+          ),
+          "timeout_ms": MCPPropertySchema(
+            type: .number,
+            description: "Timeout from 100 to 30000 milliseconds. Defaults to 5000."
+          ),
+        ],
+        required: []
+      )
     ),
     MCPToolDefinition(
       tool: .simulatorTap,

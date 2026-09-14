@@ -54,6 +54,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case simulatorScreenshot
   case simulatorSnapshot
   case simulatorAnnotations
+  case simulatorWait
   case simulatorTap
   case simulatorSwipe
   case simulatorTypeText

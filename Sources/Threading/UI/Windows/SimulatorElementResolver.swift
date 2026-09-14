@@ -98,6 +98,21 @@ enum SimulatorElementResolver {
         return .point(center(of: matches[0], width: width, height: height))
     }
 
+    /// How many elements a semantic locator matches — the basis for `simulator_wait` (appears when
+    /// > 0, disappears when 0). Ref-based locators are not counted; waiting is semantic.
+    static func matchCount(
+        _ locator: SimulatorAgentCommandService.ElementLocator,
+        in root: SimulatorAccessibilityElement
+    ) -> Int {
+        var count = 0
+        func visit(_ element: SimulatorAccessibilityElement) {
+            if semanticMatch(locator, element) { count += 1 }
+            for child in element.children { visit(child) }
+        }
+        visit(root)
+        return count
+    }
+
     private static func semanticMatch(
         _ locator: SimulatorAgentCommandService.ElementLocator,
         _ element: SimulatorAccessibilityElement
