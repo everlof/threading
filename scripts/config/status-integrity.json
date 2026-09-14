@@ -14,7 +14,7 @@
     "Sources/ThreadingMobile/RemoteDiagnostics.swift": 2,
     "Sources/ThreadingMobile/RemoteGitReviewView.swift": 1,
     "Sources/ThreadingMobile/RemoteNotifications.swift": 1,
-    "Sources/ThreadingMobile/RemoteUsageDashboardView.swift": 6,
+    "Sources/ThreadingMobile/RemoteUsageDashboardView.swift": 7,
     "Sources/ThreadingMobile/SessionDashboard.swift": 1,
     "Sources/ThreadingMobile/SessionDetailView.swift": 3,
     "Sources/ThreadingMobile/SessionDraftView.swift": 1,
