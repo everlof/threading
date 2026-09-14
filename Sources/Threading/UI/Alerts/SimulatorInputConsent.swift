@@ -42,14 +42,28 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
         static let maximumRememberedGrants = 64
     }
 
+    /// Presents the control-consent prompt and yields the answer. Injectable so a test can drive an
+    /// approval or a denial deterministically without a modal — the same reason `ConfirmationAlert`
+    /// takes its settings by injection.
+    typealias Present = @MainActor (
+        _ request: ConfirmationRequest,
+        _ window: NSWindow?,
+        _ completion: @escaping @MainActor (Bool) -> Void
+    ) -> Void
+
     private let store: UserDefaults
+    private let present: Present
     private var decisions: [SimulatorDeviceID: Bool] = [:]
     private var pending: [SimulatorDeviceID: [@MainActor (Bool) -> Void]] = [:]
 
     /// `store` defaults to `PreferenceStore.shared` so a hosted test writes a scratch suite rather
     /// than the developer's own preferences, exactly as every other stored user choice does.
-    init(store: UserDefaults = PreferenceStore.shared) {
+    init(
+        store: UserDefaults = PreferenceStore.shared,
+        present: @escaping Present = { ConfirmationAlert.ask($0, in: $1, completion: $2) }
+    ) {
         self.store = store
+        self.present = present
         for rawValue in persistedGrants() {
             guard let deviceID = SimulatorDeviceID(rawValue) else { continue }
             decisions[deviceID] = true
@@ -94,7 +108,7 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
             confirmTitle: L10n.string("Allow Control"),
             style: .warning
         )
-        ConfirmationAlert.ask(request, in: window) { [weak self] approved in
+        present(request, window) { [weak self] approved in
             guard let self else { return }
             decisions[device.id] = approved
             // Only an approval is durable. A denial stays in memory for this launch so the sheet
