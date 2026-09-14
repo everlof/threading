@@ -639,6 +639,78 @@ final class SimulatorPaneViewController: NSViewController {
         }
     }
 
+    /// Capture just one element by cropping the current live frame to its bounds — no public-path
+    /// screenshot and no transport stop. Resolves the locator against a fresh snapshot first.
+    func elementScreenshotForAgent(
+        locator: SimulatorAgentCommandService.ElementLocator,
+        completion: @escaping @MainActor @Sendable (
+            SimulatorPaneAgentResult<SimulatorPaneScreenshot>
+        ) -> Void
+    ) {
+        guard let device = lease?.device else {
+            completion(.failure("Call simulator_prepare before capturing the Simulator."))
+            return
+        }
+        guard let session = streamSession else {
+            completion(.failure(
+                "The Simulator is not streaming live; an element screenshot needs the pane transport."
+            ))
+            return
+        }
+        Task { @MainActor [weak self] in
+            do {
+                let root = try await session.requestAccessibilitySnapshot()
+                guard let self, self.lease?.device.id == device.id,
+                      self.streamSession === session else {
+                    completion(.failure("The selected Simulator changed during capture."))
+                    return
+                }
+                switch SimulatorElementResolver.resolveElement(locator, in: root) {
+                case .element(let element, let width, let height):
+                    guard let image = self.screenView.image else {
+                        completion(.failure("No Simulator frame is available yet."))
+                        return
+                    }
+                    let normalized = CGRect(
+                        x: element.frame.x / width,
+                        y: element.frame.y / height,
+                        width: element.frame.width / width,
+                        height: element.frame.height / height
+                    )
+                    guard let png = Self.croppedPNG(image, normalizedFrame: normalized) else {
+                        completion(.failure("The element is off-screen or too small to capture."))
+                        return
+                    }
+                    completion(.success(SimulatorPaneScreenshot(data: png, device: device)))
+                case .notFound(let message), .ambiguous(let message):
+                    completion(.failure(message))
+                }
+            } catch {
+                completion(.failure(error.localizedDescription))
+            }
+        }
+    }
+
+    /// Crop an NSImage to a normalized rect (0…1, top-left origin — matching the framebuffer and the
+    /// tap space) and encode PNG. CGImage pixels are top-left origin, so no flip is needed.
+    /// `nonisolated`: a pure, bounded transform of a single cropped element, not main-actor work.
+    private nonisolated static func croppedPNG(_ image: NSImage, normalizedFrame: CGRect) -> Data? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let pixelRect = CGRect(
+            x: normalizedFrame.minX * width,
+            y: normalizedFrame.minY * height,
+            width: normalizedFrame.width * width,
+            height: normalizedFrame.height * height
+        ).integral.intersection(CGRect(x: 0, y: 0, width: width, height: height))
+        guard pixelRect.width >= 1, pixelRect.height >= 1,
+              let cropped = cgImage.cropping(to: pixelRect) else { return nil }
+        return NSBitmapImageRep(cgImage: cropped).representation(using: .png, properties: [:])
+    }
+
     private func retry() {
         controlActivity = .idle
         if let lease {

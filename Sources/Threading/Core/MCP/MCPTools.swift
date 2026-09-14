@@ -1602,9 +1602,16 @@ struct SimulatorInstallLaunchArguments: Codable, Sendable {
 
 struct SimulatorScreenshotArguments: Codable, Sendable {
   let includeImage: Bool?
+  /// Optionally crop to one element: an `eN` ref, or a semantic locator (`label`/`identifier`,
+  /// optionally narrowed by `role`). With none, the whole framebuffer is captured.
+  let ref: String?
+  let role: String?
+  let label: String?
+  let identifier: String?
 
   private enum CodingKeys: String, CodingKey {
     case includeImage = "include_image"
+    case ref, role, label, identifier
   }
 }
 
@@ -5795,16 +5802,20 @@ enum MCPTools {
       symbol: "iphone.and.arrow.forward",
       decodeArguments: { container in
         try container.decodeIfPresent(SimulatorScreenshotArguments.self, forKey: .arguments)
-          ?? SimulatorScreenshotArguments(includeImage: nil)
+          ?? SimulatorScreenshotArguments(
+            includeImage: nil, ref: nil, role: nil, label: nil, identifier: nil
+          )
       },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
         handler.simulatorScreenshot(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Capture the current PNG pixels from the exact Simulator device adopted in Threading's \
-        right panel. The image is returned to you by default and the same frame is placed in \
-        the visible pane. Call simulator_prepare first. Set include_image to false only when \
+        Capture PNG pixels from the exact Simulator device adopted in Threading's right panel. With \
+        no target, the whole framebuffer is captured and placed in the visible pane. To capture just \
+        one control, give its simulator_snapshot ref (like "e12") or a semantic locator (label \
+        and/or identifier, optionally narrowed by role): the current frame is cropped to that \
+        element's bounds. Call simulator_prepare first. Set include_image to false only when \
         refreshing what the user sees without adding image bytes to your tool result.
         """,
       inputSchema: MCPInputSchema(
@@ -5812,7 +5823,23 @@ enum MCPTools {
           "include_image": MCPPropertySchema(
             type: .boolean,
             description: "Include the PNG in the result. Defaults to true."
-          )
+          ),
+          "ref": MCPPropertySchema(
+            type: .string,
+            description: "Crop to this element ref from a recent simulator_snapshot, like \"e12\"."
+          ),
+          "label": MCPPropertySchema(
+            type: .string,
+            description: "Crop to the element with this label (with role/identifier)."
+          ),
+          "identifier": MCPPropertySchema(
+            type: .string,
+            description: "Crop to the element with this accessibilityIdentifier, matched exactly."
+          ),
+          "role": MCPPropertySchema(
+            type: .string,
+            description: "Optional role to narrow a label crop, e.g. \"AXButton\"."
+          ),
         ],
         required: []
       )

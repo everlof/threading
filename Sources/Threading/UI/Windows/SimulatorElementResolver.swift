@@ -47,10 +47,32 @@ enum SimulatorElementResolver {
         case ambiguous(String)
     }
 
+    /// The resolved element plus the root's logical size, so a caller can take its center (a tap) or
+    /// its full frame (an element screenshot).
+    enum ElementOutcome {
+        case element(SimulatorAccessibilityElement, rootWidth: Double, rootHeight: Double)
+        case notFound(String)
+        case ambiguous(String)
+    }
+
     static func resolve(
         _ locator: SimulatorAgentCommandService.ElementLocator,
         in root: SimulatorAccessibilityElement
     ) -> Outcome {
+        switch resolveElement(locator, in: root) {
+        case .element(let element, let width, let height):
+            return .point(center(of: element, width: width, height: height))
+        case .notFound(let message):
+            return .notFound(message)
+        case .ambiguous(let message):
+            return .ambiguous(message)
+        }
+    }
+
+    static func resolveElement(
+        _ locator: SimulatorAgentCommandService.ElementLocator,
+        in root: SimulatorAccessibilityElement
+    ) -> ElementOutcome {
         let width = root.frame.width
         let height = root.frame.height
         guard width > 0, height > 0 else {
@@ -66,7 +88,7 @@ enum SimulatorElementResolver {
                         + "Re-run simulator_snapshot for fresh refs."
                 )
             }
-            return .point(center(of: listed[index - 1], width: width, height: height))
+            return .element(listed[index - 1], rootWidth: width, rootHeight: height)
         }
 
         // Semantic mode: search the whole tree; ambiguity is a failure, not a first-match guess.
@@ -95,7 +117,7 @@ enum SimulatorElementResolver {
                     + "identifier, or tap one by coordinate: \(candidates)"
             )
         }
-        return .point(center(of: matches[0], width: width, height: height))
+        return .element(matches[0], rootWidth: width, rootHeight: height)
     }
 
     /// How many elements a semantic locator matches — the basis for `simulator_wait` (appears when

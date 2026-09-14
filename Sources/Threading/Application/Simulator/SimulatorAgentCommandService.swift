@@ -70,6 +70,20 @@ enum SimulatorAgentCommandService {
         case rejected(MCPToolResult)
     }
 
+    /// A locator to crop a screenshot to, or nil for the whole framebuffer.
+    static func screenshotLocator(from arguments: SimulatorScreenshotArguments) -> ElementLocator? {
+        let hasTarget = !(arguments.ref?.isEmpty ?? true)
+            || !(arguments.label?.isEmpty ?? true)
+            || !(arguments.identifier?.isEmpty ?? true)
+        guard hasTarget else { return nil }
+        return ElementLocator(
+            ref: arguments.ref,
+            role: arguments.role,
+            label: arguments.label,
+            identifier: arguments.identifier
+        )
+    }
+
     enum WaitCondition: Sendable { case appears, disappears }
 
     struct WaitRequest: Sendable {

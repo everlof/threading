@@ -115,7 +115,7 @@ final class SimulatorAgentToolTests: XCTestCase {
         XCTAssertTrue(launch.text.contains(#""process_identifier" : 4242"#))
 
         let screenshot = await execute(
-            .simulatorScreenshot(SimulatorScreenshotArguments(includeImage: true)),
+            .simulatorScreenshot(SimulatorScreenshotArguments(includeImage: true, ref: nil, role: nil, label: nil, identifier: nil)),
             with: fixture.coordinator,
             sessionID: fixture.sessionID
         )

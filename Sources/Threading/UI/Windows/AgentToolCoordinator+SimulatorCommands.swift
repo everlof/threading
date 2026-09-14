@@ -74,17 +74,22 @@ extension AgentToolCoordinator {
 
         _ = displayPaneController.activateSimulator(for: sessionID)
         revealDisplayPane(for: sessionID)
-        simulator.screenshotForAgent { result in
+        let includeImage = arguments.includeImage ?? true
+        let deliver: @MainActor @Sendable (SimulatorPaneAgentResult<SimulatorPaneScreenshot>) -> Void = {
+            result in
             switch result {
             case .success(let capture):
                 completion(SimulatorAgentCommandService.screenshotResult(
-                    data: capture.data,
-                    device: capture.device,
-                    includeImage: arguments.includeImage ?? true
+                    data: capture.data, device: capture.device, includeImage: includeImage
                 ))
             case .failure(let message):
                 completion(.failure(message))
             }
+        }
+        if let locator = SimulatorAgentCommandService.screenshotLocator(from: arguments) {
+            simulator.elementScreenshotForAgent(locator: locator, completion: deliver)
+        } else {
+            simulator.screenshotForAgent(completion: deliver)
         }
     }
 

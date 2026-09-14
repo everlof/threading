@@ -83,7 +83,7 @@ final class SimulatorAgentDogfoodIntegrationTests: XCTestCase {
         XCTAssertTrue(launch.text.contains(bundleIdentifier))
 
         let screenshot = await execute(
-            .simulatorScreenshot(SimulatorScreenshotArguments(includeImage: false)),
+            .simulatorScreenshot(SimulatorScreenshotArguments(includeImage: false, ref: nil, role: nil, label: nil, identifier: nil)),
             coordinator: coordinator,
             sessionID: sessionID
         )
