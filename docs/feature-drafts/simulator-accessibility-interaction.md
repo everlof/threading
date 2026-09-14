@@ -1,9 +1,10 @@
 # Simulator pane: element-level interaction via the accessibility tree
 
-**Status:** **Phase 1 implemented** (read path + inspector overlay + `simulator_snapshot` tool),
-building green with tests passing; pending live evaluation of the embedded helper. Phases 2–4
-(tap-by-ref/locator, live pointer hit-test overlay, human annotations) remain. Feasibility was
-validated live and the exact read recipe proven in our own host code (below). Extends
+**Status:** **Phases 1–2 implemented.** Phase 1 (read path + inspector overlay + `simulator_snapshot`)
+is **verified live** — the embedded helper returned SpringBoard's real tree on the running build.
+Phase 2 (tap/type by `eN` ref or semantic locator, resolved against a fresh snapshot) is built and
+unit-tested, pending a relaunch to verify live. Phases 3–4 (live pointer hit-test overlay, human
+annotations) remain. The exact read recipe was proven in our own host code (below). Extends
 [`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the signed direct
 helper, framebuffer and Indigo HID input) and deliberately mirrors the agent browser
 ([`agent-browser.md`](../architecture/agent-browser.md)): its accessibility-oriented snapshot,
@@ -261,8 +262,14 @@ Host-owned picking, provenance and focus, exactly as the browser overlay is.
    device-points → framebuffer mapping. Point hit-test (`objectAtPoint`) is deferred to Phase 3 with
    the live pointer overlay. Automation mode: the helper does not toggle it per-read (a per-launch
    cache; see the finding above); `ApplicationAccessibilityEnabled` handling stays a follow-up.
-2. **Target by ref.** `simulator_tap`/`type` accept ref + semantic locator; fresh snapshot after
-   each action.
+2. **Target by ref.** ✅ **Implemented.** `simulator_tap`/`simulator_type_text` accept an `eN` ref
+   or a semantic locator (label/identifier, optionally narrowed by role) as well as a normalized
+   coordinate. The UI router (`SimulatorAgentInputRouter`) takes a fresh snapshot and resolves the
+   target to a normalized centre immediately before acting (`SimulatorElementResolver`); an ambiguous
+   locator fails with candidates rather than guessing, and typing focuses the resolved field with a
+   tap first. Refs are numbered over one shared `SimulatorElementListing` used by both the renderer
+   and the resolver, so a ref the agent saw resolves to the same element. Actuation still goes
+   through the shipped Indigo HID tap — the tree is the addressing layer, not a new actuator.
 3. **Inspector overlay.** Outline-and-name-under-pointer in the pane; optional all-bounds overlay.
 4. **Human annotations.** Pinned notes with provenance, mirroring the browser.
 
