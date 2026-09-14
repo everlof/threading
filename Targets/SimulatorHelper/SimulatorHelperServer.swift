@@ -186,11 +186,22 @@ final class SimulatorHelperServer: @unchecked Sendable {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     let tree = try bridge.accessibilitySnapshot()
-                    self?.writeControl(.accessibilitySnapshotResult(
+                    let sent = self?.writeControl(.accessibilitySnapshotResult(
                         requestID: requestID,
                         root: Self.element(from: tree),
                         error: nil
                     ))
+                    if sent == false {
+                        // The serialized tree exceeded the control-frame cap. Dropping it would
+                        // strand the app on a timeout with no reason, so answer with an explicit,
+                        // always-small failure the app can surface and retry from.
+                        self?.writeControl(.accessibilitySnapshotResult(
+                            requestID: requestID,
+                            root: nil,
+                            error: "The accessibility tree is too large to return over the helper "
+                                + "wire. Snapshot a smaller screen or a more specific element."
+                        ))
+                    }
                 } catch {
                     self?.writeControl(.accessibilitySnapshotResult(
                         requestID: requestID,
@@ -470,14 +481,19 @@ final class SimulatorHelperServer: @unchecked Sendable {
         }
     }
 
-    private func writeControl(_ message: SimulatorBridgeHelperMessage) {
+    /// Returns false when the message could not even be framed — chiefly because its payload
+    /// exceeds the control-frame cap. Callers that would otherwise leave the app waiting on a
+    /// dropped reply use this to send a smaller, explicit failure in its place.
+    @discardableResult
+    private func writeControl(_ message: SimulatorBridgeHelperMessage) -> Bool {
         guard let payload = try? JSONEncoder().encode(message),
               let frame = try? SimulatorBridgeFraming.encode(kind: .control, payload: payload) else {
-            return
+            return false
         }
         outputQueue.async { [outputDescriptor] in
             try? Self.writeAll(frame, to: outputDescriptor)
         }
+        return true
     }
 
     private func stop() {
