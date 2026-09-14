@@ -1,0 +1,190 @@
+# Simulator pane: element-level interaction via the accessibility tree
+
+**Status:** draft. Researched; no implementation started. Extends
+[`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the signed direct
+helper, framebuffer and Indigo HID input) and deliberately mirrors the agent browser
+([`agent-browser.md`](../architecture/agent-browser.md)): its accessibility-oriented snapshot,
+stable `eN` refs, semantic locators, and the annotation/probe overlay. Prompted by the pane driving
+the device only through screenshots and guessed pixel coordinates.
+
+## The problem
+
+Today an agent (and a person) interacts with the adopted device by looking at a screenshot and
+computing a normalized `(x, y)` to tap. That is brittle: a coordinate means nothing after a layout
+change, a scroll, a different device size, or a localized string; there is no notion of "the
+**General** row" or "the **Continue** button," only pixels. The browser solved exactly this — it
+reads a compact accessibility snapshot, gives each interactive element a stable `eN` ref, lets
+tools address elements by ref or by a rerender-safe **semantic locator** (role + name / label /
+test-id), and returns a fresh snapshot after every action. We want the same for the Simulator: an
+element tree the agent targets by ref, and a pane overlay that outlines and names the element under
+the pointer — an Accessibility-Inspector-grade surface, host-owned.
+
+## The tree is reachable from our helper directly — no idb, no XCUITest
+
+The decisive finding: the live accessibility hierarchy of the **foreground** app in a booted
+simulator is available to a **host process that already links CoreSimulator** — which the signed
+helper does — through the same private path Apple's Simulator.app, Xcode's Accessibility Inspector,
+and idb's default backend use. It needs nothing injected into the guest and no XCUITest runner.
+
+**The path (idb's `--api ax` backend, which is a reference implementation of this exact call):**
+
+1. Take the process-wide `AXPTranslator` singleton from the private
+   `AccessibilityPlatformTranslation.framework` (shipped in Xcode's Simulator runtime).
+2. Resolve a root translation object: `frontmostApplicationWithDisplayId:0 bridgeDelegateToken:`
+   for the whole app, or `objectAtPoint:displayId:bridgeDelegateToken:` to hit-test a point.
+3. Install ourselves as the translator's token delegate. The translator fetches every attribute
+   **lazily**, calling back `accessibilityTranslationDelegateBridgeCallbackWithToken:`; we forward
+   each opaque `AXPTranslatorRequest` to
+   `-[SimDevice sendAccessibilityRequestAsync:completionQueue:completionHandler:]` and hand the
+   `AXPTranslatorResponse` back. **We never build the request by hand** — the translator builds it
+   and we relay it, which is why adoption is small (idb's `AXTranslationDispatcher` is ~200 lines).
+
+`SimDevice.h` states this route "in Xcode 12 … replaces SimulatorBridge related accessibility
+requests." The strings are already present in the frameworks on this machine:
+CoreSimulator exports `-[SimDevice sendAccessibilityRequestAsync:completionQueue:completionHandler:]`,
+`accessibilityConnection`, `com.apple.CoreSimulator.accessibility`; SimulatorKit exports
+`SimAccessibilityManager`, `AXTestingSnapshotParameterizedAttribute`, `AXPTranslatorResponse`, and
+`accessibilityTranslationConvertPlatformFrameToSystem:withToken:`.
+
+### The element shape we get (enough for browser-style refs)
+
+Per element: `AXLabel`, `AXFrame`, `AXValue` (a text field's contents come through here),
+**`AXUniqueId` = `accessibilityIdentifier`**, `type`/`role`/`subrole`, `traits`, `enabled`,
+`custom_actions`, `role_description`, `help`, `pid`, and — in the nested format — real `children`.
+That is the same primitive set a browser AX snapshot is built from: `identifier` is the stable
+anchor when the app sets one, and a `(type + label + sibling-index)` path is the fallback when it
+does not, exactly as with DOM refs. Whole-tree reads are bounded (idb caps depth 50 / 3000 nodes
+and flags `truncated`).
+
+### Coordinate mapping onto our framebuffer
+
+Frames come as **points**, top-left origin, in the device's **screen** space. Our rendered
+framebuffer is **pixels = points × displayScale** (2× / 3× Retina). So `pixel_rect = ax_frame ×
+scale`, with the scale read from the device's display, not guessed. No extra transform is needed —
+idb's `accessibilityTranslationConvertPlatformFrameToSystem:` implementation is identity, and
+rotation is already reflected in the numbers (re-read after rotating; do not apply your own
+rotation). The status bar needs no offset — frames are absolute in screen space.
+
+### Two operational facts that decide whether this works at all
+
+- **Automation mode.** With `com.apple.Accessibility AutomationEnabled` off, UIKit collapses
+  subtrees and drops most identifiers (idb measured 98 elements / 12 identifiers off vs
+  176 elements / 58 identifiers on); and `ApplicationAccessibilityEnabled` must be set or reads come
+  back **empty**. The helper must assert both (consulted per read, no app relaunch) before a
+  snapshot is meaningful.
+- **The translator is a process-wide singleton with unsynchronized state.** Concurrent use
+  over-releases shared token storage → `EXC_BAD_ACCESS`. Every translator interaction must funnel
+  through **one serial queue**, and the async `SimDevice` XPC must be bridged to the translator's
+  synchronous delegate (idb uses a `DispatchGroup` with a 5 s timeout). This is a correctness
+  requirement, not a nicety.
+
+### Cost / staleness
+
+Pull-only, no change notifications — poll. First read of a screen is 1–2 orders of magnitude slower
+than warm reads. The ordinary read (all elements, frames, labels, identifiers) is milliseconds once
+warm; the two reachability keys `interactable` / `occluded_by` hit-test every node (one screen: 16
+ms → ~2148 ms), so ask those only **per point, per interaction**, never per-tree per-frame. This
+maps cleanly onto the Scaling Gate: a snapshot is externally sized, so it is fetched off-main,
+bounded, and turned into a value model before any view or ref is built.
+
+### Ranked alternatives (documented so the choice is on the record)
+
+1. **`AXPTranslator` + `sendAccessibilityRequestAsync` (above)** — host-side, no guest install, what
+   Apple's tools use. **Recommended.**
+2. **Legacy `SimulatorBridge` XPC** (`accessibilityElementsWithDisplayId:` returns a ready-made dict
+   tree; `performPressAction:`/`Increment:`/`Decrement:`) — simpler to call, but the path Apple
+   superseded in Xcode 12; keep as a fallback / cross-check.
+3. **idb's `axbridge`** — a helper **inside** the guest gives XCUITest-level fidelity (typed,
+   labelled elements where the host view reports one composite) in one round trip, but requires
+   building, signing, and shipping a guest binary. Only if the host-side view's composite-collapsing
+   proves limiting.
+4. **XCUITest / `XCUIApplication`** — the true snapshot, but needs a built, attached UI-test runner;
+   too heavyweight for live inspection. Fallback of last resort.
+5. **Shelling out to `idb`** — produces the same data but adds a subprocess + gRPC hop over the same
+   private API we can call in-process. Avoid.
+
+## Proposed shape (mirroring the browser)
+
+### 1. Helper: an accessibility-snapshot request over the existing wire
+
+Add a control request the app sends the signed helper: "snapshot the foreground app" and
+"hit-test point `(x, y)`." The helper runs the `AXPTranslator` dance on its serial input-adjacent
+queue, walks the tree to the bound, translates each frame to framebuffer pixels, and returns a
+compact value tree: `{ role, subrole, label, value, identifier, traits, enabled, frame, children }`.
+It asserts automation + application accessibility first. This is a read capability the helper does
+not have today — it widens the direct-helper boundary and belongs in the `SimulatorHelperTrust`
+review and `simulator-pane.md`.
+
+### 2. App: refs + the snapshot contract
+
+The pane assigns stable `eN` refs to interactive elements (anchored on `identifier` where present,
+else a structural path), holds the value tree, and exposes it. Every input returns a fresh snapshot;
+a truncated tree is recoverable by re-snapshotting a subtree — the browser's exact contract.
+
+### 3. Agent tools
+
+- `simulator_snapshot` — returns the current element tree with refs (bounded; text labelled as
+  untrusted external data, as the browser does).
+- `simulator_tap` / `simulator_type_text` / etc. accept **a ref or a semantic locator** (role +
+  label / identifier) as well as the existing normalized coordinate, resolved against a fresh
+  snapshot immediately before acting; ambiguous matches fail rather than silently pick the first.
+  The tap still actuates through the Indigo HID path we already have (ref → element frame center →
+  touch); the accessibility tree is the *addressing* layer, not a new actuation layer.
+
+### 4. Pane overlay (the "annotation style")
+
+An Accessibility-Inspector-grade overlay over the live framebuffer, built on the
+`BrowserAnnotationOverlay` / `BrowserBaselineOverlay` precedent: while inspection mode is on, the
+overlay outlines and **names** the element under the pointer (pointer move → helper `objectAtPoint`
+hit-test → role + name), and can draw all element bounds. Human annotations (pinned notes with
+`user_authored` provenance, kept separate from the untrusted tree) mirror `browser_annotations`.
+Host-owned picking, provenance and focus, exactly as the browser overlay is.
+
+## Phasing
+
+1. **Read path.** Helper AX-snapshot + hit-test request; automation-mode assertion; the serial-queue
+   + DispatchGroup discipline; a read-only `simulator_snapshot` agent tool. Prove the tree comes
+   back and frames land on the framebuffer (render the bounds as an overlay to verify mapping).
+2. **Target by ref.** `simulator_tap`/`type` accept ref + semantic locator; fresh snapshot after
+   each action.
+3. **Inspector overlay.** Outline-and-name-under-pointer in the pane; optional all-bounds overlay.
+4. **Human annotations.** Pinned notes with provenance, mirroring the browser.
+
+## Risks and boundaries
+
+- **Private-API/ABI fragility.** `AXPTranslator`, the `AXPTranslatorRequest/Response` types, and the
+  `SimDevice` accessibility selectors are private and have moved before (the Xcode 12 migration).
+  Every adopted signature needs a per-Xcode disassembly check and the compatibility probe extended
+  to cover a snapshot — the same class of risk the Indigo input path already carries.
+- **Singleton concurrency.** The serial-queue funnel + sync bridge is mandatory; getting it wrong is
+  an `EXC_BAD_ACCESS` in the helper, not a soft failure.
+- **Trust boundary.** Reading the guest app's accessibility tree is a new capability for the signed
+  helper; revisit `SimulatorHelperTrust` and the consent copy (it is a read, not input, but it is
+  device content leaving the guest).
+- **Automation mode is a side effect.** Turning on `AutomationEnabled` changes how the guest app
+  reports itself; decide whether that is always-on while the pane is adopted or scoped to snapshot
+  windows, and document it.
+- **Coordinate correctness** must be verified by rendering bounds over the framebuffer (Retina scale,
+  orientation), the same way the browser's element-screenshot geometry is a tested tripwire.
+- **Fidelity ceiling.** The host-side `ax` path collapses custom-drawn composites into one element;
+  if that blocks real targets, `axbridge` (guest helper) is the escalation, at real cost.
+
+## Open questions
+
+- Does the app already load / can it `dlopen` `AccessibilityPlatformTranslation.framework`, or does
+  only the helper need it? (The helper is the natural home — it already links CoreSimulator and
+  loads the active Xcode's SimulatorKit.)
+- Always-on automation mode vs. per-snapshot, and its effect on the app under test.
+- Snapshot cadence for the live overlay: hit-test on pointer-move is cheap (one point); a full-tree
+  refresh is not — bound it and debounce, per the Scaling Gate.
+- Do we expose `custom_actions` (accessibility custom actions) as agent-invocable, or only
+  tap/type/scroll to start?
+
+---
+
+*Not yet indexed in [`README.md`](README.md) — add a row under the appropriate tier when
+prioritized. On implementation, move the durable helper/wire and trust decisions into
+`docs/architecture/simulator-pane.md`. Primary research: idb's accessibility backends and element
+shape (fbidb.io/docs/accessibility, fbidb.io/docs/idb/ui), the idb source
+(`AXTranslationDispatcher.swift`, `FBAccessibilityKeys.swift`) and private headers
+(`AXPTranslator.h`, `SimDevice.h`, `SimulatorBridge-Protocol.h`).*
