@@ -201,7 +201,7 @@ final class SimulatorPaneViewController: NSViewController {
             inkSource: .chrome
         )
         button.toolTip = L10n.string("Save a snapshot of the device (right-click for options)")
-        button.onPress = { [weak self] in self?.saveSnapshot() }
+        button.onPress = { [weak self] in self?.captureButtonPressed() }
         button.onContextMenu = { [weak self] anchor in
             self?.presentCaptureMenu(from: anchor) ?? false
         }
@@ -210,6 +210,10 @@ final class SimulatorPaneViewController: NSViewController {
     }()
 
     private var captureMenuSession: AnyObject?
+    private let simctlRecorder = SimulatorSimctlRecorder()
+    private var isRecording = false
+    private var recordingStartedAt: Date?
+    private var recordingTimer: Timer?
 
     private lazy var showTouchesButton: ThemedIconButton = {
         let button = ThemedIconButton(
@@ -1619,8 +1623,76 @@ final class SimulatorPaneViewController: NSViewController {
         ) { url in SimulatorCaptureSaver.writeData(data, to: url) }
     }
 
+    // MARK: - Capture (recording)
+
+    private func captureButtonPressed() {
+        if isRecording { stopRecording() } else { saveSnapshot() }
+    }
+
+    private func startSimctlRecording() {
+        guard !isRecording, let device = lease?.device else { return }
+        let url = SimulatorCaptureSaver.defaultDirectory(video: true)
+            .appendingPathComponent(
+                SimulatorCaptureSaver.suggestedName(device: device, fileExtension: "mov")
+            )
+        do {
+            try simctlRecorder.start(deviceID: device.id.rawValue, to: url) { [weak self] finalized in
+                self?.finishRecording(saved: finalized)
+            }
+            beginRecordingUI()
+        } catch {
+            flashStatus(L10n.string("Could not start recording"))
+        }
+    }
+
+    private func stopRecording() {
+        guard isRecording else { return }
+        simctlRecorder.stop()
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        statusLabel.stringValue = L10n.string("Finishing recording…")
+        // finishRecording fires from the recorder's termination handler once the file is complete.
+    }
+
+    private func beginRecordingUI() {
+        isRecording = true
+        recordingStartedAt = Date()
+        captureButton.isSelected = true
+        captureButton.toolTip = L10n.string("Stop recording")
+        recordingTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateRecordingElapsed() }
+        }
+        RunLoop.current.add(timer, forMode: .common)
+        recordingTimer = timer
+        updateRecordingElapsed()
+    }
+
+    private func updateRecordingElapsed() {
+        guard let started = recordingStartedAt else { return }
+        let elapsed = Int(Date().timeIntervalSince(started))
+        let time = String(format: "%d:%02d", elapsed / 60, elapsed % 60)
+        statusLabel.stringValue = L10n.format("Recording %@", time)
+        statusLabel.textColor = Design.Text.secondary
+    }
+
+    private func finishRecording(saved url: URL?) {
+        isRecording = false
+        recordingStartedAt = nil
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        captureButton.isSelected = false
+        captureButton.toolTip = L10n.string("Save a snapshot of the device (right-click for options)")
+        if let url {
+            SimulatorCaptureSaver.reveal(url)
+            flashStatus(L10n.string("Saved recording"))
+        } else {
+            renderState()
+        }
+    }
+
     private func presentCaptureMenu(from anchor: ThemedMenuAnchor) -> Bool {
-        let entries: [ThemedMenuEntry] = [
+        var entries: [ThemedMenuEntry] = [
             .item(ThemedMenuItem(
                 title: L10n.string("Save Snapshot"),
                 onChoose: { [weak self] in self?.saveSnapshot() }
@@ -1634,6 +1706,17 @@ final class SimulatorPaneViewController: NSViewController {
                 onChoose: { [weak self] in self?.saveSnapshotAs() }
             )),
         ]
+        if isRecording {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Stop Recording"),
+                onChoose: { [weak self] in self?.stopRecording() }
+            )))
+        } else {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Record Video"),
+                onChoose: { [weak self] in self?.startSimctlRecording() }
+            )))
+        }
         captureMenuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: 220),
             from: captureButton,

@@ -14792,6 +14792,17 @@
         }
       }
     },
+    "Could not start recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte starta inspelning"
+          }
+        }
+      }
+    },
     "Couldn't continue the conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19899,6 +19910,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avslutad · inte ännu sett"
+          }
+        }
+      }
+    },
+    "Finishing recording…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutar inspelning…"
           }
         }
       }
@@ -34289,6 +34311,17 @@
         }
       }
     },
+    "Record Video" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spela in video"
+          }
+        }
+      }
+    },
     "Record browser trace" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34340,6 +34373,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Registrerade återställningar"
+          }
+        }
+      }
+    },
+    "Recording %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spelar in %@"
           }
         }
       }
@@ -37368,6 +37412,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparat iPhone-underlag"
+          }
+        }
+      }
+    },
+    "Saved recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparade inspelning"
           }
         }
       }
@@ -42475,6 +42530,17 @@
         }
       }
     },
+    "Stop Recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa inspelning"
+          }
+        }
+      }
+    },
     "Stop Sharing Chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42559,6 +42625,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stoppa sidaladdning"
+          }
+        }
+      }
+    },
+    "Stop recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa inspelning"
           }
         }
       }
