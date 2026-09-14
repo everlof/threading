@@ -11,7 +11,7 @@ import AppKit
 /// `NSEvent.ModifierFlags` is an `OptionSet` over `UInt` and not `Codable`, so the raw value is
 /// what persists. Only the device-independent bits are kept: the flags an event carries also
 /// describe *which* shift key was pressed, which is not part of the shortcut.
-public struct KeyboardShortcut: Codable, Equatable, Hashable {
+public struct KeyboardShortcut: Codable, Equatable, Hashable, Sendable {
 
     /// The modifier bits that distinguish one shortcut from another. Caps Lock, numeric-pad,
     /// function-key, and device-side bits ride along on ordinary events without changing the

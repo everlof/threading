@@ -3284,9 +3284,18 @@ is left running. If Threading itself started the device, it may stop it when the
 deliberately released.
 
 You can use the screen directly too: click for a tap, drag for a swipe, then type while the screen
-has keyboard focus. The status line says whether control is ready, needs permission, or needs to
-reconnect. A click on a visible fallback frame requests that reconnection and preserves the
-intended tap, but Threading does not send it until the direct device connection and permission are
+has keyboard focus. While it does, Apple Simulator's own shortcuts work here: **⇧⌘H** Home,
+**⌘L** Lock, **⇧⌘B** Side Button, **⌘↑ / ⌘↓** volume and **⇧⌘A** Toggle Appearance — each
+button's tooltip shows its chord. They belong to the device only while it has focus, so ⇧⌘B still
+opens the Browser from anywhere else. Rotate, Shake, Siri and the App Switcher are not available
+yet.
+
+The status line stays quiet when all is well: just the iOS version, in plain text. It adds a word
+only when something needs you — the permission hint, "Connecting…", or a red **Disconnected** when
+the live connection is gone. Hover it to see which transport is carrying the picture.
+
+A click on a visible fallback frame asks to reconnect and preserves the intended tap, but Threading
+does not send it until the direct device connection and permission are
 both in place. The hand control beside Refresh enables control without spending a tap. If you
 previously chose not to allow control, press that hand explicitly to ask again; repeated screen
 clicks do not keep presenting the permission sheet.
@@ -5589,6 +5598,20 @@ from the program in the terminal to the window around it.
 
 Option is otherwise left to the keyboard layout rather than claimed as a Meta key, so
 `~ | \ @ { }` and the rest still compose normally on a non-US layout.
+
+### In the Browser and iOS Simulator tabs
+
+These answer only while keyboard focus is inside the tab; everywhere else the same keys keep their
+app command.
+
+| Action | Shortcut |
+|--------|----------|
+| Reload the page (instead of Rename Session) | Cmd+R |
+| Simulator: Home | Cmd+Shift+H |
+| Simulator: Lock | Cmd+L |
+| Simulator: Side Button (instead of Browser) | Cmd+Shift+B |
+| Simulator: Volume Up / Volume Down | Cmd+Up / Cmd+Down |
+| Simulator: Toggle Appearance | Cmd+Shift+A |
 
 ### Changing shortcuts
 

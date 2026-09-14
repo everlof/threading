@@ -182,11 +182,83 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
 
         XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
 
-        try await eventually { controller.statusForTesting.contains("Control ready") }
+        try await eventually { controller.controlButtonForTesting.isSelected }
+        XCTAssertFalse(
+            controller.statusForTesting.contains("Control"),
+            "a granted, working control is the default and says nothing in the status line"
+        )
         XCTAssertEqual(authorizer.resetCount, 1)
         XCTAssertEqual(authorizer.authorizationCount, 1)
         XCTAssertEqual(session.inputs, [], "enabling control must not invent a device tap")
         XCTAssertTrue(controller.controlButtonForTesting.isSelected)
+    }
+
+    func testSimulatorChordsPressDeviceButtonsOnlyWhileThePaneHasFocus() async throws {
+        let session = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(session)])
+        let controller = makeController(
+            control: SimulatorRecoveryControlFake(),
+            coordinator: coordinator,
+            inputAuthorizer: SimulatorRecoveryInputAuthorizerFake(initialDecision: true)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 720),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        // The screen takes focus only once frames arrive, which this fake never sends; a probe
+        // inside the pane stands in for it.
+        let inside = SimulatorShortcutFocusProbe()
+        controller.view.addSubview(inside)
+        defer {
+            controller.terminate()
+            window.contentViewController = nil
+        }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+
+        let homeButton = try XCTUnwrap(
+            viewWithIdentifier("simulator.button.home", in: controller.view) as? ThemedIconButton
+        )
+        XCTAssertEqual(homeButton.toolTip, "Home (⇧⌘H)", "hovering a device button names its chord")
+
+        let home = try keyEvent("h", modifiers: [.command, .shift], keyCode: 4, in: window)
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        XCTAssertFalse(window.performKeyEquivalent(with: home), "⇧⌘H without pane focus is not ours")
+
+        XCTAssertTrue(window.makeFirstResponder(inside))
+        XCTAssertTrue(window.performKeyEquivalent(with: home))
+        let volumeUp = try keyEvent("\u{F700}", modifiers: [.command, .numericPad, .function], keyCode: 126, in: window)
+        XCTAssertTrue(window.performKeyEquivalent(with: volumeUp))
+        let sideButton = try keyEvent("b", modifiers: [.command, .shift], keyCode: 11, in: window)
+        XCTAssertTrue(window.performKeyEquivalent(with: sideButton), "⇧⌘B presses the side button, not Browser")
+        let rename = try keyEvent("r", modifiers: [.command], keyCode: 15, in: window)
+        XCTAssertFalse(window.performKeyEquivalent(with: rename), "unmapped chords reach the menu")
+
+        try await eventually { session.inputs.count == 3 }
+        XCTAssertEqual(session.inputs, [.button(.home), .button(.volumeUp), .button(.side)])
+    }
+
+    private func viewWithIdentifier(_ identifier: String, in root: NSView) -> NSView? {
+        if root.accessibilityIdentifier() == identifier { return root }
+        return root.subviews.lazy.compactMap { self.viewWithIdentifier(identifier, in: $0) }.first
+    }
+
+    private func keyEvent(
+        _ characters: String,
+        modifiers: NSEvent.ModifierFlags,
+        keyCode: UInt16,
+        in window: NSWindow
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode
+        ))
     }
 
     func testAgentInstallQuiescesDirectTransportAndReconnectsAfterMutation() async throws {
@@ -406,6 +478,10 @@ private final class SimulatorRecoveryStreamSessionFake: SimulatorLiveStreamSessi
     func stop() {
         lock.withLock { stopped = true }
     }
+}
+
+private final class SimulatorShortcutFocusProbe: NSView {
+    override var acceptsFirstResponder: Bool { true }
 }
 
 @MainActor

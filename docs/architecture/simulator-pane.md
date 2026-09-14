@@ -94,7 +94,7 @@ encoded frame; the app maps them read-only (`SimulatorSharedMemoryConsumer`), bu
 one `memcpy` and no decode, and answers `releaseSharedFrame(bufferIndex:)`. A `SimulatorSharedFrameRing`
 tracks which buffers the app still holds so the helper only writes a free one and drops the capture
 (latest-frame-wins) when the app is behind — the shared-memory analogue of the codec path's frame
-window. The pane shows this as **"Live shared memory"**; H.264/JPEG stay as the automatic fallback
+window. The status tooltip names this **"Live shared memory"**; H.264/JPEG stay as the automatic fallback
 (non-BGRA surface, or a peer that does not offer shared memory), and remain the transport a future
 *remote* viewer would use, since shared memory is same-machine only. Wire protocol is v2, decoded
 back-compatibly so a v1 peer stays on the codec path.
@@ -214,6 +214,22 @@ header, tab chip, controls, status rows, placeholder and interactive screen surf
 components. A future public extension component may embed a semantic device status or explicit
 remote surface, but it cannot replace the host-owned lifecycle or consent rules. The deliberate
 host-only decision is recorded in `docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md`.
+
+**The status line is quiet by default.** The device chip already names the device and a live
+stream under granted control is the expected state, so the line then carries only the runtime, in
+tertiary text. It adds a word only for something that needs the person — a permission hint,
+"Connecting…", or **Disconnected** in `Design.Status.negative` on the screenshot fallback or a
+failed control request. The transport (H.264, JPEG, shared memory) is a diagnostic and lives in
+the tooltip. A green "Live" label was removed: it made the default state the loudest thing in the
+pane, and it is what kept a frozen stream looking healthy.
+
+**Keyboard follows Apple Simulator.** The pane root is a `KeyEquivalentScopeView`, so chords apply
+only while focus is inside the pane: ⇧⌘H Home, ⌘L Lock, ⇧⌘B Side Button, ⌘↑/⌘↓ volume and
+⇧⌘A Toggle Appearance, taken from Simulator.app's own menus (`SimulatorPaneShortcuts`). A chord
+presses the matching button, not the action beside it, so enabled state, consent and fail-closed
+input stay one path. A focused pane claims its chords even while the button is disabled, so ⇧⌘B
+never falls through to Browser mid-reconnect. Rotate, Shake, Siri and App Switcher have no route
+in `SimulatorBridgeInput` and are absent until the helper can send them.
 
 The enabled built-in tool group is the current agent preference: **Threading right panel**. Apple
 Simulator / Device Hub is an explicit workflow fallback, not an automatic reaction to a

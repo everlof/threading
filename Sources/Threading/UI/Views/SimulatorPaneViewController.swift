@@ -11,6 +11,20 @@ struct SimulatorPaneScreenshot: Sendable {
     let device: SimulatorDevice
 }
 
+/// Apple Simulator's own chords (its Device and Features menus) for the actions this pane can
+/// perform, so the muscle memory carries over. They apply only while keyboard focus is inside the
+/// pane: several collide with app commands — ⇧⌘B is Browser — and the app's binding wins
+/// everywhere else. Simulator's Rotate (⌘←/→), Shake (⌃⌘Z), Siri (⌥⇧⌘H) and App Switcher
+/// (⌃⇧⌘H) have no route in the helper's input vocabulary yet, so they are deliberately absent.
+enum SimulatorPaneShortcuts {
+    static let home = KeyboardShortcut(key: "h", modifiers: [.command, .shift])
+    static let lock = KeyboardShortcut(key: "l", modifiers: .command)
+    static let sideButton = KeyboardShortcut(key: "b", modifiers: [.command, .shift])
+    static let volumeUp = KeyboardShortcut(key: "\u{F700}", modifiers: .command)
+    static let volumeDown = KeyboardShortcut(key: "\u{F701}", modifiers: .command)
+    static let toggleAppearance = KeyboardShortcut(key: "a", modifiers: [.command, .shift])
+}
+
 /// A session's adopted CoreSimulator device inside the right display pane.
 ///
 /// The signed helper is the default live renderer; bounded `simctl` screenshots remain its public
@@ -134,7 +148,11 @@ final class SimulatorPaneViewController: NSViewController {
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Toggle appearance")
+        button.toolTip = L10n.format(
+            "%1$@ (%2$@)",
+            L10n.string("Toggle appearance"),
+            SimulatorPaneShortcuts.toggleAppearance.displayString
+        )
         button.onPress = { [weak self] in self?.toggleAppearance() }
         button.setAccessibilityIdentifier("simulator.appearance")
         return button
@@ -153,7 +171,8 @@ final class SimulatorPaneViewController: NSViewController {
         symbol: String,
         title: String,
         identifier: String,
-        button: SimulatorBridgeButton
+        button: SimulatorBridgeButton,
+        shortcut: KeyboardShortcut
     ) -> ThemedIconButton {
         let control = ThemedIconButton(
             symbolName: symbol,
@@ -161,7 +180,7 @@ final class SimulatorPaneViewController: NSViewController {
             target: .device,
             inkSource: .chrome
         )
-        control.toolTip = title
+        control.toolTip = L10n.format("%1$@ (%2$@)", title, shortcut.displayString)
         control.setAccessibilityIdentifier(identifier)
         control.onPress = { [weak self] in self?.submitInput(.button(button)) }
         return control
@@ -169,27 +188,45 @@ final class SimulatorPaneViewController: NSViewController {
 
     private lazy var homeButton = makeHardwareButton(
         symbol: "house", title: L10n.string("Home"),
-        identifier: "simulator.button.home", button: .home
+        identifier: "simulator.button.home", button: .home,
+        shortcut: SimulatorPaneShortcuts.home
     )
     private lazy var lockButton = makeHardwareButton(
         symbol: "lock", title: L10n.string("Lock"),
-        identifier: "simulator.button.lock", button: .lock
+        identifier: "simulator.button.lock", button: .lock,
+        shortcut: SimulatorPaneShortcuts.lock
     )
     private lazy var sideButton = makeHardwareButton(
         symbol: "power", title: L10n.string("Side button"),
-        identifier: "simulator.button.side", button: .side
+        identifier: "simulator.button.side", button: .side,
+        shortcut: SimulatorPaneShortcuts.sideButton
     )
     private lazy var volumeDownButton = makeHardwareButton(
         symbol: "speaker.wave.1.fill", title: L10n.string("Volume down"),
-        identifier: "simulator.button.volumeDown", button: .volumeDown
+        identifier: "simulator.button.volumeDown", button: .volumeDown,
+        shortcut: SimulatorPaneShortcuts.volumeDown
     )
     private lazy var volumeUpButton = makeHardwareButton(
         symbol: "speaker.wave.3.fill", title: L10n.string("Volume up"),
-        identifier: "simulator.button.volumeUp", button: .volumeUp
+        identifier: "simulator.button.volumeUp", button: .volumeUp,
+        shortcut: SimulatorPaneShortcuts.volumeUp
     )
 
     private var hardwareButtons: [ThemedIconButton] {
         [homeButton, lockButton, sideButton, volumeDownButton, volumeUpButton]
+    }
+
+    /// Each chord presses its button rather than calling the action beside it, so a shortcut is
+    /// enabled, consented and fails closed exactly as a click on that button would.
+    private var shortcutButtons: [(shortcut: KeyboardShortcut, button: ThemedIconButton)] {
+        [
+            (SimulatorPaneShortcuts.home, homeButton),
+            (SimulatorPaneShortcuts.lock, lockButton),
+            (SimulatorPaneShortcuts.sideButton, sideButton),
+            (SimulatorPaneShortcuts.volumeUp, volumeUpButton),
+            (SimulatorPaneShortcuts.volumeDown, volumeDownButton),
+            (SimulatorPaneShortcuts.toggleAppearance, appearanceButton),
+        ]
     }
 
     /// The device's hardware buttons. A press converges on the same consented input path as a tap,
@@ -250,9 +287,20 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView()
+        let root = KeyEquivalentScopeView()
         root.setAccessibilityIdentifier("simulator.pane")
+        root.onKeyEquivalent = { [weak self] event in self?.performSimulatorShortcut(event) ?? false }
         view = root
+    }
+
+    private func performSimulatorShortcut(_ event: NSEvent) -> Bool {
+        guard let match = shortcutButtons.first(where: { $0.shortcut.matches(event) }) else {
+            return false
+        }
+        // Claimed even while the button is unavailable: a focused device pane must not hand ⇧⌘B
+        // on to the Browser command just because its stream is reconnecting.
+        _ = match.button.performPrimaryAction()
+        return true
     }
 
     override func viewDidLoad() {
@@ -984,7 +1032,7 @@ final class SimulatorPaneViewController: NSViewController {
                 return L10n.string("View only")
             }
             return effectiveControlDecision == true
-                ? L10n.string("Control ready")
+                ? nil
                 : L10n.string("Click to enable control")
         case .screenshotFallback:
             return L10n.string("Click to reconnect control")
@@ -1077,22 +1125,18 @@ final class SimulatorPaneViewController: NSViewController {
             retryButton.isEnabled = false
         case .ready(let device):
             deviceChip.configure(symbolName: "iphone", title: device.name)
-            let backend: String
+            // The chip already names the device, and a live stream under granted control is the
+            // default: the line stays quiet then and speaks up only for what needs attention.
+            // Which transport carries the pixels is a diagnostic, so it moves to the tooltip.
+            var status = [device.runtimeName]
             switch liveBackend {
-            case .direct(.h264): backend = L10n.string("Live H.264")
-            case .direct(.jpeg): backend = L10n.string("Live JPEG")
-            case .sharedMemory: backend = L10n.string("Live shared memory")
-            case .screenshotFallback: backend = L10n.string("Preview fallback")
-            case nil: backend = L10n.string("Connecting live preview…")
+            case .screenshotFallback: status.append(L10n.string("Disconnected"))
+            case nil: status.append(L10n.string("Connecting…"))
+            case .direct, .sharedMemory: break
             }
-            var status = [device.name, device.runtimeName, backend]
             if let control = controlStatus() { status.append(control) }
             statusLabel.stringValue = status.joined(separator: " · ")
-            if case .screenshotFallback = liveBackend {
-                statusLabel.textColor = Design.Status.warning
-            } else {
-                statusLabel.textColor = Design.Status.positive
-            }
+            statusLabel.textColor = isDisconnected ? Design.Status.negative : Design.Text.tertiary
             retryButton.isEnabled = true
         case .failed(let message):
             statusLabel.stringValue = message
@@ -1106,12 +1150,33 @@ final class SimulatorPaneViewController: NSViewController {
         configureControlButton(for: lease?.device)
         configureHardwareButtons()
         configureAppearanceButton()
+        var tooltipLines = [statusLabel.stringValue]
+        if case .ready = presentationState, let backend = liveBackendDescription {
+            tooltipLines.append(backend)
+        }
         if let lastStreamFailure,
            !lastStreamFailure.isEmpty,
            lastStreamFailure != statusLabel.stringValue {
-            statusLabel.toolTip = statusLabel.stringValue + "\n" + lastStreamFailure
-        } else {
-            statusLabel.toolTip = statusLabel.stringValue
+            tooltipLines.append(lastStreamFailure)
+        }
+        statusLabel.toolTip = tooltipLines.joined(separator: "\n")
+    }
+
+    /// Red is kept for a pane that lost its device route: on the view-only fallback, or when
+    /// enabling control failed. Everything else — connecting, a hint to click — is ordinary text.
+    private var isDisconnected: Bool {
+        if case .screenshotFallback = liveBackend { return true }
+        if case .failed = controlActivity { return true }
+        return false
+    }
+
+    private var liveBackendDescription: String? {
+        switch liveBackend {
+        case .direct(.h264): L10n.string("Live H.264")
+        case .direct(.jpeg): L10n.string("Live JPEG")
+        case .sharedMemory: L10n.string("Live shared memory")
+        case .screenshotFallback: L10n.string("Preview fallback")
+        case nil: nil
         }
     }
 

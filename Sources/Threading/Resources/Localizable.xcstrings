@@ -188,6 +188,17 @@
         }
       }
     },
+    "%1$@ (%2$@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (%2$@)"
+          }
+        }
+      }
+    },
     "%1$@ The local mirror is ready on 127.0.0.1:%2$@." : {
       "extractionState" : "manual",
       "localizations" : {

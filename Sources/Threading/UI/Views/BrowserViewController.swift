@@ -102,7 +102,16 @@ final class BrowserChromeBar: NSView {
 
     let backButton = BrowserChromeBar.button("chevron.backward", L10n.string("Back"))
     let forwardButton = BrowserChromeBar.button("chevron.forward", L10n.string("Forward"))
-    let reloadButton = BrowserChromeBar.button("arrow.clockwise", L10n.string("Reload"))
+    let reloadButton: ThemedButton = {
+        let button = BrowserChromeBar.button("arrow.clockwise", L10n.string("Reload"))
+        button.toolTip = BrowserChromeBar.reloadToolTip
+        return button
+    }()
+
+    /// Stop has no chord, so only Reload names one; ⌘R itself works either way.
+    static var reloadToolTip: String {
+        L10n.format("%1$@ (%2$@)", L10n.string("Reload"), BrowserDefaults.reloadShortcut.displayString)
+    }
     let addressField = ThemedTextField(surfacePresentation: .onInteraction)
     let annotationButton = BrowserChromeBar.button(
         DesignSymbols.annotate,
@@ -256,7 +265,7 @@ final class BrowserChromeBar: NSView {
         let symbol = isLoading ? "xmark" : "arrow.clockwise"
         let label = isLoading ? L10n.string("Stop Loading") : L10n.string("Reload")
         reloadButton.image = Self.image(symbol, accessibility: label)
-        reloadButton.toolTip = label
+        reloadButton.toolTip = isLoading ? label : Self.reloadToolTip
         reloadButton.setAccessibilityLabel(label)
         updateResponsiveLayout()
     }
@@ -636,7 +645,9 @@ final class BrowserViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        let root = KeyEquivalentScopeView()
+        root.onKeyEquivalent = { [weak self] event in self?.performBrowserShortcut(event) ?? false }
+        view = root
         view.applySurface(
             fill: Design.Surface.ground,
             radius: .fixed(0),
@@ -2511,6 +2522,15 @@ final class BrowserViewController: NSViewController {
     }
     @objc private func goForward() { webView.goForward() }
     @objc private func reload() { webView.reload() }
+
+    /// ⌘R reloads while focus is anywhere in the browser — page or address bar — as it does in
+    /// every browser; outside it the chord stays Rename Session's. The chord is the browser's own
+    /// rather than read from the command table, so rebinding Rename does not move Reload.
+    private func performBrowserShortcut(_ event: NSEvent) -> Bool {
+        guard BrowserDefaults.reloadShortcut.matches(event) else { return false }
+        reload()
+        return true
+    }
     @objc private func reloadFromOrigin() { webView.reloadFromOrigin() }
     @objc private func stopLoading() {
         guard webView.isLoading else { return }
@@ -3122,6 +3142,7 @@ final class BrowserViewController: NSViewController {
         if chromeBar.isReloadFolded {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Reload"),
+                shortcut: BrowserDefaults.reloadShortcut,
                 image: BrowserChromeBar.image(
                     "arrow.clockwise",
                     accessibility: L10n.string("Reload")
@@ -4145,6 +4166,7 @@ private final class BrowserAgentFileSelectionRequest {
 enum BrowserDefaults {
     static var addressPlaceholder: String { L10n.string("Search or enter address") }
     static let searchPrefix = "https://duckduckgo.com/?q="
+    static let reloadShortcut = KeyboardShortcut(key: "r", modifiers: .command)
     static let consoleMessageHandler = "threadingConsole"
     static let networkMessageHandler = "threadingNetwork"
     static let navigationReadinessMessageHandler = "threadingNavigationReadiness"
