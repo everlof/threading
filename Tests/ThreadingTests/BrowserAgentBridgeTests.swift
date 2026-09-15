@@ -6166,7 +6166,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertNotNil(
             descendantViews(in: browser.view)
                 .compactMap { $0 as? ThemedButton }
-                .first { $0.toolTip == "Reload" },
+                .first { $0.toolTip == BrowserChromeBar.reloadToolTip },
             "Stopping must return the visible control to Reload"
         )
 

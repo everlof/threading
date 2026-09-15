@@ -7895,6 +7895,8 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(
             ComponentGalleryViewController.componentNames,
             [
+                "AnnotationSendBar",
+                "KeyEquivalentScopeView",
                 "AgentActivityBeamView",
                 "AgentWorkSummaryView",
                 "AgentWorkloadAnalyzerView",
@@ -8085,7 +8087,11 @@ final class ThemedControlTests: HostedStoreTestCase {
                 return String(declarations[nameRange])
             }
         )
-        let missing = declaredComponents.subtracting(ComponentGalleryViewController.componentNames)
+        // This timestamp accumulator is a model, not a view or interactive design component.
+        // Its output is exercised by SimulatorTouchOverlayTests.
+        let nonvisualModels: Set<String> = ["SimulatorTouchOverlayModel"]
+        let missing = declaredComponents.subtracting(nonvisualModels)
+            .subtracting(ComponentGalleryViewController.componentNames)
 
         XCTAssertEqual(
             missing,

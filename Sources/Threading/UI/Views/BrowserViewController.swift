@@ -2748,6 +2748,10 @@ final class BrowserViewController: NSViewController {
     /// Drop the given annotations from the per-page store, wherever they live.
     private func forgetAnnotations(_ identifiers: [Int]) {
         let ids = Set(identifiers)
+        for identifier in ids {
+            pendingAnnotations.removeValue(forKey: identifier)
+            sentAnnotationNotes.removeValue(forKey: identifier)
+        }
         for url in Array(annotationsByPage.keys) {
             annotationsByPage[url]?.removeAll { ids.contains($0.id) }
         }

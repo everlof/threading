@@ -6978,6 +6978,17 @@
         }
       }
     },
+    "AnnotationSendBar sent the pending notes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AnnotationSendBar skickade de väntande anteckningarna."
+          }
+        }
+      }
+    },
     "Annotations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9289,6 +9300,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "BrowserAnnotationOverlay"
+          }
+        }
+      }
+    },
+    "BrowserAnnotationOverlay / AnnotationSendBar / KeyEquivalentScopeView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BrowserAnnotationOverlay / AnnotationSendBar / KeyEquivalentScopeView"
           }
         }
       }
@@ -23749,6 +23771,17 @@
         }
       }
     },
+    "KeyEquivalentScopeView handled Reload inside the annotation story." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "KeyEquivalentScopeView hanterade Läs in igen i anteckningsexemplet."
+          }
+        }
+      }
+    },
     "Keyboard" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31650,6 +31683,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pixel 8"
+          }
+        }
+      }
+    },
+    "Place pins and send notes. With focus inside, ⌘R reports the scoped Reload action." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Placera nålar och skicka anteckningar. Med fokus inuti rapporterar ⌘R den lokala åtgärden Läs in igen."
           }
         }
       }

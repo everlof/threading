@@ -438,7 +438,9 @@ arbitrary pages, and editor placement reserves space above it. No screenshots or
 are collected by Send; its payload is the user's notes with their captured page/coordinate anchors.
 
 Empty new drafts are discarded; unfinished text never enters `browser_annotations`. Editing and
-deleting existing notes use stable IDs rather than array positions. Focus returns to the canvas
+deleting existing notes use stable IDs rather than array positions. Deletion removes both the
+page pin and its pending/sent revision bookkeeping, so deleted text cannot enter a later send.
+Focus returns to the canvas
 when the editor owned it; closing the editor never steals focus from another control.
 
 An iframe note also captures a weak target and the clicked fraction of its bounding box in the

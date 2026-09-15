@@ -80,6 +80,8 @@ final class ComponentGalleryViewController: NSViewController {
     /// Keeping this explicit makes additions reviewable and gives the tests one place to detect
     /// a story silently disappearing during a refactor.
     static let componentNames: Set<String> = [
+        "AnnotationSendBar",
+        "KeyEquivalentScopeView",
         "AgentActivityBeamView",
         "AgentWorkSummaryView",
         "AgentWorkloadAnalyzerView",
@@ -5084,6 +5086,20 @@ final class ComponentGalleryViewController: NSViewController {
         // Switched on, because an overlay in its resting state is a component that deliberately
         // draws and answers nothing — a blank card would be an accurate and useless story.
         let overlay = BrowserAnnotationOverlay()
+        let annotationScope = KeyEquivalentScopeView()
+        annotationScope.translatesAutoresizingMaskIntoConstraints = false
+        annotationScope.addSubview(overlay)
+        annotationScope.onKeyEquivalent = { [weak self] event in
+            guard event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .command,
+                  event.keyCode == 15 else { return false }
+            self?.showReceipt(L10n.string("KeyEquivalentScopeView handled Reload inside the annotation story."))
+            return true
+        }
+        overlay.setPendingSend(count: 2, sending: false)
+        overlay.onSend = { [weak self, weak overlay] in
+            overlay?.setPendingSend(count: 0, sending: false)
+            self?.showReceipt(L10n.string("AnnotationSendBar sent the pending notes."))
+        }
         overlay.isAnnotating = true
         overlay.markers = [
             BrowserAnnotationMarker(id: 1, point: CGPoint(x: 54, y: 34)),
@@ -5099,6 +5115,7 @@ final class ComponentGalleryViewController: NSViewController {
             guard let self else { return }
             let next = (overlay.markers.map(\.id).max() ?? 0) + 1
             overlay.markers.append(BrowserAnnotationMarker(id: next, point: point))
+            overlay.setPendingSend(count: overlay.markers.count, sending: false)
             self.showReceipt(L10n.format("BrowserAnnotationOverlay placed pin %lld.", Int64(next)))
         }
         overlay.onSelect = { [weak self] id in
@@ -5186,6 +5203,10 @@ final class ComponentGalleryViewController: NSViewController {
             annotationSurface.heightAnchor.constraint(equalToConstant: 72),
             overlay.widthAnchor.constraint(equalToConstant: 460),
             overlay.heightAnchor.constraint(equalToConstant: 120),
+            overlay.leadingAnchor.constraint(equalTo: annotationScope.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: annotationScope.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: annotationScope.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: annotationScope.bottomAnchor),
             baselineCard.widthAnchor.constraint(equalToConstant: 460),
             baselineCard.heightAnchor.constraint(equalToConstant: 120),
             underlying.centerXAnchor.constraint(equalTo: baselineCard.centerXAnchor),
@@ -5211,9 +5232,9 @@ final class ComponentGalleryViewController: NSViewController {
                     deviceToolbar
                 ),
                 story(
-                    "BrowserAnnotationOverlay",
-                    "The agent-visible pin layer, shown in annotation mode — click the panel to place one.",
-                    overlay
+                    "BrowserAnnotationOverlay / AnnotationSendBar / KeyEquivalentScopeView",
+                    "Place pins and send notes. With focus inside, ⌘R reports the scoped Reload action.",
+                    annotationScope
                 ),
                 story(
                     "BrowserAnnotationSurfaceView",
