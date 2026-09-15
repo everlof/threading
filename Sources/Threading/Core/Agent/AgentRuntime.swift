@@ -1151,6 +1151,19 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         conversations[sessionID]?.terminate(preservingViewport: true)
     }
 
+    /// Replaces a process for the same conversation without dropping its scenario provider.
+    func discardForRelaunch(sessionID: SessionID) {
+#if DEBUG
+        let fixturePlan = fixtureLaunchPlanProviders[sessionID]
+#endif
+        discard(sessionID: sessionID)
+#if DEBUG
+        if let fixturePlan {
+            _ = installFixtureLaunchPlan(for: sessionID, provider: fixturePlan)
+        }
+#endif
+    }
+
     /// Terminates the agent and releases its terminal, returning the session to dormant.
     func discard(sessionID: SessionID, preservingViewport: Bool = true) {
         terminalOwnerships.removeValue(forKey: sessionID)

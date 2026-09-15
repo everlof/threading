@@ -1315,7 +1315,7 @@ final class TerminalContainerViewController: NSViewController {
         guard let sessionID = currentSessionID else { return }
 
         // Force a fresh terminal so the resumed conversation starts from a clean screen.
-        AgentRuntime.shared.discard(sessionID: sessionID)
+        AgentRuntime.shared.discardForRelaunch(sessionID: sessionID)
         currentSessionID = nil
         show(sessionID: sessionID)
     }

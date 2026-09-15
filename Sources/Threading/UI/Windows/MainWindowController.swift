@@ -1569,7 +1569,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             if self.containerViewController.currentSessionID == event.sessionID {
                 self.containerViewController.resumeCurrentSession()
             } else {
-                environment.agentRuntime.discard(sessionID: event.sessionID)
+                environment.agentRuntime.discardForRelaunch(sessionID: event.sessionID)
                 self.containerViewController.launchInBackground(sessionID: event.sessionID)
             }
             // This releases the transient store/event fence only after replacement has started.

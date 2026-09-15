@@ -91,7 +91,9 @@ blank terminal fixture. Its app-owned shell records each PID and the provider re
 inside that home before becoming `cat`. The journey opens the ordinary session menu, restarts,
 and checks the old PID ended while the replacement retains the same provider conversation.
 It never starts a real account's CLI. The fixture launch plan is retained across this explicit
-restart only in Debug; ordinary runtime disposal still clears fixture registrations.
+restart only in Debug; ordinary runtime disposal still clears fixture registrations. Same-chat
+checkout relaunches use `discardForRelaunch` to retain that provider too, for both foreground and
+background conversations, so a process replacement cannot fall through to a real account's CLI.
 
 The UI lane needs an interactive macOS test host with automation mode available. A machine that
 can compile the runner but cannot enable UI automation reports an infrastructure failure before
