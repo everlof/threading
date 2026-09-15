@@ -103,3 +103,72 @@ final class MobileButtonHapticsTests: XCTestCase {
         XCTAssertTrue(MobileButtonHaptics.isInstalled(on: disclosure))
     }
 }
+
+@MainActor
+final class MobileRowSwipeFeedbackTests: XCTestCase {
+    func testShippingCellTicksOnCrossingsAndCommitsOnce() {
+        var events: [String] = []
+        let arm = ImpactSpy { events.append("arm") }
+        let retreat = ImpactSpy { events.append("retreat") }
+        let commit = ImpactSpy { events.append("commit") }
+        let feedback = MobileRowSwipeFeedback(arm: arm, retreat: retreat, commit: commit)
+
+        MobileDashboardSwipeLifecycleProbe.exerciseFeedback(feedback)
+
+        XCTAssertEqual(events, ["arm", "retreat", "arm", "commit"])
+        XCTAssertEqual(arm.intensities, [1, 1])
+        XCTAssertEqual(retreat.intensities, [0.6])
+        XCTAssertEqual(commit.intensities, [1])
+        XCTAssertGreaterThan(arm.preparations, 0)
+        XCTAssertGreaterThan(retreat.preparations, 0)
+        XCTAssertGreaterThan(commit.preparations, 0)
+    }
+
+    func testCancellationAndSettlingDoNotPretendTheFingerRetreated() {
+        let arm = ImpactSpy()
+        let retreat = ImpactSpy()
+        let commit = ImpactSpy()
+        let feedback = MobileRowSwipeFeedback(arm: arm, retreat: retreat, commit: commit)
+        feedback.begin()
+        feedback.update(isArmed: false)
+        feedback.update(isArmed: true)
+        feedback.update(isArmed: true)
+        feedback.end()
+        feedback.update(isArmed: false)
+        feedback.update(isArmed: true)
+        feedback.begin()
+        feedback.update(isArmed: false)
+        feedback.end()
+
+        XCTAssertEqual(arm.intensities, [1])
+        XCTAssertTrue(retreat.intensities.isEmpty)
+        XCTAssertTrue(commit.intensities.isEmpty)
+    }
+
+    func testExplicitActionCanCommitWithoutAFullSwipe() {
+        let arm = ImpactSpy()
+        let retreat = ImpactSpy()
+        let commit = ImpactSpy()
+        let feedback = MobileRowSwipeFeedback(arm: arm, retreat: retreat, commit: commit)
+        feedback.commit()
+        feedback.update(isArmed: false)
+
+        XCTAssertTrue(arm.intensities.isEmpty)
+        XCTAssertTrue(retreat.intensities.isEmpty)
+        XCTAssertEqual(commit.intensities, [1])
+    }
+}
+
+@MainActor
+private final class ImpactSpy: MobileImpactFeedbackProducing {
+    var preparations = 0
+    var intensities: [CGFloat] = []
+    private let onImpact: () -> Void
+
+    init(onImpact: @escaping () -> Void = {}) { self.onImpact = onImpact }
+    func prepare() { preparations += 1 }
+    func impactOccurred(intensity: CGFloat) {
+        intensities.append(intensity)
+        onImpact()
+    }
+}

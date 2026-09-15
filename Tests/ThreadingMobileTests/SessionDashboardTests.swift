@@ -88,13 +88,24 @@ final class SessionDashboardTests: XCTestCase {
         let metrics = MobileDashboardSwipeArmProbe.exercise()
 
         XCTAssertTrue(metrics.restingUsesControlPlate)
-        XCTAssertTrue(metrics.armedUsesSelectionPlate)
+        XCTAssertTrue(metrics.armedUsesAccentPlate)
         XCTAssertTrue(metrics.disarmedUsesControlPlate)
         XCTAssertEqual(metrics.firstArmMotionCount, 1)
         XCTAssertEqual(metrics.disarmMotionCount, 1)
         XCTAssertEqual(metrics.secondArmMotionCount, 2)
-        XCTAssertTrue(metrics.reducedMotionUsesSelectionPlate)
+        XCTAssertTrue(metrics.reducedMotionUsesAccentPlate)
         XCTAssertEqual(metrics.reducedMotionArmMotionCount, 0)
+        XCTAssertTrue(metrics.armedShowsReleaseInstruction)
+        XCTAssertTrue(metrics.retreatRestoresActionTitle)
+        XCTAssertTrue(metrics.reducedMotionShowsReleaseInstruction)
+    }
+
+    @MainActor
+    func testSwipeSurvivesLayoutAndLiveUpdatesThenCancelsAndReusesCleanly() {
+        XCTAssertEqual(
+            MobileDashboardSwipeLifecycleProbe.exercise(),
+            [-110, -110, -110, -110, 110, -130, 0, 0, 0]
+        )
     }
 
     func testDashboardRowHeightFollowsAccessibilityContentSize() {

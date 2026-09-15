@@ -313,6 +313,41 @@ editors, Notifications, Diagnostics, Mac appearance, Ask for input and the issue
   its rows are editable or reordered, the group when the form is a small fixed shape or the
   screen already builds its rows lazily.
 
+## Dashboard swipe lifecycle
+
+The native dashboard cell owns the archive/restore gesture and its interruptible spring. The
+pan is attached to the stationary content container; row taps wait for it to fail. Layout sets
+`bounds` and `center`, never `frame` on the translated row. The current swipe offset survives
+layout and same-identity catalogue/theme updates; identity changes, loss of action authority,
+reuse and leaving the window reset it. A new pan samples the presentation transform before
+stopping a settling animator, so it picks up the row where it is visibly drawn.
+
+Release uses signed projected travel for open/closed intent, while full archive requires actual
+travel across the threshold. At that same threshold, the compact Archive action expands into a
+fixed-width “Release to archive” instruction on the palette’s solid accent with accent foreground
+ink, alongside the symbol bounce and haptic. Retreat restores Archive and the quiet control plate.
+The explicit instruction and highlight remain under Reduce Motion. Settling carries bounded release velocity and honors Reduce Motion.
+The action strip clips continuously down to zero instead of disappearing at the beginning of a
+closing animation. An archive animation cannot invoke an old cell's action after reuse, and a
+host refusal cannot strand its row offscreen. Per-frame work touches only the active cell's fixed
+view tree; the dashboard's viewport reuse and 1,000-row scaling gate remain unchanged.
+
+`MobileRowSwipeFeedback` is shared by the native and SwiftUI swipe paths. Finger-driven arming
+uses a medium impact, retreat uses a softer impact, and accepting a full swipe or explicit action
+uses a distinct rigid impact. The commit acknowledges the command, not success from the Mac.
+Generators are prepared at gesture start and threshold edges, with constant work per active row.
+Repeated samples, ordinary settling, cancellation, reuse and catalogue updates stay silent;
+ending tracking before animation prevents a false retreat tick after commit.
+
+This is a host-only interaction within the existing themed session row: the remote palette
+controls ink and material; the host retains gesture arbitration, archive authority, stable record
+identity, action settlement and accessibility equivalents.
+
+`SessionDashboardTests` exercises repeated layout and live reconfiguration during a swipe,
+cancellation and reuse; `MobileSessionChromeTests` pins signed release intent. The simulator
+review covers repeated reveal/close, full-swipe recovery and row-originated vertical scrolling.
+Physical-device haptics and the live Mac archive round trip require device verification.
+
 ## Prominent application actions
 
 Feature code never applies SwiftUI's `.buttonStyle(.borderedProminent)` directly. That system

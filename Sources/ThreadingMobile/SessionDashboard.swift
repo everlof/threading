@@ -1361,10 +1361,12 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     /// The record whose title is already drawn in this reused cell. A morph is meaningful only
     /// while this identity stays put and its title changes.
     private var representedItemID: String?
-    private var restingOffset: CGFloat = 0
     private var beganAtOffset: CGFloat = 0
+    private var currentSwipeOffset: CGFloat = 0
+    private var swipeAnimator: UIViewPropertyAnimator?
+    private var isCommittingSwipe = false
     private var isSwipeArmed = false
-    private let feedback = UIImpactFeedbackGenerator(style: .medium)
+    private var feedback = MobileRowSwipeFeedback()
 #if DEBUG
     private var swipeArmMotionCountForTesting = 0
 #endif
@@ -1433,7 +1435,8 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         tapRecognizer.delegate = self
         panRecognizer.delegate = self
         rowView.addGestureRecognizer(tapRecognizer)
-        rowView.addGestureRecognizer(panRecognizer)
+        contentView.addGestureRecognizer(panRecognizer)
+        tapRecognizer.require(toFail: panRecognizer)
         rowView.addInteraction(contextMenuInteraction)
         actionButton.addTarget(self, action: #selector(actionButtonTapped), for: .touchUpInside)
 
@@ -1451,10 +1454,10 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        resetSwipe()
         configuration = nil
         representedItemID = nil
         titleView.resetForReuse()
-        restingOffset = 0
         beganAtOffset = 0
         isSwipeArmed = false
         rowView.layer.removeAllAnimations()
@@ -1469,6 +1472,11 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
 
     func configure(_ configuration: DashboardUIKitRowConfiguration) {
         let nextItemID = configuration.row.item.id
+        if representedItemID != nextItemID
+            || self.configuration?.isArchived != configuration.isArchived
+            || configuration.swipeAction == nil {
+            resetSwipe()
+        }
         let animatesTitle = representedItemID == nextItemID
             && titleView.stringValue != configuration.row.item.title
         if let representedItemID, representedItemID != nextItemID {
@@ -1477,13 +1485,6 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         representedItemID = nextItemID
         self.configuration = configuration
         accessibilityTraits = configuration.activate == nil ? [] : .link
-        restingOffset = 0
-        beganAtOffset = 0
-        isSwipeArmed = false
-        rowView.layer.removeAllAnimations()
-        actionBackdropView.layer.removeAllAnimations()
-        actionButton.imageView?.removeAllSymbolEffects(animated: false)
-        rowView.transform = .identity
         applyFonts()
         applyCommon(configuration, animatesTitle: animatesTitle)
         switch configuration.row.item {
@@ -1500,7 +1501,9 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         super.layoutSubviews()
         guard let configuration else { return }
         let bounds = contentView.bounds
-        rowView.frame = bounds
+        // A transformed view has no assignable frame. Layout its untransformed geometry.
+        rowView.bounds = CGRect(origin: .zero, size: bounds.size)
+        rowView.center = CGPoint(x: bounds.midX, y: bounds.midY)
 
         let dividerHeight = max(
             configuration.theme.borderWidth,
@@ -1570,7 +1573,7 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
             corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner])
         }
         contentView.layer.maskedCorners = corners
-        applySwipeOffset(restingOffset)
+        applySwipeOffset(currentSwipeOffset)
     }
 
     private func applyFonts() {
@@ -1628,8 +1631,17 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         (titleView.stringValue, titleView.isAnimatingTitleForTesting)
     }
 
-    var swipePresentationForTesting: (isArmed: Bool, backdrop: UIColor?, motionCount: Int) {
-        (isSwipeArmed, actionBackdropView.backgroundColor, swipeArmMotionCountForTesting)
+    func setSwipeFeedbackForTesting(_ feedback: MobileRowSwipeFeedback) {
+        self.feedback = feedback
+    }
+
+    var swipeGeometryForTesting: (origin: CGFloat, offset: CGFloat, revealed: CGFloat) {
+        (rowView.frame.minX, currentSwipeOffset, actionBackdropView.bounds.width)
+    }
+
+    var swipePresentationForTesting: (isArmed: Bool, backdrop: UIColor?, motionCount: Int, title: String?, ink: UIColor?) {
+        (isSwipeArmed, actionBackdropView.backgroundColor, swipeArmMotionCountForTesting,
+         actionButton.configuration?.title, actionButton.configuration?.baseForegroundColor)
     }
 
     func setSwipeArmedForTesting(_ armed: Bool, reducesMotion: Bool) {
@@ -1928,11 +1940,11 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         theme: RemoteThemePalette
     ) {
         panRecognizer.isEnabled = action != nil
-        actionBackdropView.isHidden = true
-        actionButton.isHidden = true
+        actionBackdropView.isHidden = action == nil
+        actionButton.isHidden = action == nil
         guard let action else { return }
         var buttonConfiguration = UIButton.Configuration.plain()
-        buttonConfiguration.title = action.title
+        buttonConfiguration.title = isSwipeArmed ? MobileRowSwipe.releaseTitle : action.title
         buttonConfiguration.image = UIImage(systemName: action.systemImage)
         buttonConfiguration.imagePlacement = .top
         buttonConfiguration.imagePadding = MobileDesign.Spacing.hairline
@@ -1947,6 +1959,12 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         case .destructive:
             buttonConfiguration.baseForegroundColor = theme.uiNegative
         }
+        if isSwipeArmed { buttonConfiguration.baseForegroundColor = theme.uiAccentForeground }
+        buttonConfiguration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var result = incoming
+            result.font = UIFont.preferredFont(forTextStyle: .caption2)
+            return result
+        }
         buttonConfiguration.contentInsets = .zero
         actionButton.configuration = buttonConfiguration
         actionButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .caption2)
@@ -1954,13 +1972,12 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         actionButton.titleLabel?.numberOfLines = 1
         actionButton.titleLabel?.lineBreakMode = .byClipping
         actionButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        actionBackdropView.backgroundColor = theme.uiControlResting
+        actionBackdropView.backgroundColor = isSwipeArmed ? theme.uiAccent : theme.uiControlResting
     }
 
-    /// Applies the threshold edge the pan has already decided. The action stays in its fixed
-    /// compact slot while the backdrop expands, but arming changes the plate and gives the
-    /// symbol one discrete bounce alongside the haptic. Crossing back disarms the plate without
-    /// replaying the symbol, and Reduce Motion keeps the same visible state change synchronously.
+    /// Crossing the actual commit distance replaces the compact action with an explicit release
+    /// instruction on a solid accent plate. Text, fill, symbol bounce and haptic answer the same
+    /// threshold; retreat restores the ordinary action. Reduce Motion retains text and fill.
     private func setSwipeArmed(
         _ armed: Bool,
         animated: Bool,
@@ -1969,8 +1986,15 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         guard armed != isSwipeArmed, let configuration else { return }
         isSwipeArmed = armed
         let targetColor = armed
-            ? configuration.theme.uiSelection
+            ? configuration.theme.uiAccent
             : configuration.theme.uiControlResting
+        if let action = configuration.swipeAction {
+            var button = actionButton.configuration
+            button?.title = armed ? MobileRowSwipe.releaseTitle : action.title
+            button?.baseForegroundColor = armed ? configuration.theme.uiAccentForeground
+                : (action.role == .destructive ? configuration.theme.uiNegative : configuration.theme.uiAccent)
+            actionButton.configuration = button
+        }
         let changes = { self.actionBackdropView.backgroundColor = targetColor }
         if animated, !reducesMotion {
             UIView.animate(
@@ -1992,21 +2016,25 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     }
 
     private func applySwipeOffset(_ offset: CGFloat) {
+        currentSwipeOffset = offset
         rowView.transform = CGAffineTransform(translationX: offset, y: 0)
         let revealed = min(contentView.bounds.width, max(0, -offset))
         let layout = MobileRowSwipe.actionLayout(
             in: contentView.bounds,
-            revealed: revealed
+            revealed: revealed,
+            armed: isSwipeArmed
         )
-        let isHidden = revealed <= 0
-        actionBackdropView.isHidden = isHidden
-        actionButton.isHidden = isHidden
+        // Clip continuously through zero; hiding here would erase the closing animation.
+        actionBackdropView.isHidden = configuration?.swipeAction == nil
+        actionButton.isHidden = configuration?.swipeAction == nil
+        actionButton.accessibilityElementsHidden = revealed <= 0
         actionBackdropView.frame = layout.backdrop
         actionButton.frame = layout.controlInBackdrop
     }
 
     @objc private func tapped() {
-        guard restingOffset == 0 else {
+        guard !isCommittingSwipe else { return }
+        guard currentSwipeOffset == 0, swipeAnimator == nil else {
             animate(to: 0)
             return
         }
@@ -2014,13 +2042,18 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     }
 
     @objc private func actionButtonTapped() {
-        let action = configuration?.swipeAction
-        animate(to: 0) { action?.perform() }
+        guard !isCommittingSwipe else { return }
+        guard let action = configuration?.swipeAction else { return }
+        feedback.commit()
+        isCommittingSwipe = true
+        animate(to: -contentView.bounds.width) { action.perform() }
     }
 
     @objc private func performAccessibilitySwipeAction() -> Bool {
-        configuration?.swipeAction?.perform()
-        return configuration?.swipeAction != nil
+        guard !isCommittingSwipe, let action = configuration?.swipeAction else { return false }
+        feedback.commit()
+        action.perform()
+        return true
     }
 
     override func accessibilityActivate() -> Bool {
@@ -2030,12 +2063,21 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
     }
 
     @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
-        guard let configuration, configuration.swipeAction != nil else { return }
-        let translation = recognizer.translation(in: contentView).x
-        switch recognizer.state {
+        handleSwipe(
+            state: recognizer.state,
+            translation: recognizer.translation(in: contentView).x,
+            velocity: recognizer.velocity(in: contentView).x
+        )
+    }
+
+    fileprivate func handleSwipe(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+        guard let configuration, configuration.swipeAction != nil, !isCommittingSwipe else { return }
+        switch state {
         case .began:
-            beganAtOffset = restingOffset
-            feedback.prepare()
+            interruptSwipeAnimation()
+            beganAtOffset = currentSwipeOffset
+            feedback.begin(isArmed: isSwipeArmed)
+            fallthrough
         case .changed:
             let offset = MobileRowSwipe.offset(
                 translation: translation,
@@ -2048,15 +2090,20 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
                 rowWidth: contentView.bounds.width,
                 allowsFullSwipe: !configuration.isArchived
             )
-            if armed, !isSwipeArmed { feedback.impactOccurred() }
+            feedback.update(isArmed: armed)
             setSwipeArmed(armed, animated: true)
             applySwipeOffset(offset)
         case .ended:
-            let offset = rowView.transform.tx
+            feedback.end()
+            let offset = MobileRowSwipe.offset(
+                translation: translation, resting: beganAtOffset,
+                rowWidth: contentView.bounds.width, allowsFullSwipe: !configuration.isArchived
+            )
+            applySwipeOffset(offset)
             let projected = MobileRowSwipe.offset(
                 translation: MobileRowSwipe.projectedTranslation(
                     translation,
-                    velocity: recognizer.velocity(in: contentView).x
+                    velocity: velocity
                 ),
                 resting: beganAtOffset,
                 rowWidth: contentView.bounds.width,
@@ -2068,43 +2115,91 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
                 rowWidth: contentView.bounds.width,
                 allowsFullSwipe: !configuration.isArchived
             ) {
-            case .closed: animate(to: 0)
-            case .open: animate(to: -MobileRowSwipe.actionWidth)
+            case .closed: animate(to: 0, velocity: velocity)
+            case .open: animate(to: -MobileRowSwipe.actionWidth, velocity: velocity)
             case .performed:
+                feedback.commit()
                 let action = configuration.swipeAction
-                animate(to: -contentView.bounds.width) { action?.perform() }
+                isCommittingSwipe = true
+                animate(to: -contentView.bounds.width, velocity: velocity) { action?.perform() }
             }
         case .cancelled, .failed:
+            feedback.end()
             animate(to: 0)
         default:
             break
         }
     }
 
-    private func animate(to offset: CGFloat, completion: (() -> Void)? = nil) {
-        restingOffset = offset
-        let armed = MobileRowSwipe.isArmed(
-            offset: offset,
-            rowWidth: contentView.bounds.width,
+    /// Pick up the pixels currently on screen, not the previous spring's destination.
+    private func interruptSwipeAnimation() {
+        guard let animator = swipeAnimator else { return }
+        let visibleOffset = rowView.layer.presentation()?.affineTransform().tx ?? currentSwipeOffset
+        swipeAnimator = nil
+        animator.stopAnimation(true)
+        applySwipeOffset(visibleOffset)
+    }
+
+    private func resetSwipe() {
+        feedback.end()
+        // Cancel an in-flight touch before this cell can represent another record.
+        isCommittingSwipe = true
+        panRecognizer.isEnabled = false
+        swipeAnimator?.stopAnimation(true)
+        swipeAnimator = nil
+        isCommittingSwipe = false
+        beganAtOffset = 0
+        isSwipeArmed = false
+        actionButton.imageView?.removeAllSymbolEffects(animated: false)
+        applySwipeOffset(0)
+        panRecognizer.isEnabled = configuration?.swipeAction != nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { resetSwipe() }
+    }
+
+    private func animate(to offset: CGFloat, velocity: CGFloat = 0, completion: (() -> Void)? = nil) {
+        interruptSwipeAnimation()
+        setSwipeArmed(MobileRowSwipe.isArmed(
+            offset: offset, rowWidth: contentView.bounds.width,
             allowsFullSwipe: !(configuration?.isArchived ?? true)
-        )
-        setSwipeArmed(armed, animated: true)
-        UIView.animate(
-            withDuration: MobileRowSwipe.settleResponse,
-            delay: 0,
-            usingSpringWithDamping: MobileRowSwipe.settleDamping,
-            initialSpringVelocity: 0,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
+        ), animated: true)
+        let itemID = representedItemID
+        let finish = { [weak self] in
+            guard let self, self.representedItemID == itemID else { return }
+            self.swipeAnimator = nil
             self.applySwipeOffset(offset)
-        } completion: { _ in
+            self.isCommittingSwipe = false
             completion?()
+            // The host may refuse or asynchronously remove the row. Never leave it offscreen.
+            if completion != nil, self.representedItemID == itemID { self.animate(to: 0) }
         }
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            applySwipeOffset(offset)
+            finish()
+            return
+        }
+        let distance = offset - currentSwipeOffset
+        let normalizedVelocity = MobileRowSwipe.springVelocity(velocity, distance: distance)
+        let timing = UISpringTimingParameters(
+            dampingRatio: MobileRowSwipe.settleDamping,
+            initialVelocity: CGVector(dx: normalizedVelocity, dy: 0)
+        )
+        let animator = UIViewPropertyAnimator(duration: MobileRowSwipe.settleResponse, timingParameters: timing)
+        swipeAnimator = animator
+        animator.addAnimations { [weak self] in self?.applySwipeOffset(offset) }
+        animator.addCompletion { position in
+            guard position == .end else { return }
+            finish()
+        }
+        animator.startAnimation()
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === panRecognizer else { return true }
-        return MobileRowSwipe.isSwipeDirection(velocity: panRecognizer.velocity(in: contentView))
+        return !isCommittingSwipe && MobileRowSwipe.isSwipeDirection(velocity: panRecognizer.velocity(in: contentView))
     }
 
     func contextMenuInteraction(
@@ -2262,13 +2357,16 @@ struct MobileDashboardTitleReuseMetrics: Equatable {
 
 struct MobileDashboardSwipeArmMetrics: Equatable {
     let restingUsesControlPlate: Bool
-    let armedUsesSelectionPlate: Bool
+    let armedUsesAccentPlate: Bool
     let disarmedUsesControlPlate: Bool
     let firstArmMotionCount: Int
     let disarmMotionCount: Int
     let secondArmMotionCount: Int
-    let reducedMotionUsesSelectionPlate: Bool
+    let reducedMotionUsesAccentPlate: Bool
     let reducedMotionArmMotionCount: Int
+    let armedShowsReleaseInstruction: Bool
+    let retreatRestoresActionTitle: Bool
+    let reducedMotionShowsReleaseInstruction: Bool
 }
 
 /// Exercises the armed edge on the same retained UIKit cell the shipping dashboard uses. This
@@ -2300,20 +2398,24 @@ enum MobileDashboardSwipeArmProbe {
 
         return MobileDashboardSwipeArmMetrics(
             restingUsesControlPlate: resting.backdrop == theme.uiControlResting,
-            armedUsesSelectionPlate: firstArm.isArmed
-                && firstArm.backdrop == theme.uiSelection,
+            armedUsesAccentPlate: firstArm.isArmed
+                && firstArm.backdrop == theme.uiAccent,
             disarmedUsesControlPlate: !disarmed.isArmed
                 && disarmed.backdrop == theme.uiControlResting,
             firstArmMotionCount: firstArm.motionCount,
             disarmMotionCount: disarmed.motionCount,
             secondArmMotionCount: secondArm.motionCount,
-            reducedMotionUsesSelectionPlate: reducedMotionArm.isArmed
-                && reducedMotionArm.backdrop == theme.uiSelection,
-            reducedMotionArmMotionCount: reducedMotionArm.motionCount
+            reducedMotionUsesAccentPlate: reducedMotionArm.isArmed
+                && reducedMotionArm.backdrop == theme.uiAccent,
+            reducedMotionArmMotionCount: reducedMotionArm.motionCount,
+            armedShowsReleaseInstruction: firstArm.title == MobileRowSwipe.releaseTitle
+                && firstArm.ink == theme.uiAccentForeground,
+            retreatRestoresActionTitle: disarmed.title == MobileL10n.string("Archive"),
+            reducedMotionShowsReleaseInstruction: reducedMotionArm.title == MobileRowSwipe.releaseTitle
         )
     }
 
-    private static func configuration(
+    fileprivate static func configuration(
         theme: RemoteThemePalette
     ) -> DashboardUIKitRowConfiguration {
         let session = RemoteSessionSummaryDTO(
@@ -2345,6 +2447,64 @@ enum MobileDashboardSwipeArmProbe {
             ),
             contextMenu: nil
         )
+    }
+}
+
+/// Uses the production pan reducer and UICollectionViewCell layout, including an update while
+/// the finger is down. Repeated layout is where assigning a transformed frame moved the origin.
+@MainActor
+enum MobileDashboardSwipeLifecycleProbe {
+    static func exerciseFeedback(_ feedback: MobileRowSwipeFeedback) {
+        let configuration = MobileDashboardSwipeArmProbe.configuration(
+            theme: RemoteThemePalette(RemoteAppModel.demoTheme)
+        )
+        let cell = DashboardRowCollectionCell(frame: CGRect(x: 0, y: 0, width: 361, height: 58))
+        cell.configure(configuration)
+        cell.layoutIfNeeded()
+        cell.setSwipeFeedbackForTesting(feedback)
+        cell.handleSwipe(state: .began, translation: -10, velocity: -100)
+        cell.handleSwipe(state: .changed, translation: -210, velocity: -100)
+        cell.handleSwipe(state: .changed, translation: -220, velocity: -100)
+        cell.configure(configuration) // A live update is silent and preserves the armed edge.
+        cell.handleSwipe(state: .changed, translation: -100, velocity: 100)
+        cell.handleSwipe(state: .changed, translation: -220, velocity: -100)
+        cell.handleSwipe(state: .ended, translation: -220, velocity: -100)
+        cell.handleSwipe(state: .ended, translation: -220, velocity: -100)
+        cell.prepareForReuse() // No completion or disarm haptic after recycling.
+    }
+
+    static func exercise() -> [CGFloat] {
+        let configuration = MobileDashboardSwipeArmProbe.configuration(
+            theme: RemoteThemePalette(RemoteAppModel.demoTheme)
+        )
+        let cell = DashboardRowCollectionCell(frame: CGRect(x: 0, y: 0, width: 361, height: 58))
+        cell.configure(configuration)
+        cell.layoutIfNeeded()
+        cell.handleSwipe(state: .began, translation: -12, velocity: -100)
+        cell.handleSwipe(state: .changed, translation: -110, velocity: -100)
+        var result: [CGFloat] = []
+        for _ in 0..<3 {
+            cell.setNeedsLayout()
+            cell.layoutIfNeeded()
+            result.append(cell.swipeGeometryForTesting.origin)
+        }
+        cell.configure(configuration)
+        cell.layoutIfNeeded()
+        result.append(cell.swipeGeometryForTesting.offset)
+        result.append(cell.swipeGeometryForTesting.revealed)
+        cell.handleSwipe(state: .changed, translation: -130, velocity: -100)
+        cell.layoutIfNeeded()
+        result.append(cell.swipeGeometryForTesting.origin)
+        UIView.performWithoutAnimation {
+            cell.handleSwipe(state: .cancelled, translation: -130, velocity: 0)
+        }
+        result.append(cell.swipeGeometryForTesting.offset)
+        cell.prepareForReuse()
+        cell.configure(configuration)
+        cell.layoutIfNeeded()
+        result.append(cell.swipeGeometryForTesting.origin)
+        result.append(cell.swipeGeometryForTesting.revealed)
+        return result
     }
 }
 

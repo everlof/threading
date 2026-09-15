@@ -2976,6 +2976,14 @@ state is device-local rather than collaborative: another person or one of your o
 not inherit half-written text, your terminal input choice, or pull your view away from where you
 left it. Drafts are retained until sent or cleared; older position-only records may be pruned.
 
+On the iPhone session list, swipe left to reveal **Archive**, or drag past halfway and release
+to archive directly. The action highlights and says **Release to archive** when releasing will
+archive; pulling back changes it to **Archive** again. A firm tick marks that threshold, a softer
+tick marks pulling back, and a distinct impact acknowledges committing the action. Ordinary
+dragging and closing stay silent. Swipe right or tap the shifted row to close the action. You can pick up a
+row while it is settling; live status updates preserve your gesture. Archived rows reveal
+**Restore**, which requires a tap. These actions are also available through accessibility.
+
 The iPhone also remembers the last app appearance received from each paired Mac. After restarting,
 it uses that theme immediately while reconnecting or offline, then adopts and remembers any newer
 theme from the Mac. Changing Mac appearance from the iPhone updates the same remembered value.

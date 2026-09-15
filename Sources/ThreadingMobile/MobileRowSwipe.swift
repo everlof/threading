@@ -60,9 +60,12 @@ enum MobileRowSwipe {
         }
     }
 
-    static func actionLayout(in bounds: CGRect, revealed: CGFloat) -> ActionLayout {
+    static var releaseTitle: String { MobileL10n.string("Release to archive") }
+
+    static func actionLayout(in bounds: CGRect, revealed: CGFloat, armed: Bool = false) -> ActionLayout {
         let visibleWidth = min(bounds.width, max(0, revealed))
-        let controlWidth = min(bounds.width, actionWidth)
+        // The armed instruction earns a wider, fixed slot at the actual trigger distance.
+        let controlWidth = min(bounds.width, armed ? max(actionWidth, bounds.width * fullSwipeFraction) : actionWidth)
         return ActionLayout(
             backdrop: CGRect(
                 x: bounds.maxX - visibleWidth,
@@ -97,6 +100,14 @@ enum MobileRowSwipe {
     /// The snap back to rest. A row settles at chrome pace, not at a spring's own pace.
     static let settleResponse: Double = 0.28
     static let settleDamping: Double = 0.86
+
+    /// Keep tiny remaining distances from turning a normal flick into an extreme spring.
+    static let maximumSpringVelocity: CGFloat = 4
+
+    static func springVelocity(_ velocity: CGFloat, distance: CGFloat) -> CGFloat {
+        guard distance != 0 else { return 0 }
+        return min(maximumSpringVelocity, max(-maximumSpringVelocity, velocity / distance))
+    }
 
     /// What letting go means.
     enum Release: Equatable {
@@ -173,8 +184,64 @@ enum MobileRowSwipe {
         if isArmed(offset: offset, rowWidth: rowWidth, allowsFullSwipe: allowsFullSwipe) {
             return .performed
         }
-        let thrown = max(-offset, -projectedOffset)
+        // Respect a closing throw too; taking the larger distance traps an open row.
+        let thrown = -projectedOffset
         return thrown >= actionWidth * openFraction ? .open : .closed
+    }
+}
+
+/// Feedback belongs to finger-driven edges, never to a spring or a catalogue refresh.
+/// A commit acknowledges the user's command, not a successful response from the Mac.
+@MainActor
+final class MobileRowSwipeFeedback {
+    static let armIntensity: CGFloat = 1
+    static let retreatIntensity: CGFloat = 0.6
+    static let commitIntensity: CGFloat = 1
+
+    private let arm: any MobileImpactFeedbackProducing
+    private let retreat: any MobileImpactFeedbackProducing
+    private let commitImpact: any MobileImpactFeedbackProducing
+    private var isTracking = false
+    private var isArmed = false
+
+    init(
+        arm: any MobileImpactFeedbackProducing = UIImpactFeedbackGenerator(style: .medium),
+        retreat: any MobileImpactFeedbackProducing = UIImpactFeedbackGenerator(style: .soft),
+        commit: any MobileImpactFeedbackProducing = UIImpactFeedbackGenerator(style: .rigid)
+    ) {
+        self.arm = arm
+        self.retreat = retreat
+        self.commitImpact = commit
+    }
+
+    func begin(isArmed: Bool = false) {
+        isTracking = true
+        self.isArmed = isArmed
+        arm.prepare()
+        retreat.prepare()
+        commitImpact.prepare()
+    }
+
+    func update(isArmed: Bool) {
+        guard isTracking, self.isArmed != isArmed else { return }
+        self.isArmed = isArmed
+        let generator = isArmed ? arm : retreat
+        generator.impactOccurred(intensity: isArmed ? Self.armIntensity : Self.retreatIntensity)
+        // Keep a reversal responsive without making ordinary drag samples do preparation work.
+        arm.prepare()
+        retreat.prepare()
+        commitImpact.prepare()
+    }
+
+    func end() {
+        isTracking = false
+        isArmed = false
+    }
+
+    func commit() {
+        end()
+        commitImpact.impactOccurred(intensity: Self.commitIntensity)
+        commitImpact.prepare()
     }
 }
 
@@ -229,7 +296,7 @@ private struct MobileRowSwipeModifier: ViewModifier {
     /// How far the finger has carried the row during the pan in progress.
     @State private var travel: CGFloat?
     @State private var rowWidth: CGFloat = 0
-    @State private var armFeedback = UIImpactFeedbackGenerator(style: .medium)
+    @State private var feedback = MobileRowSwipeFeedback()
     /// Changes only when the action becomes armed, so the symbol answers that edge once rather
     /// than bouncing again when the finger crosses back below the threshold.
     @State private var armEffectTrigger = 0
@@ -266,12 +333,22 @@ private struct MobileRowSwipeModifier: ViewModifier {
                     // The Taptic Engine takes a moment to wake, and the arming threshold can be
                     // crossed within one of a swipe's first frames. Ask for it at the start of
                     // the pan so the feedback lands with the colour change rather than after it.
-                    onBegin: { armFeedback.prepare() },
-                    onChange: { travel = $0 },
+                    onBegin: { feedback.begin(isArmed: armed) },
+                    onChange: { translation in
+                        travel = translation
+                        feedback.update(isArmed: MobileRowSwipe.isArmed(
+                            offset: MobileRowSwipe.offset(
+                                translation: translation, resting: resting,
+                                rowWidth: rowWidth, allowsFullSwipe: allowsFullSwipe
+                            ),
+                            rowWidth: rowWidth, allowsFullSwipe: allowsFullSwipe
+                        ))
+                    },
                     onEnd: { translation, velocity in
                         settle(translation: translation, velocity: velocity, action: action)
                     },
                     onCancel: {
+                        feedback.end()
                         land()
                         close()
                     }
@@ -284,13 +361,13 @@ private struct MobileRowSwipeModifier: ViewModifier {
             }
             .onChange(of: armed) { _, isArmed in
                 guard isArmed else { return }
-                armFeedback.impactOccurred()
                 guard !reduceMotion else { return }
                 armEffectTrigger += 1
             }
             .accessibilityAction(named: Text(action.title)) {
-                action.perform()
+                perform(action)
             }
+            .onDisappear { feedback.end() }
     }
 
     // MARK: - Geometry
@@ -325,20 +402,20 @@ private struct MobileRowSwipeModifier: ViewModifier {
                         options: .nonRepeating,
                         value: armEffectTrigger
                     )
-                Text(action.title)
+                Text(armed ? MobileRowSwipe.releaseTitle : action.title)
                     .font(.caption2)
                     .lineLimit(1)
             }
-            .frame(width: MobileRowSwipe.actionWidth)
+            .frame(width: armed ? max(MobileRowSwipe.actionWidth, rowWidth * MobileRowSwipe.fullSwipeFraction) : MobileRowSwipe.actionWidth)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(ink(for: action))
-        .frame(width: MobileRowSwipe.actionWidth)
+        .foregroundStyle(armed ? theme.accentForeground : ink(for: action))
+        .frame(width: armed ? max(MobileRowSwipe.actionWidth, rowWidth * MobileRowSwipe.fullSwipeFraction) : MobileRowSwipe.actionWidth)
         .frame(maxHeight: .infinity)
         .frame(width: max(0, revealed), alignment: .trailing)
-        .background(armed ? theme.selection : theme.controlResting)
+        .background(armed ? theme.accent : theme.controlResting)
         .clipped()
         .accessibilityHidden(revealed <= 0)
     }
@@ -386,6 +463,7 @@ private struct MobileRowSwipeModifier: ViewModifier {
             rowWidth: rowWidth,
             allowsFullSwipe: allowsFullSwipe
         )
+        feedback.end()
         land()
         switch release {
         case .closed:
@@ -398,6 +476,7 @@ private struct MobileRowSwipeModifier: ViewModifier {
     }
 
     private func perform(_ action: MobileRowSwipeAction) {
+        feedback.commit()
         close()
         action.perform()
     }

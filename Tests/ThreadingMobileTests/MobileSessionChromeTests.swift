@@ -522,6 +522,12 @@ final class MobileSessionChromeTests: XCTestCase {
         )
     }
 
+    func testAClosingFlickClosesAnOpenRow() {
+        XCTAssertEqual(MobileRowSwipe.release(
+            offset: -65, projectedOffset: 0, rowWidth: 340, allowsFullSwipe: true
+        ), .closed)
+    }
+
     func testDraggingPastMostOfTheRowPerformsTheActionOnRelease() {
         XCTAssertEqual(
             MobileRowSwipe.release(
