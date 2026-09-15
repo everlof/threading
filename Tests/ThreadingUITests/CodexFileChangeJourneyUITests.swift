@@ -80,7 +80,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             "the empty panel did not open a default Overview"
         )
         XCTAssertTrue(
-            firstLaunch.buttons["Finder"].waitForExistence(timeout: 10),
+            firstLaunch.buttons["Show this folder in Finder"].waitForExistence(timeout: 10),
             "Overview did not open with its right-hand Info section focused"
         )
         let infoLoaded = XCTNSPredicateExpectation(
