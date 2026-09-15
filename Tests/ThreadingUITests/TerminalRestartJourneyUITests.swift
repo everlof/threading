@@ -21,7 +21,7 @@ final class TerminalRestartJourneyUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 20), .completed)
         let oldPID = try XCTUnwrap(Self.processIDs(at: launches).first)
-        let actions = app.buttons["sidebar.session.actions"]
+        let actions = app.buttons["Session context menu"]
         XCTAssertTrue(actions.waitForExistence(timeout: 5))
         actions.click()
         let restart = app.menuItems["Restart Terminal"]

@@ -28,7 +28,9 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
         let statusFile = fixture.project.appendingPathComponent("status.txt")
 
         let firstLaunch = XCUIApplication()
-        let targetSize = sandbox.configure(firstLaunch)
+        sandbox.configure(firstLaunch)
+        // The floating usage card needs a gutter beside the readable conversation column.
+        let targetSize = UIWindowContract.configure(firstLaunch, preferred: CGSize(width: 1800, height: 900))
         fixture.configure(firstLaunch, scenarioRoot: sandbox.root)
         application = firstLaunch
         sandbox.launch(firstLaunch)

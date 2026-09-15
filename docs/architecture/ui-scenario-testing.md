@@ -64,6 +64,12 @@ across its relaunches and removed in teardown. This prevents a saved status-card
 from changing a fresh scenario. Evidence capture is installed for every marked scenario home,
 including the launch-only case with no provider fixture.
 
+The file-change journey requests a wider viewport for its floating usage card: the shipping
+card deliberately withdraws when the conversation's readable column leaves no trailing gutter.
+Tests must supply that space before asserting on the card's controls. The themed menu overlay
+explicitly exposes its menu surfaces, and each live surface identifies itself as an accessibility
+element; a menu painted in the window is not proof that UI automation or VoiceOver can reach it.
+
 `THREADING_UI_SCENARIO_HOME` is that home's name, and it is also how the application recognises
 that a machine rather than a person is driving it. `AutomatedRun` reads it, so the refusal beep an
 unavailable command makes, and any bell a fixture agent rings, stay silent for the whole lane: a scenario clicks and

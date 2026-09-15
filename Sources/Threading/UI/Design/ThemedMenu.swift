@@ -1360,6 +1360,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
     override var acceptsFirstResponder: Bool { true }
     override func isAccessibilityElement() -> Bool { false }
     override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    override func accessibilityChildren() -> [Any]? { columns.map(\.surface) }
     override func accessibilityPerformPress() -> Bool {
         onDismiss?()
         return true
@@ -2895,6 +2896,7 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
     override func accessibilityRole() -> NSAccessibility.Role? {
         isRetiredFromAccessibility ? nil : .menu
     }
+    override func isAccessibilityElement() -> Bool { !isRetiredFromAccessibility }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {

@@ -13,8 +13,8 @@ enum UIWindowContract {
     static let screenMargin: CGFloat = 80
 
     @discardableResult
-    static func configure(_ application: XCUIApplication) -> CGSize {
-        let target = targetSize()
+    static func configure(_ application: XCUIApplication, preferred: CGSize = preferredSize) -> CGSize {
+        let target = targetSize(preferred: preferred)
         application.launchEnvironment["THREADING_UI_WINDOW_WIDTH"] = String(Int(target.width))
         application.launchEnvironment["THREADING_UI_WINDOW_HEIGHT"] = String(Int(target.height))
         return target
@@ -31,11 +31,11 @@ enum UIWindowContract {
         XCTAssertGreaterThanOrEqual(frame.height, target.height - 2, file: file, line: line)
     }
 
-    private static func targetSize() -> CGSize {
-        guard let visible = NSScreen.main?.visibleFrame.size else { return preferredSize }
+    private static func targetSize(preferred: CGSize) -> CGSize {
+        guard let visible = NSScreen.main?.visibleFrame.size else { return preferred }
         return CGSize(
-            width: min(preferredSize.width, max(1, visible.width - screenMargin)),
-            height: min(preferredSize.height, max(1, visible.height - screenMargin))
+            width: min(preferred.width, max(1, visible.width - screenMargin)),
+            height: min(preferred.height, max(1, visible.height - screenMargin))
         )
     }
 }
