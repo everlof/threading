@@ -1360,7 +1360,8 @@ private final class ThemedMenuOverlayView: ThemedControl {
     override var acceptsFirstResponder: Bool { true }
     override func isAccessibilityElement() -> Bool { false }
     override func accessibilityRole() -> NSAccessibility.Role? { .group }
-    override func accessibilityChildren() -> [Any]? { columns.map(\.surface) }
+    // Open submenus are children of their owning rows, not duplicate roots in this overlay.
+    override func accessibilityChildren() -> [Any]? { columns.prefix(1).map(\.surface) }
     override func accessibilityPerformPress() -> Bool {
         onDismiss?()
         return true

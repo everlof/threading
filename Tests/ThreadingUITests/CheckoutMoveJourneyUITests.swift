@@ -52,7 +52,7 @@ final class CheckoutMoveJourneyUITests: XCTestCase {
         openMoveSubmenu(in: app)
         XCTAssertTrue(
             app.menuItems.matching(NSPredicate(
-                format: "label BEGINSWITH %@", "Pending: \(Self.targetBranch)"
+                format: "title BEGINSWITH %@", "Pending: \(Self.targetBranch)"
             )).firstMatch.waitForExistence(timeout: 5),
             "the active turn did not retain a visible pending checkout move"
         )
