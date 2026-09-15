@@ -4220,7 +4220,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(title.accessibilityTitle(), "First")
         XCTAssertEqual(title.accessibilityRole(), .button)
         let action = try XCTUnwrap(title.accessibilityChildren()?.first as? ThemedIconButton)
-        XCTAssertEqual(action.accessibilityLabel(), "Session context menu")
+        XCTAssertEqual(action.accessibilityTitle(), "Session context menu")
 
         title.update(title: "Second", symbolName: "folder", identity: 2)
         XCTAssertEqual(title.title, "Second")
