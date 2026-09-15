@@ -410,6 +410,60 @@ final class RemoteConnectionFailureTests: XCTestCase {
         XCTAssertFalse(encoded.contains("\"z\""))
     }
 
+    func testBackgroundLossShowsReconnectingUntilRecoveryFails() async throws {
+        var routeReply: CheckedContinuation<RemoteClient?, Never>?
+        let connection = makeConnection(port: 1, sessionID: UUID().uuidString) { _ in
+            await withCheckedContinuation { routeReply = $0 }
+        }
+        connection.receiveServerTextForTesting(
+            #"{"type":"hello","surface":"terminal","capability":"view","cols":80,"rows":24,"title":"Existing session"}"#
+        )
+        XCTAssertTrue(connection.hasEverConnected)
+        connection.noteEnteringBackground()
+        connection.receiveTransportFailureForTesting(URLError(.networkConnectionLost))
+        XCTAssertEqual(connection.phase, .connecting, "backoff is recovery, not a final failure")
+        XCTAssertNil(connection.phase.failure)
+        XCTAssertEqual(
+            MobileSessionChrome.diallingStatus(hasEverConnected: connection.hasEverConnected, routeWalk: nil),
+            MobileL10n.string("Reconnecting…")
+        )
+
+        connection.resumeAfterActivation()
+        XCTAssertEqual(connection.phase, .connecting)
+        let resolving = await Self.eventually { routeReply != nil }
+        XCTAssertTrue(resolving)
+        XCTAssertEqual(connection.phase, .connecting, "route lookup must not restore the stale error")
+        routeReply?.resume(returning: nil)
+        let failed = await Self.eventually { connection.phase.failure != nil }
+        XCTAssertTrue(failed, "a route walk that cannot recover still exposes the failure")
+        XCTAssertFalse(connection.isAwaitingResume)
+        connection.disconnect()
+    }
+
+    func testAbandonedRecoveryCannotRestoreAnOldError() async throws {
+        var routeReply: CheckedContinuation<RemoteClient?, Never>?
+        let connection = makeConnection(port: 1, sessionID: UUID().uuidString) { _ in
+            await withCheckedContinuation { routeReply = $0 }
+        }
+        connection.receiveTransportFailureForTesting(URLError(.networkConnectionLost))
+        connection.retryNow()
+        XCTAssertEqual(connection.phase, .connecting)
+        let resolving = await Self.eventually { routeReply != nil }
+        XCTAssertTrue(resolving)
+        connection.disconnect()
+        let ended = connection.phase
+        routeReply?.resume(returning: nil)
+        await Task.yield()
+        XCTAssertEqual(connection.phase, ended)
+    }
+
+    func testLossWithoutRecoveryStillShowsTheError() {
+        let connection = makeConnection(port: 1, sessionID: UUID().uuidString)
+        connection.receiveTransportFailureForTesting(URLError(.networkConnectionLost))
+        XCTAssertNotNil(connection.phase.failure)
+        connection.disconnect()
+    }
+
     // MARK: - A dead route is not dialled blind
 
     /// The 2026-09-02 report: Wi-Fi went, both sockets died within a millisecond, and the

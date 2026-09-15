@@ -422,6 +422,7 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var isAwaitingResume = false
     private var resumeProbeGeneration: Int?
     private var backgroundedAt: Date?
+    private var recoveryFailure: RemoteConnectionFailure?
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence = MobileCollaborationPresence()
@@ -1181,13 +1182,16 @@ final class RemoteSessionConnection: ObservableObject {
     private func reconnectThroughModel(_ request: MobileSessionReconnectRequest) {
         guard let reconnectClient else { return }
         let generation = connectionGeneration
+        let previousPhase = phase
+        phase = .connecting
         Task { [weak self] in
-            guard let client = await reconnectClient(request) else {
-                self?.isAwaitingResume = false
-                return
-            }
+            let client = await reconnectClient(request)
             guard let self, self.connectionGeneration == generation,
                   self.reconnectTask == nil else { return }
+            guard let client else {
+                self.finishRecoveryWithoutClient(fallback: previousPhase)
+                return
+            }
             self.client = client
             self.connect()
         }
@@ -1796,11 +1800,13 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
 #if DEBUG
+    /// Exercises the same failure and recovery boundaries as a lost WebSocket.
+    func receiveTransportFailureForTesting(_ error: Error) {
+        fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
+        scheduleReconnect(generation: connectionGeneration)
+    }
+
     /// Feeds one server frame through the same handler a real socket frame reaches.
-    ///
-    /// Refusal policy is the part of this class most worth asserting and the part hardest to
-    /// reach: it needs a Mac that answers. Kept out of release builds so nothing shipping can
-    /// inject server state.
     func receiveServerTextForTesting(_ text: String) {
         handle(text)
     }
@@ -1937,6 +1943,7 @@ final class RemoteSessionConnection: ObservableObject {
             cancelHelloDeadline()
             warmTransportState = .active
             phase = .connected
+            recoveryFailure = nil
             hasEverConnected = true
 #if DEBUG
             MobileTerminalWirePerformanceProbe.helloReceived(
@@ -2287,6 +2294,7 @@ final class RemoteSessionConnection: ObservableObject {
         finishSessionResume(result: "failed", code: failureCode)
         finishTerminalInputProbe(result: "failed")
         clearRunPlanState(resetFeature: true)
+        recoveryFailure = failure
         phase = .failed(failure)
         var fields = socketFields(phase: failedPhase)
         fields[.result] = "failed"
@@ -2593,20 +2601,33 @@ final class RemoteSessionConnection: ObservableObject {
             .delayMS: MobileDiagnostics.milliseconds(delay),
             .detail: Self.lossToken(peerSentClose: request.peerSentClose),
         ]) { current, _ in current })
+        // A known session is recovering throughout backoff and route discovery. Keep the
+        // transport failure for diagnostics and for a route walk that cannot recover.
+        if hasEverConnected { phase = .connecting }
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self,
                   self.connectionGeneration == generation,
                   let reconnectClient = self.reconnectClient else { return }
-            guard let client = await reconnectClient(request) else {
-                // Nothing to reconnect with: the locked screen would never be released.
-                self.isAwaitingResume = false
+            self.phase = .connecting
+            let client = await reconnectClient(request)
+            guard !Task.isCancelled, self.connectionGeneration == generation else { return }
+            guard let client else {
+                self.finishRecoveryWithoutClient()
                 return
             }
-            guard !Task.isCancelled, self.connectionGeneration == generation else { return }
             self.client = client
             self.reconnectTask = nil
             self.connect()
+        }
+    }
+
+    private func finishRecoveryWithoutClient(fallback: Phase? = nil) {
+        isAwaitingResume = false
+        if let recoveryFailure {
+            phase = .failed(recoveryFailure)
+        } else if let fallback {
+            phase = fallback
         }
     }
 
@@ -2721,7 +2742,13 @@ final class RemoteSessionConnection: ObservableObject {
         let link = RemoteConnectionLink(string: "https://demo.invalid/#terminal-preview")!
         let connection = RemoteSessionConnection(
             session: session,
-            client: RemoteClient(link: link)
+            client: RemoteClient(link: link),
+            reconnectClient: { _ in
+                if demoMode == "terminal-reconnecting" {
+                    try? await Task.sleep(for: .seconds(60))
+                }
+                return nil
+            }
         )
         connection.phase = .connected
         connection.surface = .terminal
@@ -2944,6 +2971,17 @@ final class RemoteSessionConnection: ObservableObject {
             ]
         }
         connection.pendingTerminalOutput = Data(lines.joined(separator: "\r\n").utf8)
+        if demoMode == "terminal-reconnecting" || demoMode == "terminal-recovery-failed" {
+            connection.hasEverConnected = true
+            Task { [weak connection] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let connection else { return }
+                connection.noteResigningActive()
+                connection.noteEnteringBackground()
+                connection.receiveTransportFailureForTesting(URLError(.networkConnectionLost))
+                connection.resumeAfterActivation()
+            }
+        }
         guard demoMode == "terminal-collaboration" else { return connection }
         let anna = RemotePresenceDTO(
             presenceID: "terminal-anna",

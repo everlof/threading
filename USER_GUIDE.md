@@ -2643,6 +2643,10 @@ Threading iPhone app or a browser. Under it is a list of **ways in**, each with 
 status line, and four lines saying who can reach it, who can see the traffic, what happens after a
 restart, and whether it works away from home.
 
+When returning to an open chat, “Reconnecting…” means the phone is restoring its connection to
+the existing session. The agent is not restarted. If recovery cannot find a route, the connection
+error becomes visible again.
+
 - **This network** (on). Your phone reaches this Mac when both are on the same Wi-Fi. The status
   line names the address and port it is answering on, such as `Reachable at 192.168.1.42:8760`, or
   the specific reason there is none. The port stays the same across restarts, so a paired phone

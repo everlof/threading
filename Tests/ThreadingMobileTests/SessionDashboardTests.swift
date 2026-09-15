@@ -1130,6 +1130,8 @@ final class MobileDemoSceneTests: XCTestCase {
             case .terminalCodexTUI: expected = ("terminal-codex-tui", .terminal)
             case .terminalCollaboration: expected = ("terminal-collaboration", .terminal)
             case .terminalSoloPresence: expected = ("terminal-solo-presence", .terminal)
+            case .terminalReconnecting: expected = ("terminal-reconnecting", .terminal)
+            case .terminalRecoveryFailed: expected = ("terminal-recovery-failed", .terminal)
             case .terminalCompose: expected = ("terminal-compose", .terminal)
             case .terminalScrollback: expected = ("terminal-scrollback", .terminal)
             case .terminalSelection: expected = ("terminal-selection", .terminal)

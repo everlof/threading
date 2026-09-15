@@ -922,6 +922,17 @@ for the reconnect, which resigned the keyboard and unmounted the line composer s
 in. `RemoteTerminalViewportLeaseTests` proves the prompt release and the long-background
 reconnect that keeps the screen.
 
+A previously connected session presents “Reconnecting…” throughout automatic retry backoff and
+route lookup, including the snapshot shown when returning from another app. The socket failure
+remains in diagnostics; if route recovery returns no client, the original failure becomes visible
+again and the resume hold is released. Activation and manual retry enter the connecting phase
+before asynchronous route discovery. A cancelled recovery cannot overwrite a newer connection or
+a closed screen. These transitions retain the existing session identity and terminal replay.
+Recovery status is host-owned and uses the existing themed chrome. Each transition updates one
+connection and retains one failure value; it performs no transcript scan or additional I/O.
+`RemoteConnectionFailureTests` covers backoff, activation, failed recovery and cancellation;
+`terminal-reconnecting` and `terminal-recovery-failed` capture the shipping session-detail chrome.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients

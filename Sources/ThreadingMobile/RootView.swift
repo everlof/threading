@@ -80,6 +80,8 @@ extension MobileDemoScene {
     static let terminalFixtureIDs: Set<String> = [
         "terminal-collaboration",
         "terminal-solo-presence",
+        "terminal-reconnecting",
+        "terminal-recovery-failed",
         "terminal-compose",
         "terminal-ansi",
         "terminal-scrollback",
@@ -190,6 +192,8 @@ enum MobileDemoFixture: String, CaseIterable {
     case terminalCodexTUI = "terminal-codex-tui"
     case terminalCollaboration = "terminal-collaboration"
     case terminalSoloPresence = "terminal-solo-presence"
+    case terminalReconnecting = "terminal-reconnecting"
+    case terminalRecoveryFailed = "terminal-recovery-failed"
     case terminalCompose = "terminal-compose"
     case terminalScrollback = "terminal-scrollback"
     case terminalSelection = "terminal-selection"
@@ -438,7 +442,9 @@ struct RootView: View {
         switch MobileDemoScene.current {
         case .terminal:
             NavigationStack {
-                if isMarketingTerminalFixture {
+                if isMarketingTerminalFixture
+                    || ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-reconnecting"
+                    || ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-recovery-failed" {
                     // Use the shipping detail chrome so the capture proves the actual account,
                     // usage, Workspace and session-actions menu rather than a fixture facsimile.
                     SessionDetailView(evidenceConnection: demoTerminal)
