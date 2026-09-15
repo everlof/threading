@@ -47,7 +47,7 @@ final class CheckoutMoveJourneyUITests: XCTestCase {
         openCheckoutMenu(in: app)
         let target = app.menuItems[Self.targetBranch]
         XCTAssertTrue(target.waitForExistence(timeout: 5), "the sibling checkout was not offered")
-        target.click()
+        target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
 
         openMoveSubmenu(in: app)
         XCTAssertTrue(
@@ -112,7 +112,9 @@ final class CheckoutMoveJourneyUITests: XCTestCase {
         context.click()
         let move = application.menuItems["Move to Checkout"]
         XCTAssertTrue(move.waitForExistence(timeout: 5))
-        move.click()
+        // XCUI's MenuItem.click traverses native NSMenu ownership. This menu is drawn in
+        // the app window, so resolve its semantic row and exercise its actual pointer target.
+        move.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     }
 
     private func submit(

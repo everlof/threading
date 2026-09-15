@@ -32,7 +32,7 @@ final class TerminalRestartJourneyUITests: XCTestCase {
             description: "The shared session menu offers recovery without typing into the terminal.",
             journey: "Restart terminal", in: sandbox, of: window
         )
-        restart.click()
+        restart.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         let second = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             Self.processIDs(at: launches).count == 2
         }, object: nil)

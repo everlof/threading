@@ -210,12 +210,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        // AppKit exposes the fold's visible NSTextField as the stable child in a table row;
-        // XCUI does not preserve the custom NSView disclosure role through that container.
-        // Assert the user-visible semantic title rather than an implementation-specific role.
-        let worked = application.staticTexts.matching(
-            NSPredicate(format: "value BEGINSWITH %@", "Worked")
-        ).firstMatch
+        let worked = application.descendants(matching: .any)["conversation.work-disclosure"]
         XCTAssertTrue(
             worked.waitForExistence(timeout: 10),
             "\(context) lost its work disclosure",
