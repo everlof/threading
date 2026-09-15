@@ -375,7 +375,8 @@ and CSS-query output carry the same boundary in their own results.
 
 User annotations take the opposite trust path. A themed native overlay above the active WebKit
 surface owns numbered pins and note text keyed to the page URL without its fragment. It declines
-all hit testing outside annotation mode, so visible pins cannot block the page or agent actions.
+hit testing outside annotation mode except on the pending Send button, so visible pins cannot
+block the page or agent actions.
 Scroll observation and weak iframe target anchors run in WebKit's isolated client world; no note text is injected
 into the DOM or exposed to page JavaScript. `browser_annotations` returns the current authorized
 page's notes separately from the untrusted DOM snapshot, with explicit `user_authored` provenance
@@ -414,6 +415,24 @@ so movement while typing cannot relocate or reassign the note. One editor sits b
 pin, clamped inside the viewport without resizing WebKit or running a modal loop. Enter/Save commits;
 Escape/close cancels only that draft. Selecting another pin, leaving annotation mode, navigation,
 or changing the active pop-up saves nonempty text against the captured page before dismissing.
+Enter also updates a browser-local pending batch and its constant-size **Send (n)** button.
+Command-Return (including keypad Enter) saves the active draft and sends that batch through
+`SessionMessageDelivery` to the session assigned by the creating pane, detached host or audit
+host. The shortcut is scoped to annotation/editor/button focus, so it does not intercept page or
+address-field input. Notes from earlier pages in this browser tab retain their captured URL and
+coordinates. Native delivery uses the normal outbox; terminal delivery waits for its receipt.
+Only accepted revisions leave the pending batch, never the page's pins. Refusal or unconfirmed
+terminal delivery leaves the batch available with an explanatory sheet. A second send cannot
+race an in-flight receipt, and edits made during delivery remain pending.
+
+The send surface remains host-only: session routing, submission, note provenance, and pending
+revision ownership cannot be replaced by an extension. Expected batches are 5–10 notes, with
+200 as the existing stress cardinality. Count refresh is O(1), commit updates one pending value,
+and repeated geometry updates do not reset button layout. Submission snapshots value state,
+formats note text off-main, and creates no per-note UI. The button uses the editor’s opaque ground so outlined theme styles remain readable over
+arbitrary pages, and editor placement reserves space above it. No screenshots or page DOM
+are collected by Send; its payload is the user's notes with their captured page/coordinate anchors.
+
 Empty new drafts are discarded; unfinished text never enters `browser_annotations`. Editing and
 deleting existing notes use stable IDs rather than array positions. Focus returns to the canvas
 when the editor owned it; closing the editor never steals focus from another control.

@@ -1124,6 +1124,7 @@ final class MobileDemoSceneTests: XCTestCase {
             switch fixture {
             case .terminalANSI: expected = ("terminal-ansi", .terminal)
             case .terminalAttachments: expected = ("terminal-attachments", .terminal)
+            case .terminalAttachmentNotice: expected = ("terminal-attachment-notice", .terminal)
             case .terminalBrowserActivity:
                 expected = ("terminal-browser-activity", .terminal)
             case .terminalClaudeTUI: expected = ("terminal-claude-tui", .terminal)
@@ -1316,11 +1317,14 @@ final class MobileDemoSceneTests: XCTestCase {
             "marketing-codex-tui",
             "terminal-ansi",
             "terminal-attachments",
+            "terminal-attachment-notice",
             "terminal-browser-activity",
             "terminal-claude-tui",
             "terminal-codex-tui",
             "terminal-collaboration",
             "terminal-compose",
+            "terminal-reconnecting",
+            "terminal-recovery-failed",
             "terminal-scrollback",
             "terminal-selection",
             "terminal-solo-presence",

@@ -1553,6 +1553,22 @@ struct TerminalRemoteView: View {
         }
         .onAppear(perform: restoreInputPreference)
         .onAppear(perform: configureDirectAttachments)
+#if DEBUG
+        .task {
+            guard MobileDemoScene.current == .terminal,
+                  ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                    == MobileDemoFixture.terminalAttachmentNotice.rawValue else { return }
+            let pasteboard = UIPasteboard.withUniqueName()
+            pasteClipboardIntoTerminal(clipboard: ComposerClipboard(pasteboard: pasteboard))
+            UIPasteboard.remove(withName: pasteboard.name)
+            // A live connection can publish while a finger is held on OK. Keep this fixture
+            // updating too: a static screenshot cannot detect a button replaced mid-press.
+            for _ in 0..<240 {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                connection.objectWillChange.send()
+            }
+        }
+#endif
         .onAppear(perform: seedSelectionQuotesForEvidence)
         .onAppear { keyBridge.seedKeyboardWanted(rememberedTerminalKeyboardUp) }
         .onChange(of: isShowingFind) { _, isShowing in
@@ -1955,8 +1971,7 @@ struct TerminalRemoteView: View {
     /// at the cursor — because a program reading a PTY has nowhere to put a picture. Text is
     /// typed at the cursor as one paste, which is all the edit menu's own Paste does and saves a
     /// long press aimed at a single prompt line while an agent is drawing over it.
-    private func pasteClipboardIntoTerminal() {
-        let clipboard = ComposerClipboard.general
+    private func pasteClipboardIntoTerminal(clipboard: ComposerClipboard = .general) {
         let files = clipboard.files()
         if !files.isEmpty {
             guard let tray = directAttachmentTray else { return }

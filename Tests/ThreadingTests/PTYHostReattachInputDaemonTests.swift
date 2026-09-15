@@ -17,7 +17,7 @@ import XCTest
 /// The child records its own standard input rather than being asked what it saw, so the assertion
 /// is on bytes a program actually received rather than on frames somebody sent.
 @MainActor
-final class PTYHostReattachInputDaemonTests: XCTestCase {
+final class PTYHostReattachInputDaemonTests: HostedStoreTestCase {
 
     // MARK: - Constants
 
@@ -72,6 +72,44 @@ final class PTYHostReattachInputDaemonTests: XCTestCase {
         daemon = nil
         if let directory { try? FileManager.default.removeItem(at: directory) }
         super.tearDown()
+    }
+
+    func testContainerReusesCachedSurfacesAndClearsRefusalsForMultipleLiveChildren() throws {
+        let socketPath = try startDaemon()
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let container = TerminalContainerViewController()
+        container.view.frame = Fixture.frame
+        var controllers: [AgentSessionViewController] = []
+        defer {
+            for controller in controllers { controller.terminate() }
+            _ = pump(until: { controllers.allSatisfy { !$0.isHostBacked } })
+        }
+        for _ in 0..<2 {
+            let stored = try XCTUnwrap(store.addSession(to: project.id, kind: .claude, usesNativeUI: false))
+            let first = try makeSession(identity: .agentSession(stored.id))
+            first.hostTransportFactory = factory(socketPath: socketPath)
+            first.start(plan: plan("printf READY; while read -r line; do printf '[%s]' \"$line\"; done"))
+            XCTAssertTrue(pump(until: { first.visibleScreenLines().contains { $0.contains("READY") } }))
+            let before = try XCTUnwrap(holdings(socketPath: socketPath).sessions.first { $0.sessionID == stored.id })
+            XCTAssertTrue(first.detachFromHost(by: Date().addingTimeInterval(2)))
+            store.update(sessionID: stored.id) {
+                $0.lastLaunchFailure = ExternalConversationPreflight.launchFailure(kind: .codex, transcriptPath: nil)
+            }
+            let cached = AgentRuntime.shared.makeController(for: stored)
+            controllers.append(cached)
+            XCTAssertFalse(cached.isRunning)
+            XCTAssertTrue(container.reattachInBackground(summary: before, socketPath: socketPath))
+            XCTAssertTrue(AgentRuntime.shared.controller(for: stored.id) === cached)
+            XCTAssertTrue(cached.isRunning)
+            XCTAssertTrue(cached.isHostBacked)
+            XCTAssertNil(store.session(withID: stored.id)?.lastLaunchFailure)
+            XCTAssertTrue(container.reattachInBackground(summary: before, socketPath: socketPath),
+                          "Repeated restoration must recognize an already connected child")
+            let after = try XCTUnwrap(holdings(socketPath: socketPath).sessions.first { $0.sessionID == stored.id })
+            XCTAssertEqual(after.pid, before.pid, "Reconnection must preserve the original child")
+            XCTAssertNil(after.exit)
+        }
     }
 
     // MARK: - Tests

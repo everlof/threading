@@ -868,6 +868,13 @@ extension ProjectSidebarViewController {
             })
         }
 
+        if !session.usesNativeUI, session.kind.supports(.terminalUI) {
+            entries.append(action(L10n.string("Restart Terminal"), symbol: "arrow.clockwise") { [weak self] in
+                guard let self else { return }
+                self.delegate?.projectSidebar(self, restartTerminal: sessionID)
+            })
+        }
+
         // The middle of this menu was once a twelve-item unbroken run, so it now reads in
         // groups: side chats, then the appearance-and-conduct pair plus the folded options,
         // then identity-and-housekeeping. The fold takes what is set once and left alone;

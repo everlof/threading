@@ -129,6 +129,28 @@ Selection no longer retries. The retry is a button on the surface, which is a de
 a side effect of navigating, and it clears the record first so the gate that sent us there does
 not refuse it.
 
+### A refused write must not turn into a desktop-only dialog
+
+The terminal launch bookkeeping used to call `ThemedAlert.runModal()` when saving `hasLaunched`
+failed. A remote resume reaches that boundary from a main-queue callback. The nested modal
+kept that callback open, preventing the main queue from serving catalogue and resume requests
+until somebody clicked the Mac. The 2026-09-12 incident aligned a storage refusal at 20:19:12
+with a 325,545 ms watchdog stall; TLS and hosted route preparation still succeeded throughout.
+
+This refusal now takes the ordinary launch-failure path. The controller retains the current
+attempt's `launchRefusal`, and the container captures that value before discarding the runtime:
+the database that refused the launch can also refuse its diagnosis. This fallback is transient,
+not a claim that the failure was saved. No modal needs to be cleared on the Mac or phone.
+Remote resume checks persistence before invoking application commands and again on return,
+preserving the existing `storageExhausted` or `persistenceUnavailable` REST error. Already-running
+sessions remain accessible. An asynchronously discovered refusal still follows the ordinary
+runtime startup/exit lifecycle; the REST check does not promise that a later write will succeed.
+
+`TerminalLaunchPersistenceTests` refuses both writes through a real SQLite trigger in the hosted
+scratch store. `RemoteServerIntegrationTests` verifies repeated storage refusals and subsequent
+catalogue access over real HTTP sockets. These checks cover this application-owned launch alert;
+they do not establish remote dismissal of arbitrary macOS permission dialogs.
+
 ### The column states its own width, and the pane keeps its own
 
 The column is capped at `LaunchFailureDefaults.wellMaximumWidth` (720) so the well stays a

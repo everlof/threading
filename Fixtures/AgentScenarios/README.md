@@ -24,3 +24,8 @@ chooses that process contract from durable session state before it starts the pr
 `codex-question-fresh` and `codex-question-resume` are synthetic fixtures authored against the
 installed Codex 0.154.0 generated app-server schema. The fresh tape waits for two exact question
 answers before writing its receipt and completing the turn; no real provider runs in this journey.
+
+`codex-browser-annotations-fresh` accepts two annotation turns from the browser's counted Send
+button and Command-Return. Each accepted request writes a separate sandbox receipt; the hosted
+component tests assert the exact note, URL and coordinate payload. It uses the existing thread-1
+resume fixture only to satisfy the shared bootstrap contract; this journey does not relaunch.

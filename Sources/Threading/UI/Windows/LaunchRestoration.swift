@@ -102,7 +102,7 @@ final class LaunchRestoration {
     /// The three restore paths, plus the way the held-back two are offered back.
     struct Actions {
         var restoreSelectedSession: () -> Void
-        var relaunchSessionsFromLastQuit: () -> Void
+        var relaunchSessionsFromLastQuit: (@escaping () -> Void) -> Void
         var restoreDetachedBrowserWindows: () -> Void
 
         /// Puts the notice on screen. The closure it is handed performs exactly what was held
@@ -120,6 +120,8 @@ final class LaunchRestoration {
 
     /// Whether this launch has already offered its held-back workspace. See the type's note.
     private(set) var hasOfferedNotice = false
+    private var isResolvingHost = false
+    private var requestedWorkspaceRestore = false
 
     // MARK: - Initialization
 
@@ -142,14 +144,23 @@ final class LaunchRestoration {
             ? .restoresEverything
             : LaunchRestorationPlan(previousLaunch: outcome)
 
-        if plan.restoresSelectedSession {
-            actions.restoreSelectedSession()
-        }
-        // Always, and untouched: the record is consumed even when the setting is off, so
-        // enabling it later cannot act on a list from some earlier quit.
-        actions.relaunchSessionsFromLastQuit()
-        if plan.restoresDetachedBrowserWindows {
-            actions.restoreDetachedBrowserWindows()
+        // The host survey must settle before selection can allocate and launch a terminal.
+        // Starting an asynchronous survey first is insufficient: selection must await its answer.
+        isResolvingHost = true
+        actions.relaunchSessionsFromLastQuit { [weak self] in
+            guard let self else { return }
+            self.isResolvingHost = false
+            if self.requestedWorkspaceRestore {
+                self.requestedWorkspaceRestore = false
+                self.restoreHeldBackWorkspace()
+                return
+            }
+            if plan.restoresSelectedSession {
+                self.actions.restoreSelectedSession()
+            }
+            if plan.restoresDetachedBrowserWindows {
+                self.actions.restoreDetachedBrowserWindows()
+            }
         }
 
         guard case .holdsBackWorkspace(let crashReport) = plan else { return plan }
@@ -164,6 +175,10 @@ final class LaunchRestoration {
     /// the selected session first, so the detached windows it would bring back with it are not
     /// built twice (`restoreDetachedBrowserWindows` skips ids it already holds).
     func restoreHeldBackWorkspace() {
+        guard !isResolvingHost else {
+            requestedWorkspaceRestore = true
+            return
+        }
         actions.restoreSelectedSession()
         actions.restoreDetachedBrowserWindows()
     }

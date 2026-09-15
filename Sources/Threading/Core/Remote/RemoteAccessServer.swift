@@ -910,6 +910,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 id: parsed.id,
                 decision: parsed.decision
             )
+        case RemoteClipboardPolicy.readyType, RemoteClipboardPolicy.resultType:
+            guard let authorization = connection.authorization else { return }
+            DispatchQueue.main.async {
+                guard self.authorizer?.isCurrent(authorization) == true else { return }
+                self.services.mirrors.clipboardMessage(
+                    parsed, from: connection,
+                    authorizationIsCurrent: { [weak self] in
+                        self?.authorizer?.isCurrent(authorization) == true
+                    }
+                )
+            }
         case "presence":
             handlePresence(connection, state: parsed.state)
         case "sessionPark":
@@ -1331,9 +1342,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
 
             if !self.services.runtimeStatus.isRunning(sessionID: sessionID) {
-                guard let sessionCommands = self.sessionCommands,
-                      sessionCommands.resumeRemoteSession(sessionID)
-                else {
+                guard self.services.sessionMutations.persistenceBlockReason == nil else {
+                    respond(.respond(self.persistenceRefusalResponse()))
+                    return
+                }
+                let accepted = self.sessionCommands?.resumeRemoteSession(sessionID) == true
+                // A launch can discover a full disk after admission. Preserve that cause for
+                // the phone instead of accepting a startup that can never become ready.
+                guard self.services.sessionMutations.persistenceBlockReason == nil else {
+                    respond(.respond(self.persistenceRefusalResponse()))
+                    return
+                }
+                guard accepted else {
                     respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                     return
                 }

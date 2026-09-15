@@ -381,9 +381,8 @@ enum PTYHostReattach {
 
     /// Performs the plan and answers the sessions the relaunch must leave alone.
     ///
-    /// A session whose terminal could not be built is **not** in the answer: it is not being
-    /// taken back, so the ordinary relaunch is exactly right to relaunch it. It *is* counted as
-    /// pending, which is what puts a `Reattach` on the launch band.
+    /// A failed attach remains held: the daemon still owns the live child. It is counted as
+    /// pending so the launch band offers Reattach, never a second process on that conversation.
     ///
     /// Everything here is main-actor work on values the survey already has. The two kinds of
     /// child that have to be *ended* are the caller's, because their deadlines decide when the
@@ -401,11 +400,10 @@ enum PTYHostReattach {
         var pending = 0
         for summary in plan.adopt {
             guard let sessionID = summary.sessionID else { continue }
-            guard adopt(summary, socketPath) else {
-                pending += 1
-                continue
-            }
             taken.insert(sessionID)
+            if !adopt(summary, socketPath) {
+                pending += 1
+            }
         }
 
         for summary in plan.ended {
@@ -421,14 +419,15 @@ enum PTYHostReattach {
             taken.insert(sessionID)
         }
 
-        journal(plan, eventLog: eventLog)
+        journal(plan, pending: pending, eventLog: eventLog)
         return (taken, pending)
     }
 
-    private static func journal(_ plan: PTYHostReattachPlan, eventLog: EventLog) {
+    private static func journal(_ plan: PTYHostReattachPlan, pending: Int, eventLog: EventLog) {
         guard !plan.isEmpty else { return }
         eventLog.record(.session, "PTY host reattach", [
-            "adopted": String(plan.adopt.count),
+            "adopted": String(plan.adopt.count - pending),
+            "pending": String(pending),
             "resumed": String(plan.resume.count),
             "ended": String(plan.ended.count),
             "orphaned": String(plan.orphans.count),

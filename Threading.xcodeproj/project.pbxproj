@@ -107,6 +107,7 @@
 		A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */; };
 		A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */; };
 		A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70400010000000000000002 /* ComposerClipboardTests.swift */; };
+		A46200010000000000000001 /* ThemedDialogActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A46200010000000000000002 /* ThemedDialogActionTests.swift */; };
 		A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */; };
 		DA615910541442DC8D940C01 /* RemoteTerminalInitialViewportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */; };
 		A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */; };
@@ -115,6 +116,7 @@
 		A70900010000000000000001 /* MobileConnectionStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70900010000000000000002 /* MobileConnectionStatusTests.swift */; };
 		A71000010000000000000001 /* MobileNewSessionDefaultsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */; };
 		5DA0B6D200EA4699B8F1B2EA /* MobileProjectDisclosureStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D8ECF66FF7246588661088B /* MobileProjectDisclosureStoreTests.swift */; };
+		CD019F448A9C4E009C2AC210 /* MobileProjectChatPreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD019F448A9C4E009C2AC211 /* MobileProjectChatPreviewTests.swift */; };
 		A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */; };
 		A71200010000000000000001 /* MobileButtonHapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71200010000000000000002 /* MobileButtonHapticsTests.swift */; };
 		A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */; };
@@ -158,6 +160,7 @@
 		61A0CE010000000000000003 /* ThreadingGlanceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 61A0CE010000000000000002; };
 		61A0CE010000000000000004 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011; };
 		61A0CE010000000000000005 /* ThreadingGlance.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 61A0CE010000000000000006; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C11B04010000000000000001 /* MobileClipboardWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11B04010000000000000002 /* MobileClipboardWriterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -409,6 +412,7 @@
 		A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileHostRefreshSingleFlightTests.swift; sourceTree = "<group>"; };
 		A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteExtensionSceneScalingTests.swift; sourceTree = "<group>"; };
 		A70400010000000000000002 /* ComposerClipboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerClipboardTests.swift; sourceTree = "<group>"; };
+		A46200010000000000000002 /* ThemedDialogActionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedDialogActionTests.swift; sourceTree = "<group>"; };
 		A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalLayoutViewTests.swift; sourceTree = "<group>"; };
 		DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalInitialViewportTests.swift; sourceTree = "<group>"; };
 		A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentPreviewFailureTests.swift; sourceTree = "<group>"; };
@@ -417,6 +421,7 @@
 		A70900010000000000000002 /* MobileConnectionStatusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileConnectionStatusTests.swift; sourceTree = "<group>"; };
 		A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNewSessionDefaultsStoreTests.swift; sourceTree = "<group>"; };
 		6D8ECF66FF7246588661088B /* MobileProjectDisclosureStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileProjectDisclosureStoreTests.swift; sourceTree = "<group>"; };
+		CD019F448A9C4E009C2AC211 /* MobileProjectChatPreviewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileProjectChatPreviewTests.swift; sourceTree = "<group>"; };
 		A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeCacheStoreTests.swift; sourceTree = "<group>"; };
 		A71200010000000000000002 /* MobileButtonHapticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileButtonHapticsTests.swift; sourceTree = "<group>"; };
 		A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDashboardCacheStoreTests.swift; sourceTree = "<group>"; };
@@ -445,6 +450,7 @@
 		F2000001000000000000038 /* Threading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threading.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper-network.entitlements"; sourceTree = "<group>"; };
 		61A0CE010000000000000006 /* ThreadingGlance.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThreadingGlance.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C11B04010000000000000002 /* MobileClipboardWriterTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileClipboardWriterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -464,6 +470,9 @@
 				ThreadingMobile/MobileAccountImages.swift,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
+				ThreadingMobile/MobileClipboardWriter.swift,
+				ThreadingMobile/MobileProjectDisclosureStore.swift,
+				ThreadingMobile/MobileProjectChatPreview.swift,
 				ThreadingMobile/MobileCollaborationPresence.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,
 				ThreadingMobile/MobileConversationQuestionCard.swift,
@@ -820,7 +829,9 @@
 				A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */,
 				A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */,
 				A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */,
+				C11B04010000000000000002 /* MobileClipboardWriterTests.swift */,
 				A70400010000000000000002 /* ComposerClipboardTests.swift */,
+				A46200010000000000000002 /* ThemedDialogActionTests.swift */,
 				A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */,
 				DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */,
 				A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */,
@@ -829,6 +840,7 @@
 				A70900010000000000000002 /* MobileConnectionStatusTests.swift */,
 				A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */,
 				6D8ECF66FF7246588661088B /* MobileProjectDisclosureStoreTests.swift */,
+				CD019F448A9C4E009C2AC211 /* MobileProjectChatPreviewTests.swift */,
 				A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */,
 				A71200010000000000000002 /* MobileButtonHapticsTests.swift */,
 				D4F83001A8124C5BA937FE11 /* MobilePairingRecoveryTests.swift */,
@@ -1693,7 +1705,9 @@
 				A70100010000000000000001 /* MobileSessionConnectionPoolTests.swift in Sources */,
 				A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */,
 				A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */,
+				C11B04010000000000000001 /* MobileClipboardWriterTests.swift in Sources */,
 				A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */,
+				A46200010000000000000001 /* ThemedDialogActionTests.swift in Sources */,
 				A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */,
 				DA615910541442DC8D940C01 /* RemoteTerminalInitialViewportTests.swift in Sources */,
 				A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */,
@@ -1702,6 +1716,7 @@
 				A70900010000000000000001 /* MobileConnectionStatusTests.swift in Sources */,
 				A71000010000000000000001 /* MobileNewSessionDefaultsStoreTests.swift in Sources */,
 				5DA0B6D200EA4699B8F1B2EA /* MobileProjectDisclosureStoreTests.swift in Sources */,
+				CD019F448A9C4E009C2AC210 /* MobileProjectChatPreviewTests.swift in Sources */,
 				A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */,
 				A71200010000000000000001 /* MobileButtonHapticsTests.swift in Sources */,
 				D4F83001A8124C5BA937FE10 /* MobilePairingRecoveryTests.swift in Sources */,

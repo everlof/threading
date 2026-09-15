@@ -221,7 +221,8 @@ worktree name, for a linked worktree), and whether it is working, running, or do
 branch is not shown on rows themselves: a checkout's branch changes and one repository can
 have several checkouts at once, so stating it as an identity would be misleading. A checkout under
 a repository row is the exception, named by its branch, since that is what tells the checkouts of
-one repository apart.
+one repository apart. A quieter `[worktree path]` follows the branch on the same row;
+your home directory becomes `~`, and hovering the path shows its full location.
 
 Because a checkout row already states its branch, chats on that branch sit directly under it
 rather than gaining a branch heading that repeats the row above. Chats that ran on a branch the
@@ -1316,6 +1317,14 @@ Two kinds of transcript are deliberately left out:
 - Transcripts with nothing you typed in them. Codex writes a rollout for its own approval
   reviewer, in the same folder and against the same project, and a session you opened but
   never spoke in has nothing to resume either.
+
+### Restarting a blank or stuck terminal
+Right-click the chat row (or open its **⋯** menu) and choose **Restart Terminal**.
+This stops its agent, including a process held by the background session host, and resumes
+its saved conversation in a fresh terminal. It works even when the terminal cannot accept
+Ctrl+D or the row appears dormant. The conversation, account, and checkout stay the same;
+any work currently running is interrupted. A failed stop is reported instead of launching
+a second agent. This action applies to chats using the Terminal interface.
 
 ### Closing
 - **Cmd+W**: closes the focused drawer/panel tab, or the page on screen — never the agent
@@ -2638,6 +2647,11 @@ interface.
 
 ## Remote Access (beta)
 
+A chat that cannot start because the Mac has paused writes after running out of storage reports
+the storage error on iPhone without opening a blocking Mac alert. You can still reach the host
+catalogue and already-running chats. Starting new work requires freeing space and recovering
+the Mac's ability to save.
+
 Open **Settings > Remote Access** and turn on **Remote Access** to reach Threading from the
 Threading iPhone app or a browser. Under it is a list of **ways in**, each with its own switch, a
 status line, and four lines saying who can reach it, who can see the traffic, what happens after a
@@ -2747,6 +2761,14 @@ collapse or expand a project’s chats and terminals. The iPhone remembers each 
 across navigation, reconnects and app launches, separately for each paired Mac. Tap the project
 name to open its full list, or **+** to start a chat even while the group is collapsed.
 Collapsing changes only this phone’s navigation; it does not archive or stop chats.
+
+Expanded projects initially show three chats, with pinned chats first. **Show more (N)** reveals
+the remaining chats in the same card; **Show fewer** returns to the compact preview and brings
+that project back into view. The preview remembers your choice while navigating and reconnecting,
+separately for each Mac, and starts compact on a fresh app launch. Hidden chats working or needing
+attention are summarized below Show more while the catalogue is live. These buttons, the project
+fold arrow and **+** respond with a light haptic. Standalone terminals remain visible independently;
+the full project list, Search, Recent, By type, Archived and Snoozed retain their complete lists.
 
 Use a standalone terminal row's **… > Share Terminal…** to give somebody access to that terminal
 alone. **View only** follows output from an already-running shell and cannot type, resize or start
@@ -3254,6 +3276,20 @@ Where it works is your choice, under **Settings > Remote Access > Reports from y
 The two isolated choices need a Git project whose agent has Threading's session tools; elsewhere
 the report still starts its chat in the project's own checkout. The phone tells you which one you
 got. Reports from a phone never open a pull or merge request.
+
+### Ask an agent to copy text
+
+Ask “Copy this to my Mac clipboard” or “Copy this to my iPhone clipboard.” The agent uses
+`copy_to_clipboard` with an explicit `mac` or `ios` target. It supports text, code and links
+up to 64 KiB and preserves whitespace. It replaces the clipboard's current contents.
+The tool is included in **Settings → Tools → This session**.
+
+For iPhone or iPad, keep this chat open in an updated ThreadingMobile while the copy runs.
+Both the Mac and iOS app need this feature. The phone verifies the write before the agent
+reports success. If the app is inactive or disconnected, open the chat and retry. Delivery
+never silently switches to the Mac, and iOS writes stay local to that device. If multiple
+of your iOS devices have this chat open, leave it open only on the intended device.
+Images, files and copying while ThreadingMobile is in the background are not supported.
 
 ## Display Panel
 
@@ -3791,7 +3827,12 @@ cross-origin frames and closed shadow roots remain opaque. Pins and outlines hav
 images, and the note editor has an opaque background. Notes stay in
 Threading's native UI rather than entering the page DOM, so the site cannot read or alter them.
 Click to open a small note editor beside the pin, directly over the page. **Enter** or **Save**
-saves the note; **Esc** or the close button cancels that edit. You can keep scrolling while writing.
+saves the note and shows **Send (1)** at the bottom-right of the browser. The count tracks new or
+changed notes waiting to be sent, including notes on other pages in this tab. Click **Send** or press
+**⌘Enter** while annotating to send the batch to this browser’s chat; ⌘Enter also saves the note
+you are currently editing. A busy native chat queues the message. Pins remain after sending; if
+delivery is refused or unconfirmed, the notes stay pending. **Esc** or the close button cancels
+only the current edit. You can keep scrolling while writing.
 Notes inside same-origin iframes follow their target as the frame scrolls, including nested frames.
 Pins hide when clipped or when their frame loads a different document, while the note is kept.
 Cross-origin frames can be annotated as visible regions; their internal content remains opaque.

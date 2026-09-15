@@ -68,6 +68,13 @@ product's compact 800×600 first-launch window.
 The first smoke test proves only that the shipping executable reaches a real main window through
 that isolation boundary. It is foundation, not yet feature coverage.
 
+`TerminalRestartJourneyUITests` uses the same marked sandbox with an explicitly requested
+blank terminal fixture. Its app-owned shell records each PID and the provider resume identifier
+inside that home before becoming `cat`. The journey opens the ordinary session menu, restarts,
+and checks the old PID ended while the replacement retains the same provider conversation.
+It never starts a real account's CLI. The fixture launch plan is retained across this explicit
+restart only in Debug; ordinary runtime disposal still clears fixture registrations.
+
 The UI lane needs an interactive macOS test host with automation mode available. A machine that
 can compile the runner but cannot enable UI automation reports an infrastructure failure before
 any scenario method starts; that is not converted into a skipped or passing test.

@@ -465,13 +465,15 @@ enum MCPToolCatalog {
     id: "session-lifecycle",
     family: .session,
     title: "This session",
-    summary: "Let an agent name its own session, and file it away once the work is done.",
+    summary: "Let an agent name or archive this chat, and copy requested text to a clipboard.",
     symbol: "archivebox",
     // Listed in `MCPBuiltInTool` declaration order, which `MCPWireTests` holds this to: the
     // group's rows and `MCPTools.sessionTools` are the same list, and a page that ordered them
     // by hand would drift from the registry the moment either changed.
     tools: [],
     instruction: """
+      copy_to_clipboard copies requested text to an explicit mac or ios destination.
+
       set_session_name names this session's row in the sidebar. Sessions are named after \
       their first message, which stops describing them the moment the work moves on, and \
       you are the only thing here that knows what the conversation actually became. Rename \

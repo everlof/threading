@@ -3,6 +3,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import Threading
 
 /// `threading-ptyd`, exercised as the process it ships as.
 ///
@@ -391,6 +392,30 @@ final class PTYHostDaemonTests: XCTestCase {
     /// A checkout move stops one incarnation and immediately starts the next with the same
     /// logical identity. The daemon serializes that handoff: no refusal can push the replacement
     /// back into Threading's process, and the two children never overlap.
+    func testRestartStopReachesAHostedChildWithoutAnAppRuntime() throws {
+        let daemon = try startDaemon()
+        let originalClient = try connect(to: daemon)
+        let sessionID = SessionID()
+        let id = PTYHostSessionIdentity.agentSession(sessionID)
+        let original = try spawn(on: originalClient, id: id, script: "printf READY; sleep 60")
+        try originalClient.waitForOutput(containing: "READY", timeout: Fixture.childTimeout)
+        let decision = PTYHostDecision(
+            isEnabled: true, helperURL: URL(fileURLWithPath: Fixture.shell),
+            socketPath: daemon.socketPath, socketPathBytes: daemon.socketPath.utf8.count,
+            build: "restart-test"
+        )
+        XCTAssertTrue(SessionTerminalRestart.stopHosted(
+            sessionID: sessionID, decision: decision, survey: .connecting(),
+            stopper: { identity, socket, build in
+                PTYHostSessionStop.run(identity, socketPath: socket, build: build)
+            }
+        ))
+        let replacement = try connect(to: daemon)
+        let spawned = try spawn(on: replacement, id: id, script: "printf RESUMED; sleep 60", replaceExisting: true)
+        XCTAssertNotEqual(spawned.pid, original.pid)
+        try replacement.waitForOutput(containing: "RESUMED", timeout: Fixture.childTimeout)
+    }
+
     func testAKilledSessionIsAtomicallyReplacedUnderTheSameIdentity() throws {
         let daemon = try startDaemon()
         let first = try connect(to: daemon)

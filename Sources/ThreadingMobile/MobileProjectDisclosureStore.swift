@@ -9,6 +9,23 @@ final class MobileProjectDisclosureStore: ObservableObject {
     private static let keyPrefix = "threading.mobile.project-collapsed.v1."
     @Published private var changeGeneration: UInt64 = 0
     private let defaults: UserDefaults
+    private struct PreviewIdentity: Hashable {
+        let hostID: String?
+        let projectKey: String
+    }
+    private var previewStages: [PreviewIdentity: MobileProjectChatPreview.Stage] = [:]
+
+    func chatPreviewStage(hostID: String?, projectKey: String) -> MobileProjectChatPreview.Stage {
+        previewStages[PreviewIdentity(hostID: hostID, projectKey: projectKey)] ?? .compact
+    }
+
+    func setChatPreviewStage(_ stage: MobileProjectChatPreview.Stage, hostID: String?, projectKey: String) {
+        let identity = PreviewIdentity(hostID: hostID, projectKey: projectKey)
+        guard chatPreviewStage(hostID: hostID, projectKey: projectKey) != stage else { return }
+        if stage == .compact { previewStages.removeValue(forKey: identity) }
+        else { previewStages[identity] = stage }
+        changeGeneration &+= 1
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

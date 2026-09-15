@@ -1,0 +1,114 @@
+{
+  "id": "codex-browser-annotations-fresh",
+  "provenance": {
+    "protocolVersion": "app-server-1",
+    "providerVersion": "0.147.0",
+    "recordedAt": "2026-08-11T08:44:00Z"
+  },
+  "provider": "codex",
+  "steps": [
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":1,\"method\":\"initialize\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":1,\"result\":{\"userAgent\":\"threading-ui-fixture/1\"}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"initialized\"}"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":2,\"method\":\"thread/start\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-1\",\"name\":\"Update status fixture\",\"model\":\"gpt-5.6\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project\",\"skills\":[],\"errors\":[]}]}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-1\",\"input\":[{\"type\":\"text\"}]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"annotation-turn-1\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turn\":{\"id\":\"annotation-turn-1\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "kind": "writeFixtureFile",
+      "path": "project/annotation-received-1.txt",
+      "contents": "received\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turnId\":\"annotation-turn-1\",\"item\":{\"id\":\"annotation-reply-1\",\"type\":\"agentMessage\",\"text\":\"Annotations received 1.\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turn\":{\"id\":\"annotation-turn-1\",\"status\":\"completed\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-1\",\"input\":[{\"type\":\"text\"}]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":5,\"result\":{\"turn\":{\"id\":\"annotation-turn-2\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turn\":{\"id\":\"annotation-turn-2\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "kind": "writeFixtureFile",
+      "path": "project/annotation-received-2.txt",
+      "contents": "received\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turnId\":\"annotation-turn-2\",\"item\":{\"id\":\"annotation-reply-2\",\"type\":\"agentMessage\",\"text\":\"Annotations received 2.\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread-1\",\"turn\":{\"id\":\"annotation-turn-2\",\"status\":\"completed\"}}}\n"
+    },
+    {
+      "kind": "exit",
+      "status": 0,
+      "afterMilliseconds": 100
+    }
+  ],
+  "title": "Browser annotations reach the owning native chat",
+  "transport": "codex-app-server",
+  "version": 1
+}

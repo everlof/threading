@@ -141,6 +141,20 @@ Remote themes own material — colours, radii, border weight and glow — while
 inset from the panel edge, and filled actions use the active theme's control radius. Do not put
 spacing into an individual dialog or make it vary by decorative theme.
 
+**An action keeps its identity while its owner refreshes.** Callers create action values inside
+SwiftUI `body`; connection and validation updates must not create new button identities. A fresh
+UUID replaced a pressed Attachment alert's OK button before touch-up, leaving a visible alert
+that could not be dismissed over updating session state. `ThemedDialogAction` uses its source
+title and role by default; supply `id:` when titles repeat or change for the same semantic action.
+Enabled state, decoration and handlers are values to update, not identity. This applies to both
+alert layouts and system confirmations. Threading retains presentation, validation and action
+authority; themes continue to own material. No new extension surface is introduced.
+
+The `terminal-attachment-notice` fixture takes the empty-paste path inside `SessionDetailView`
+using a private empty pasteboard. It publishes four connection refreshes per second for at most
+one minute (constant work, cancelled on removal), so evidence holds OK across multiple updates
+and checks that the terminal controls return. A static dialog fixture cannot prove this contract.
+
 **An item-backed confirmation captures its item.** An alert still runs its handler before the
 presentation binding is cleared, so a handler may read the selected session on the way out. The
 system action sheet does not work that way: it clears `isPresented` as part of dismissing and
@@ -349,6 +363,20 @@ review covers repeated reveal/close, full-swipe recovery and row-originated vert
 Physical-device haptics and the live Mac archive round trip require device verification.
 
 ## Prominent application actions
+
+The project dashboard's Show more/Show fewer control occupies one reusable item inside the
+existing plate. `MobileProjectChatDisclosure` owns its text, chevron, accessible count and live
+hidden-activity summary; the collection decoration retains sole ownership of the panel and
+outline. Its divider starts at `DashboardRowMetrics.textLeadingEdge`, and the final item clips
+its pressed wash to the panel's bottom corners. `MobileProjectDisclosureButtonStyle` gives
+both preview and whole-project disclosure a themed pressed response. Preview, fold and new-chat
+buttons use `MobileButtonFeedback` on activation, with no haptic on mount or catalogue changes.
+The full-height hit target and two-line row sizing follow the existing Dynamic Type metrics.
+When the full activity sentence does not fit, `ViewThatFits` uses an attention symbol and count
+beside the working count instead of truncating away one of them. The full spoken description
+remains the button's accessibility value. The large-text capture scrolls the production list to
+this control, and the collapsed-again capture taps Show fewer in a pre-expanded fixture; neither
+recreates the surface outside its collection host.
 
 Feature code never applies SwiftUI's `.buttonStyle(.borderedProminent)` directly. That system
 style chooses its foreground independently of the Mac-supplied accent: a white or bright accent

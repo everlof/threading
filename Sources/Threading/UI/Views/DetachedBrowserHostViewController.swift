@@ -308,6 +308,7 @@ final class DetachedBrowserHostViewController: NSViewController {
     private func makeBrowser(contextKind: BrowserContextKind) -> BrowserViewController {
         let controller = browserFactory(contextKind)
         addChild(controller)
+        controller.annotationSessionID = sessionID
         controller.onPageChange = pageHook
         return controller
     }

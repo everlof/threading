@@ -1283,10 +1283,12 @@ final class TerminalContainerViewController: NSViewController {
         guard let sessionID = summary.sessionID,
               let agentSession = ProjectStore.shared.session(withID: sessionID),
               !agentSession.isArchived,
-              !agentSession.usesNativeUI,
-              !AgentRuntime.shared.hasTerminal(sessionID: sessionID) else { return false }
+              !agentSession.usesNativeUI else { return false }
 
         let controller = AgentRuntime.shared.makeController(for: agentSession)
+        // A cached surface may be waiting for launch or displaying a previous refusal.
+        // Allocation is not ownership. Reuse it, and leave an already attached child alone.
+        if controller.isRunning { return controller.isHostBacked }
         controller.delegate = self
         controller.view.frame = NSRect(origin: .zero, size: backgroundLaunchSize)
         controller.view.layoutSubtreeIfNeeded()
@@ -2820,6 +2822,7 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
         // The agent exited: close its terminal but keep the sidebar entry so the
         // conversation can be resumed by identifier later.
         let sessionID = controller.sessionID
+        let launchRefusal = controller.launchRefusal
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -2828,10 +2831,10 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
 
             if sessionID == self.currentSessionID {
                 self.detachCurrentChild()
-                // The controller has already written the record by the time this runs, so the
-                // store is the one place both this route and a later selection read it from.
+                // Disk exhaustion can refuse the failure record itself. The attempted launch's
+                // diagnosis still belongs on this surface without waiting for a writable store.
                 if let stored = ProjectStore.shared.session(withID: sessionID),
-                   let failure = stored.lastLaunchFailure
+                   let failure = launchRefusal ?? stored.lastLaunchFailure
                 {
                     self.showLaunchFailureState(failure, session: stored)
                 } else {

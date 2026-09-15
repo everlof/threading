@@ -518,7 +518,7 @@ capture_fixture() {
   local fixture="$1"
   local identifier entry_id demo appearance theme keyboard_state capture_mode keyboard_layout
   local content_size terminal_font_size
-  local interaction_label interaction_wait_labels
+  local interaction_label interaction_wait_labels interaction_press_duration
   identifier="$(jq -r '.id' <<<"${fixture}")"
   entry_id="$(jq -r '.entryID' <<<"${fixture}")"
   demo="$(jq -r '.demo' <<<"${fixture}")"
@@ -535,6 +535,7 @@ capture_fixture() {
   content_size="$(jq -r '.contentSize // "large"' <<<"${fixture}")"
   terminal_font_size="$(jq -r '.terminalFontSize // empty' <<<"${fixture}")"
   interaction_label="$(jq -r '.interaction.tapAccessibilityLabel // empty' <<<"${fixture}")"
+  interaction_press_duration="$(jq -r '.interaction.pressDuration // 0' <<<"${fixture}")"
   interaction_wait_labels="$(jq -c \
     '.interaction.waitForAccessibilityLabels // []' <<<"${fixture}")"
 
@@ -593,6 +594,12 @@ capture_fixture() {
     return 1
   fi
   if [[ -n "${interaction_label}" ]]; then
+    if ! jq -e '.interaction.pressDuration // 0 | type == "number" and . >= 0 and . <= 2' \
+        <<<"${fixture}" >/dev/null; then
+      printf 'error: capture %s requires a pressDuration between 0 and 2 seconds\n' \
+        "${identifier}" >&2
+      return 1
+    fi
     if ! command -v idb >/dev/null; then
       printf 'error: capture %s requires idb for semantic interaction\n' "${identifier}" >&2
       return 1
@@ -742,7 +749,8 @@ capture_fixture() {
       return 1
     fi
     read -r tap_x tap_y <<<"${tap_point}"
-    idb ui tap --udid "${simulator_udid}" "${tap_x}" "${tap_y}" \
+    idb ui tap --duration "${interaction_press_duration}" \
+      --udid "${simulator_udid}" "${tap_x}" "${tap_y}" \
       >"${log_directory}/${identifier}.tap.log" 2>&1
 
     local interaction_settled=0

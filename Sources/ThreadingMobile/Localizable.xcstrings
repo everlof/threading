@@ -640,6 +640,17 @@
         }
       }
     },
+    "%lld need attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld behöver uppmärksamhet"
+          }
+        }
+      }
+    },
     "%lld observations, %lld recorded resets, %@ currently used" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -750,6 +761,17 @@
         }
       }
     },
+    "%lld working" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld arbetar"
+          }
+        }
+      }
+    },
     "%lld · accepts %lld+" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -834,6 +856,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 minut"
+          }
+        }
+      }
+    },
+    "1 needs attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 behöver uppmärksamhet"
           }
         }
       }
@@ -7584,6 +7617,17 @@
         }
       }
     },
+    "Probe" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test"
+          }
+        }
+      }
+    },
     "Processed tokens" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8041,6 +8085,17 @@
         }
       }
     },
+    "Release to archive" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Släpp för att arkivera"
+          }
+        }
+      }
+    },
     "Remote access options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8400,17 +8455,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställs %@ · %@"
-          }
-        }
-      }
-    },
-    "Release to archive" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Släpp för att arkivera"
           }
         }
       }
@@ -9378,6 +9422,23 @@
         }
       }
     },
+    "Show %lld more" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show %lld more"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa %lld till"
+          }
+        }
+      }
+    },
     "Show again" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9385,6 +9446,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa igen"
+          }
+        }
+      }
+    },
+    "Show fewer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa färre"
+          }
+        }
+      }
+    },
+    "Show fewer chats in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa färre chattar i %@"
           }
         }
       }
@@ -9411,6 +9494,28 @@
         }
       }
     },
+    "Show more (%lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa fler (%lld)"
+          }
+        }
+      }
+    },
+    "Show more chats in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa fler chattar i %@"
+          }
+        }
+      }
+    },
     "Show on session usage controls" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9429,6 +9534,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa plan"
+          }
+        }
+      }
+    },
+    "Show remaining (%lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show remaining (%lld)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa resten (%lld)"
           }
         }
       }

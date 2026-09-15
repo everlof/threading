@@ -69,7 +69,7 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
             _ = store.removeProject(id: project.id)
             try? FileManager.default.removeItem(at: fixture)
         }
-        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude, usesNativeUI: false))
 
         let sidebar = ProjectSidebarViewController(decorateAccountUsage: { _, _, _, _ in })
         sidebar.actionSessionID = session.id
@@ -89,7 +89,40 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
 
         XCTAssertEqual(written, Render.appearances.count)
         try renderAccountDestinations(to: directory)
+        try renderRestartInShell(to: directory, session: session)
         print("Rendered the session action menu to \(directory.path)")
+    }
+
+    private func renderRestartInShell(to directory: URL, session: AgentSession) throws {
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1120, height: 800))
+        let sidebar = controller.sidebarViewController
+        sidebar.mountInitialTreeIfNeeded()
+        let root = try XCTUnwrap(window.contentView)
+        let prior = AppThemePalette.current
+        defer { AppThemePalette.set(prior) }
+        for theme in [AppTheme.system, AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist] {
+            AppThemePalette.set(theme)
+            for (name, appearance) in Render.appearances {
+                root.appearance = NSAppearance(named: appearance)
+                root.layoutSubtreeIfNeeded()
+                let token = ThemedMenuPresenter.present(
+                    ThemedMenuPresentation(entries: sidebar.sessionActionEntries(for: session),
+                                           minimumWidth: SidebarDefaults.menuWidth),
+                    from: sidebar.view, selectedEntryIndex: nil,
+                    onChoose: { _, _ in }, onDismiss: {}
+                )
+                defer { ThemedMenuPresenter.dismiss(token) }
+                AppThemeRefresh.repaint(root)
+                root.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+                root.cacheDisplay(in: root.bounds, to: bitmap)
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                    to: directory.appendingPathComponent("session-menu-restart-shell-\(theme.id.rawValue)-\(name).png")
+                )
+            }
+        }
     }
 
     /// Exercise the shipping row builders, including a selected recovery policy and a scoped

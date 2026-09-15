@@ -28,6 +28,8 @@ final class LaunchRestorationTests: XCTestCase {
 
         var calls: [Call] = []
         var noticeCount = 0
+        var defersRelaunch = false
+        var finishRelaunch: (() -> Void)?
         /// Double-optional on purpose: the outer says whether a notice was offered at all, the
         /// inner whether macOS had filed a report to point at.
         var offeredCrashReport: URL??
@@ -37,7 +39,10 @@ final class LaunchRestorationTests: XCTestCase {
         var actions: LaunchRestoration.Actions {
             LaunchRestoration.Actions(
                 restoreSelectedSession: { self.calls.append(.selectedSession) },
-                relaunchSessionsFromLastQuit: { self.calls.append(.relaunch) },
+                relaunchSessionsFromLastQuit: { completion in
+                    self.calls.append(.relaunch)
+                    if self.defersRelaunch { self.finishRelaunch = completion } else { completion() }
+                },
                 restoreDetachedBrowserWindows: { self.calls.append(.browserWindows) },
                 presentNotice: { crashReport, escalation, restore in
                     self.noticeCount += 1
@@ -52,6 +57,25 @@ final class LaunchRestorationTests: XCTestCase {
     private func restoration() -> (LaunchRestoration, Recorder) {
         let recorder = Recorder()
         return (LaunchRestoration(actions: recorder.actions), recorder)
+    }
+
+    func testSelectionWaitsForTheAsynchronousHostSurvey() throws {
+        let (restoration, recorder) = restoration()
+        recorder.defersRelaunch = true
+        restoration.run(previousLaunch: .clean)
+        XCTAssertEqual(recorder.calls, [.relaunch])
+        try XCTUnwrap(recorder.finishRelaunch)()
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+    }
+
+    func testRestoreOfferAlsoWaitsForHostOwnership() throws {
+        let (restoration, recorder) = restoration()
+        recorder.defersRelaunch = true
+        restoration.run(previousLaunch: .unclean(crashReport: nil))
+        try XCTUnwrap(recorder.restoreOffer)()
+        XCTAssertEqual(recorder.calls, [.relaunch])
+        try XCTUnwrap(recorder.finishRelaunch)()
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
     }
 
     // MARK: - The Plan
@@ -69,7 +93,7 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .unknown)
 
         XCTAssertEqual(recorder.noticeCount, 0)
-        XCTAssertEqual(recorder.calls, [.selectedSession, .relaunch, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
     }
 
     func testAnUncleanPreviousLaunchHoldsBackBothWorkspacePaths() {
@@ -92,7 +116,7 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .intentional(reason: .reset))
 
         XCTAssertEqual(recorder.noticeCount, 0)
-        XCTAssertEqual(recorder.calls, [.selectedSession, .relaunch, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
     }
 
     // MARK: - Escalation
@@ -159,7 +183,7 @@ final class LaunchRestorationTests: XCTestCase {
         let (restoration, recorder) = restoration()
         restoration.run(previousLaunch: .clean)
 
-        XCTAssertEqual(recorder.calls, [.selectedSession, .relaunch, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
         XCTAssertEqual(recorder.noticeCount, 0)
         XCTAssertFalse(restoration.hasOfferedNotice)
     }
@@ -267,7 +291,7 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .unclean(crashReport: nil))
 
         XCTAssertEqual(recorder.noticeCount, 1, "the notice was offered twice for one crash")
-        XCTAssertEqual(recorder.calls, [.selectedSession, .relaunch, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
     }
 
     /// Nothing is written down to make the offer one-shot. The marker it is read from is
@@ -282,7 +306,7 @@ final class LaunchRestorationTests: XCTestCase {
         second.run(previousLaunch: .clean)
         XCTAssertEqual(secondRecorder.noticeCount, 0)
         XCTAssertEqual(
-            secondRecorder.calls, [.selectedSession, .relaunch, .browserWindows]
+            secondRecorder.calls, [.relaunch, .selectedSession, .browserWindows]
         )
     }
 }

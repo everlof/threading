@@ -6,9 +6,9 @@ import ThreadingExtensionKit
 /// Sidebar row for a project or a group heading: a single-line name with an optional count at
 /// the trailing edge.
 ///
-/// Where the checkout lives and what branch it is on are shown in the *session* rows' hover
-/// popover, since a session is what actually runs inside the checkout — the project row
-/// states the project's identity and nothing that merely describes its current state.
+/// A grouped checkout states its branch followed by a quiet, home-abbreviated path.
+/// The path belongs to the native presentation; extensions may replace that content while
+/// checkout identity, navigation and trailing actions remain host-owned.
 final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
     // MARK: - Properties
@@ -19,6 +19,9 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// project rows; headings and grouped checkouts keep their text-only shape.
     private let iconView = NSImageView()
     private let nameLabel = MorphingTitleLabel()
+    private var worktreePathLabel: MorphingTitleLabel?
+    private var worktreePathMinimumWidth: NSLayoutConstraint?
+    private lazy var nativeStack = NSStackView(views: [iconView, nameLabel])
     /// Most project rows have no collapsed-session count. Besides an otherwise empty label and
     /// three constraints, creating this eagerly pays AppKit's cold monospaced-digit font setup
     /// in the first sidebar layout. Materialize it only when there are digits to show.
@@ -235,11 +238,13 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         switch style {
         case .standalone:
             nativeName = project.name
+            setWorktreePath(nil)
             // The icon shows on standalone rows only: under a repository heading the same
             // repo's mark would repeat once per checkout and say nothing new.
             showIcon(for: project)
         case .checkout:
             nativeName = GitInfo.currentBranch(for: project.folderPath) ?? project.name
+            setWorktreePath(project.folderPath)
             hideIcon()
         }
 
@@ -287,6 +292,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         count: Int = 0,
         representing project: Project? = nil
     ) {
+        setWorktreePath(nil)
         popoverProject = nil
         dismissPopover()
 
@@ -331,6 +337,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// unlike a repository heading this one can be renamed in place and says so by morphing.
     func configureAsBranch(named branch: String, collapsedSessionCount: Int = 0) {
         isHeading = true
+        setWorktreePath(nil)
         popoverProject = nil
         dismissPopover()
         hideIcon()
@@ -354,6 +361,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// heading it owns no branch operation, so no hover control is reserved beside its label.
     func configureAsFactGroup(named title: String, collapsedSessionCount: Int = 0) {
         isHeading = true
+        setWorktreePath(nil)
         popoverProject = nil
         dismissPopover()
         hideIcon()
@@ -471,7 +479,6 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Builds the visual subtree extensions may replace. Count and hover actions remain in the
     /// trailing sibling so no replacement can hide or move host-owned project state.
     private func setupCustomizableContent() {
-        let nativeStack = NSStackView(views: [iconView, nameLabel])
         nativeStack.orientation = .horizontal
         nativeStack.alignment = .centerY
         nativeStack.spacing = SidebarRowDefaults.horizontalSpacing
@@ -512,6 +519,42 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         addSubview(trailingSlot)
 
         _ = customizationHost
+    }
+
+    /// One optional label per visible checkout; no discovery or filesystem work on this path.
+    private func setWorktreePath(_ path: String?) {
+        guard let path else {
+            worktreePathMinimumWidth?.isActive = false
+            worktreePathLabel?.isHidden = true
+            nameLabel.setContentHuggingPriority(SidebarRowDefaults.stretchableHugging, for: .horizontal)
+            nameLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+            return
+        }
+        let label: MorphingTitleLabel
+        if let worktreePathLabel {
+            label = worktreePathLabel
+        } else {
+            label = MorphingTitleLabel()
+            label.applyFont(.body)
+            label.setAccessibilityIdentifier("sidebar.project.worktree-path")
+            label.setTextColor { [weak self] in
+                self?.backgroundStyle == .emphasized
+                    ? Design.Ink.selection.secondary : Design.Text.tertiary
+            }
+            label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            nativeStack.addArrangedSubview(label)
+            worktreePathLabel = label
+            worktreePathMinimumWidth = label.widthAnchor.constraint(
+                greaterThanOrEqualTo: nativeStack.widthAnchor,
+                multiplier: SidebarRowDefaults.worktreePathMinimumFraction
+            )
+        }
+        nameLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setStringValue("[\(PathAbbreviation.abbreviatingHome(in: path))]", animated: false)
+        label.toolTip = path
+        label.isHidden = false
+        worktreePathMinimumWidth?.isActive = true
     }
 
     /// Shows the project's stored icon, or the folder symbol while it has none.
@@ -950,6 +993,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// only reaches the folder-symbol fallback; a real icon keeps its own colours.
     private func applyTextColors() {
         nameLabel.refreshTextColor()
+        worktreePathLabel?.refreshTextColor()
 
         // The `+` and the `⋯` are drawn controls rather than tinted images, so they are told
         // which ground they are on rather than handed a colour — see

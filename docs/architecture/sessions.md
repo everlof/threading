@@ -1823,6 +1823,25 @@ transport cannot be picked up half-way through a turn — the terminal's replay 
 here. What the agent finished while Threading was closed is in the transcript, which is the whole
 point; see [`pty-host.md`](pty-host.md#why-a-conversation-is-not-reattached).
 
+## Terminal restart
+
+**Restart Terminal** is a host-owned recovery action in the shared row/context/header menu,
+including dormant terminal rows. It preserves the session, provider identifier, account and
+checkout. `SessionCoordinator` closes the cached presentation, and `SessionTerminalRestart`
+fences launch while it checks the background host even if hosting was since disabled. One
+bounded survey identifies only that session; a live hosted child must acknowledge its exit.
+A failed survey at an existing socket or an unconfirmed stop refuses the relaunch visibly.
+The local terminal's reaper owns termination; the worker waits on the captured PID/start-time
+pair before normal resume. Already-ended host records use the normal atomic replacement path.
+Discard also cancels deferred layout launches and external-owner preflight callbacks.
+
+The action immediately interrupts work by explicit user request; its progress receipt states
+that the saved conversation will resume. It does not archive, delete, reset provider identity,
+or send an agent prompt. Process authority and refusal remain host-owned when sidebar
+presentation is customized. At user frequency, four workers bound blocking I/O, one host
+inventory scan handles ordinary tens/stress 1,000 sessions, and main-actor work changes only
+the target. There is no new externally sized view tree.
+
 ## Close and Archive
 
 Two row actions that read as near-synonyms and are near-opposites. **Close** acts on the

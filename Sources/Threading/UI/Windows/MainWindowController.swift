@@ -2258,7 +2258,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// choice cannot fire under a later one. The selected session is left out when
     /// `restoreSelectedSession` is already bringing it back through the sidebar — its launch
     /// is a run-loop turn away, which `hasTerminal` alone would race.
-    func relaunchSessionsFromLastQuit() {
+    func relaunchSessionsFromLastQuit(completion: @escaping () -> Void = {}) {
         // Consumed whatever the policy is, and before the policy is consulted: a list written
         // under one choice must not be able to fire under a later one. Consumed *here* rather
         // than inside the completion below for the same reason it has always been consumed
@@ -2288,6 +2288,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             },
             completion: { [weak self] heldByHost in
                 self?.planRelaunchFromLastQuit(recorded: recorded, heldByHost: heldByHost)
+                completion()
             }
         )
     }
@@ -5158,6 +5159,10 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
 
     func projectSidebar(_: ProjectSidebarViewController, closeSession sessionID: SessionID) {
         sessionCoordinator.closeSession(sessionID)
+    }
+
+    func projectSidebar(_: ProjectSidebarViewController, restartTerminal sessionID: SessionID) {
+        sessionCoordinator.restartTerminal(sessionID)
     }
 
     /// Naming is a decision about the session record, so it routes through the coordinator with

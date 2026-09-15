@@ -14483,6 +14483,17 @@
         }
       }
     },
+    "Copy requested text to the Mac or an active iOS device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera begärd text till Macen eller en aktiv iOS-enhet."
+          }
+        }
+      }
+    },
     "Copy selected text to the clipboard" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14600,6 +14611,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera den här inloggningslänken"
+          }
+        }
+      }
+    },
+    "Copy to clipboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera till urklipp"
           }
         }
       }
@@ -24372,6 +24394,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låt en agent namnge sin egen session och arkivera den när arbetet är klart."
+          }
+        }
+      }
+    },
+    "Let an agent name or archive this chat, and copy requested text to a clipboard." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt en agent namnge eller arkivera chatten och kopiera begärd text till urklipp."
           }
         }
       }

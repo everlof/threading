@@ -263,6 +263,68 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sidebar.refreshRows()
     }
 
+    /// Recovery is available even when a stale runtime says no process is running.
+    func restartTerminal(_ sessionID: SessionID) {
+        guard let session = environment.projectStore.session(withID: sessionID),
+              !session.isArchived, !session.usesNativeUI,
+              session.kind.supports(.terminalUI),
+              !SessionTerminalRestart.shared.contains(sessionID) else { return }
+        let runtime = environment.agentRuntime
+#if DEBUG
+        let fixturePlan = runtime.fixtureLaunchPlanProvider(for: sessionID)
+#endif
+        let localPID = runtime.terminalRuntimeSurface(for: sessionID)?.isHostBacked == true
+            ? nil : runtime.terminalRootProcessIdentifier(for: sessionID)
+        environment.eventLog.record(.session, "Terminal restart requested", ["session": sessionID.uuidString])
+        toastPresenter(ToastRequest(
+            message: L10n.string("Restarting terminal…"),
+            detail: L10n.string("Stopping the agent. The saved conversation will resume."),
+            persistsUntilDismissed: true,
+            replacementID: sessionID.uuidString
+        ))
+        SessionTerminalRestart.shared.run(
+            sessionID: sessionID, localPID: localPID,
+            decision: PTYHostDecision.live(settings: environment.settings, bundle: .main),
+            discard: { [weak self] in self?.container.closeTerminal(for: sessionID) },
+            completion: { [weak self] stopped in
+                guard let self else { return }
+                self.environment.eventLog.record(.session, "Terminal restart stop completed", [
+                    "session": sessionID.uuidString, "stopped": String(stopped)
+                ])
+                self.toastPresenter(ToastRequest(
+                    message: stopped ? L10n.string("Terminal stopped") : L10n.string("Couldn’t restart terminal"),
+                    detail: stopped ? nil : L10n.string("The old process could not be confirmed stopped. Try Restart Terminal again."),
+                    persistsUntilDismissed: !stopped,
+                    replacementID: sessionID.uuidString
+                ))
+                guard stopped,
+                      let current = self.environment.projectStore.session(withID: sessionID),
+                      !current.isArchived, !current.usesNativeUI else { return }
+                guard self.environment.projectStore.update(sessionID: sessionID, { stored in
+                    stored.lastLaunchFailure = nil
+                }).succeeded else {
+                    self.toastPresenter(ToastRequest(
+                        message: L10n.string("Couldn’t restart terminal"),
+                        detail: L10n.string("The project data could not be saved."),
+                        persistsUntilDismissed: true,
+                        replacementID: sessionID.uuidString
+                    ))
+                    return
+                }
+                // A selection made during the stop may have mounted a fenced, empty controller.
+                self.environment.agentRuntime.discard(sessionID: sessionID)
+#if DEBUG
+                if let fixturePlan {
+                    _ = self.environment.agentRuntime.installFixtureLaunchPlan(for: sessionID, provider: fixturePlan)
+                }
+#endif
+                self.sidebar.select(sessionID: sessionID)
+                self.container.reopenIfShowing(sessionID: sessionID)
+                self.onPresentationChanged()
+            }
+        )
+    }
+
     /// Files a session away, or restores it.
     ///
     /// Archiving implies closing: the row leaves the sidebar, and an agent nothing lists must

@@ -149,6 +149,9 @@ reshuffling it is a line move.
 
 ### Shipped — pointers remain
 
+- [Three-chat project previews on iPhone](mobile-project-chat-preview.md) — **implemented**
+  2026-09-15: compact previews, inline disclosure, hidden activity summaries and light haptics.
+  The durable contract lives in [Remote Access](../REMOTE_ACCESS.md).
 - [The navigator pipeline](navigator-pipeline.md) — **shipped** 2026-09-07. Extensions can define
   a focused sidebar as a host-evaluated transform over typed host and provider facts, with
   persisted static and registered-fact options, host-owned search and row intents, virtualized

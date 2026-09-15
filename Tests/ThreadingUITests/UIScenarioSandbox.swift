@@ -165,6 +165,15 @@ struct UIScenarioSandbox {
                                resumeTapeName: "codex-question-resume.json", fileManager: fileManager)
     }
 
+    func prepareCodexBrowserAnnotationsFixture() throws -> CodexScenarioFixture {
+        try prepareCodexFixture(
+            title: "Browser annotation fixture",
+            freshTapeName: "codex-browser-annotations-fresh.json",
+            resumeTapeName: "codex-update-status-resume.json",
+            fileManager: .default
+        )
+    }
+
     func prepareCodexStopTurnFixture(
         fileManager: FileManager = .default
     ) throws -> CodexScenarioFixture {

@@ -11,7 +11,7 @@ import XCTest
 /// interesting claims here are about a *launch*, and a launch that had to be arranged with a real
 /// daemon in a real state could only be asserted one way round.
 @MainActor
-final class PTYHostReattachTests: XCTestCase {
+final class PTYHostReattachTests: HostedStoreTestCase {
 
     // MARK: - Constants
 
@@ -255,6 +255,20 @@ final class PTYHostReattachTests: XCTestCase {
             reason,
             SessionPopoverDefaults.dormancyReason(for: .notRunningAtLastQuit)
         )
+    }
+
+    func testFailedAttachmentStillExcludesTheLiveChildFromRelaunch() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: FileManager.default.temporaryDirectory))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .claude))
+        var held: Set<SessionID>?
+        PTYHostReattach.run(
+            decision: decision(isEnabled: true),
+            survey: .answering(PTYHostHoldings(socketPath: Fixture.socket, sessions: [summary(session.id)])),
+            adopt: { _, _ in false },
+            completion: { held = $0 }
+        )
+        XCTAssertTrue(settle(until: { held != nil }))
+        XCTAssertEqual(held, [session.id])
     }
 
     // MARK: - Helpers

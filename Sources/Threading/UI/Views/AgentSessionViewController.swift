@@ -27,9 +27,13 @@ final class AgentSessionViewController: NSViewController {
     private let agentKind: AgentKind
     private let subagentState: SubagentSessionState
     private let launchPlanProvider: AgentLaunchPlanProvider
+    private let projectStore: ProjectStore
     private let appEvents = AppEventObservations()
 
     private(set) var isRunning = false
+    /// A failed write cannot persist its own diagnosis. Keep the current attempt's value until
+    /// the container has presented it, even when the database refuses the failure record too.
+    private(set) var launchRefusal: SessionLaunchFailure?
     var subagents: SubagentTimeline { subagentState.timeline }
     var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
 
@@ -117,9 +121,11 @@ final class AgentSessionViewController: NSViewController {
     init(
         agentSession: AgentSession,
         subagentState: SubagentSessionState? = nil,
-        launchPlanProvider: AgentLaunchPlanProvider? = nil
+        launchPlanProvider: AgentLaunchPlanProvider? = nil,
+        projectStore: ProjectStore = .shared
     ) {
         self.sessionID = agentSession.id
+        self.projectStore = projectStore
         self.agentKind = agentSession.kind
         self.subagentState = subagentState
             ?? SubagentSessionState(sessionID: agentSession.id)
@@ -157,7 +163,7 @@ final class AgentSessionViewController: NSViewController {
         attachmentObserver = TerminalAttachmentObserver(
             sessionID: agentSession.id,
             projectRoot: {
-                ProjectStore.shared.executionProject(forSessionID: agentSession.id).map {
+                projectStore.executionProject(forSessionID: agentSession.id).map {
                     URL(fileURLWithPath: $0.folderPath, isDirectory: true)
                 }
             },
@@ -182,7 +188,7 @@ final class AgentSessionViewController: NSViewController {
             sessionID: agentSession.id,
             kind: agentSession.kind,
             projectRoot: {
-                ProjectStore.shared.executionProject(forSessionID: agentSession.id).map {
+                projectStore.executionProject(forSessionID: agentSession.id).map {
                     URL(fileURLWithPath: $0.folderPath, isDirectory: true)
                 }
             },
@@ -210,10 +216,10 @@ final class AgentSessionViewController: NSViewController {
             self.lastRuntimeSnapshot = snapshot
             if transition.beganTurn {
                 self.beginRunProgressTurn()
-                ProjectStore.shared.noteTurnStarted(sessionID: self.sessionID)
+                projectStore.noteTurnStarted(sessionID: self.sessionID)
             }
             if transition.endedTurn || transition.completedPendingOutcome {
-                ProjectStore.shared.noteTurnEnded(sessionID: self.sessionID)
+                projectStore.noteTurnEnded(sessionID: self.sessionID)
             }
             if transition.endedTurn {
                 self.clearRunProgress(resetTranscriptCursor: false)
@@ -427,6 +433,8 @@ final class AgentSessionViewController: NSViewController {
     /// `initialPrompt` opens the conversation and applies to a first launch only; the
     /// launcher drops it on resume, where the conversation already has an opening.
     func launch(initialPrompt: String? = nil) {
+        guard !isRunning else { return }
+        launchRefusal = nil
         guard externalResumePreflightID == nil else { return }
         continueLaunch(initialPrompt: initialPrompt, checksExternalOwner: true)
     }
@@ -435,7 +443,7 @@ final class AgentSessionViewController: NSViewController {
     /// one check suppressed; every store and filesystem preflight is intentionally asked again
     /// because the process-table read crossed an executor boundary.
     private func continueLaunch(initialPrompt: String?, checksExternalOwner: Bool) {
-        guard !isRunning else { return }
+        guard !isRunning, !SessionTerminalRestart.shared.contains(sessionID) else { return }
 
         // The last line before a PTY exists, which is where recovery's refusal has to be. The
         // pane refuses earlier and more visibly, but this is the one every path crosses — a
@@ -446,8 +454,8 @@ final class AgentSessionViewController: NSViewController {
             return
         }
 
-        guard let agentSession = ProjectStore.shared.session(withID: sessionID),
-              let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+        guard let agentSession = self.projectStore.session(withID: sessionID),
+              let project = self.projectStore.project(forSessionID: sessionID) else {
             ThreadingLogger.agent.error("Cannot launch session \(self.sessionID, privacy: .public): not found in store")
             return
         }
@@ -533,7 +541,7 @@ final class AgentSessionViewController: NSViewController {
                 // A migration or provider discovery could replace the id during the queue hop.
                 // The answer belongs only to the exact id it checked; restart every preflight for
                 // a different state rather than applying a stale refusal or skipping its owner.
-                guard ProjectStore.shared.session(withID: self.sessionID)?
+                guard self.projectStore.session(withID: self.sessionID)?
                     .resumeState.transcriptID?.rawValue == rawTranscriptID
                 else {
                     self.continueLaunch(
@@ -544,9 +552,9 @@ final class AgentSessionViewController: NSViewController {
                 }
 
                 if owner != nil {
-                    let transcriptPath = ProjectStore.shared.session(withID: self.sessionID)
+                    let transcriptPath = self.projectStore.session(withID: self.sessionID)
                         .flatMap { stored -> URL? in
-                            guard let project = ProjectStore.shared.project(
+                            guard let project = self.projectStore.project(
                                 forSessionID: self.sessionID
                             ) else { return nil }
                             return SessionTranscript.existingURL(for: stored, in: project)
@@ -564,11 +572,12 @@ final class AgentSessionViewController: NSViewController {
     }
 
     private func recordLaunchRefusal(_ refusal: SessionLaunchFailure) {
+        launchRefusal = refusal
         EventLog.shared.record(.session, "Refused agent launch", [
             "session": sessionID.uuidString,
             "cause": refusal.knownCause ?? "unrecognised"
         ])
-        ProjectStore.shared.update(sessionID: sessionID) { stored in
+        self.projectStore.update(sessionID: sessionID) { stored in
             stored.lastLaunchFailure = refusal
         }
         delegate?.agentSession(self, didExitWithCode: nil)
@@ -576,7 +585,12 @@ final class AgentSessionViewController: NSViewController {
 
     /// Terminates the agent, leaving the terminal view in place showing its final output.
     func terminate() {
-        guard isRunning else { return }
+        pendingLaunchPlan = nil
+        externalResumePreflightID = nil
+        guard isRunning else {
+            session.terminate()
+            return
+        }
         RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
         session.terminate()
         isRunning = false
@@ -631,6 +645,7 @@ final class AgentSessionViewController: NSViewController {
         // the host survey is in flight. The daemon owns the child named by this attach attempt,
         // so that local launch must stay cancelled even if attaching the surface fails.
         pendingLaunchPlan = nil
+        externalResumePreflightID = nil
 
         session.hostTransportFactory = PTYHostPolicy.attachingTransportFactory(
             socketPath: socketPath,
@@ -648,6 +663,10 @@ final class AgentSessionViewController: NSViewController {
         }
 
         isRunning = true
+        launchRefusal = nil
+        if projectStore.session(withID: sessionID)?.lastLaunchFailure != nil {
+            projectStore.update(sessionID: sessionID) { $0.lastLaunchFailure = nil }
+        }
         // Not a launch date: nothing launched, so nothing can have failed to launch. The
         // survival check exists to retire a *previous* launch's failure band, and a reattach has
         // no evidence either way.
@@ -853,7 +872,8 @@ final class AgentSessionViewController: NSViewController {
     // MARK: - Private Methods
 
     private func startIfTerminalIsSized() {
-        guard let plan = pendingLaunchPlan else { return }
+        guard let plan = pendingLaunchPlan,
+              !SessionTerminalRestart.shared.contains(sessionID) else { return }
 
         let dimensions = session.terminalView.terminalDimensions
         guard dimensions.cols > 0, dimensions.rows > 0 else {
@@ -866,7 +886,7 @@ final class AgentSessionViewController: NSViewController {
         let hostFactory: PTYHostTransportFactory?
         switch PTYHostPolicy.launchRoute(
             for: session.identity,
-            session: ProjectStore.shared.session(withID: sessionID)
+            session: self.projectStore.session(withID: sessionID)
         ) {
         case .local:
             hostFactory = nil
@@ -887,7 +907,7 @@ final class AgentSessionViewController: NSViewController {
         // moment it runs. See `SessionRestorationLedger`.
         SessionRestorationLedger.shared.forget(sessionID: sessionID)
 
-        let recorded = ProjectStore.shared.update(sessionID: sessionID) { stored in
+        let recorded = self.projectStore.update(sessionID: sessionID) { stored in
             stored.hasLaunched = true
             stored.lastActiveAt = Date()
             stored.lastExitCode = nil
@@ -898,11 +918,13 @@ final class AgentSessionViewController: NSViewController {
             ThreadingLogger.agent.error(
                 "Refused to launch session \(self.sessionID, privacy: .public): project state could not be saved"
             )
-            let alert = ThemedAlert()
-            alert.messageText = L10n.string("Couldn’t start")
-            alert.informativeText = L10n.string("The project data could not be saved.")
-            alert.alertStyle = .informational
-            alert.runModal()
+            recordLaunchRefusal(SessionLaunchFailure(
+                origin: .preflight,
+                summary: L10n.string("Couldn’t start"),
+                detail: [L10n.string("The project data could not be saved.")],
+                knownCause: self.projectStore.persistenceBlockReason == .storageExhausted
+                    ? "storage-exhausted" : "persistence-unavailable"
+            ))
             return
         }
 
@@ -955,7 +977,7 @@ final class AgentSessionViewController: NSViewController {
     /// press that is about to reproduce it. One work item per launch, cancelled by the exit.
     private func armLaunchSurvivalCheck() {
         launchSurvivalWorkItem?.cancel()
-        guard ProjectStore.shared.session(withID: sessionID)?.lastLaunchFailure != nil else {
+        guard self.projectStore.session(withID: sessionID)?.lastLaunchFailure != nil else {
             launchSurvivalWorkItem = nil
             return
         }
@@ -964,7 +986,7 @@ final class AgentSessionViewController: NSViewController {
             guard let self else { return }
             self.launchSurvivalWorkItem = nil
             guard self.isRunning else { return }
-            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+            self.projectStore.update(sessionID: self.sessionID) { stored in
                 stored.lastLaunchFailure = nil
             }
             self.delegate?.agentSessionDidChangeState(self)
@@ -993,9 +1015,9 @@ final class AgentSessionViewController: NSViewController {
 
         let detail = Array(screen.suffix(SessionLaunchFailureDefaults.capturedLineCount))
         let diagnosis = SessionLaunchDiagnosis.classify(lines: detail, kind: agentKind)
-        let transcriptPath = ProjectStore.shared.session(withID: sessionID)
+        let transcriptPath = self.projectStore.session(withID: sessionID)
             .flatMap { stored -> URL? in
-                guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+                guard let project = self.projectStore.project(forSessionID: sessionID) else {
                     return nil
                 }
                 return SessionTranscript.existingURL(for: stored, in: project)
@@ -1099,7 +1121,7 @@ final class AgentSessionViewController: NSViewController {
     ) {
         guard agentKind.supports(.transcriptInterruptedTurnRecord),
               let path,
-              let stored = ProjectStore.shared.session(withID: sessionID),
+              let stored = self.projectStore.session(withID: sessionID),
               let transcriptID = providerSessionID ?? stored.resumeState.transcriptID,
               let account = AgentAccountDiscovery.account(
                   for: stored.kind,
@@ -1266,7 +1288,7 @@ final class AgentSessionViewController: NSViewController {
         -> TerminalTranscriptAttachmentObserver.TranscriptURLLookup? {
         guard agentKind.supports(.transcriptInterruptedTurnRecord),
               codexTranscriptURL == nil,
-              let stored = ProjectStore.shared.session(withID: sessionID),
+              let stored = self.projectStore.session(withID: sessionID),
               let transcriptID = stored.resumeState.transcriptID,
               let account = AgentAccountDiscovery.account(
                   for: stored.kind,
@@ -1460,9 +1482,9 @@ final class AgentSessionViewController: NSViewController {
     /// A hook may correct the initial checkout-derived path after the first output callback.
     /// Store and location lookups are O(1), with no filesystem work after account resolution.
     private func resolvedClaudeTranscriptURL() -> URL? {
-        guard let session = ProjectStore.shared.session(withID: sessionID),
+        guard let session = self.projectStore.session(withID: sessionID),
               let transcriptID = session.resumeState.transcriptID,
-              let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
+              let project = self.projectStore.executionProject(forSessionID: sessionID)
         else { return nil }
 
         if claudeTranscriptAccount?.handle != session.accountHandle {
@@ -1507,7 +1529,7 @@ final class AgentSessionViewController: NSViewController {
     private func discoverAssignedSessionID() {
         guard !isDiscoveringIdentifier,
               let launchedAt = identifierLaunchDate,
-              let agentSession = ProjectStore.shared.session(withID: sessionID),
+              let agentSession = self.projectStore.session(withID: sessionID),
               agentSession.resumeState == .awaitingIdentifier else { return }
 
         isDiscoveringIdentifier = true
@@ -1530,7 +1552,7 @@ final class AgentSessionViewController: NSViewController {
     /// Codex rollouts live under the launching account's own home, so discovery is scoped to
     /// that account rather than the default one.
     private func discoverCodexSessionID(for agentSession: AgentSession, launchedAt: Date) {
-        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
+        guard let project = self.projectStore.executionProject(forSessionID: sessionID),
               let account = AgentAccountDiscovery.account(
                   for: agentSession.kind,
                   handle: agentSession.accountHandle
@@ -1548,7 +1570,7 @@ final class AgentSessionViewController: NSViewController {
             self.isDiscoveringIdentifier = false
             guard let discoveredID else { return }
 
-            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+            self.projectStore.update(sessionID: self.sessionID) { stored in
                 stored.resumeState = .resumable(discoveredID)
             }
 
@@ -1563,7 +1585,7 @@ final class AgentSessionViewController: NSViewController {
     /// Querying that public surface avoids coupling Threading to OpenCode's private SQLite
     /// schema, which has already changed between releases.
     private func discoverOpenCodeSessionID(launchedAt: Date) {
-        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
+        guard let project = self.projectStore.executionProject(forSessionID: sessionID) else {
             isDiscoveringIdentifier = false
             return
         }
@@ -1579,7 +1601,7 @@ final class AgentSessionViewController: NSViewController {
                 return
             }
 
-            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+            self.projectStore.update(sessionID: self.sessionID) { stored in
                 stored.resumeState = .resumable(discoveredID)
             }
 
@@ -1594,7 +1616,7 @@ final class AgentSessionViewController: NSViewController {
     /// create that conversation. Confirm it through the supported session list before storing a
     /// resume state, so quitting login cannot strand the sidebar row on a nonexistent UUID.
     private func discoverGrokSessionID(for agentSession: AgentSession) {
-        guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else {
+        guard let project = self.projectStore.executionProject(forSessionID: sessionID) else {
             isDiscoveringIdentifier = false
             return
         }
@@ -1611,7 +1633,7 @@ final class AgentSessionViewController: NSViewController {
                 return
             }
 
-            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+            self.projectStore.update(sessionID: self.sessionID) { stored in
                 stored.resumeState = .resumable(discoveredID)
             }
 
@@ -1775,7 +1797,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
             ])
         }
 
-        ProjectStore.shared.update(sessionID: sessionID) { stored in
+        self.projectStore.update(sessionID: sessionID) { stored in
             stored.lastExitCode = exitCode
             stored.lastActiveAt = Date()
             if let failure {

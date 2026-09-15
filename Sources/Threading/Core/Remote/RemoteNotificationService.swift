@@ -422,6 +422,14 @@ final class RemoteNotificationService {
         }
     }
 
+    /// The accepted speaker's stable identity, independent of notification registration.
+    func clipboardParticipantID(for sessionID: SessionID) -> String {
+        switch currentActorBySession[sessionID] ?? .owner {
+        case .owner: RemoteCollaborationParticipantDTO.ownerID
+        case .member(let id, _): id
+        }
+    }
+
     /// Whether the requested recipient set includes the Mac owner, independently of whether any
     /// phone is registered. Local delivery uses this before posting on the owner's Mac so a guest
     /// saying “notify me” cannot accidentally alert somebody else.

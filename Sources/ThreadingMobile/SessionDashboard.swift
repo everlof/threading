@@ -633,7 +633,9 @@ enum MobileSessionOrdering {
         }
         return sessions.sorted {
             if $0.isPinned != $1.isPinned { return $0.isPinned }
-            return ($0.lastActiveAt ?? 0) > ($1.lastActiveAt ?? 0)
+            let lhs = $0.lastActiveAt ?? 0
+            let rhs = $1.lastActiveAt ?? 0
+            return lhs == rhs ? $0.id < $1.id : lhs > rhs
         }
     }
 }
@@ -671,6 +673,7 @@ private enum DashboardCollectionItemID: Hashable {
     case empty
     case notificationOnboarding
     case projectHeader(String)
+    case projectChatDisclosure(String)
     case typeHeader(DashboardContentType)
     case row(String)
 }
@@ -699,9 +702,18 @@ private struct DashboardCollectionRow {
     let isLast: Bool
 }
 
+private struct DashboardPreviewChange: Equatable {
+    let id = UUID()
+    let projectKey: String
+    let isExpanded: Bool
+}
+
 private struct DashboardCollectionModel {
     let sections: [DashboardCollectionSection]
     let rows: [String: DashboardCollectionRow]
+    var previews: [String: MobileProjectChatPreview] = [:]
+    var projectTitles: [String: String] = [:]
+    var previewChange: DashboardPreviewChange? = nil
 }
 
 private struct DashboardUIKitRowConfiguration {
@@ -752,7 +764,8 @@ private struct MobileDashboardCollection: UIViewControllerRepresentable {
             bottomContentInset: bottomContentInset,
             content: content,
             rowConfiguration: rowConfiguration,
-            refresh: refresh
+            refresh: refresh,
+            previewChange: model.previewChange
         )
     }
 }
@@ -778,6 +791,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
     private var rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
     private var refreshAction: @MainActor () async -> Void
     private var refreshTask: Task<Void, Never>?
+    private var lastPreviewChange: UUID?
     private var dataSource: UICollectionViewDiffableDataSource<
         String,
         DashboardCollectionItemID
@@ -870,14 +884,34 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         }
     }
 
+#if DEBUG
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        let capture = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
+        guard capture == "session-dashboard-preview-accessibility-custom-light"
+                || capture == "session-dashboard-preview-collapsed-again-custom-dark",
+              let path = dataSource.indexPath(for: .projectChatDisclosure(
+                MobileProjectDisclosureStore.projectKey(id: nil, name: "AnotherTerminal")
+              )) else { return }
+        // Position the actual list at the control under review. Large-text evidence must
+        // photograph the disclosure, not just the demo banner above its offscreen rows.
+        collectionView.layoutIfNeeded()
+        collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+    }
+#endif
+
     func update(
         sections: [DashboardCollectionSection],
         theme: RemoteThemePalette,
         bottomContentInset: CGFloat,
         content: @escaping @MainActor (DashboardCollectionItemID) -> AnyView,
         rowConfiguration: @escaping @MainActor (String) -> DashboardUIKitRowConfiguration?,
-        refresh: @escaping @MainActor () async -> Void
+        refresh: @escaping @MainActor () async -> Void,
+        previewChange: DashboardPreviewChange? = nil
     ) {
+        let userChange = previewChange.flatMap { $0.id == lastPreviewChange ? nil : $0 }
+        lastPreviewChange = previewChange?.id
+        let previousAnchor = isViewLoaded ? visibleAnchor() : nil
         let structureChanged = self.sections != sections
         let themeChanged = self.theme != theme
         let bottomInsetChanged = self.bottomContentInset != bottomContentInset
@@ -900,7 +934,16 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         }
         if structureChanged {
             collectionView.setCollectionViewLayout(makeLayout(), animated: false)
-            applySnapshot(preservingVisibleAnchor: true)
+            applySnapshot(
+                preservingVisibleAnchor: true,
+                requestedAnchor: userChange.map { change in
+                    change.isExpanded ? previousAnchor : VisibleAnchor(
+                        item: .projectHeader(change.projectKey),
+                        offset: collectionView.adjustedContentInset.top
+                    )
+                } ?? previousAnchor,
+                animated: userChange != nil && !UIAccessibility.isReduceMotionEnabled
+            )
         } else {
             if themeChanged {
                 replaceLayoutPreservingVisibleAnchor()
@@ -1038,8 +1081,12 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         }
     }
 
-    private func applySnapshot(preservingVisibleAnchor: Bool) {
-        let anchor = preservingVisibleAnchor ? visibleAnchor() : nil
+    private func applySnapshot(
+        preservingVisibleAnchor: Bool,
+        requestedAnchor: VisibleAnchor? = nil,
+        animated: Bool = false
+    ) {
+        let anchor = requestedAnchor ?? (preservingVisibleAnchor ? visibleAnchor() : nil)
         var snapshot = NSDiffableDataSourceSnapshot<String, DashboardCollectionItemID>()
         for section in presentedSections {
             snapshot.appendSections([section.id])
@@ -1052,7 +1099,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
             dataSource.itemIdentifier(for: $0)
         }.filter { snapshot.indexOfItem($0) != nil }
         snapshot.reconfigureItems(retainedVisible)
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+        dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
             guard let self else { return }
             collectionView.layoutIfNeeded()
             restore(anchor)
@@ -1145,10 +1192,13 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
               let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
             return
         }
+        let minimumY = -collectionView.adjustedContentInset.top
+        let maximumY = max(minimumY, collectionView.contentSize.height
+            - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
         collectionView.setContentOffset(
             CGPoint(
                 x: collectionView.contentOffset.x,
-                y: attributes.frame.minY - anchor.offset
+                y: min(maximumY, max(minimumY, attributes.frame.minY - anchor.offset))
             ),
             animated: false
         )
@@ -2851,6 +2901,103 @@ private extension MobileDashboardCollectionViewController {
     }
 }
 
+struct MobileDashboardChatPreviewMetrics {
+    let itemCounts: [Int]
+    let maximumMountedCells: Int
+    let headerOffsetAfterCollapse: CGFloat
+    let expansionAnchorDelta: CGFloat
+    let projectionMilliseconds: Double
+    let expandedMountMilliseconds: Double
+}
+
+@MainActor
+enum MobileDashboardChatPreviewProbe {
+    static func exercise(rowCount: Int) async -> MobileDashboardChatPreviewMetrics {
+        await MobileDashboardCollectionViewController.exerciseChatPreview(rowCount: rowCount)
+    }
+}
+
+private extension MobileDashboardCollectionViewController {
+    static func exerciseChatPreview(rowCount: Int) async -> MobileDashboardChatPreviewMetrics {
+        let source = (0..<rowCount).map {
+            RemoteSessionSummaryDTO(id: "preview-probe:\($0)", title: "Chat \($0)",
+                agentKind: "codex", surface: .conversation, state: .idle, projectName: "Probe")
+        }
+        let theme = RemoteThemePalette(nil)
+        var preview = MobileProjectChatPreview(sessions: source, isExpanded: false, isLive: true)
+        var rows: [String: DashboardCollectionRow] = [:]
+        var projectionMilliseconds = 0.0
+        func sections(expanded: Bool) -> [DashboardCollectionSection] {
+            let start = CACurrentMediaTime()
+            preview = MobileProjectChatPreview(sessions: source, isExpanded: expanded, isLive: true)
+            rows = [:]
+            let items = preview.sessions.enumerated().map { index, session in
+                let row = DashboardRowItem.chat(session)
+                rows[row.id] = DashboardCollectionRow(item: row, hasDivider: index > 0,
+                    isFirst: index == 0, isLast: false)
+                return DashboardCollectionItemID.row(row.id)
+            } + [DashboardCollectionItemID.projectChatDisclosure("probe")]
+            projectionMilliseconds += (CACurrentMediaTime() - start) * 1_000
+            return [
+                .init(id: "header", kind: .chrome(estimatedHeight: 44),
+                      items: [.projectHeader("probe")], spacingAfter: 0),
+                .init(id: "plate", kind: .plate, items: items, spacingAfter: 0),
+            ]
+        }
+        let content: @MainActor (DashboardCollectionItemID) -> AnyView = { item in
+            if case .projectChatDisclosure = item {
+                return AnyView(MobileProjectChatDisclosure(preview: preview,
+                    projectTitle: "Probe", action: {}).mobileTheme(theme))
+            }
+            return AnyView(Text("Probe").frame(height: 44))
+        }
+        let configuration: @MainActor (String) -> DashboardUIKitRowConfiguration? = { id in
+            guard let row = rows[id] else { return nil }
+            return DashboardUIKitRowConfiguration(row: row, theme: theme, isArchived: false,
+                isCatalogueLive: true, showsProjectName: false, activate: nil,
+                swipeAction: nil, contextMenu: nil)
+        }
+        let controller = MobileDashboardCollectionViewController(sections: sections(expanded: false),
+            theme: theme, bottomContentInset: 0, content: content,
+            rowConfiguration: configuration, refresh: {})
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        controller.view.layoutIfNeeded()
+        var counts = [controller.dataSource.snapshot().numberOfItems]
+        var mounted = controller.collectionView.visibleCells.count
+        let initialOffset = controller.collectionView.contentOffset.y
+        let expandedSections = sections(expanded: true)
+        let start = CACurrentMediaTime()
+        controller.update(sections: expandedSections, theme: theme, bottomContentInset: 0,
+            content: content, rowConfiguration: configuration, refresh: {},
+            previewChange: .init(projectKey: "probe", isExpanded: true))
+        controller.view.layoutIfNeeded()
+        let mountMilliseconds = (CACurrentMediaTime() - start) * 1_000
+        try? await Task.sleep(for: .milliseconds(500))
+        counts.append(controller.dataSource.snapshot().numberOfItems)
+        mounted = max(mounted, controller.collectionView.visibleCells.count)
+        let anchorDelta = controller.collectionView.contentOffset.y - initialOffset
+        controller.collectionView.setContentOffset(CGPoint(x: 0, y: 12_000), animated: false)
+        controller.collectionView.layoutIfNeeded()
+        mounted = max(mounted, controller.collectionView.visibleCells.count)
+        controller.update(sections: sections(expanded: false), theme: theme, bottomContentInset: 0,
+            content: content, rowConfiguration: configuration, refresh: {},
+            previewChange: .init(projectKey: "probe", isExpanded: false))
+        controller.view.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(500))
+        counts.append(controller.dataSource.snapshot().numberOfItems)
+        mounted = max(mounted, controller.collectionView.visibleCells.count)
+        let header = controller.dataSource.indexPath(for: .projectHeader("probe"))!
+        // Measure against the unobscured viewport, which includes UIKit's safe-area inset.
+        let offset = controller.collectionView.layoutAttributesForItem(at: header)!.frame.minY
+            - controller.collectionView.contentOffset.y
+            - controller.collectionView.adjustedContentInset.top
+        return MobileDashboardChatPreviewMetrics(itemCounts: counts, maximumMountedCells: mounted,
+            headerOffsetAfterCollapse: offset, expansionAnchorDelta: anchorDelta,
+            projectionMilliseconds: projectionMilliseconds, expandedMountMilliseconds: mountMilliseconds)
+    }
+}
+
 @MainActor
 enum MobileDashboardWorkingStatusProbe {
     static func exercise(rowCount: Int) -> [Bool] {
@@ -2869,6 +3016,7 @@ struct SessionDashboard: View {
     @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
         SessionTypeDirection.chatsFirst.rawValue
     @StateObject private var projectDisclosure: MobileProjectDisclosureStore
+    @State private var previewChange: DashboardPreviewChange?
     @State private var isConfirmingForget = false
     @State private var showsArchived = false
     @State private var showsSnoozed = false
@@ -2910,7 +3058,12 @@ struct SessionDashboard: View {
         if let run = environment["THREADING_MOBILE_UI_EVIDENCE_RUN"],
            let capture = environment["THREADING_MOBILE_UI_EVIDENCE_ID"],
            let defaults = UserDefaults(suiteName: "threading.mobile.disclosure-evidence.\(run).\(capture)") {
-            _projectDisclosure = StateObject(wrappedValue: MobileProjectDisclosureStore(defaults: defaults))
+            let disclosure = MobileProjectDisclosureStore(defaults: defaults)
+            if capture == "session-dashboard-preview-collapsed-again-custom-dark" {
+                disclosure.setChatPreviewStage(.all, hostID: "demo-mac",
+                    projectKey: MobileProjectDisclosureStore.projectKey(id: nil, name: "AnotherTerminal"))
+            }
+            _projectDisclosure = StateObject(wrappedValue: disclosure)
         } else {
             _projectDisclosure = StateObject(wrappedValue: MobileProjectDisclosureStore())
         }
@@ -3038,7 +3191,7 @@ struct SessionDashboard: View {
             theme: theme,
             bottomContentInset: dashboardCollectionBottomInset,
             content: { item in
-                dashboardCollectionContent(item, rows: collectionModel.rows)
+                dashboardCollectionContent(item, model: collectionModel)
             },
             rowConfiguration: { id in
                 guard let row = collectionModel.rows[id] else { return nil }
@@ -3067,6 +3220,8 @@ struct SessionDashboard: View {
     private var dashboardCollectionModel: DashboardCollectionModel {
         var sections: [DashboardCollectionSection] = []
         var rowModels: [String: DashboardCollectionRow] = [:]
+        var previews: [String: MobileProjectChatPreview] = [:]
+        var projectTitles: [String: String] = [:]
 
         func appendChrome(
             _ item: DashboardCollectionItemID,
@@ -3085,18 +3240,20 @@ struct SessionDashboard: View {
         func appendPlate(
             _ rows: [DashboardRowItem],
             id: String,
+            disclosureKey: String? = nil,
             spacingAfter: CGFloat = MobileDesign.Spacing.pane
         ) {
             guard !rows.isEmpty else { return }
-            let items = rows.enumerated().map { offset, row in
+            var items = rows.enumerated().map { offset, row in
                 rowModels[row.id] = DashboardCollectionRow(
                     item: row,
                     hasDivider: offset > 0,
                     isFirst: offset == 0,
-                    isLast: offset == rows.count - 1
+                    isLast: offset == rows.count - 1 && disclosureKey == nil
                 )
                 return DashboardCollectionItemID.row(row.id)
             }
+            if let disclosureKey { items.append(.projectChatDisclosure(disclosureKey)) }
             sections.append(DashboardCollectionSection(
                 id: id,
                 kind: .plate,
@@ -3148,13 +3305,24 @@ struct SessionDashboard: View {
                 )
                 guard projectDisclosure.isExpanded(hostID: model.activeHostID, projectKey: project.id)
                 else { continue }
+                let preview = MobileProjectChatPreview(
+                    sessions: project.sessions,
+                    stage: showsArchived || showsSnoozed ? .all : projectDisclosure.chatPreviewStage(
+                        hostID: model.activeHostID, projectKey: project.id
+                    ),
+                    isLive: model.dashboardCatalogue?.isLive == true
+                )
+                previews[project.id] = preview
+                projectTitles[project.id] = project.title
                 appendPlate(
                     DashboardRowItem.rows(
-                        sessions: project.sessions,
+                        sessions: Array(preview.sessions),
                         terminals: project.terminals,
                         order: [.chats, .terminals]
                     ),
-                    id: "project-plate:\(project.id)"
+                    id: "project-plate:\(project.id)",
+                    disclosureKey: preview.canExpand && !showsArchived && !showsSnoozed
+                        ? project.id : nil
                 )
             }
         } else {
@@ -3176,12 +3344,15 @@ struct SessionDashboard: View {
                 spacingAfter: 0
             )
         }
-        return DashboardCollectionModel(sections: sections, rows: rowModels)
+        return DashboardCollectionModel(
+            sections: sections, rows: rowModels, previews: previews,
+            projectTitles: projectTitles, previewChange: previewChange
+        )
     }
 
     private func dashboardCollectionContent(
         _ item: DashboardCollectionItemID,
-        rows: [String: DashboardCollectionRow]
+        model collectionModel: DashboardCollectionModel
     ) -> AnyView {
         let content: AnyView
         switch item {
@@ -3217,10 +3388,39 @@ struct SessionDashboard: View {
                     ? { startDraft(in: name) }
                     : nil
             ))
+        case .projectChatDisclosure(let key):
+            if let preview = collectionModel.previews[key] {
+                content = AnyView(
+                    MobileProjectChatDisclosure(
+                        preview: preview,
+                        projectTitle: collectionModel.projectTitles[key] ?? "",
+                        action: {
+                            let expanded = preview.nextStage != .compact
+                            projectDisclosure.setChatPreviewStage(
+                                preview.nextStage, hostID: model.activeHostID, projectKey: key
+                            )
+                            previewChange = DashboardPreviewChange(
+                                projectKey: key, isExpanded: expanded
+                            )
+                        }
+                    )
+                    .overlay(alignment: .top) {
+                        ThemedRowDivider(
+                            leadingInset: DashboardRowMetrics.textLeadingEdge,
+                            trailingInset: 0
+                        )
+                    }
+                    .clipShape(DashboardCollectionRowClip(
+                        roundsTop: false, roundsBottom: true, radius: theme.panelRadius
+                    ))
+                )
+            } else {
+                content = AnyView(EmptyView())
+            }
         case .typeHeader(let type):
             content = AnyView(DashboardTypeHeader(type: type))
         case .row(let id):
-            if let row = rows[id] {
+            if let row = collectionModel.rows[id] {
                 content = AnyView(dashboardCollectionRow(row))
             } else {
                 content = AnyView(EmptyView())
@@ -4324,7 +4524,10 @@ struct NewSessionButton: View {
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            MobileButtonFeedback.shared.perform()
+            action()
+        } label: {
             Image(systemName: "plus")
                 .frame(
                     width: MobileDesign.Size.compactControl,
@@ -4333,6 +4536,7 @@ struct NewSessionButton: View {
                 .background(theme.controlResting, in: Circle())
                 .contentShape(Circle())
         }
+        .onAppear { MobileButtonFeedback.shared.prepare() }
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -4360,7 +4564,10 @@ private struct DashboardProjectHeader: View {
 
     var body: some View {
         HStack(spacing: MobileDesign.Spacing.small) {
-            Button(action: toggleExpanded) {
+            Button {
+                MobileButtonFeedback.shared.perform()
+                toggleExpanded()
+            } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(theme.secondaryLabel)
@@ -4370,7 +4577,8 @@ private struct DashboardProjectHeader: View {
                     )
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MobileProjectDisclosureButtonStyle())
+            .onAppear { MobileButtonFeedback.shared.prepare() }
             .accessibilityLabel(MobileL10n.string(
                 isExpanded ? "Collapse %@" : "Expand %@", title
             ))

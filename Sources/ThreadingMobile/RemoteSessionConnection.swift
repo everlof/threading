@@ -457,6 +457,7 @@ final class RemoteSessionConnection: ObservableObject {
     private let reconnectClient: (
         @MainActor (MobileSessionReconnectRequest) async -> RemoteClient?
     )?
+    private let clipboardWriter: @MainActor (RemoteClipboardWrite) -> RemoteClipboardResult
     private let deviceID: String
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -651,8 +652,12 @@ final class RemoteSessionConnection: ObservableObject {
         terminalHydrationQuietDelay: Duration =
             RemoteMobileConnectionDefaults.terminalHydrationQuietDelay,
         terminalHydrationMaximumDelay: Duration =
-            RemoteMobileConnectionDefaults.terminalHydrationMaximumDelay
+            RemoteMobileConnectionDefaults.terminalHydrationMaximumDelay,
+        clipboardWriter: @escaping @MainActor (RemoteClipboardWrite) -> RemoteClipboardResult = {
+            MobileClipboardWriter.copy($0)
+        }
     ) {
+        self.clipboardWriter = clipboardWriter
         self.session = session
         self.target = target ?? .session(session.id)
         self.client = client
@@ -1895,6 +1900,21 @@ final class RemoteSessionConnection: ObservableObject {
             from: data
         ) else { return }
         switch envelope.type {
+        case RemoteClipboardPolicy.writeType:
+            let generation = connectionGeneration
+            Task { [weak self] in
+                let request = await Task.detached {
+                    try? JSONDecoder().decode(RemoteClipboardWrite.self, from: data)
+                }.value
+                guard let self, self.connectionGeneration == generation,
+                      self.phase == .connected, let request else { return }
+                let result: RemoteClipboardResult = self.warmTransportState == .active
+                    ? self.clipboardWriter(request) : .inactive
+                try? self.send(RemoteClientMessage(
+                    type: RemoteClipboardPolicy.resultType,
+                    state: result.rawValue, requestID: request.requestID
+                ), generation: generation)
+            }
         case "sessionStarting":
             guard phase == .connecting,
                   (try? JSONDecoder().decode(RemoteSessionStartingDTO.self, from: data)) != nil
@@ -1943,6 +1963,7 @@ final class RemoteSessionConnection: ObservableObject {
             cancelHelloDeadline()
             warmTransportState = .active
             phase = .connected
+            try? send(RemoteClientMessage(type: RemoteClipboardPolicy.readyType))
             recoveryFailure = nil
             hasEverConnected = true
 #if DEBUG
@@ -2719,6 +2740,7 @@ final class RemoteSessionConnection: ObservableObject {
         }
         let isCodexFixture = demoMode == "terminal-ansi"
             || demoMode == "terminal-attachments"
+            || demoMode == "terminal-attachment-notice"
             || demoMode == "terminal-codex-tui"
             || demoMode == "terminal-scrollback"
             || marketingProvider == .codex
@@ -2855,7 +2877,7 @@ final class RemoteSessionConnection: ObservableObject {
                 "",
                 "❯ ",
             ]
-        case "terminal-attachments":
+        case "terminal-attachments", "terminal-attachment-notice":
             lines = [
                 "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  AnotherTerminal",
                 "\u{1b}[2mDirect TUI input · attachment paths insert at the cursor\u{1b}[0m",

@@ -1662,3 +1662,19 @@ Re-adopting a **live** native conversation, rather than ending it and resuming f
 — see [Why a conversation is not reattached](#why-a-conversation-is-not-reattached). The mirror
 unification and scheduled work without a window are the other two named follow-ups, and both stay
 contingent on this having shipped and settled.
+
+### Restoration waits for ownership, not controller allocation
+
+The launch restoration completion is the boundary before selected-session and detached-window
+restoration. The daemon survey is asynchronous; calling it before selection without awaiting its
+completion still allows selection to start a second process. Reattachment reuses an allocated,
+non-running terminal controller, cancels its pending launch and external-owner preflight, and
+clears a stale launch failure once the host transport is attached. An already connected host
+surface is an idempotent success. A live child whose attachment failed remains excluded from
+ordinary relaunch and is offered for Reattach; failure to build a view does not transfer process
+ownership. The reattach journal reports actual accepted attachments separately from pending ones.
+
+`LaunchRestorationTests` delays the survey completion and exercises the held-back Restore action.
+`PTYHostReattachInputDaemonTests` reconnects two cached controllers through the shipping container
+to a scratch real daemon, checks that both original child PIDs survive, clears stale refusals, and
+repeats the reconnect. `PTYHostReattachTests` pins the failed-attachment exclusion.

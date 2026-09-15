@@ -1974,6 +1974,51 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+    func testStorageBlockedResumeReturnsItsCauseAndLeavesCatalogueReachable() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+        ))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, usesNativeUI: false, title: "Blocked resume"
+        ))
+        sessionAccess.persistenceBlockReasonOverride = .storageExhausted
+        for _ in 0..<3 {
+            let response = try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/resume",
+                bearer: "goodtoken", body: Data()
+            ))
+            XCTAssertEqual(response.status, 503)
+            XCTAssertEqual(
+                try JSONDecoder().decode(RemoteErrorDTO.self, from: response.body),
+                RemoteErrorDTO(code: .storageExhausted)
+            )
+        }
+        XCTAssertTrue(sessionCommands.resumedSessionIDs.isEmpty)
+        XCTAssertEqual(try XCTUnwrap(get("/api/me", bearer: "goodtoken")).status, 200)
+    }
+
+    func testStorageFailureDiscoveredDuringResumeIsNotAcceptedAsStarting() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+        ))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, usesNativeUI: false, title: "Failed resume"
+        ))
+        sessionCommands.onResume = { [weak sessionAccess] in
+            sessionAccess?.persistenceBlockReasonOverride = .storageExhausted
+        }
+        let response = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken", body: Data()
+        ))
+        XCTAssertEqual(response.status, 503)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: response.body),
+            RemoteErrorDTO(code: .storageExhausted)
+        )
+        XCTAssertEqual(sessionCommands.resumedSessionIDs, [session.id])
+    }
+
     func testStandaloneTerminalCatalogAndResumeHonorTypedCapabilityScope() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-project-terminal-\(UUID().uuidString)",
@@ -4908,6 +4953,7 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
 
     var createdSessionID: SessionID?
     var resumeResult = true
+    var onResume: (() -> Void)?
     var accountMoveResult: Result<Void, RemoteSessionAccountMoveFailure> = .success(())
     private(set) var launches: [RemoteSessionLaunch] = []
     private(set) var openingAttachmentPayloads: [[Data?]] = []
@@ -4923,6 +4969,7 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
 
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool {
         resumedSessionIDs.append(sessionID)
+        onResume?()
         return resumeResult
     }
 

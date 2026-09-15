@@ -379,6 +379,73 @@ final class RemoteSessionMirrorRegistry {
         }
     }
 
+    private struct ClipboardConnection {
+        let connection: RemoteConnection
+        let authorizationIsCurrent: @MainActor () -> Bool
+    }
+    private var clipboardConnections: [ObjectIdentifier: ClipboardConnection] = [:]
+    private static let maximumClipboardConnections = 64
+
+    func clipboardMessage(
+        _ message: RemoteClientMessage, from connection: RemoteConnection,
+        authorizationIsCurrent: @escaping @MainActor () -> Bool
+    ) {
+        let key = ObjectIdentifier(connection)
+        guard authorizationIsCurrent(), let sessionID = sessionByConnection[key],
+              let peer = connection.authenticatedPeer,
+              peer.authorization.scope.covers(sessionID),
+              peer.authorization.capability == .interact,
+              !peer.authorization.isExpired else { return }
+        switch message.type {
+        case RemoteClipboardPolicy.readyType:
+            guard clipboardConnections[key] != nil
+                || clipboardConnections.count < Self.maximumClipboardConnections else { return }
+            clipboardConnections[key] = ClipboardConnection(
+                connection: connection, authorizationIsCurrent: authorizationIsCurrent
+            )
+        case RemoteClipboardPolicy.resultType:
+            guard clipboardConnections[key] != nil,
+                  let requestID = message.requestID,
+                  let state = message.state,
+                  let result = RemoteClipboardResult(rawValue: state) else { return }
+            SessionClipboardService.shared.receive(
+                requestID: requestID, result: result, endpointID: key, sessionID: sessionID
+            )
+        default: break
+        }
+    }
+
+    func copyToClipboard(
+        text: String?, target: String?, sessionID: SessionID, participantID: String,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) else {
+            completion(.failure("This chat is no longer available."))
+            return
+        }
+        let endpoints = clipboardConnections.compactMap { key, entry -> SessionClipboardService.Endpoint? in
+            let connection = entry.connection
+            guard sessionByConnection[key] == sessionID,
+                  let peer = connection.authenticatedPeer, let deviceID = peer.deviceID else { return nil }
+            return SessionClipboardService.Endpoint(
+                id: key, deviceID: deviceID,
+                participantID: peer.authorization.collaborationParticipantID,
+                isCurrent: { [weak self, weak connection] in
+                    guard let self, let connection else { return false }
+                    return entry.authorizationIsCurrent()
+                        && self.isAttached(connection, to: sessionID)
+                        && !peer.authorization.isExpired
+                        && self.canWrite(sessionID: sessionID, authorization: peer.authorization)
+                },
+                send: { connection.sendClipboard($0) }
+            )
+        }
+        SessionClipboardService.shared.copy(
+            text: text, target: target, sessionID: sessionID,
+            participantID: participantID, endpoints: endpoints, completion: completion
+        )
+    }
+
     private var mirrors: [SessionID: Mirror] = [:]
     private var terminalMirrors: [TerminalID: ProjectTerminalMirror] = [:]
     private var terminalByConnection: [ObjectIdentifier: TerminalID] = [:]
@@ -1590,6 +1657,8 @@ final class RemoteSessionMirrorRegistry {
         viewportRelease: ViewportLeaseRelease
     ) {
         let key = ObjectIdentifier(connection)
+        clipboardConnections[key] = nil
+        SessionClipboardService.shared.disconnect(key)
         if let startupSessionID = startupSessionByConnection.removeValue(forKey: key),
            var starting = startingSessions[startupSessionID]
         {
@@ -1775,6 +1844,8 @@ final class RemoteSessionMirrorRegistry {
 
     /// Releases idle capture as well as subscribers when the master switch is turned off.
     func remoteAccessStopped() {
+        for key in clipboardConnections.keys { SessionClipboardService.shared.disconnect(key) }
+        clipboardConnections.removeAll()
         invalidateMeCatalogue()
         for transaction in terminalHydrations.values {
             transaction.cancel()

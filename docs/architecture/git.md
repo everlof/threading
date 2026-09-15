@@ -39,7 +39,13 @@ correctly — it is a separate repository that happens to live inside another.
 
 Every repository is a **root row** in the sidebar, with its added checkouts beneath it, at one
 checkout exactly as at five. The checkouts are labelled by branch, since the repository name is
-already shown above them, and the repository's mark is drawn once — on the root — rather than
+already shown above them. A quiet `[checkout path]` follows the branch on the same line,
+with the current user’s home directory abbreviated to `~`. The path compresses before the
+branch while keeping at least 30% of the available text width, and retains its full value in accessibility and its tooltip. This is native content
+inside the existing customizable project row; checkout identity, selection and actions remain
+host-owned. It adds one lazily materialized label per visible checkout (O(visible), including
+the existing 5,000-row stress case), with string-only formatting on row configuration and no
+new discovery or layout-time I/O. The repository's mark is drawn once — on the root — rather than
 repeated down the column or, as it was before this, nowhere at all. A folder outside any
 repository has no repository to sit under and stays a plain project row; so does the scratchpad,
 deliberately (below).

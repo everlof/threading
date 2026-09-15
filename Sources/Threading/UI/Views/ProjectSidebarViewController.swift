@@ -4650,6 +4650,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
         _ sidebar: ProjectSidebarViewController,
         closeSession sessionID: SessionID
     )
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, restartTerminal sessionID: SessionID)
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
         askAgentToRename sessionID: SessionID

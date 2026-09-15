@@ -187,6 +187,27 @@
       }
     },
     {
+      "id": "sidebar-worktree-path",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Sidebar checkout location",
+      "description": "The shipping sidebar shows a quiet worktree path after its branch, under truncation pressure, in both appearances.",
+      "states": ["Inline checkout path", "Narrow sidebar"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["360- and 240-point sidebars in a 1120×720-point main window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SidebarWorktreePathTests.swift",
+        "test": "ThreadingTests/SidebarWorktreePathTests/testRendersWorktreePathsInShippingSidebar"
+      },
+      "capture": {
+        "glob": "sidebar-worktree-*.png"
+      }
+    },
+    {
       "id": "sidebar-edge-reveal",
       "kind": "surface",
       "status": "implemented",
@@ -646,7 +667,7 @@
       "priority": "important",
       "title": "Session action menu",
       "description": "The shared sidebar, context, and header session menu for a chat whose repository has two branch-attached checkouts, plus usage-bearing move, continuation and recovery account choices across three themes.",
-      "states": ["Move to Checkout available", "Account usage columns", "Scoped model usage", "Selected recovery login", "Light", "Dark"],
+      "states": ["Restart Terminal in the product shell", "Move to Checkout available", "Account usage columns", "Scoped model usage", "Selected recovery login", "Light", "Dark"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
@@ -904,7 +925,7 @@
       "priority": "important",
       "title": "Inline browser annotations",
       "description": "The native note editor over a live WebKit page in the shipping detached-browser tab host.",
-      "states": ["New note", "Existing note with delete", "Empty note with disabled save", "Compact viewport", "Live theme switch", "Scrolled nested iframe", "Matching page colour", "Saturated page", "Checkerboard and busy artwork"],
+      "states": ["New note", "Pending Send count", "Existing note with delete", "Empty note with disabled save", "Compact viewport", "Live theme switch", "Scrolled nested iframe", "Matching page colour", "Saturated page", "Checkerboard and busy artwork"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],

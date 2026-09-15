@@ -72,7 +72,7 @@ struct BrowserPageIdentity: Equatable {
 /// Notes remain native app state rather than page state: neither site JavaScript nor the DOM
 /// snapshot can read them. The agent receives them only through Threading's dedicated annotation
 /// surface, where their user-authored provenance stays explicit.
-struct BrowserAnnotation: Equatable {
+struct BrowserAnnotation: Equatable, Sendable {
     let id: Int
     let note: String
     var documentPoint: CGPoint
@@ -184,6 +184,7 @@ final class BrowserChromeBar: NSView {
         )
         stack.translatesAutoresizingMaskIntoConstraints = false
 
+        addressField.setAccessibilityIdentifier("browser.address")
         addressField.placeholderString = BrowserDefaults.addressPlaceholder
         addressField.applyFont(.body)
         addressField.focusRingType = .none
@@ -557,6 +558,16 @@ final class BrowserViewController: NSViewController {
     private var annotationsByPage: [String: [BrowserAnnotation]] = [:]
     private var nextAnnotationID = 1
     private var annotationDraft: BrowserAnnotation?
+    private var pendingAnnotations: [Int: BrowserAnnotation] = [:]
+    private var sentAnnotationNotes: [Int: String] = [:]
+    private var isSendingAnnotations = false
+    /// Pinned by the creating host and carried with the browser when its tab moves.
+    var annotationSessionID: SessionID?
+    var deliverAnnotations: (String, SessionID, @escaping @MainActor (SessionMessageDelivery.Outcome) -> Void) -> Void = {
+        SessionMessageDelivery.deliver($0, to: $1, completion: $2)
+    }
+    var onAnnotationSendFailure: ((SessionMessageDelivery.Outcome) -> Void)?
+
     private var annotationAnchorPositions: [ObjectIdentifier: [String: BrowserAnnotationAnchorPosition]] = [:]
     private var capturedAnnotationAnchorTokens: [ObjectIdentifier: Set<String>] = [:]
     private var annotationAnchorRefreshRunning = false
@@ -765,6 +776,7 @@ final class BrowserViewController: NSViewController {
         chromeBar.passwordInputButton.action = #selector(resumePrivatePasswordInput)
         chromeBar.annotationButton.target = self
         chromeBar.annotationButton.action = #selector(toggleAnnotationMode)
+        annotationOverlay.onSend = { [weak self] in self?.sendPendingAnnotations() }
         annotationOverlay.onAdd = { [weak self] point in
             self?.addAnnotation(atViewportPoint: point)
         }
@@ -2749,6 +2761,11 @@ final class BrowserViewController: NSViewController {
                 documentPoint: annotationWithCurrentPosition(draft).documentPoint,
                 url: draft.url, anchorID: draft.anchorID
             )
+            if isSendingAnnotations || sentAnnotationNotes[draft.id] != note {
+                pendingAnnotations[draft.id] = annotation
+            } else {
+                pendingAnnotations.removeValue(forKey: draft.id)
+            }
             if let index = annotationsByPage[draft.url]?.firstIndex(where: { $0.id == draft.id }) {
                 annotationsByPage[draft.url]?[index] = annotation
             } else {
@@ -2763,6 +2780,60 @@ final class BrowserViewController: NSViewController {
         refreshAnnotationTargetUnderPointer()
     }
 
+    /// Snapshot before delivery: navigation or edits during a terminal receipt cannot clear
+    /// newer notes. Formatting scales with note text and stays off the main actor.
+    func sendPendingAnnotations() {
+        finishAnnotationEditing(save: true)
+        guard !isSendingAnnotations, !pendingAnnotations.isEmpty else { return }
+        guard let sessionID = annotationSessionID else {
+            annotationSendFailed(.noLiveSurface)
+            return
+        }
+        let batch = pendingAnnotations
+        isSendingAnnotations = true
+        if annotationOverlay.sendButton.hasKeyboardFocus {
+            view.window?.makeFirstResponder(isAnnotating ? annotationOverlay : webView)
+        }
+        annotationOverlay.setPendingSend(count: pendingAnnotations.count, sending: true)
+        Task { @MainActor [weak self] in
+            let text = await Task.detached(priority: .userInitiated) {
+                "Please address these browser annotations from me:\n\n" + batch.values.sorted { $0.id < $1.id }.map {
+                    "Annotation \($0.id)\nPage: \($0.url)\nPosition: (\($0.documentPoint.x), \($0.documentPoint.y)) CSS pixels\nNote: \($0.note)"
+                }.joined(separator: "\n\n")
+            }.value
+            guard let self else { return }
+            self.deliverAnnotations(text, sessionID) { [weak self] outcome in
+                guard let self else { return }
+                self.isSendingAnnotations = false
+                switch outcome {
+                case .sentNow, .queuedBehindTurn:
+                    for (id, annotation) in batch {
+                        self.sentAnnotationNotes[id] = annotation.note
+                        if self.pendingAnnotations[id]?.note == annotation.note {
+                            self.pendingAnnotations.removeValue(forKey: id)
+                        }
+                    }
+                case .noLiveSurface, .busyTerminal, .typedUnconfirmed, .notTaken:
+                    self.annotationSendFailed(outcome)
+                }
+                if self.pendingAnnotations.isEmpty, self.annotationOverlay.sendButton.hasKeyboardFocus {
+                    self.view.window?.makeFirstResponder(self.isAnnotating ? self.annotationOverlay : self.webView)
+                }
+                self.annotationOverlay.setPendingSend(count: self.pendingAnnotations.count, sending: false)
+            }
+        }
+    }
+
+    private func annotationSendFailed(_ outcome: SessionMessageDelivery.Outcome) {
+        if let onAnnotationSendFailure { onAnnotationSendFailure(outcome); return }
+        let alert = ThemedAlert()
+        alert.messageText = L10n.string("Annotations are still pending")
+        alert.informativeText = outcome == .typedUnconfirmed
+            ? L10n.string("The message was typed, but delivery was not confirmed. Check the chat before sending again.")
+            : L10n.string("The chat could not accept the annotations. They are saved here; try sending again when the chat is ready.")
+        if let window = view.window { alert.beginSheetModal(for: window) }
+    }
+
     private func annotationPageKey(for url: URL?) -> String? {
         guard let url else { return nil }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -2771,6 +2842,7 @@ final class BrowserViewController: NSViewController {
     }
 
     private func updateAnnotationOverlay() {
+        annotationOverlay.setPendingSend(count: pendingAnnotations.count, sending: isSendingAnnotations)
         guard isViewLoaded else { return }
         let offset = annotationViewportOffsets[ObjectIdentifier(webView)] ?? .zero
         var visibleAnnotations = annotationsForActivePage

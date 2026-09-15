@@ -1,6 +1,11 @@
 import CoreGraphics
 import Foundation
 
+struct CopyToClipboardArguments: Codable, Sendable {
+  let text: String?
+  let target: String?
+}
+
 // MARK: - Tool Call
 
 struct DisplayImageArguments: Codable, Sendable {
@@ -3163,6 +3168,44 @@ enum MCPTools {
           )
         ],
         required: []
+      )
+    ),
+    MCPToolDefinition(
+      tool: .copyToClipboard,
+      name: "copy_to_clipboard",
+      groupID: "session-lifecycle",
+      family: .session,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false, destructiveHint: true,
+        idempotentHint: false, openWorldHint: false
+      ),
+      title: "Copy to clipboard",
+      detail: "Copy requested text to the Mac or an active iOS device.",
+      symbol: "doc.on.clipboard",
+      decodeArguments: { container in
+        try container.decodeIfPresent(CopyToClipboardArguments.self, forKey: .arguments)
+          ?? CopyToClipboardArguments(text: nil, target: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.copyToClipboard(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Put text, code, or a link on the user's clipboard, only when the user asks to copy it.
+        Replaces the clipboard; never reads its previous content. Preserves text exactly, up to
+        65536 UTF-8 bytes. target is required: mac or ios. Choose the device the user asks
+        for; if their intended device is unclear, ask before overwriting either clipboard.
+        iOS delivery is limited to the current chat participant's active session connection.
+        iOS requires this chat open in an active, updated ThreadingMobile. Success means the
+        phone acknowledged its clipboard write; a timeout is unconfirmed. Never substitute
+        pbcopy or claim iOS success after a refusal. Images and files are not supported.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "text": MCPPropertySchema(type: .string, description: "Exact text to copy."),
+          "target": MCPPropertySchema(type: .string, description: "Required destination: mac or ios.")
+        ],
+        required: ["text", "target"]
       )
     ),
     MCPToolDefinition(

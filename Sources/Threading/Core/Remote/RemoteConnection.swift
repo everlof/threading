@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import os
+import ThreadingRemoteKit
 
 /// The immutable identity established by the first valid authentication frame.
 ///
@@ -159,6 +160,15 @@ final class RemoteConnection: @unchecked Sendable {
     }
 
     // MARK: - Sending (any caller; hops to the server queue)
+
+    /// Serial encoding stays off the UI actor and shares the socket's bounded send queue.
+    func sendClipboard(_ request: RemoteClipboardWrite) {
+        queue.async { [weak self] in
+            guard let self,
+                  let data = try? JSONEncoder().encode(request) else { return }
+            self.sendText(String(decoding: data, as: UTF8.self))
+        }
+    }
 
     func sendText(_ text: String) { enqueue(RemoteWebSocket.textFrame(text)) }
     func sendBinary(_ data: Data) { enqueue(RemoteWebSocket.binaryFrame(data)) }

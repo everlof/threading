@@ -496,6 +496,9 @@ public enum SidebarStrings {
 // MARK: - Sidebar Row Defaults
 
 public enum SidebarRowDefaults {
+    /// Preserve a readable location fragment even beside a long branch.
+    public static let worktreePathMinimumFraction: CGFloat = 0.3
+
     public static let projectFontSize: CGFloat = 13
     public static let headingFontSize: CGFloat = 11
     public static let sessionFontSize: CGFloat = 12

@@ -86,6 +86,7 @@ extension MobileDemoScene {
         "terminal-ansi",
         "terminal-scrollback",
         "terminal-attachments",
+        "terminal-attachment-notice",
         "terminal-browser-activity",
         "terminal-selection",
         "terminal-codex-tui",
@@ -187,6 +188,7 @@ enum MobileDemoFixture: String, CaseIterable {
     /// The mirrored terminal, one id per captured terminal state.
     case terminalANSI = "terminal-ansi"
     case terminalAttachments = "terminal-attachments"
+    case terminalAttachmentNotice = "terminal-attachment-notice"
     case terminalBrowserActivity = "terminal-browser-activity"
     case terminalClaudeTUI = "terminal-claude-tui"
     case terminalCodexTUI = "terminal-codex-tui"
@@ -443,6 +445,7 @@ struct RootView: View {
         case .terminal:
             NavigationStack {
                 if isMarketingTerminalFixture
+                    || ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-attachment-notice"
                     || ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-reconnecting"
                     || ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-recovery-failed" {
                     // Use the shipping detail chrome so the capture proves the actual account,

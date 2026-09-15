@@ -666,6 +666,27 @@ overlap report is linear. The 8,000-mark case returns one issue in under a milli
 
 ### Mobile remote dashboard scaling contract
 
+The three-chat project preview (2026-09-15) caps the ordered value projection before
+`DashboardRowItem.rows`, leaving one disclosure identity for the rest. Full expansion still
+uses ordinary viewport cells, never a retained nested stack. The existing initial sort/group
+pass remains O(catalogue); this change does not claim to cap catalogue scanning or network work.
+Hidden activity is aggregated in the value pass and its bounded summary is read during drawing.
+Transient full-preview choices use one host/project identity each, independently of persistent
+whole-project folding. Only explicit preview actions animate; status publications stay silent.
+
+`MobileProjectChatPreviewTests/testPreviewExpansionAndDeepCollapseUseTheShippingCollection`
+drives compact → full → deep scroll → compact through the production collection with 1,000
+chats in a 393 × 852 viewport. Its snapshot counts are 5 → 1,002 → 5 (header and disclosure
+included), with at most 18 mounted cells. Expansion anchor drift and collapsed header error
+relative to the safe-area inset are both zero. Two iPhone 17 Pro / iOS 26.5 Debug runs reported
+3.26 / 3.21 ms for the three value-projection passes together and 32.89 / 34.20 ms for expanded
+snapshot application plus immediate layout. Fixture manufacture and the animation-settlement
+waits are excluded. These are structural-interaction observations, not physical-device frame
+rate or a measured speedup over the previous full-list design. The existing 1,000-row reuse and
+section-removal regressions also pass; no increased mounted-cell budget was needed.
+
+The preview's physical haptic feel and device scroll/animation tails remain device checks.
+
 Project disclosure is a user-frequency structural update: expect tens of projects; exercise
 1,000 independent project preferences and the existing 1,000-row collection stress case.
 `MobileProjectDisclosureStore` reads/writes one scalar preference per identity, never an archive

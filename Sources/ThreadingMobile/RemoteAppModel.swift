@@ -4903,7 +4903,17 @@ final class RemoteAppModel: ObservableObject {
         return RemoteMeDTO(
             serverProtocol: response.serverProtocol,
             share: response.share,
-            sessions: response.sessions,
+            sessions: response.sessions + [
+                .init(id: "preview-older-attention", title: "Review before release",
+                      agentKind: "claude", surface: .conversation, state: .needsAttention,
+                      projectName: "AnotherTerminal", isAvailable: true, lastActiveAt: 10),
+                .init(id: "preview-older-working", title: "Long-running checks",
+                      agentKind: "codex", surface: .conversation, state: .working,
+                      projectName: "AnotherTerminal", isAvailable: true, lastActiveAt: 9),
+                .init(id: "preview-older-idle", title: "Documentation cleanup",
+                      agentKind: "codex", surface: .conversation, state: .dormant,
+                      projectName: "AnotherTerminal", lastActiveAt: 8),
+            ],
             terminals: response.terminals,
             host: response.host,
             theme: response.theme,

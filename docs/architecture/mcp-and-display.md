@@ -66,6 +66,43 @@ endpoint's token is deliberately never written down — a helper run is one run.
 cannot read is quarantined (`.unreadable-<uuid>`) and the launch mints fresh, rather than being
 interpreted as empty and overwritten; a single unparsable row is skipped and the rest still load.
 
+## Requested clipboard writes
+
+`copy_to_clipboard` belongs to **This session** and writes plain text, code or links only
+when requested. Its required `target` is `mac` or `ios`: a shared conversation and an open
+socket do not establish which device the person intends to overwrite. There is no automatic
+fallback to the Mac, no clipboard read tool and no clipboard history. The normal provider
+transcript/audit may retain the tool's arguments, as with other agent calls.
+
+`SessionClipboardService` admits one write per receiving socket, at most 16 in flight globally,
+with 64 KiB of UTF-8 text per write and a ten-second receipt deadline. The ordinary case is one
+small snippet and one device; the stress test submits 1,000 overlapping calls and proves that
+only one frame and timer are admitted for that endpoint. The mirror retains at most 64 capable
+connections and removes them on detach/park. Scanning these bounded identities is only on a
+requested tool call; there is no poll or filesystem work. Socket encoding and the phone's
+payload decoding run off the main actor. Only the bounded native pasteboard write touches the
+platform UI actor.
+
+An updated phone announces `clipboardReady` on its authenticated session socket after `hello`.
+The host selects exactly one attached, still-authorized interactive connection belonging to
+the current chat participant. Multiple matching iOS connections are refused rather than
+broadcast to every paired device. The Mac clipboard is available only to the owner. The existing
+notification interaction identity supplies the participant; clipboard delivery does not require
+notification permission or use APNs. Older clients never announce readiness and older hosts
+ignore that additive message; protocol versions stay unchanged.
+
+The host sends `clipboardWrite` with a random request ID and expiration. iOS checks the exact
+connection generation and active application state, rejects expired or oversized text, writes
+with `localOnly: true` and verifies the resulting value before returning `clipboardResult`.
+Only a receipt matching the request, socket and session reports success. Disconnect and timeout
+report **unconfirmed**, since the write may have happened before the receipt was lost. A phone
+in the background refuses; nothing queues for foregrounding and nothing replays after reconnect.
+The receiving device must have a reasonably synchronized clock for the short expiration window.
+
+This is host-owned behavior exposed through the existing MCP catalogue, not an extension
+presentation component. Threading owns authorization, destination selection, overwrite semantics,
+limits and receipt truth. There is no additional UI surface or replaceable clipboard authority.
+
 ## The stdio bridge
 
 `--mcp-config` names an endpoint the CLI resolves **once, at startup**. Everything above survives

@@ -37,13 +37,18 @@ enum MobileL10n {
 /// step with the shared Mac/iPhone theme. OS-owned surfaces such as notification permission and
 /// the share sheet remain system UI.
 struct ThemedDialogAction: Identifiable {
-    enum Role {
+    enum Role: Hashable {
         case standard
         case cancel
         case destructive
     }
 
-    let id = UUID()
+    enum ID: Hashable {
+        case named(String)
+        case automatic(title: String, role: Role)
+    }
+
+    let id: ID
     let title: String
     let systemImage: String?
     let role: Role
@@ -58,8 +63,13 @@ struct ThemedDialogAction: Identifiable {
         systemImage: String? = nil,
         role: Role = .standard,
         isEnabled: Bool = true,
+        id: String? = nil,
         perform: @escaping () -> Void = {}
     ) {
+        // Call sites rebuild these values whenever their observed state changes. A fresh UUID
+        // would replace the SwiftUI button during an in-flight press and lose its release.
+        // Repeated titles with the same role may supply an explicit semantic identifier.
+        self.id = id.map(ID.named) ?? .automatic(title: title, role: role)
         self.title = MobileL10n.string(title)
         self.systemImage = systemImage
         self.role = role

@@ -301,6 +301,10 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   /// host that has none, which is every test and the default below.
   var conversationRepairHandler: ConversationRepairHandler? { get }
   func listSettings() -> MCPToolResult
+  func copyToClipboard(
+    _ arguments: CopyToClipboardArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func notifyUser(_ arguments: NotifyUserArguments, for sessionID: SessionID) -> MCPToolResult
   func listThemes(for sessionID: SessionID) -> MCPToolResult
   func setTheme(_ arguments: SetThemeArguments, for sessionID: SessionID) -> MCPToolResult

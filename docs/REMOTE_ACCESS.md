@@ -2,6 +2,10 @@
 
 Remote access mirrors Threading sessions and standalone project terminals to a browser or to the
 native `ThreadingMobile` iOS app.
+When a chat cannot resume because the Mac has paused writes after running out of storage, the
+iPhone receives a storage error. This failure does not open a blocking desktop alert: the host
+catalogue and already-running chats remain accessible. Freeing space and recovering persistence
+are still required before a new agent can start.
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
 turn on **Remote Access**, and switch on the ways in you want. There is no connection *mode* any
 more: a mode forced one choice between overlapping things, and a way in is one switch per network,
@@ -388,6 +392,23 @@ top on both Mac and iPhone. Archived sessions are ordered newest archive first a
 title or project. Archive/Restore removes a row at the press edge while the Mac finishes the
 durable provider transaction, so several sessions can be filed without serial UI stalls; a
 refusal restores the row. Archive is available from the dashboard and an open owner chat.
+
+The project overview previews three chats per expanded project. `MobileProjectChatPreview`
+caps the ordered value models before collection rows are made; pins count toward the cap, with
+stable ID ordering breaking equal activity timestamps. A stable project disclosure row reveals
+the rest inline, retaining the existing plate and viewport reuse. Terminals are independent of
+the chat cap. Full project destinations, recent/type organization, archive, snoozed and search
+remain uncapped. Hidden activity counts use only live catalogue facts: working requires
+availability; awaiting-user, needs-attention and limit-reached contribute to the attention count.
+Expanding does not acknowledge activity or read a hidden chat.
+
+`MobileProjectDisclosureStore` keeps full-preview identities in memory, scoped to Mac/project,
+separate from persistent whole-project folding. Navigation, fold/unfold and reconnect preserve
+the preview choice; a new dashboard lifetime starts compact. Only explicit preview presses
+animate snapshot differences, honoring Reduce Motion. Expand keeps the visible anchor; Show fewer
+returns to the project header, clamped to the valid scroll extent. The light button haptic runs
+at activation, never from catalogue publication or animation. Presentation stays in the existing
+mobile theme boundary and these navigation semantics remain host-owned.
 
 This mobile browser is deliberately host-owned. Threading retains project/session navigation,
 launch scoping, connection truth, row actions and the native fallback; the macOS extension

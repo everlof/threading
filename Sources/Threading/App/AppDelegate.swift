@@ -224,12 +224,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             restoreSelectedSession: { [weak self] in
                 self?.mainWindowController?.restoreSelectedSession()
             },
-            // Behind the same two gates for the same reasons — every launch reads the MCP port —
-            // and after the selected session, which the user is about to look at and which the
-            // relaunch therefore leaves out. The record is consumed even when the setting is
-            // off, so enabling it later cannot act on a list from some earlier quit.
-            relaunchSessionsFromLastQuit: { [weak self] in
-                self?.mainWindowController?.relaunchSessionsFromLastQuit()
+            // Resolve background-host ownership before restoring the selected surface.
+            // The record is consumed even when restoration is disabled.
+            relaunchSessionsFromLastQuit: { [weak self] completion in
+                guard let window = self?.mainWindowController else {
+                    completion()
+                    return
+                }
+                window.relaunchSessionsFromLastQuit(completion: completion)
             },
             // After both session-restore paths, so a window whose session is coming back anyway
             // is not built twice — `restoreDetachedBrowserWindows` skips ids it already holds.
@@ -3890,6 +3892,7 @@ private enum UIScenarioBootstrap {
         static let freshTape = "THREADING_UI_SCENARIO_FRESH_TAPE"
         static let resumeTape = "THREADING_UI_SCENARIO_RESUME_TAPE"
         static let title = "THREADING_UI_SCENARIO_TITLE"
+        static let terminal = "THREADING_UI_SCENARIO_TERMINAL"
     }
 
     private static let markerName = ".threading-ui-scenario-home"
@@ -3998,9 +4001,10 @@ private enum UIScenarioBootstrap {
            ProjectStore.shared.addProject(folderURL: targetProject) == nil {
             return .refused("could not persist the synthetic target checkout")
         }
+        let terminalFixture = environment[Key.terminal] == "1"
         let session: AgentSession
         if let existing = ProjectStore.shared.session(withID: sessionID) {
-            guard existing.usesNativeUI,
+            guard existing.usesNativeUI == !terminalFixture,
                   existing.title == title,
                   ProjectStore.shared.project(forSessionID: sessionID)?.id == storedProject.id else {
                 return .refused("fixed fixture session collides with incompatible state")
@@ -4010,7 +4014,7 @@ private enum UIScenarioBootstrap {
             guard let created = ProjectStore.shared.addSession(
                 to: storedProject.id,
                 kind: .codex,
-                usesNativeUI: true,
+                usesNativeUI: !terminalFixture,
                 title: title,
                 id: sessionID
             ) else {
@@ -4019,12 +4023,26 @@ private enum UIScenarioBootstrap {
             session = created
         }
 
+        if terminalFixture {
+            guard ProjectStore.shared.update(sessionID: sessionID, { stored in
+                stored.resumeState = .resumable(TranscriptID("00000000-0000-0000-0000-000000000102"))
+            }).succeeded else { return .refused("could not persist the terminal fixture identity") }
+        }
         ProjectStore.shared.selectedSessionID = sessionID
         let rootPath = root.path
         guard AgentRuntime.shared.installFixtureLaunchPlan(
             for: sessionID,
             provider: { _, _, _ in
                 let current = ProjectStore.shared.session(withID: sessionID) ?? session
+                if terminalFixture {
+                    return AgentLaunchPlan(
+                        executable: "/bin/sh",
+                        arguments: ["-c", "printf '%s %s\\n' \"$$\" \"$2\" >> \"$1\"; exec /bin/cat",
+                                    "threading-terminal-fixture", root.appendingPathComponent("terminal-launches.txt").path,
+                                    current.resumeState.transcriptID?.rawValue ?? "missing"],
+                        resumeState: current.resumeState
+                    )
+                }
                 let tape = current.resumeState.isResumable ? resumeTape : freshTape
                 return AgentLaunchPlan(
                     executable: executable.path,

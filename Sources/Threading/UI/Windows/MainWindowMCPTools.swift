@@ -467,6 +467,18 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
     )
   }
 
+  func copyToClipboard(
+    _ arguments: CopyToClipboardArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
+    dependencies.remoteMirror.copyToClipboard(
+      text: arguments.text, target: arguments.target,
+      sessionID: sessionID,
+      participantID: dependencies.notifications.clipboardParticipantID(for: sessionID),
+      completion: completion
+    )
+  }
+
   func notifyUser(
     _ arguments: NotifyUserArguments,
     for sessionID: SessionID

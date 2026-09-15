@@ -63,6 +63,7 @@ final class ExecutionAuditViewController: NSViewController {
     ) {
         self.sessionID = sessionID
         self.browser = browser
+        browser.annotationSessionID = sessionID
         self.store = store
         self.mode = initialMode
         if initialMode == .browserSplit { self.selectedCategory = .browser }
