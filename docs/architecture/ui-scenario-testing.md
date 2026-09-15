@@ -59,6 +59,11 @@ transport. A disposable Cocoa home does not isolate Keychain, and checking only 
 real development service's Cloudflare Access sign-in. Remote-specific fixtures must inject
 their dependencies explicitly.
 
+Recorded user choices use a preference suite named for the scenario home's UUID, preserved
+across its relaunches and removed in teardown. This prevents a saved status-card or pane choice
+from changing a fresh scenario. Evidence capture is installed for every marked scenario home,
+including the launch-only case with no provider fixture.
+
 `THREADING_UI_SCENARIO_HOME` is that home's name, and it is also how the application recognises
 that a machine rather than a person is driving it. `AutomatedRun` reads it, so the refusal beep an
 unavailable command makes, and any bell a fixture agent rings, stay silent for the whole lane: a scenario clicks and

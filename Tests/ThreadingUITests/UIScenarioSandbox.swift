@@ -280,6 +280,9 @@ struct UIScenarioSandbox {
             throw UIScenarioSandboxError.refusedUnsafeRemoval(root)
         }
         try fileManager.removeItem(at: root)
+        UserDefaults.standard.removePersistentDomain(
+            forName: "codes.threading.ui-scenario.\(root.lastPathComponent)"
+        )
     }
 
     private func runGit(_ arguments: [String], in directory: URL) throws {

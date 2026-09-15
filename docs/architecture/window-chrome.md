@@ -237,6 +237,10 @@ raises once the list has scrolled elsewhere). The actions did not go anywhere â€
 a session, the sidebar's per-project `+` still makes one in place, and âŒ˜W still clears the pane.
 What went is three affordances that misdescribed them.
 
+The title explicitly exposes its nested actions button as an accessibility child. AppKit treats
+the enclosing button as a leaf otherwise, hiding the menu from VoiceOver and UI automation even
+though the ellipsis is drawn and pointer-clickable.
+
 **Reveal means the visible, keyboard-usable sidebar, not a selection in a hidden controller.**
 The column may currently contain an extension navigator or be collapsed entirely, so the title's
 press takes one ordered route: restore and persist the native navigator, select and scroll the

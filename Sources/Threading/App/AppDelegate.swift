@@ -3905,13 +3905,28 @@ private enum UIScenarioBootstrap {
         fileManager: FileManager = .default
     ) -> Result {
         let fixtureKeys = [Key.project, Key.freshTape, Key.resumeTape, Key.title]
-        guard fixtureKeys.contains(where: { environment[$0] != nil }) else {
+        guard environment[Key.home] != nil || fixtureKeys.contains(where: { environment[$0] != nil }) else {
             return .notRequested
         }
         guard let homePath = environment[Key.home],
               environment["HOME"] == homePath,
               environment["CFFIXED_USER_HOME"] == homePath else {
             return .refused("scenario home does not own HOME and CFFIXED_USER_HOME")
+        }
+        let root = URL(fileURLWithPath: homePath, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard fileManager.fileExists(atPath: root.appendingPathComponent(markerName).path) else {
+            return .refused("scenario home marker is missing")
+        }
+        switch UIScenarioEvidenceCapture.installIfRequested(
+            environment: environment, scenarioRoot: root, fileManager: fileManager
+        ) {
+        case .installed: break
+        case .refused(let reason): return .refused(reason)
+        }
+        guard fixtureKeys.contains(where: { environment[$0] != nil }) else {
+            return .installed
         }
         guard let title = environment[Key.title]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -3922,14 +3937,6 @@ private enum UIScenarioBootstrap {
             return .refused("scenario title is missing or invalid")
         }
 
-        let root = URL(fileURLWithPath: homePath, isDirectory: true)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        guard fileManager.fileExists(
-            atPath: root.appendingPathComponent(markerName).path
-        ) else {
-            return .refused("scenario home marker is missing")
-        }
         guard let project = artifact(
             Key.project,
             environment: environment,
@@ -3981,17 +3988,6 @@ private enum UIScenarioBootstrap {
         guard executable.deletingLastPathComponent() == helpers,
               fileManager.isExecutableFile(atPath: executable.path) else {
             return .refused("the signed UI scenario helper is not embedded")
-        }
-
-        switch UIScenarioEvidenceCapture.installIfRequested(
-            environment: environment,
-            scenarioRoot: root,
-            fileManager: fileManager
-        ) {
-        case .installed:
-            break
-        case .refused(let reason):
-            return .refused(reason)
         }
 
         guard let storedProject = ProjectStore.shared.addProject(folderURL: project) else {

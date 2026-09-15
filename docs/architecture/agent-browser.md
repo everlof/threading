@@ -425,6 +425,10 @@ Only accepted revisions leave the pending batch, never the page's pins. Refusal 
 terminal delivery leaves the batch available with an explanatory sheet. A second send cannot
 race an in-flight receipt, and edits made during delivery remain pending.
 
+The panel's browser factory assigns its owning session to annotation delivery as well as baseline
+capture; a browser with no annotation owner must refuse delivery. The UI journey covers the
+factory-created browser so a correctly wired detached host cannot hide a missing panel assignment.
+
 The send surface remains host-only: session routing, submission, note provenance, and pending
 revision ownership cannot be replaced by an extension. Expected batches are 5–10 notes, with
 200 as the existing stress cardinality. Count refresh is O(1), commit updates one pending value,

@@ -311,5 +311,6 @@ final class PageTitleView: BackdropThemedControl {
 
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
     override func accessibilityTitle() -> String? { titleLabel.stringValue }
+    override func accessibilityChildren() -> [Any]? { [actionsButton] }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
 }

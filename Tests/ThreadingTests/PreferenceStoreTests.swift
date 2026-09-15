@@ -13,6 +13,18 @@ import XCTest
 ///
 /// These hold the seam that ends it, rather than each test's memory to put things back.
 final class PreferenceStoreTests: XCTestCase {
+    func testUIScenarioPreferencesAreStableAcrossRelaunchAndDistinctAcrossHomes() throws {
+        let first = UUID().uuidString
+        let second = UUID().uuidString
+        let environment = ["THREADING_UI_SCENARIO_HOME": "/tmp/ThreadingUITests/\(first)"]
+        let suite = try XCTUnwrap(PreferenceStore.scenarioSuiteName(environment: environment))
+        XCTAssertEqual(suite, PreferenceStore.scenarioSuiteName(environment: environment))
+        XCTAssertNotEqual(suite, PreferenceStore.scenarioSuiteName(environment: [
+            "THREADING_UI_SCENARIO_HOME": "/tmp/ThreadingUITests/\(second)"
+        ]))
+        XCTAssertNil(PreferenceStore.scenarioSuiteName(environment: [:]))
+        XCTAssertNil(PreferenceStore.scenarioSuiteName(environment: ["THREADING_UI_SCENARIO_HOME": "/tmp"]))
+    }
 
     func testAHostedTestBundleIsRedirectedAwayFromTheUsersPreferences() {
         XCTAssertTrue(

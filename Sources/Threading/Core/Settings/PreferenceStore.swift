@@ -52,11 +52,23 @@ enum PreferenceStore {
     /// not yet carry `Sendable`. Keep that compatibility assertion inside one immutable wrapper
     /// rather than marking the globally visible property `nonisolated(unsafe)`.
     private static let storage = SendableUserDefaults({
+        if let suite = scenarioSuiteName(environment: ProcessInfo.processInfo.environment) {
+            return UserDefaults(suiteName: suite)!
+        }
         guard NSClassFromString("XCTestCase") != nil else { return .standard }
         return UserDefaults(suiteName: hostedTestSuiteName) ?? .standard
     })
 
     static var shared: UserDefaults { storage.value }
+
+    /// Stable across a scenario's relaunches, distinct from the user's domain and other runs.
+    static func scenarioSuiteName(environment: [String: String]) -> String? {
+        guard let home = environment["THREADING_UI_SCENARIO_HOME"],
+              let id = UUID(uuidString: URL(fileURLWithPath: home).lastPathComponent) else {
+            return nil
+        }
+        return "codes.threading.ui-scenario.\(id.uuidString)"
+    }
 
     /// Whether this process redirects, so a test can assert the redirect rather than the
     /// developer's luck.
