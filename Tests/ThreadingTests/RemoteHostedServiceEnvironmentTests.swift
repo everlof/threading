@@ -59,6 +59,27 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
 #endif
     }
 
+    func testUIScenarioCannotResolveAHostedEndpointOrStartBrowserAuthentication() {
+        for override in [nil, "https://dev.remote.threading.codes", "http://localhost:8787"] {
+            var environment = ["THREADING_UI_SCENARIO_HOME": "/tmp/scenario"]
+            environment["THREADING_CONTROL_PLANE_URL"] = override
+            let endpoint = RemoteHostedServiceController.configuredEndpoint(
+                preferredEnvironment: .development,
+                environment: environment
+            )
+            XCTAssertNil(endpoint)
+            let controller = RemoteHostedServiceController(
+                endpoint: endpoint,
+                hostID: "ui-scenario", hostName: "UI scenario",
+                localDevelopmentAuthentication: true,
+                developmentBrowserAuthentication: true
+            )
+            controller.start(targetPort: 12345)
+            XCTAssertEqual(controller.state, .notConfigured)
+            controller.stop()
+        }
+    }
+
     func testExplicitLaunchOverrideStillWinsInDeveloperBuilds() throws {
         let override = try XCTUnwrap(URL(string: "https://override.example.test"))
         let endpoint = RemoteHostedServiceController.configuredEndpoint(

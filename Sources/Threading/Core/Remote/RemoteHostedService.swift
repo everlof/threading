@@ -1012,7 +1012,7 @@ final class RemoteHostedServiceController {
     private static func defaultStore(
         endpoint: PeerControlPlaneServiceEndpoint?
     ) -> RemoteHostedServicePersisting {
-        NSClassFromString("XCTestCase") == nil
+        !AutomatedRun.isUnderway
             ? RemoteHostedServiceKeychainStore(
                 account: configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
                     ? RemoteHostedServiceDefaults.developmentKeychainAccount
@@ -1043,6 +1043,12 @@ final class RemoteHostedServiceController {
         bundle: Bundle = .main,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> PeerControlPlaneServiceEndpoint? {
+        // UI scenarios run the shipping app without loading XCTest into it. Their disposable
+        // home does not isolate Keychain or inherited service configuration. A remote fixture
+        // must inject its endpoint explicitly instead of reaching a real hosted service.
+        guard !AutomatedRun.isUnderway(environment: environment, isHostedTest: false) else {
+            return nil
+        }
 #if DEBUG || THREADING_INTERNAL
         if let override = environment["THREADING_CONTROL_PLANE_URL"],
            let url = URL(string: override) {

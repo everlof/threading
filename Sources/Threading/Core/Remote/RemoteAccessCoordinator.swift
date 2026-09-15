@@ -251,11 +251,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// `tailscale` and publish their Mac, leaving a child behind after the run. A test that wants
     /// to observe transport behaviour injects its own double rather than relying on this.
     static func defaultTailnetTransport() -> any RemoteTailnetTransport {
-        isHostedTestProcess ? RefusedRemoteTransport() : TailscaleServeTransport()
-    }
-
-    private static var isHostedTestProcess: Bool {
-        NSClassFromString("XCTestCase") != nil
+        AutomatedRun.isUnderway ? RefusedRemoteTransport() : TailscaleServeTransport()
     }
 
     /// The remote transport's live composition root. No route may recover one of these process
@@ -386,14 +382,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private static func defaultOwnerDeviceStore() -> RemoteOwnerDevicePersisting {
-        if NSClassFromString("XCTestCase") != nil {
+        if AutomatedRun.isUnderway {
             return InMemoryRemoteOwnerDeviceStore()
         }
         return RemoteOwnerDeviceKeychainStore()
     }
 
     private static func defaultGuestShareStore() -> RemoteGuestSharePersisting {
-        if NSClassFromString("XCTestCase") != nil {
+        if AutomatedRun.isUnderway {
             return InMemoryRemoteGuestShareStore()
         }
         return RemoteGuestShareKeychainStore()

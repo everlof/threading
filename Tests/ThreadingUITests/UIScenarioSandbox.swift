@@ -75,6 +75,7 @@ struct UIScenarioSandbox {
         application.launchArguments += [
             "-ApplePersistenceIgnoreState", "YES",
             "-NSQuitAlwaysKeepsWindows", "NO",
+            "-remoteAccessEnabled", "NO",
             "-\(Defaults.onboardingCompletedVersion)", "1",
         ]
         return UIWindowContract.configure(application)

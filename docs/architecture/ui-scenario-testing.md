@@ -52,6 +52,13 @@ signed synthetic provider belongs to the disposable application process and must
 Background-host durability has its own test lane; routing these fixtures through the daemon also
 makes its Unix socket path exceed the limit inside the UI runner's temporary home.
 
+UI scenarios start with Remote Access off. Their home marker also disables configured hosted
+endpoints and selects in-memory remote credential stores and a refused default Tailscale
+transport. A disposable Cocoa home does not isolate Keychain, and checking only for a loaded
+`XCTestCase` misses the separately launched app; that gap let ordinary UI scenarios open the
+real development service's Cloudflare Access sign-in. Remote-specific fixtures must inject
+their dependencies explicitly.
+
 `THREADING_UI_SCENARIO_HOME` is that home's name, and it is also how the application recognises
 that a machine rather than a person is driving it. `AutomatedRun` reads it, so the refusal beep an
 unavailable command makes, and any bell a fixture agent rings, stay silent for the whole lane: a scenario clicks and
