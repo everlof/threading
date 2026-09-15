@@ -2731,6 +2731,23 @@
         }
       }
     },
+    "Collapse %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapse %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fäll ihop %@"
+          }
+        }
+      }
+    },
     "Collapsed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4196,6 +4213,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Underlag"
+          }
+        }
+      }
+    },
+    "Expand %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expand %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expandera %@"
           }
         }
       }
@@ -10930,6 +10964,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nästa återställningsdatum för ett påverkat fönster kan flyttas."
+          }
+        }
+      }
+    },
+    "The project’s open or closed state could not be saved." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The project’s open or closed state could not be saved."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektets öppna eller stängda läge kunde inte sparas."
           }
         }
       }

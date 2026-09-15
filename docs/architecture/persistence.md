@@ -726,6 +726,14 @@ pairing identities against the hard 64-record ceiling, and a write occurs only w
 theme actually changes, never on a session or terminal hot callback. See
 [`themes.md`](themes.md#2026-08-30--the-iphone-keeps-the-last-resolved-mac-theme-through-reconnect).
 
+The iPhone's project disclosures are independent scalar preferences in
+`MobileProjectDisclosureStore`, under `threading.mobile.project-collapsed.v1.*`. Each key hashes
+a length-framed pairing ID and stable project ID (name fallback for older hosts). Missing values
+mean expanded; both explicit states survive navigation, catalogue replacement and relaunch. A
+rename preserves the choice when a project ID is available. Unknown scalar values remain untouched
+and refuse writes. One toggle writes and verifies one Boolean; no catalogue or aggregate preference
+archive is encoded. These are local navigation choices, not Mac project state or chat archives.
+
 The iPhone dashboard's last-good catalogue is a second separate optional cache. It is keyed by
 the exact pairing id rather than the Mac's stable host id because `/api/me` is capability-filtered:
 two memberships on one Mac may expose different rows. The snapshot keeps only list identity and

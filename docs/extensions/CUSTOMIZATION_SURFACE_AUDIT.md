@@ -141,7 +141,7 @@ leaking the AppKit cell.
 The built-in macOS sidebar and iOS dashboard organization controls remain host-only navigation
 chrome. They arrange existing public or host-only rows without changing those rows' presentation
 contracts. Threading owns persisted project membership, chat-versus-terminal classification,
-stable order inside each type and direction persistence; allowing a replacement control to
+stable order inside each type, direction persistence and phone-local project disclosure state; allowing a replacement control to
 contradict any of those facts would make the same terminal appear to have different ownership
 across surfaces.
 

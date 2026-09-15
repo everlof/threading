@@ -49,6 +49,9 @@
     {"id": "marketing-claude-usage-menu", "entryID": "ios-marketing-flow", "demo": "marketing-claude-usage-menu", "appearance": "dark", "theme": "threading", "contentSize": "large", "terminalFontSize": 10, "keyboardState": "open", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Session actions", "waitForAccessibilityLabels": ["Vera Keller", "Workspace", "Interface", "Archive"]}, "assertions": ["editorFocused", "keyboardShown", "hostInteractionPrepared"]},
     {"id": "marketing-settings", "entryID": "ios-marketing-flow", "demo": "marketing-settings", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "stable-display"},
     {"id": "marketing-usage", "entryID": "ios-marketing-flow", "demo": "usage-totals", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "stable-display"},
+    {"id": "session-dashboard-collapsed-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom", "captureMode": "stable-display", "interaction": {"tapAccessibilityLabel": "Collapse AnotherTerminal", "waitForAccessibilityLabels": ["Expand AnotherTerminal", "Collapse Strom"]}, "assertions": ["hostInteractionPrepared"]},
+    {"id": "session-dashboard-accessibility-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light", "contentSize": "accessibility-extra-large", "captureMode": "stable-display", "interaction": {"tapAccessibilityLabel": "Collapse AnotherTerminal", "waitForAccessibilityLabels": ["Expand AnotherTerminal", "Collapse Strom"]}, "assertions": ["hostInteractionPrepared"]},
+    {"id": "session-dashboard-fallback-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "fallback"},
     {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "session-dashboard-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "project-sessions", "appearance": "dark", "theme": "custom"},
     {"id": "standalone-terminal-dashboard-custom-dark", "entryID": "ios-standalone-terminal", "demo": "sessions", "appearance": "dark", "theme": "custom"},
@@ -294,7 +297,7 @@
       "priority": "critical",
       "title": "Session dashboard",
       "description": "The paired owner dashboard and project-scoped chat list, with host switching in navigation chrome, project-aware session creation, named multi-route connection progress and actionable recovery.",
-      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Project-scoped chat list", "Multi-route connection progress", "Offline recovery with saved routes and identity"],
+      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Collapsed project after disclosure tap", "Project-scoped chat list", "Multi-route connection progress", "Offline recovery with saved routes and identity"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-dashboard-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}

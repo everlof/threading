@@ -666,6 +666,19 @@ overlap report is linear. The 8,000-mark case returns one issue in under a milli
 
 ### Mobile remote dashboard scaling contract
 
+Project disclosure is a user-frequency structural update: expect tens of projects; exercise
+1,000 independent project preferences and the existing 1,000-row collection stress case.
+`MobileProjectDisclosureStore` reads/writes one scalar preference per identity, never an archive
+of the whole catalogue. The project loop skips a collapsed plate before constructing its row
+models or views. Remaining rows keep their diffable identities and viewport reuse, and the
+collection preserves its visible anchor through section removal. Catalogue grouping remains a
+value-model structural pass; no hidden nested stack is introduced. The 1,000-preference write,
+reload and exact-choice verification test took 0.975 s and 1.121 s total in two iOS Simulator Debug runs on
+2026-09-14 (including fixture work, not a per-tap latency claim). `SessionDashboardTests` still
+pins fewer than 40 mounted cells for 1,000 rows and safe removal of every plate. Expanded and
+interactively collapsed shipping-shell captures live in `ios-session-dashboard`.
+
+
 The dashboard catalogue scales with sessions and its invalidation source can burst when the Mac
 applies several store mutations together. The ordinary expectation is tens of sessions and fewer
 than five catalogue changes per minute; the stress case is 1,000 sessions with 100 row-change

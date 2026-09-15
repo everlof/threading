@@ -611,6 +611,7 @@ enum MobileConnectionRecoveryDisplay {
 }
 
 private struct DashboardProjectSection {
+    let id: String
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
@@ -2707,6 +2708,7 @@ struct SessionDashboard: View {
         SessionOrganization.project.rawValue
     @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
         SessionTypeDirection.chatsFirst.rawValue
+    @StateObject private var projectDisclosure: MobileProjectDisclosureStore
     @State private var isConfirmingForget = false
     @State private var showsArchived = false
     @State private var showsSnoozed = false
@@ -2741,6 +2743,20 @@ struct SessionDashboard: View {
     ) {
         self.projectName = projectName
         self.projectID = projectID
+        #if DEBUG
+        // Each capture starts with independent preferences; relaunching that same capture still
+        // exercises persistence. A collapse interaction must not alter later theme fixtures.
+        let environment = ProcessInfo.processInfo.environment
+        if let run = environment["THREADING_MOBILE_UI_EVIDENCE_RUN"],
+           let capture = environment["THREADING_MOBILE_UI_EVIDENCE_ID"],
+           let defaults = UserDefaults(suiteName: "threading.mobile.disclosure-evidence.\(run).\(capture)") {
+            _projectDisclosure = StateObject(wrappedValue: MobileProjectDisclosureStore(defaults: defaults))
+        } else {
+            _projectDisclosure = StateObject(wrappedValue: MobileProjectDisclosureStore())
+        }
+        #else
+        _projectDisclosure = StateObject(wrappedValue: MobileProjectDisclosureStore())
+        #endif
         self.openSettings = openSettings
         self.reportConnectionIssue = reportConnectionIssue
     }
@@ -2810,18 +2826,29 @@ struct SessionDashboard: View {
     }
 
     private var groupedProjects: [DashboardProjectSection] {
-        let sessionsByProject = Dictionary(grouping: sessions, by: \.projectName)
-        let terminalsByProject = Dictionary(grouping: terminals, by: \.projectName)
+        let sessionsByProject = Dictionary(grouping: sessions) {
+            MobileProjectDisclosureStore.projectKey(id: $0.projectID, name: $0.projectName)
+        }
+        let terminalsByProject = Dictionary(grouping: terminals) {
+            MobileProjectDisclosureStore.projectKey(id: $0.projectID, name: $0.projectName)
+        }
         return Set(sessionsByProject.keys).union(terminalsByProject.keys)
-            .map { name in
-                DashboardProjectSection(
+            .map { key in
+                let projectSessions = sessionsByProject[key] ?? []
+                let projectTerminals = terminalsByProject[key] ?? []
+                let name = projectSessions.first?.projectName ?? projectTerminals.first?.projectName ?? ""
+                return DashboardProjectSection(
+                    id: key,
                     projectName: name,
                     title: name.isEmpty ? MobileL10n.string("Other") : name,
-                    sessions: sessionsByProject[name] ?? [],
-                    terminals: terminalsByProject[name] ?? []
+                    sessions: projectSessions,
+                    terminals: projectTerminals
                 )
             }
-            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            .sorted {
+                let comparison = $0.title.localizedCaseInsensitiveCompare($1.title)
+                return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+            }
     }
 
     var body: some View {
@@ -2954,18 +2981,20 @@ struct SessionDashboard: View {
         } else if projectName == nil, organization == .project {
             for project in groupedProjects {
                 appendChrome(
-                    .projectHeader(project.projectName),
-                    id: "project-header:\(project.projectName)",
+                    .projectHeader(project.id),
+                    id: "project-header:\(project.id)",
                     estimatedHeight: MobileDesign.Size.minimumTapTarget,
                     spacingAfter: 10
                 )
+                guard projectDisclosure.isExpanded(hostID: model.activeHostID, projectKey: project.id)
+                else { continue }
                 appendPlate(
                     DashboardRowItem.rows(
                         sessions: project.sessions,
                         terminals: project.terminals,
                         order: [.chats, .terminals]
                     ),
-                    id: "project-plate:\(project.projectName)"
+                    id: "project-plate:\(project.id)"
                 )
             }
         } else {
@@ -3010,11 +3039,20 @@ struct SessionDashboard: View {
             content = AnyView(emptyCard)
         case .notificationOnboarding:
             content = AnyView(NotificationOnboardingCard())
-        case .projectHeader(let name):
-            let section = groupedProjects.first { $0.projectName == name }
+        case .projectHeader(let key):
+            let section = groupedProjects.first { $0.id == key }
+            let name = section?.projectName ?? ""
+            let expanded = projectDisclosure.isExpanded(hostID: model.activeHostID, projectKey: key)
             content = AnyView(DashboardProjectHeader(
                 projectName: name,
+                projectID: section?.sessions.first?.projectID ?? section?.terminals.first?.projectID,
                 title: section?.title ?? name,
+                isExpanded: expanded,
+                toggleExpanded: {
+                    if !projectDisclosure.setExpanded(!expanded, hostID: model.activeHostID, projectKey: key) {
+                        actionError = MobileL10n.string("The project’s open or closed state could not be saved.")
+                    }
+                },
                 startNewSession: model.canManageSessions && !showsArchived
                     ? { startDraft(in: name) }
                     : nil
@@ -4153,13 +4191,33 @@ private struct DashboardTypeHeader: View {
 
 private struct DashboardProjectHeader: View {
     let projectName: String
+    let projectID: String?
     let title: String
+    let isExpanded: Bool
+    let toggleExpanded: () -> Void
     let startNewSession: (() -> Void)?
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         HStack(spacing: MobileDesign.Spacing.small) {
-            NavigationLink(value: MobileNavigationRoute.project(projectName)) {
+            Button(action: toggleExpanded) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.secondaryLabel)
+                    .frame(
+                        width: MobileDesign.Size.minimumTapTarget,
+                        height: MobileDesign.Size.minimumTapTarget
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(MobileL10n.string(
+                isExpanded ? "Collapse %@" : "Expand %@", title
+            ))
+            .accessibilityValue(MobileL10n.string(isExpanded ? "Expanded" : "Collapsed"))
+            NavigationLink(value: projectID.map {
+                MobileNavigationRoute.searchProject(id: $0, name: projectName)
+            } ?? .project(projectName)) {
                 HStack(spacing: MobileDesign.Spacing.tight) {
                     Label(title, systemImage: "folder")
                         .font(.headline)

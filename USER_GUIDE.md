@@ -2738,7 +2738,11 @@ permission cards, so its screen exposes only the terminal and terminal sharing a
 On iPhone, **… ▸ Organize ▸ By project** places terminals inside the project that owns them,
 after its chats. Choose **By type** to gather chats and terminals across projects under their own
 **Chats** and **Terminals** headings; its **Direction** section offers **Chats first** and
-**Terminals first**. The choice is saved on that iPhone.
+**Terminals first**. The choice is saved on that iPhone. In **By project**, tap the disclosure arrow to
+collapse or expand a project’s chats and terminals. The iPhone remembers each project’s state
+across navigation, reconnects and app launches, separately for each paired Mac. Tap the project
+name to open its full list, or **+** to start a chat even while the group is collapsed.
+Collapsing changes only this phone’s navigation; it does not archive or stop chats.
 
 Use a standalone terminal row's **… > Share Terminal…** to give somebody access to that terminal
 alone. **View only** follows output from an already-running shell and cannot type, resize or start
