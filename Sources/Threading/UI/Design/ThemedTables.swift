@@ -996,7 +996,7 @@ public class ThemedOutlineView:
     /// leaves a point between them — and a reach stated from the chevron stopped that point short
     /// of the content it was measured against. Zero — every list but the one that opts in —
     /// leaves AppKit's own target exactly as it was.
-    public struct DisclosureHitOutsets: Equatable {
+    public struct DisclosureHitOutsets: Equatable, Sendable {
         /// Points before the chevron's leading edge.
         public let beforeChevron: CGFloat
         /// Points past the leading edge of the row's cell; the target never ends before the
