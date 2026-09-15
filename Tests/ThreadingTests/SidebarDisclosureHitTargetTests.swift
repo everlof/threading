@@ -21,25 +21,23 @@ final class SidebarDisclosureHitTargetTests: XCTestCase {
     private var stateManagers: [StateManager] = []
     private var windows: [NSWindow] = []
 
-    override func tearDown() {
-        MainActor.assumeIsolated {
-            for window in windows {
-                window.orderOut(nil)
-                window.contentViewController = nil
-                window.close()
-            }
-            windows = []
-            for manager in stateManagers { manager.closeDatabase() }
-            stateManagers = []
-            for directory in directories {
-                try? FileManager.default.removeItem(at: directory)
-            }
-            directories = []
-            UserDefaults.standard.removeObject(forKey: "compactsSidebarTree")
-            UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch")
-            UserDefaults.standard.removeObject(forKey: "groupsLoneBranches")
+    override func tearDown() async throws {
+        for window in windows {
+            window.orderOut(nil)
+            window.contentViewController = nil
+            window.close()
         }
-        super.tearDown()
+        windows = []
+        for manager in stateManagers { manager.closeDatabase() }
+        stateManagers = []
+        for directory in directories {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        directories = []
+        UserDefaults.standard.removeObject(forKey: "compactsSidebarTree")
+        UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch")
+        UserDefaults.standard.removeObject(forKey: "groupsLoneBranches")
+        try await super.tearDown()
     }
 
     /// One project whose sessions gather under branch headings, and one flat project, so the list
