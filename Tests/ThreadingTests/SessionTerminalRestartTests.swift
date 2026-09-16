@@ -64,12 +64,12 @@ final class SessionTerminalRestartTests: HostedStoreTestCase {
         let controller = AgentSessionViewController(agentSession: session, launchPlanProvider: { _, _, _ in
             AgentLaunchPlan(executable: "/bin/cat", arguments: [], resumeState: .unavailable)
         })
+        defer { controller.terminate() }
         controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 400)
         controller.launch()
         controller.terminate()
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertFalse(controller.isRunning)
-        defer { controller.terminate() }
     }
 
     func testUnaddressableHostSocketAllowsLocalRecovery() {

@@ -25,8 +25,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     private var identityDirectory: URL!
     private var port: UInt16!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         authority = RemoteAuthorityStore()
         authority.set(
             RemoteAuthorization(shareID: "test", capability: .interact, scope: .allSessions),
@@ -118,7 +118,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             self.port = outcome.port
             ready.fulfill()
         }
-        wait(for: [ready], timeout: 5)
+        await fulfillment(of: [ready], timeout: 5)
         XCTAssertNotNil(port, "the server should bind a loopback port")
     }
 

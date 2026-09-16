@@ -8,7 +8,7 @@ built — every update stage renders as Threading's own sheets; see
 stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and the release and
 nightly workflows under `.github/workflows/`. The trusted-Mac route is
 `scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete Mac test
-level and Mac release-quality gate before either public ref exists, then proves the clean tested
+level inside the Mac release-quality gate before either public ref exists, then proves the clean tested
 commit is still checked out. The downloadable artifact is the Mac app, release builds offer
 Remote Access's local ways in but not Hosted Direct, and the iPhone companion is not published with it; the release lane therefore
 does not make an unshipped mobile test a prerequisite. Ordinary CI remains the superset and still
@@ -18,6 +18,10 @@ the Developer ID identity, notary profile, and matching Sparkle key immediately 
 ref moves, then proves the checkout remained unchanged during that check. Only then does it push
 the outer repository and annotated tag, temporarily prevent the tag workflow from racing a second
 signed build, and invoke the same publisher locally.
+The gate's `--mac-release` mode runs `Threading-All` once in fresh DerivedData with complete
+concurrency checking and the warning ratchet. This includes the tests formerly run by the
+driver's separate `mac-all` invocation as well as the off-screen plan; package, service and
+repository checks remain in the same gate. Ordinary CI still selects the off-screen Mac plan.
 The publisher's duplicate quality-gate invocation is skipped only inside that driver, after the
 exact commit check; direct `release.sh` and `publish_release.sh` runs remain fail-closed. The Sparkle key
 already exists under account `mjukis-threading`; [Keys](#keys--threadings-own-one-manual-step-from-real)

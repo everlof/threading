@@ -164,8 +164,12 @@ npm --prefix "${repository_directory}/Service/ThreadingControlPlane" ci
 say "Testing ThreadingControlPlane"
 npm --prefix "${repository_directory}/Service/ThreadingControlPlane" test
 
-say "Testing Threading (off-screen plan, complete concurrency checking)"
-capture_swift_warnings mac-tests "${script_directory}/test.sh" fast \
+mac_test_level=fast
+if [[ "${include_mobile}" == "0" ]]; then
+    mac_test_level=mac-all
+fi
+say "Testing Threading (${mac_test_level}, complete concurrency checking)"
+capture_swift_warnings mac-tests "${script_directory}/test.sh" "${mac_test_level}" \
     -derivedDataPath "${ci_derived_data}" \
     SWIFT_STRICT_CONCURRENCY=complete \
     COMPILER_INDEX_STORE_ENABLE=NO

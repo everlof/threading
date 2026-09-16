@@ -5086,6 +5086,7 @@ final class ComponentGalleryViewController: NSViewController {
         // Switched on, because an overlay in its resting state is a component that deliberately
         // draws and answers nothing — a blank card would be an accurate and useless story.
         let overlay = BrowserAnnotationOverlay()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
         let annotationScope = KeyEquivalentScopeView()
         annotationScope.translatesAutoresizingMaskIntoConstraints = false
         annotationScope.addSubview(overlay)

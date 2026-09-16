@@ -179,12 +179,10 @@ release_version_is_publishable "$CHANNEL" "$VERSION" "$TAG" <<< "$published" \
 
 # MARK: - Test, push, and publish
 
-say "Running the complete Mac shipping test level"
-"$ROOT/scripts/test.sh" mac-all
-
 # `release.sh` normally runs this gate immediately before archive. The local driver must run it
 # before publishing either immutable ref: a lint, package, service, strict-concurrency, or Mac
 # failure cannot be allowed to leave a tag pointing at a commit that was never releasable.
+# Its Mac-release mode includes the complete Mac plan in the fresh strict-concurrency build.
 say "Running the Mac release quality gate before publishing refs"
 "$ROOT/scripts/ci.sh" --mac-release
 

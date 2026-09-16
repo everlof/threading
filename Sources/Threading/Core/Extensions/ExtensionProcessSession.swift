@@ -850,7 +850,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
                 deadline: .now() + timeout,
                 execute: timeoutItem
             )
-            writeQueue.async { [weak self] in
+            writeQueue.async { [weak self, encoded] in
                 guard let self else { return }
                 do {
                     try self.stdin.fileHandleForWriting.write(contentsOf: encoded)

@@ -14,15 +14,15 @@ final class SidebarBranchHeadingMenuTests: XCTestCase {
     private let branch = "feature/copy-branch-name"
     private var pasteboard: NSPasteboard!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         pasteboard = NSPasteboard(name: NSPasteboard.Name("threading-tests-\(UUID().uuidString)"))
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         pasteboard.releaseGlobally()
         pasteboard = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     /// The copy leads, set apart from the grouping toggles that were the whole menu before.

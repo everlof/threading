@@ -177,7 +177,7 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
     private var suiteNames: [String] = []
     private var coordinators: [RemoteAccessCoordinator] = []
 
-    override func tearDown() async throws {
+    nonisolated override func tearDown() async throws {
         await MainActor.run {
             for coordinator in coordinators { coordinator.stop() }
             coordinators.removeAll()
