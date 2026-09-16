@@ -174,21 +174,6 @@ final class RemoteAccessChannelGateTests: XCTestCase {
 @MainActor
 final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
 
-    private var suiteNames: [String] = []
-    private var coordinators: [RemoteAccessCoordinator] = []
-
-    nonisolated override func tearDown() async throws {
-        await MainActor.run {
-            for coordinator in coordinators { coordinator.stop() }
-            coordinators.removeAll()
-            for name in suiteNames {
-                UserDefaults().removePersistentDomain(forName: name)
-            }
-            suiteNames.removeAll()
-        }
-        try await super.tearDown()
-    }
-
     func testAPublicBuildReportsNoHostedServiceCredentialsOrPairingLink() throws {
         let settings = try publicBuildSettings()
         let coordinator = makeCoordinator(settings)
@@ -238,7 +223,7 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
 
     private func publicBuildSettings() throws -> AppSettings {
         let name = "RemoteAccessPublicBuildCoordinatorTests.\(UUID().uuidString)"
-        suiteNames.append(name)
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: name) }
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
         let settings = AppSettings(defaults: defaults, hostedDirectIsOffered: false)
@@ -257,7 +242,9 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
             tailnetTransport: RecordingTailnetTransport()
         )
-        coordinators.append(coordinator)
+        addTeardownBlock { [coordinator] in
+            await MainActor.run { coordinator.stop() }
+        }
         return coordinator
     }
 
