@@ -465,7 +465,7 @@ if [[ $NOTARIZE -eq 0 ]]; then
 fi
 
 say "Submitting to Apple"
-xcrun notarytool submit "$zip" --keychain-profile "$NOTARY_PROFILE" --wait
+python3 "$ROOT/scripts/local_release_credentials.py" submit "$zip" --profile "$NOTARY_PROFILE"
 
 say "Stapling"
 xcrun stapler staple "$APP"

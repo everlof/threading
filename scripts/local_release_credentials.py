@@ -15,12 +15,22 @@ CREDENTIALS = ROOT / ".release-local" / "credentials.json"
 TEAM_ID = "SMQ3E8Y57T"
 
 
+def keychain_arguments():
+    if configured := os.environ.get("NOTARY_KEYCHAIN"):
+        return ["--keychain", configured]
+    if CREDENTIALS.is_file():
+        # The default Local Items store can refuse unattended access even while the login
+        # keychain is unlocked. Local backups consistently use the file-based login keychain.
+        return ["--keychain", str(Path.home() / "Library/Keychains/login.keychain-db")]
+    return []  # CI can keep its already-provisioned default profile.
+
+
 def store_profile(values):
     # Capture output: neither credentials nor a subprocess command belong in release logs.
     result = subprocess.run(
         ["xcrun", "notarytool", "store-credentials", values["profile"],
          "--apple-id", values["apple_id"], "--team-id", values["team_id"],
-         "--password", values["app_specific_password"]],
+         "--password", values["app_specific_password"], *keychain_arguments()],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False,
     )
     if result.returncode:
@@ -61,7 +71,7 @@ def load_backup(profile, path=CREDENTIALS):
 
 def ensure_profile(profile, path=CREDENTIALS):
     result = subprocess.run(
-        ["xcrun", "notarytool", "history", "--keychain-profile", profile],
+        ["xcrun", "notarytool", "history", "--keychain-profile", profile, *keychain_arguments()],
         stdin=subprocess.DEVNULL, capture_output=True, check=False,
     )
     if result.returncode == 0:
@@ -71,11 +81,13 @@ def ensure_profile(profile, path=CREDENTIALS):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("setup", "ensure"))
+    parser.add_argument("action", choices=("setup", "ensure", "submit"))
+    parser.add_argument("archive", nargs="?")
     parser.add_argument("--profile", default=os.environ.get("NOTARY_PROFILE", "mjukis-notary"))
     args = parser.parse_args()
     try:
         if args.action == "setup":
+            os.environ.setdefault("NOTARY_KEYCHAIN", str(Path.home() / "Library/Keychains/login.keychain-db"))
             values = {
                 "profile": args.profile,
                 "team_id": TEAM_ID,
@@ -87,8 +99,16 @@ def main():
             store_profile(values)
             save_backup(values)
             print("Notarization profile validated and stored. Local backup saved with mode 600.")
-        else:
+        elif args.action == "ensure":
             ensure_profile(args.profile)
+        else:
+            if not args.archive:
+                parser.error("submit requires an archive path")
+            return subprocess.run(
+                ["xcrun", "notarytool", "submit", args.archive, "--keychain-profile", args.profile,
+                 *keychain_arguments(), "--wait"],
+                stdin=subprocess.DEVNULL, check=False,
+            ).returncode
     except (OSError, ValueError):
         # Do not echo exception details: malformed JSON or OS errors can contain private values.
         print("Notarization credentials unavailable or invalid. Run: python3 scripts/local_release_credentials.py setup")

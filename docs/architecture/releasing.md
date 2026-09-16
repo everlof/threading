@@ -648,7 +648,10 @@ replacement. It contains a plaintext password and must stay local. The helper ne
 Both local release entry points call the helper's `ensure` command. A working Keychain profile
 needs no file. If the profile is unavailable, the helper restores it from the matching local
 backup with Apple's validation enabled. Missing, mismatched or invalid credentials still stop
-publication. CI continues using its provisioned Keychain profile without a local backup.
+publication. Local setup, validation and submission explicitly use `login.keychain-db`: the
+default Local Items store can report a profile missing and refuse writes with "User interaction
+is not allowed" even while the login keychain is accessible. `NOTARY_KEYCHAIN` overrides that
+path when needed. CI continues using its provisioned default profile without a local backup.
 
 ### The signed Simulator helper is tested as a bundle
 

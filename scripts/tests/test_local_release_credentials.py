@@ -23,6 +23,17 @@ class LocalReleaseCredentialsTests(unittest.TestCase):
         self.values = dict(profile="fixture", team_id=credentials.TEAM_ID,
                            apple_id="fixture@example.invalid", app_specific_password="fixture-only")
 
+    @patch.dict(credentials.os.environ, {}, clear=True)
+    def test_local_backup_uses_login_keychain_but_ci_keeps_default(self):
+        with patch.object(credentials, "CREDENTIALS", self.path):
+            self.assertEqual(credentials.keychain_arguments(), [])
+            credentials.save_backup(self.values, self.path)
+            self.assertEqual(credentials.keychain_arguments(), [
+                "--keychain", str(Path.home() / "Library/Keychains/login.keychain-db")
+            ])
+            with patch.dict(credentials.os.environ, {"NOTARY_KEYCHAIN": "/fixture/custom.keychain-db"}):
+                self.assertEqual(credentials.keychain_arguments(), ["--keychain", "/fixture/custom.keychain-db"])
+
     def test_backup_is_private_and_round_trips(self):
         credentials.save_backup(self.values, self.path)
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
@@ -53,6 +64,17 @@ class LocalReleaseCredentialsTests(unittest.TestCase):
         credentials.ensure_profile("fixture", self.path)
         self.assertEqual(run.call_count, 1)
         self.assertFalse(self.path.exists())
+
+    @patch.object(credentials.subprocess, "run")
+    def test_submission_uses_the_same_keychain_without_password_arguments(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0)
+        with patch.dict(credentials.os.environ, {"NOTARY_KEYCHAIN": "/fixture/login.keychain-db"}), \
+                patch("sys.argv", ["credentials", "submit", "/fixture/app.zip", "--profile", "fixture"]):
+            self.assertEqual(credentials.main(), 0)
+        self.assertEqual(run.call_args.args[0], [
+            "xcrun", "notarytool", "submit", "/fixture/app.zip", "--keychain-profile", "fixture",
+            "--keychain", "/fixture/login.keychain-db", "--wait"
+        ])
 
     @patch.object(credentials.subprocess, "run")
     def test_missing_profile_is_restored_with_validation(self, run):
