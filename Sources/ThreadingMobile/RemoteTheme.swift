@@ -948,12 +948,26 @@ extension View {
     func remoteThemeGlow(_ theme: RemoteThemePalette) -> some View {
         if let glow = theme.glow,
            let color = UIColor(remoteHex: glow.color) {
-            shadow(
-                color: Color(color).opacity(glow.opacity),
-                radius: CGFloat(glow.radius),
-                x: CGFloat(glow.offsetX ?? 0),
-                y: CGFloat(-(glow.offsetY ?? 0))
-            )
+            // Draw only the panel silhouette. A shadow on the content hierarchy can be
+            // distributed to its children, even through a SwiftUI compositing group.
+            let radius = CGFloat(glow.radius)
+            let x = CGFloat(glow.offsetX ?? 0)
+            let y = CGFloat(-(glow.offsetY ?? 0))
+            let outset = max(abs(x), abs(y)) + radius * 3 + 1
+            background {
+                RoundedRectangle(cornerRadius: theme.panelRadius)
+                    .fill(Color(color).opacity(glow.opacity))
+                    .blur(radius: radius)
+                    .offset(x: x, y: y)
+                    .padding(outset)
+                    .mask {
+                        RemotePanelShadowExterior(inset: outset, radius: theme.panelRadius)
+                            .fill(style: FillStyle(eoFill: true))
+                    }
+                    .padding(-outset)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         } else {
             self
         }
@@ -991,6 +1005,18 @@ extension View {
             ),
             rendersStatically: freezesForEvidence
         )
+    }
+}
+
+/// Excludes the face as well as its contents, including when the authored panel is translucent.
+private struct RemotePanelShadowExterior: Shape {
+    let inset: CGFloat
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        path.addPath(RoundedRectangle(cornerRadius: radius).path(in: rect.insetBy(dx: inset, dy: inset)))
+        return path
     }
 }
 

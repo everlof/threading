@@ -1107,3 +1107,138 @@ final class MobileThemedPopoverRoomTests: XCTestCase {
         window.isHidden = true
     }
 }
+
+@MainActor
+final class MobileThemeGlowTests: XCTestCase {
+    func testUsageSheetShadowLeavesCapacityContentUnchanged() async throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#shadow-test"))
+        let model = RemoteUsageDashboardModel(link: link, isDemo: true)
+        await model.load()
+        let id = try XCTUnwrap(model.selectedLimitID)
+        await model.loadLimit(seriesID: id, days: 30)
+        let authored = try XCTUnwrap(RemoteAppModel.demoCatalogThemes.first { $0.id == "neo-brutalism" })
+        func sheet(glow: RemoteThemeDTO.Material.Glow?) -> some View {
+            let theme = RemoteThemePalette(RemoteThemeDTO(
+                id: authored.id, name: authored.name, mode: authored.mode, colors: authored.colors,
+                material: .init(panelRadius: 0, controlRadius: 0, borderWidth: 4, glow: glow)
+            ))
+            return Color.white.sheet(isPresented: .constant(true)) {
+                RemoteUsageDashboardView(link: link, isDemo: true, model: model)
+                    .mobileTheme(theme)
+            }
+            .environment(\.locale, Locale(identifier: "en_US"))
+            .environment(\.dynamicTypeSize, .large)
+        }
+        let controller = UIHostingController(rootView: sheet(glow: nil))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let plain = try await stableCapture(window)
+        XCTAssertNotNil(controller.presentedViewController)
+        controller.rootView = sheet(glow: authored.material.glow)
+        let shadowed = try await stableCapture(window)
+        // Inside the first capacity card in this fixed-size shipping sheet, including its
+        // provider heading and percentage. An outside shadow may not add any ink here.
+        let capacity = CGRect(x: 36, y: 306, width: 320, height: 58)
+        let expected = try pixels(plain, rect: capacity)
+        XCTAssertGreaterThan(expected.filter { $0 < 100 }.count, 100,
+                             "the comparison must contain capacity ink, not an empty sheet")
+        XCTAssertEqual(expected, try pixels(shadowed, rect: capacity))
+        for (name, image) in [("usage-shadow-plain", plain), ("usage-shadow-themed", shadowed)] {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testPanelShadowDoesNotDuplicateItsContentsAndUpdatesWithTheme() async throws {
+        let controller = UIHostingController(rootView: panel(glow: nil))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let plain = try await capture(window)
+        for radius in [0.0, 10.0] {
+            controller.rootView = panel(glow: .init(
+                color: "#000000", radius: radius, opacity: 1, offsetX: 12, offsetY: -12
+            ))
+            let shadowed = try await capture(window)
+            XCTAssertEqual(try pixels(plain, rect: face), try pixels(shadowed, rect: face),
+                           "A panel's shadow must not redraw its text, controls or outline inside its face")
+            XCTAssertNotEqual(try pixels(plain, rect: shadow), try pixels(shadowed, rect: shadow),
+                              "The authored shadow must still be visible outside the panel")
+        }
+        controller.rootView = panel(glow: nil)
+        let cleared = try await capture(window)
+        XCTAssertEqual(try pixels(plain, rect: shadow), try pixels(cleared, rect: shadow))
+    }
+
+    private let face = CGRect(x: 42, y: 202, width: 196, height: 96)
+    private let shadow = CGRect(x: 244, y: 220, width: 4, height: 60)
+
+    private func stableCapture(_ window: UIWindow) async throws -> UIImage {
+        var previous: Data?
+        for _ in 0..<20 {
+            let image = try await capture(window)
+            let current = try pixels(image, rect: window.bounds)
+            if current == previous { return image }
+            previous = current
+        }
+        XCTFail("The shipping sheet did not finish presenting")
+        return try await capture(window)
+    }
+
+    private func panel(glow: RemoteThemeDTO.Material.Glow?) -> some View {
+        let theme = RemoteThemePalette(RemoteThemeDTO(
+            id: "shadow-test", name: "Shadow test", mode: .light,
+            colors: ["panel": "#FFFFFF", "label": "#000000"],
+            material: .init(panelRadius: 0, controlRadius: 0, borderWidth: 2, glow: glow)
+        ))
+        return VStack {
+            HStack {
+                Text("Capacity").foregroundStyle(.black)
+                Rectangle().fill(.red).frame(width: 20, height: 20)
+            }
+        }
+        .frame(width: 200, height: 100)
+        .background(theme.panel, in: Rectangle())
+        .overlay { Rectangle().stroke(.black, lineWidth: 2) }
+        .remoteThemeGlow(theme)
+        .position(x: 140, y: 250)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.white)
+        .ignoresSafeArea()
+    }
+
+    private func capture(_ window: UIWindow) async throws -> UIImage {
+        for _ in 0..<5 {
+            try await Task.sleep(for: .milliseconds(40))
+            window.layoutIfNeeded()
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+    }
+
+    private func pixels(_ image: UIImage, rect: CGRect) throws -> Data {
+        let crop = try XCTUnwrap(image.cgImage?.cropping(to: rect))
+        var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: crop.width, height: crop.height,
+            bitsPerComponent: 8, bytesPerRow: crop.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+        return Data(bytes)
+    }
+}

@@ -141,6 +141,17 @@ Remote themes own material — colours, radii, border weight and glow — while
 inset from the panel edge, and filled actions use the active theme's control radius. Do not put
 spacing into an individual dialog or make it vary by decorative theme.
 
+`remoteThemeGlow` draws a shadow from the panel's rounded silhouette in a separate background,
+then masks out the face so translucent panels retain their authored material. A shadow on the
+content hierarchy can be distributed through its children, even with a compositing group:
+Neo Brutalism's hard 12-point offset duplicated the Usage sheet's labels, controls and chart.
+Shadow geometry belongs in the shared modifier, never on the feature's content tree. It changes
+no view identities, layout, lazy containers or data traversal, and creates no explicit bitmap
+cache. The blur's drawing bounds include the offset plus three radii; the face remains excluded.
+`MobileThemeGlowTests` checks hard/soft shadows, live removal and the actual Usage sheet. The
+Neo Brutalism demo DTO includes the authored shadow, and `usage-overview-neo-brutalism-light`
+captures the shipping sheet with that material.
+
 **An action keeps its identity while its owner refreshes.** Callers create action values inside
 SwiftUI `body`; connection and validation updates must not create new button identities. A fresh
 UUID replaced a pressed Attachment alert's OK button before touch-up, leaving a visible alert

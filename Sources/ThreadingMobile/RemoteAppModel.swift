@@ -4556,7 +4556,8 @@ final class RemoteAppModel: ObservableObject {
         label: String,
         accent: String,
         radius: Double = 10,
-        borderWidth: Double = 1
+        borderWidth: Double = 1,
+        glow: RemoteThemeDTO.Material.Glow? = nil
     ) -> RemoteThemeDTO {
         RemoteThemeDTO(
             id: id,
@@ -4586,7 +4587,8 @@ final class RemoteAppModel: ObservableObject {
             material: .init(
                 panelRadius: radius,
                 controlRadius: max(0, radius / 2),
-                borderWidth: borderWidth
+                borderWidth: borderWidth,
+                glow: glow
             )
         )
     }
@@ -4618,7 +4620,8 @@ final class RemoteAppModel: ObservableObject {
         demoCatalogTheme(
             id: "neo-brutalism", name: "Neo Brutalism", mode: .light,
             ground: "#FFFDF5", surface: "#C4B5FD", panel: "#FFFFFF",
-            label: "#000000", accent: "#FF6B6B", radius: 0, borderWidth: 4
+            label: "#000000", accent: "#FF6B6B", radius: 0, borderWidth: 4,
+            glow: .init(color: "#000000", radius: 0, opacity: 1, offsetX: 12, offsetY: -12)
         ),
         demoCatalogTheme(
             id: "claymorphism", name: "Claymorphism", mode: .light,

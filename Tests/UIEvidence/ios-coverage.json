@@ -154,6 +154,7 @@
     {"id": "attachment-detail-text-custom-dark", "entryID": "ios-attachments", "demo": "attachment-detail-text", "appearance": "dark", "theme": "custom"},
     {"id": "attachment-share-sheet-image-custom-dark", "entryID": "ios-attachments", "demo": "attachment-detail-image", "appearance": "dark", "theme": "custom", "captureMode": "stable-display", "interaction": {"tapAccessibilityLabel": "Share", "waitForAccessibilityLabels": ["Threading"]}},
     {"id": "usage-overview-custom-dark", "entryID": "ios-usage", "demo": "usage", "appearance": "dark", "theme": "custom"},
+    {"id": "usage-overview-neo-brutalism-light", "entryID": "ios-usage", "demo": "usage", "appearance": "light", "theme": "neo-brutalism", "captureMode": "stable-display"},
     {"id": "usage-stale-custom-dark", "entryID": "ios-usage", "demo": "usage-stale", "appearance": "dark", "theme": "custom"},
     {"id": "usage-limit-positive-custom-dark", "entryID": "ios-usage", "demo": "usage-limit", "appearance": "dark", "theme": "custom"},
     {"id": "usage-limit-zero-custom-dark", "entryID": "ios-usage", "demo": "usage-limit-zero", "appearance": "dark", "theme": "custom"},
