@@ -32,7 +32,9 @@
 #
 # --notarize uses the `mjukis-notary` credential profile, which already exists on the release
 # machine because claudex ships with it — same Apple ID, same team. Override with NOTARY_PROFILE.
-# To recreate it:
+# To create a private local backup and restore this profile automatically on future releases:
+#   python3 scripts/local_release_credentials.py setup
+# To recreate only the Keychain profile:
 #   xcrun notarytool store-credentials mjukis-notary \
 #     --apple-id <your-apple-id> --team-id SMQ3E8Y57T --password <app-specific-password>
 #
@@ -132,7 +134,7 @@ if ! security find-identity -v -p codesigning | grep -q "Developer ID Applicatio
 fi
 
 if [[ $NOTARIZE -eq 1 ]]; then
-    xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
+    python3 "$ROOT/scripts/local_release_credentials.py" ensure --profile "$NOTARY_PROFILE" \
         || fail "notarytool profile '$NOTARY_PROFILE' not found — see the header of this script"
 fi
 

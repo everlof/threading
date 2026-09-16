@@ -162,3 +162,6 @@ tmp
 # Wrangler's local account cache. The Cloudflare Worker sources and their wrangler configs under
 # Service/ are versioned; this directory is the CLI's own per-machine login state.
 /.wrangler/
+
+# Local release credentials; created with owner-only permissions by the setup helper.
+/.release-local/

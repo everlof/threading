@@ -74,7 +74,7 @@ assert_release_credentials() {
     security find-identity -v -p codesigning \
         | grep -q 'Developer ID Application.*(SMQ3E8Y57T)' \
         || fail "no Developer ID Application certificate for team SMQ3E8Y57T"
-    xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
+    python3 "$ROOT/scripts/local_release_credentials.py" ensure --profile "$NOTARY_PROFILE" \
         || fail "notarytool profile '$NOTARY_PROFILE' is unavailable"
     current_signing_key="$("$sparkle_bin/generate_keys" -p --account "${THREADING_SPARKLE_ACCOUNT:-mjukis-threading}" 2>/dev/null)" \
         || fail "the Threading Sparkle private key is unavailable"

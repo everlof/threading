@@ -637,6 +637,19 @@ xcrun notarytool store-credentials threading-notary \
 After stapling, the zip is rebuilt from the stapled app — the ticket lives inside the bundle, so
 serving the pre-staple zip would ship an unstapled app that Gatekeeper still questions offline.
 
+### Local credential recovery
+
+Run `python3 scripts/local_release_credentials.py setup` once to enter the Apple ID and its
+app-specific password. The helper validates and stores the `mjukis-notary` Keychain profile and
+backs up the Apple ID, team ID, profile name and password in `.release-local/credentials.json`.
+That directory is Git-ignored and owner-only (0700); the file is owner-only (0600), with atomic
+replacement. It contains a plaintext password and must stay local. The helper never prints it.
+
+Both local release entry points call the helper's `ensure` command. A working Keychain profile
+needs no file. If the profile is unavailable, the helper restores it from the matching local
+backup with Apple's validation enabled. Missing, mismatched or invalid credentials still stop
+publication. CI continues using its provisioned Keychain profile without a local backup.
+
 ### The signed Simulator helper is tested as a bundle
 
 The adopted Simulator renderer crosses two boundaries an ordinary unit suite cannot reproduce:
