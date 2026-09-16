@@ -143,7 +143,9 @@ final class MotionPreviewTests: XCTestCase {
         let selected = AppSettings.shared.chatNameMorphStyle
 
         XCTAssertTrue(popUp.accessibilityPerformShowMenu())
-        waitOutTheDwell()
+        let selectedIndex = try XCTUnwrap(ChatNameMorphStyle.allCases.firstIndex(of: selected))
+        let selectedLabel = try XCTUnwrap(popUp.item(at: selectedIndex)?.preview?.view as? MorphingTitleLabel)
+        waitUntilDemonstrating(selectedLabel)
 
         for (index, style) in ChatNameMorphStyle.allCases.enumerated() {
             let label = try XCTUnwrap(
@@ -185,7 +187,7 @@ final class MotionPreviewTests: XCTestCase {
         // the row that is starting is told first, which is the order that used to cancel it.
         arriving.highlightChanged?(true)
         popUp.item(at: selectedIndex)?.preview?.highlightChanged?(false)
-        waitOutTheDwell()
+        waitUntilDemonstrating(try XCTUnwrap(arriving.view as? MorphingTitleLabel))
 
         XCTAssertEqual(
             (arriving.view as? MorphingTitleLabel)?.stringValue, AppInfo.name,
@@ -206,7 +208,7 @@ final class MotionPreviewTests: XCTestCase {
         let label = try XCTUnwrap(popUp.item(at: index)?.preview?.view as? MorphingTitleLabel)
 
         XCTAssertTrue(popUp.accessibilityPerformShowMenu())
-        waitOutTheDwell()
+        waitUntilDemonstrating(label)
         XCTAssertEqual(label.stringValue, AppInfo.name)
 
         let responder = try XCTUnwrap(window?.firstResponder)
@@ -235,7 +237,7 @@ final class MotionPreviewTests: XCTestCase {
 
         // No run loop in between: the dismissed panel is still on screen, fading.
         XCTAssertTrue(popUp.accessibilityPerformShowMenu())
-        waitOutTheDwell()
+        waitUntilDemonstrating(label)
 
         XCTAssertEqual(
             label.stringValue, AppInfo.name,
@@ -548,6 +550,15 @@ final class MotionPreviewTests: XCTestCase {
     /// for the morph it then starts. Real time rather than a fake clock, because the thing being
     /// checked is a timer scheduled in `.common` — a seam that skipped the run loop would prove
     /// the arithmetic and not the scheduling.
+    /// The timer hands its mutation to a main-actor task. A single long run-loop spin can
+    /// return before that task runs, or after the repeating preview has already changed back.
+    private func waitUntilDemonstrating(_ label: MorphingTitleLabel) {
+        let deadline = Date(timeIntervalSinceNow: 10)
+        while label.stringValue != AppInfo.name, Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+    }
+
     private func waitOutTheDwell() {
         let settle = Design.Motion.demonstrationHold + 0.4
         RunLoop.main.run(until: Date(timeIntervalSinceNow: settle))
