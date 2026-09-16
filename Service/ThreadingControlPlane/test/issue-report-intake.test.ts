@@ -9,6 +9,23 @@ const testEnv = env as unknown as Env;
 const pickupToken = "test-only-report-pickup-token-at-least-32-bytes";
 
 describe("private issue-report intake", () => {
+  it("validates shipping evidence without storage, quota use, or triage notifications", async () => {
+    const report = makeReport();
+    const before = await todayCount();
+    const response = await worker.fetch(new Request("https://service.test/v1/reports/validate", {
+      method: "POST", headers: requestHeaders(report.id), body: JSON.stringify(report),
+    }), testEnv);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: "validated", reportID: report.id,
+      contractFingerprint: diagnosticContractFingerprint, droppedUnknownFieldCount: 0, droppedUnknownRecordCount: 0 });
+    expect(await todayCount()).toBe(before);
+    expect(await testEnv.ISSUE_REPORTS.head(`reports/v1/${report.id}.json`)).toBeNull();
+    const rejected = await worker.fetch(new Request("https://service.test/v1/reports/validate", {
+      method: "POST", headers: requestHeaders(report.id), body: JSON.stringify({ ...report, description: "" }),
+    }), testEnv);
+    expect(rejected.status).toBe(400);
+  });
+
   it("stores one normalized report in private R2 and exposes no public read route", async () => {
     const report = makeReport();
     const response = await submit(report);

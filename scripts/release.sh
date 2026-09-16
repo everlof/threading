@@ -128,6 +128,9 @@ else
     echo "warning: release quality gate skipped by THREADING_SKIP_RELEASE_CHECKS=1" >&2
 fi
 
+say "Checking the deployed report contract"
+node "$ROOT/scripts/verify_report_deployment.mjs"
+
 say "Checking the signing identity"
 if ! security find-identity -v -p codesigning | grep -q "Developer ID Application.*($TEAM_ID)"; then
     fail "no 'Developer ID Application' certificate for team $TEAM_ID in the keychain"

@@ -95,8 +95,9 @@ if (JSON.stringify(configuration.triggers?.crons) !== JSON.stringify(["17 3 * * 
 const migrations = (await readdir(new URL("migrations/", serviceRoot)))
   .filter((name) => name.endsWith(".sql"))
   .sort();
-if (migrations.at(-1) !== "0008_development_auth_and_push_registrations.sql") {
-  failures.push("development auth and push-registration migration must be the latest migration");
+if (!migrations.includes("0008_development_auth_and_push_registrations.sql")
+  || migrations.at(-1) !== "0009_service_failure_alerts.sql") {
+  failures.push("development requires auth/push registration and the current shared migration set");
 }
 
 if (failures.length > 0) {

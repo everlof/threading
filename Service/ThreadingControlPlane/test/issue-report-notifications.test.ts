@@ -13,7 +13,8 @@ describe("issue-report triage notifications", () => {
   it("delivers only trusted metadata after the private object is committed", async () => {
     const reportID = crypto.randomUUID().toLowerCase();
     const key = `reports/v1/${reportID}.json`;
-    const description = "customer-controlled prose must not leave R2";
+    // Four image previews can exceed the former 70-KiB notification ceiling.
+    const description = "customer-controlled prose must not leave R2".repeat(2400);
     const receivedAt = new Date().toISOString();
     const object = await testEnv.ISSUE_REPORTS.put(key, JSON.stringify({ description }), {
       customMetadata: {

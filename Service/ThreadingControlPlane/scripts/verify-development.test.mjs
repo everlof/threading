@@ -6,6 +6,7 @@ test("verifies isolated routes, credential enforcement, and the Access redirect"
   const requests = [];
   let success = "";
   await verifyDevelopment({
+      configurationPath: "wrangler.development.jsonc",
     attempts: 1,
     fetchImplementation: async (input, init) => {
       const url = new URL(input);
@@ -54,6 +55,7 @@ test("verifies isolated routes, credential enforcement, and the Access redirect"
 test("rejects an authorization callback that bypasses Access", async () => {
   await assert.rejects(
     verifyDevelopment({
+      configurationPath: "wrangler.development.jsonc",
       attempts: 1,
       fetchImplementation: async (input) => {
         const url = new URL(input);
@@ -88,6 +90,7 @@ test("rejects an authorization callback that bypasses Access", async () => {
 test("rejects a deployment without the notification protocol or retraction route", async () => {
   await assert.rejects(
     verifyDevelopment({
+      configurationPath: "wrangler.development.jsonc",
       attempts: 1,
       fetchImplementation: async (input) => {
         const url = new URL(input);
@@ -103,6 +106,7 @@ test("rejects a deployment without the notification protocol or retraction route
 
   await assert.rejects(
     verifyDevelopment({
+      configurationPath: "wrangler.development.jsonc",
       attempts: 1,
       fetchImplementation: async (input) => {
         const url = new URL(input);

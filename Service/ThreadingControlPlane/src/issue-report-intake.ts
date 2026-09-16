@@ -103,7 +103,7 @@ interface DiagnosticNormalization {
 
 export type IssueReportKind = "report" | "crash" | "diagnostics";
 
-export async function handleIssueReport(request: Request, env: Env): Promise<Response> {
+export async function handleIssueReport(request: Request, env: Env, validateOnly = false): Promise<Response> {
   const contentType = request.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/json") {
     throw new HttpError(415, "unsupportedMediaType", "Content-Type must be application/json");
@@ -125,6 +125,9 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
   if (idempotencyKey !== report.id) {
     throw new HttpError(400, "invalidIdempotencyKey", "Idempotency-Key must match the report id");
   }
+
+  // Exercise the real parser without storing a synthetic customer report or paging triage.
+  if (validateOnly) return json({ status: "validated", reportID: report.id, ...normalization });
 
   // Idempotency covers the normalized evidence and what version skew cost. The current contract
   // fingerprint remains stored as provenance, but is deliberately excluded here: deploying an
@@ -557,5 +560,7 @@ function receipt(reportID: string, wasAlreadyReceived: boolean, status: number):
 }
 
 function invalid(message: string): never {
+  // Every message is assembled from server-owned field names, never submitted values.
+  console.warn("issue_report_validation_failed", { reason: message });
   throw new HttpError(400, "invalidReport", message);
 }

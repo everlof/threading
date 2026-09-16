@@ -1,3 +1,4 @@
+import { ISSUE_REPORT_BOUNDS } from "./issue-report-intake";
 import type { Env } from "./environment";
 
 const reportKeyPattern = /^reports\/v1\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/u;
@@ -130,7 +131,7 @@ function asEvent(value: unknown): {
   if (event.action !== "PutObject" || typeof event.bucket !== "string"
     || !event.object || typeof event.object.key !== "string"
     || typeof event.object.size !== "number" || !Number.isSafeInteger(event.object.size)
-    || event.object.size < 1 || event.object.size > 70 * 1024) return null;
+    || event.object.size < 1 || event.object.size > ISSUE_REPORT_BOUNDS.requestBytes + 4 * 1024) return null;
   return {
     action: "PutObject",
     bucket: event.bucket,

@@ -1,3 +1,4 @@
+import { recordServiceFailure, flushServiceFailureAlerts } from "./service-failure-alerts";
 import { publicInvitationResponse } from "./invitation-worker";
 import type { Env, RendezvousPrincipal } from "./environment";
 import { HttpError } from "./environment";
@@ -93,9 +94,9 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/hosts") {
         return await enrollHost(request, env);
       }
-      if (request.method === "POST" && url.pathname === "/v1/reports"
+      if (request.method === "POST" && (url.pathname === "/v1/reports" || url.pathname === "/v1/reports/validate")
         && !isOperatedDevelopment(env)) {
-        return await handleIssueReport(request, env);
+        return await handleIssueReport(request, env, url.pathname.endsWith("/validate"));
       }
       if (request.method === "POST" && url.pathname === "/v1/push") {
         return await handleAPNSPush(request, env);
@@ -143,8 +144,10 @@ export default {
       throw new HttpError(404, "notFound", "Endpoint was not found");
     } catch (error) {
       if (error instanceof HttpError) {
+        await recordServiceFailure(request, env, error.status, error.code);
         return json({ error: { code: error.code, message: error.message } }, error.status);
       }
+      await recordServiceFailure(request, env, 500, "internal");
       console.error("request_failed", {
         reason: error instanceof Error ? error.name : "unknown",
       });
@@ -153,6 +156,7 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
+    await flushServiceFailureAlerts(env);
     const now = Math.floor(Date.now() / 1000);
     const cleanupStatements: D1PreparedStatement[] = [];
     if (event.cron === "17 3 * * *") {
@@ -444,7 +448,7 @@ function rateLimitGroup(pathname: string): string {
   if (pathname.startsWith("/v1/hosts")) return "hosts";
   if (pathname.startsWith("/v1/auth/")) return "auth";
   if (pathname.startsWith("/v1/developer/reports")) return "developerReports";
-  if (pathname === "/v1/reports") return "reports";
+  if (pathname === "/v1/reports" || pathname === "/v1/reports/validate") return "reports";
   if (pathname === "/v1/push" || pathname === "/v1/push/registrations"
     || pathname === "/v1/push/retractions") return "push";
   if (pathname === "/v1/account") return "account";

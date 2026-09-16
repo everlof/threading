@@ -33,6 +33,7 @@ try {
   await run("npm", ["run", "check"], environment);
   await run("npm", ["test"], environment);
   await run("npm", ["run", "test:load"], environment);
+  await run(process.execPath, ["scripts/verify-report-candidate.mjs"], environment);
   await run("npx", [
     "wrangler", "d1", "migrations", "apply", "threading-control-plane",
     "--remote", "--config", generatedPath,

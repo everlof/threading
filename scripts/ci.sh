@@ -157,12 +157,14 @@ python3 "${repository_directory}/scripts/tests/test_release_tag_policy.py"
 say "Testing the local release driver"
 python3 "${repository_directory}/scripts/tests/test_local_release_driver.py"
 python3 "${repository_directory}/scripts/tests/test_local_release_credentials.py"
+node --test "${repository_directory}/scripts/verify_report_deployment.test.mjs"
 
 say "Installing ThreadingControlPlane test dependencies"
 npm --prefix "${repository_directory}/Service/ThreadingControlPlane" ci
 
 say "Testing ThreadingControlPlane"
 npm --prefix "${repository_directory}/Service/ThreadingControlPlane" test
+node "${repository_directory}/Service/ThreadingControlPlane/scripts/verify-report-candidate.mjs"
 
 mac_test_level=fast
 if [[ "${include_mobile}" == "0" ]]; then

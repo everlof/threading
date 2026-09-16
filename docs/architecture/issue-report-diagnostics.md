@@ -82,3 +82,32 @@ bounded count, enum, version, timestamp, or locally pseudonymised identifier. Th
 manifest, regenerate both projections, add behavior tests, and update this matrix. Never edit a
 generated projection or add a second hand-maintained allowlist. Free-form error text belongs in
 local logs, never in the diagnostic journal.
+
+## Deployment compatibility and failed deliveries
+
+A successful `/ready` does not prove that production understands a shipping report. The 0.2.0
+app always emitted `simulatorStreaming`, while the August 24 Worker still rejected that unknown
+additional-detail field. Reviewed image arrays and newer diagnostic vocabulary had also not been
+deployed. The release had checked TLS and local tests, not the deployed intake contract.
+
+`scripts/verify_report_deployment.mjs` now asks `ReportDeploymentContractTests` to encode fixtures
+using the shipping Swift DTOs: every diagnostic event/source, field validation class, additional
+field and both image representations. `POST /v1/reports/validate` runs the same bounded parser,
+rate limits and idempotency check as submission, but never stores or consumes daily capacity.
+The gate requires an exact validation receipt and zero dropped fields/records. It runs before
+local release refs move, before direct release archives, and after a production server deploy. The production deploy and CI also run these exact Swift
+fixtures through the candidate Worker before any server deployment or database migration.
+Unknown fields remain safely droppable for old clients; deployment probes require full evidence.
+
+The control plane records handled 400, 409, 413, 415, 429 and 5xx failures for its six API route
+families in D1, grouped into 15-minute windows. Expected 401/403/404 responses and validation
+probes do not page. Rows carry only route family, HTTP status and count; console diagnostics add
+server-owned error codes and validation reasons, never submitted values. Closed windows are
+forwarded through the existing owned receiver to Pushover on the quarter-hour cron. Successful
+alerts remove only the exact observed count; concurrent increments survive for another alert.
+Failed alert delivery retains the row for retry, with seven-day bounded retention and at most
+64 rows processed per run. Monitoring failure never replaces the original HTTP response.
+
+This covers requests reaching our Worker. Cloudflare edge rejections, offline/TLS failures and
+third-party APIs are outside that counter; they require edge or client-side monitoring. A
+Pushover outage is logged and retried, not a guarantee of immediate notification.

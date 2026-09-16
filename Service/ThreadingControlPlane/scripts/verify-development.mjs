@@ -4,14 +4,13 @@ import { pathToFileURL } from "node:url";
 const maximumResponseBytes = 8 * 1024;
 
 export async function verifyDevelopment({
+  configurationPath = process.env.THREADING_WRANGLER_CONFIG ?? "wrangler.development.jsonc",
   attempts = 10,
   retryDelayMilliseconds = 2_000,
   fetchImplementation = fetch,
   reportSuccess = (message) => process.stdout.write(message),
 } = {}) {
   const serviceRoot = new URL("../", import.meta.url);
-  const configurationPath = process.env.THREADING_WRANGLER_CONFIG
-    ?? "wrangler.development.jsonc";
   const configuration = JSON.parse(
     await readFile(new URL(configurationPath, serviceRoot), "utf8"),
   );

@@ -1,5 +1,6 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
@@ -53,6 +54,8 @@ export default defineConfig({
             TEST_RENDEZVOUS_LOAD: process.env.THREADING_RENDEZVOUS_LOAD ?? "0",
             TEST_RENDEZVOUS_LOAD_HOSTS: process.env.THREADING_RENDEZVOUS_LOAD_HOSTS ?? "100",
             TEST_MIGRATIONS: migrations,
+            TEST_REPORT_FIXTURES: process.env.THREADING_REPORT_CANDIDATE_FIXTURES
+              ? readFileSync(process.env.THREADING_REPORT_CANDIDATE_FIXTURES, "utf8") : "[]",
           },
         },
       };

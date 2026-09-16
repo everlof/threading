@@ -15,6 +15,28 @@ PUBLISHER = REPOSITORY / "scripts/publish_release.sh"
 
 class LocalReleaseDriverTests(unittest.TestCase):
 
+    def test_live_report_contract_is_checked_before_any_ref_can_move(self) -> None:
+        source = DRIVER.read_text()
+        probe = source.index('node "$ROOT/scripts/verify_report_deployment.mjs"')
+        gate = source.index('"$ROOT/scripts/ci.sh" --mac-release')
+        self.assertLess(probe, gate)
+        release = (REPOSITORY / "scripts/release.sh").read_text()
+        self.assertLess(release.index('node "$ROOT/scripts/verify_report_deployment.mjs"'),
+                        release.index('say "Archiving $SCHEME ($CHANNEL)"'))
+
+    def test_server_deploy_checks_the_candidate_before_mutation_and_live_service_after(self) -> None:
+        service = REPOSITORY / "Service/ThreadingControlPlane"
+        deploy = (service / "scripts/deploy-production.mjs").read_text()
+        candidate = deploy.index('["scripts/verify-report-candidate.mjs"]')
+        migration = deploy.index('"migrations", "apply"')
+        upload = deploy.index('"wrangler", "deploy"')
+        live = deploy.index('["scripts/verify-production.mjs"]')
+        self.assertLess(candidate, migration)
+        self.assertLess(migration, upload)
+        self.assertLess(upload, live)
+        self.assertIn('then(() => verifyShippingReportDeployment())',
+                      (service / "scripts/verify-production.mjs").read_text())
+
     def test_the_driver_is_valid_bash(self) -> None:
         result = subprocess.run(
             ["bash", "-n", str(DRIVER)],

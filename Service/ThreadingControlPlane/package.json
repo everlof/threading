@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "npm run build:invitations && npm run check && vitest run && node --test scripts/*.test.mjs && npm run test:browser",
+    "test": "npm run build:invitations && npm run check && vitest run && node --test scripts/*.test.mjs ../../scripts/verify_report_deployment.test.mjs && npm run test:browser",
     "test:load": "THREADING_RENDEZVOUS_LOAD=1 THREADING_RENDEZVOUS_LOAD_HOSTS=100 vitest run test/rendezvous-load.test.ts",
     "dev": "node scripts/local-dev.mjs",
     "dev:cloud-config": "wrangler dev --config wrangler.jsonc",

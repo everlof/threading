@@ -1,3 +1,4 @@
+import { verifyShippingReportDeployment } from "../../../scripts/verify_report_deployment.mjs";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
@@ -117,7 +118,7 @@ function delay(milliseconds) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  verifyProduction().catch((error) => {
+  verifyProduction().then(() => verifyShippingReportDeployment()).catch((error) => {
     process.stderr.write(`verify-production: ${error.message}\n`);
     process.exitCode = 1;
   });

@@ -91,3 +91,18 @@ release-candidate end-to-end receipt above remains deliberately unchecked.
   preview the reporter saw.
 - [ ] Re-run the diagnostic coverage review in
   `docs/architecture/issue-report-diagnostics.md` whenever the public DTO changes.
+
+## Release/deploy drift gate (0.2.0 incident)
+
+Run `node scripts/verify_report_deployment.mjs` from the repository root. The local release driver
+and direct archive script run it automatically, and the production deploy verifier runs it after
+readiness. CI and the production deploy also run `verify-report-candidate.mjs` against the candidate
+Worker before applying migrations or uploading code. A 404, rejected report, missing/mismatched receipt or any dropped diagnostic evidence
+blocks the operation. Deploy the compatible service before tagging the app. The probe is synthetic,
+uses the shipping Swift encoders, and the validation route never writes a report or sends an alert.
+
+HTTP failure alerts use migration `0009_service_failure_alerts.sql` and the existing Pushover
+receiver. The quarter-hour schedule sends completed windows and retries receiver failures. Check
+`service_http_failure`, `issue_report_validation_failed`, `service_failure_recording_failed` and
+`service_failure_alert_delivery_failed` when investigating delivery. These counters cover Worker
+responses, not Cloudflare edge or client networking failures.
