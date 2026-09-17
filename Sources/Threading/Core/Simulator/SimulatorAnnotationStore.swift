@@ -43,6 +43,14 @@ final class SimulatorAnnotationStore: @unchecked Sendable {
         }
     }
 
+    /// Delivery acknowledges exact note values, so edits and new pins made in flight survive.
+    func removeDelivered(_ delivered: [ImageAnnotation], for device: SimulatorDeviceID) {
+        let remaining = annotations(for: device).filter { current in
+            !delivered.contains(where: { $0 == current })
+        }
+        setAnnotations(remaining, for: device)
+    }
+
     private static func key(_ device: SimulatorDeviceID) -> String {
         keyPrefix + device.rawValue
     }

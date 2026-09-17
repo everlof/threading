@@ -117,6 +117,7 @@ final class SimulatorScreenView: ThemedControl {
             guard isAnnotatingNotes != oldValue else { return }
             if !isAnnotatingNotes { hoveredNoteID = nil }
             updateInspectionTracking()
+            refreshPointerClaims()
             needsDisplay = true
         }
     }
@@ -449,8 +450,8 @@ final class SimulatorScreenView: ThemedControl {
         let location = convert(event.locationInWindow, from: nil)
 
         // Annotate mode pins or selects a note instead of touching the device.
-        if isAnnotatingNotes {
-            guard imageRect.contains(location) else {
+        if isAnnotatingNotes || event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .option {
+            guard isEnabled, image != nil, imageRect.contains(location) else {
                 onSelectNote?(nil)
                 return
             }
@@ -612,9 +613,12 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func performPrimaryAction() -> Bool {
-        guard isEnabled,
-              image != nil,
-              interactionState.acceptsPointerRequests else { return false }
+        guard isEnabled, image != nil else { return false }
+        if isAnnotatingNotes {
+            onAddNote?(CGPoint(x: 0.5, y: 0.5))
+            return true
+        }
+        guard interactionState.acceptsPointerRequests else { return false }
         onTap?(CGPoint(x: 0.5, y: 0.5))
         return true
     }
@@ -628,6 +632,10 @@ final class SimulatorScreenView: ThemedControl {
     override func accessibilityLabel() -> String? { L10n.string("Simulator screen") }
 
     override var restingPointer: NSCursor? { .arrow }
+
+    override var pointerClaims: [PointerClaim] {
+        isAnnotatingNotes ? [PointerClaim(imageRect, .crosshair)] : []
+    }
 
     private static let tapThreshold: CGFloat = 4
     private static let longPressDuration: TimeInterval = 0.5

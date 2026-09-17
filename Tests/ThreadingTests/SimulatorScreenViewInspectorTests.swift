@@ -16,6 +16,41 @@ final class SimulatorScreenViewInspectorTests: XCTestCase {
         .init(normalizedFrame: frame, label: name, name: name, copyText: name, emphasized: true)
     }
 
+    func testOptionClickAddsOneNoteWithoutTouchingTheDeviceOrEnablingMode() throws {
+        let view = makeView()
+        let window = NSWindow(contentRect: view.bounds, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.contentView = view
+        view.interactionState = .ready(touch: true, keyboard: true)
+        var notes: [CGPoint] = []
+        var taps: [CGPoint] = []
+        view.onAddNote = { notes.append($0) }
+        view.onTap = { taps.append($0) }
+        let point = view.convert(CGPoint(x: 100, y: 200), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: .option,
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+            if type == .leftMouseDown { view.mouseDown(with: event) }
+            else { view.mouseUp(with: event) }
+        }
+        XCTAssertEqual(notes, [CGPoint(x: 0.5, y: 0.5)])
+        XCTAssertTrue(taps.isEmpty)
+        XCTAssertFalse(view.isAnnotatingNotes)
+    }
+
+    func testAnnotationModeAccessibilityPressAddsANoteInsteadOfTapping() {
+        let view = makeView()
+        view.isAnnotatingNotes = true
+        var note: CGPoint?
+        view.onAddNote = { note = $0 }
+        view.onTap = { _ in XCTFail("Annotation press reached the device") }
+        XCTAssertTrue(view.accessibilityPerformPress())
+        XCTAssertEqual(note, CGPoint(x: 0.5, y: 0.5))
+    }
+
     func testHoverPicksTheSmallestContainingElement() {
         let view = makeView()
         view.annotations = [

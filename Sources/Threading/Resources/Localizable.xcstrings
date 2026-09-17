@@ -7005,6 +7005,17 @@
         }
       }
     },
+    "Annotate device (Option-click to add a note without switching modes)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommentera enheten (alternativklicka för att lägga till en anteckning utan att byta läge)"
+          }
+        }
+      }
+    },
     "AnnotatedImageView / ImageAnnotationRailView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7023,6 +7034,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kommenterar"
+          }
+        }
+      }
+    },
+    "Annotating · Esc to finish" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommenterar · Esc för att avsluta"
           }
         }
       }
@@ -16960,6 +16982,17 @@
         }
       }
     },
+    "Disable Simulator Annotations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inaktivera simulatoranteckningar"
+          }
+        }
+      }
+    },
     "Disable rich preview" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17974,6 +18007,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera HTTPS…"
+          }
+        }
+      }
+    },
+    "Enable Simulator Annotations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera simulatoranteckningar"
           }
         }
       }
@@ -40969,6 +41013,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa användning för alla konton"
+          }
+        }
+      }
+    },
+    "Show an adopted Simulator first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa en ansluten simulator först."
           }
         }
       }

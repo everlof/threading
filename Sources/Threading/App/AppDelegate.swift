@@ -2575,6 +2575,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             action: #selector(jumpToReviewFile)
         ))
         menu.addItem(commandItem(AppCommands.ID.saveBaseline, action: #selector(saveBrowserBaseline)))
+        menu.addItem(commandItem(AppCommands.ID.enableSimulatorAnnotations, action: #selector(enableSimulatorAnnotations)))
+        menu.addItem(commandItem(AppCommands.ID.disableSimulatorAnnotations, action: #selector(disableSimulatorAnnotations)))
         menu.addItem(commandItem(AppCommands.ID.sessionInfo, action: #selector(openInfo)))
         menu.addItem(commandItem(AppCommands.ID.shell, action: #selector(toggleShell)))
         menu.addItem(commandItem(AppCommands.ID.displayPanel, action: #selector(toggleDisplayPanel)))
@@ -3073,6 +3075,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.isShowingConversation == true else {
                 return .unavailable(L10n.string("The active surface is not a conversation."))
             }
+        case AppCommands.ID.enableSimulatorAnnotations, AppCommands.ID.disableSimulatorAnnotations:
+            guard mainWindowController?.displayPaneController.currentSimulator?.canAnnotateNotes == true else {
+                return .unavailable(L10n.string("Show an adopted Simulator first."))
+            }
         case AppCommands.ID.saveBaseline:
             guard mainWindowController?.canSaveVisibleBrowserBaseline == true else {
                 return .unavailable(L10n.string("Show a browser before saving a baseline."))
@@ -3356,6 +3362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.review: mainWindowController?.showReview()
         case AppCommands.ID.attachments: mainWindowController?.showAttachments()
         case AppCommands.ID.jumpToReviewFile: mainWindowController?.showReviewFileJump()
+        case AppCommands.ID.enableSimulatorAnnotations:
+            mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(true)
+        case AppCommands.ID.disableSimulatorAnnotations:
+            mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(false)
         case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
         case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
         case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()
@@ -3918,6 +3928,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func showSearchEverywhere() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.searchEverywhere)
+    }
+
+    @objc private func enableSimulatorAnnotations() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.enableSimulatorAnnotations)
+    }
+
+    @objc private func disableSimulatorAnnotations() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.disableSimulatorAnnotations)
     }
 
     @objc private func jumpToReviewFile() {

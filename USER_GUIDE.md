@@ -3393,6 +3393,21 @@ both in place. The hand control beside Refresh enables control without spending 
 previously chose not to allow control, press that hand explicitly to ask again; repeated screen
 clicks do not keep presenting the permission sheet.
 
+**Option-click** the device to add a note without switching modes. Save or cancel the note
+and continue interacting with the device. To place several notes, use the annotate button:
+its selected state and **Annotating · Esc to finish** control show that clicks place pins.
+Press **Escape** to cancel an open editor, then again to leave annotation mode, or click the
+mode indicator to finish. **Enable Simulator Annotations** and **Disable Simulator Annotations**
+are available in the command palette and View menu; assign shortcuts in **Settings → Keyboard**.
+The screen's keyboard/accessibility press places a centered pin while annotation mode is enabled.
+Right-click the annotate button to copy the annotated frame or clear all notes.
+**Send** (or **⌘Return** in the pane) sends the pending notes. Delivered pins disappear once the
+message is sent or queued; failed sends and notes added or edited during delivery stay pending.
+
+Hold **Control** to change the camera button to **Copy Snapshot**, then click to copy the
+device image to the clipboard. Release Control to return to saving a snapshot. Right-click
+keeps the capture options available; during recording the button still stops recording.
+
 The device chip switches between available iPhones without creating another kind of window. A
 helper or Xcode compatibility failure stays in the tab, with a reason and retry; Threading never
 silently responds by launching Apple Simulator. A live connection that stops delivering frames is

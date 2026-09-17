@@ -15,6 +15,32 @@ final class SimulatorAnnotationSendTests: XCTestCase {
         lastBootedAt: nil
     )
 
+    func testDeliveredPinsDisappearButEditsAndNewPinsSurvive() throws {
+        let suite = "SimulatorAnnotationSendTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SimulatorAnnotationStore(defaults: defaults)
+        let first = ImageAnnotation(point: CGPoint(x: 0.1, y: 0.1), note: "remove me")
+        let second = ImageAnnotation(point: CGPoint(x: 0.5, y: 0.5), note: "original")
+        var edited = second
+        edited.note = "edited while sending"
+        let added = ImageAnnotation(point: CGPoint(x: 0.8, y: 0.8), note: "new")
+        store.setAnnotations([first, edited, added], for: device.id)
+        store.removeDelivered([first, second], for: device.id)
+        XCTAssertEqual(store.annotations(for: device.id), [edited, added])
+        store.removeDelivered([edited, added], for: device.id)
+        XCTAssertTrue(store.annotations(for: device.id).isEmpty)
+    }
+
+    func testAnnotationCommandsAllowUserAssignedShortcuts() throws {
+        for id in [AppCommands.ID.enableSimulatorAnnotations, AppCommands.ID.disableSimulatorAnnotations] {
+            let command = try XCTUnwrap(AppCommands.all.first { $0.id == id })
+            XCTAssertTrue(command.isEditable)
+            XCTAssertNil(command.defaultShortcut)
+            XCTAssertEqual(command.scope, .session)
+        }
+    }
+
     // MARK: - Message building
 
     func testMessageIncludesOnlyPendingNotesNumberedByPin() {

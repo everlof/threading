@@ -223,6 +223,23 @@ failed control request. The transport (H.264, JPEG, shared memory) is a diagnost
 the tooltip. A green "Live" label was removed: it made the default state the loudest thing in the
 pane, and it is what kept a frozen stream looking healthy.
 
+**Annotations have an explicit mode and a one-note gesture.** Option-click pins a note through
+exactly the same bounded editor without enabling the persistent annotation mode or emitting device
+HID. The persistent mode selects its toolbar button, claims a crosshair over the image, and shows
+an explicit finish control. Escape cancels the editor first, then exits the mode; focus returns to
+the device. Palette/menu enable and disable commands share the toolbar's setter and accept user
+shortcut overrides. Pending pins remain visible outside the mode, so quick notes can be sent.
+Successful or queued delivery removes only exact acknowledged note values from the captured device's
+store; failed sends and notes edited/added in flight survive. Notes are capped at twenty, and
+modifier/pointer handling never discovers devices or rebuilds a growing view tree. These remain
+host-owned actions and presentation, using the existing Design controls.
+
+**Control changes snapshot capture to copy.** The presented pane observes modifier changes
+without taking keyboard focus, updating the capture glyph, tooltip, accessibility title and
+action together. The button freezes the chosen action at mouse-down. Right-click retains
+the capture menu, and recording always takes precedence. Hidden/terminated panes remove
+the event monitor. Clipboard and recording behavior remain host-owned.
+
 **Keyboard follows Apple Simulator.** The pane root is a `KeyEquivalentScopeView`, so chords apply
 only while focus is inside the pane: ⇧⌘H Home, ⌘L Lock, ⇧⌘B Side Button, ⌘↑/⌘↓ volume and
 ⇧⌘A Toggle Appearance, taken from Simulator.app's own menus (`SimulatorPaneShortcuts`). A chord

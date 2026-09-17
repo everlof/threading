@@ -56,9 +56,10 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 accuracy: 2,
                 "the adopted device was not rendered at the protected right-panel width"
             )
-            let representation = try XCTUnwrap(
+            var representation = try XCTUnwrap(
                 content.bitmapImageRepForCachingDisplay(in: content.bounds)
             )
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: representation)
             let png = try XCTUnwrap(
                 representation.representation(using: .png, properties: [:])
@@ -68,9 +69,85 @@ final class SimulatorPaneRenderTests: XCTestCase {
                     "simulator-pane-system-\(appearance.name).png"
                 )
             )
+
+            let capture = try XCTUnwrap(findCaptureButton(in: content))
+            let originalTitle = capture.accessibilityTitle()
+            sendModifiers(.control, to: fixture.window)
+            XCTAssertEqual(capture.accessibilityTitle(), L10n.string("Copy Snapshot"))
+            XCTAssertEqual(capture.toolTip, L10n.string("Copy Snapshot"))
+            settle(fixture.window)
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-copy-system-\(appearance.name).png"
+                )
+            )
+            sendModifiers([], to: fixture.window)
+            XCTAssertEqual(capture.accessibilityTitle(), originalTitle)
+            sendModifiers(.option, to: fixture.window)
+            XCTAssertEqual(capture.accessibilityTitle(), originalTitle)
+            sendModifiers([], to: fixture.window)
+
+            fixture.simulator.setAnnotatingNotes(true)
+            settle(fixture.window)
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-annotating-system-\(appearance.name).png"
+                )
+            )
+            fixture.simulator.setAnnotatingNotes(false)
+
+            let screen = try XCTUnwrap(findView(SimulatorScreenView.self, in: content))
+            XCTAssertFalse(screen.isAnnotatingNotes)
+            let location = screen.convert(CGPoint(x: screen.imageRect.midX, y: screen.imageRect.midY), to: nil)
+            let click = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .leftMouseDown, location: location, modifierFlags: .option,
+                timestamp: 0, windowNumber: fixture.window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+            screen.mouseDown(with: click)
+            XCTAssertFalse(screen.isAnnotatingNotes, "A quick note must not leave annotation mode enabled")
+            let editor = try XCTUnwrap(findView(BrowserAnnotationEditor.self, in: content))
+            XCTAssertEqual(screen.noteMarks.count, 1)
+            settle(fixture.window)
+            XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2,
+                           "Adding a note must not widen the simulator pane")
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-quick-note-system-\(appearance.name).png"
+                )
+            )
+            editor.onCancel?()
+            XCTAssertTrue(screen.noteMarks.isEmpty)
         }
 
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
+    }
+
+    private func sendModifiers(_ modifiers: NSEvent.ModifierFlags, to window: NSWindow) {
+        let event = NSEvent.keyEvent(
+            with: .flagsChanged, location: .zero, modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "", charactersIgnoringModifiers: "",
+            isARepeat: false, keyCode: 59
+        )!
+        NSApp.sendEvent(event)
+    }
+
+    private func findView<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+        if let match = view as? T { return match }
+        return view.subviews.lazy.compactMap { self.findView(type, in: $0) }.first
+    }
+
+    private func findCaptureButton(in view: NSView) -> ThemedIconButton? {
+        if let button = view as? ThemedIconButton,
+           button.accessibilityIdentifier() == "simulator.capture" { return button }
+        return view.subviews.lazy.compactMap { self.findCaptureButton(in: $0) }.first
     }
 
     private func makeFixture(

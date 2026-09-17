@@ -295,8 +295,13 @@ final class DisplayPaneController: NSViewController {
     return activeTab(for: currentSessionID)?.browser
   }
 
-  /// The Git Review surface actually visible in the selected session. Window commands route to
-  /// this owner rather than adding chrome over the full-size window content view.
+  /// The active Simulator tab; commands additionally check its presentation and device state.
+  var currentSimulator: SimulatorPaneViewController? {
+    guard !isShowingCurrentTheme else { return nil }
+    return activeTab(for: currentSessionID)?.simulator
+  }
+
+  /// The Git Review surface actually visible in the selected session.
   var currentReview: GitReviewViewController? {
     guard !isShowingCurrentTheme else { return nil }
     return activeTab(for: currentSessionID)?.review

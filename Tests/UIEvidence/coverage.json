@@ -322,7 +322,7 @@
       "priority": "critical",
       "title": "Adopted iOS Simulator pane",
       "description": "The real native conversation and display-panel shell with one session-owned iPhone framebuffer adopted into the protected right-side width instead of opening Apple Simulator as a separate window.",
-      "states": ["Booted device", "In-panel framebuffer", "Device identity", "Preview fallback"],
+      "states": ["Booted device", "In-panel framebuffer", "Device identity", "Preview fallback", "Control-held Copy Snapshot", "Annotation mode", "Option-click note editor"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

@@ -144,6 +144,8 @@ enum AppCommands {
         static let review = "view.review"
         static let attachments = "view.attachments"
         static let jumpToReviewFile = "review.jumpToFile"
+        static let enableSimulatorAnnotations = "simulator.annotations.enable"
+        static let disableSimulatorAnnotations = "simulator.annotations.disable"
         static let saveBaseline = "view.saveBaseline"
         static let sessionInfo = "view.info"
         static let shell = "view.shell"
@@ -313,6 +315,10 @@ enum AppCommands {
                    detail: "Searches the files changed in the active Git Review.",
                    defaultShortcut: KeyboardShortcut(key: "j", modifiers: .command), isEditable: true,
                    scope: .session),
+        AppCommand(id: ID.enableSimulatorAnnotations, group: .view, title: "Enable Simulator Annotations",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "note.text"),
+        AppCommand(id: ID.disableSimulatorAnnotations, group: .view, title: "Disable Simulator Annotations",
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "note.text"),
         // No default chord. It is a real command with a real menu item, and the plan it comes from
         // is explicit that a baseline capture has not yet earned permanent space — not on the
         // browser strip, and not in the app's small stock of unclaimed two-modifier keys. The

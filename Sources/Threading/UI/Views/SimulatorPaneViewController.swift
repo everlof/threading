@@ -104,6 +104,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     var adoptedDevice: SimulatorDevice? { lease?.device }
+    var canAnnotateNotes: Bool { isPresented && lease != nil && screenView.image != nil }
 
     var onSelectedDeviceChange: ((SimulatorDeviceID) -> Void)?
 
@@ -187,8 +188,11 @@ final class SimulatorPaneViewController: NSViewController {
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Pin your own notes on the device")
+        button.toolTip = L10n.string("Annotate device (Option-click to add a note without switching modes)")
         button.onPress = { [weak self] in self?.toggleAnnotating() }
+        button.onContextMenu = { [weak self] anchor in
+            self?.presentAnnotationMenu(from: anchor) ?? false
+        }
         button.setAccessibilityIdentifier("simulator.annotate")
         return button
     }()
@@ -200,7 +204,7 @@ final class SimulatorPaneViewController: NSViewController {
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Save a snapshot of the device (right-click for options)")
+        button.toolTip = L10n.string("Save a snapshot of the device (hold Control to copy; right-click for options)")
         button.onPress = { [weak self] in self?.captureButtonPressed() }
         button.onContextMenu = { [weak self] anchor in
             self?.presentCaptureMenu(from: anchor) ?? false
@@ -208,6 +212,9 @@ final class SimulatorPaneViewController: NSViewController {
         button.setAccessibilityIdentifier("simulator.capture")
         return button
     }()
+
+    private let captureModifierMonitor = LocalEventMonitor()
+    private var captureCopiesSnapshot = false
 
     private var captureMenuSession: AnyObject?
     private let simctlRecorder = SimulatorSimctlRecorder()
@@ -234,33 +241,7 @@ final class SimulatorPaneViewController: NSViewController {
     private var showTouches = false
     private var touchDisplayTimer: Timer?
 
-    private lazy var clearNotesButton: ThemedIconButton = {
-        let button = ThemedIconButton(
-            symbolName: "trash",
-            accessibility: L10n.string("Clear all notes"),
-            target: .inline,
-            inkSource: .chrome
-        )
-        button.toolTip = L10n.string("Remove all notes on this device")
-        button.onPress = { [weak self] in self?.clearAllNotes() }
-        button.setAccessibilityIdentifier("simulator.annotate.clear")
-        button.isHidden = true
-        return button
-    }()
-
-    private lazy var exportNotesButton: ThemedIconButton = {
-        let button = ThemedIconButton(
-            symbolName: "square.and.arrow.up",
-            accessibility: L10n.string("Copy annotated frame"),
-            target: .inline,
-            inkSource: .chrome
-        )
-        button.toolTip = L10n.string("Copy the current frame with your notes drawn on it")
-        button.onPress = { [weak self] in self?.exportAnnotatedFrame() }
-        button.setAccessibilityIdentifier("simulator.annotate.export")
-        button.isHidden = true
-        return button
-    }()
+    private var annotationMenuSession: AnyObject?
 
     /// Whether the person is placing their own note pins on the device.
     private var isAnnotatingNotes = false
@@ -271,11 +252,18 @@ final class SimulatorPaneViewController: NSViewController {
 
     /// The session these notes are handed to when the person presses Send. Set by the display pane.
     var annotationSessionID: SessionID?
-    /// The text each note had when it was last delivered, so a note counts as pending until it is
-    /// sent and again whenever its text changes — the browser's exact sent-vs-pending rule.
-    private var sentNoteTexts: [ImageAnnotation.ID: String] = [:]
     private var isSendingNotes = false
     private var exportConfirmationTimer: Timer?
+
+    private lazy var annotationModeButton: ThemedButton = {
+        let button = ThemedButton(title: L10n.string("Annotating · Esc to finish"), target: self,
+                                  action: #selector(finishAnnotating))
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.emphasis = .primary
+        button.isHidden = true
+        button.setAccessibilityIdentifier("simulator.annotate.done")
+        return button
+    }()
 
     private lazy var noteSendBar: AnnotationSendBar = {
         let bar = AnnotationSendBar()
@@ -284,9 +272,9 @@ final class SimulatorPaneViewController: NSViewController {
         return bar
     }()
 
-    /// Notes with text that has not been delivered as-is: the "Send (x)" count.
+    /// Delivered notes are removed; every remaining nonempty note is pending.
     private var pendingNotes: [ImageAnnotation] {
-        screenView.noteMarks.filter { !$0.note.isEmpty && sentNoteTexts[$0.id] != $0.note }
+        screenView.noteMarks.filter { !$0.note.isEmpty }
     }
 
     /// Whether the accessibility inspector overlay is on. Reading the tree is a host-side call, so
@@ -296,7 +284,7 @@ final class SimulatorPaneViewController: NSViewController {
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
         trailing: [
-            captureButton, showTouchesButton, annotateButton, exportNotesButton, clearNotesButton,
+            captureButton, showTouchesButton, annotateButton,
             inspectButton, appearanceButton, controlButton, retryButton,
         ]
     )
@@ -433,6 +421,16 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func performSimulatorShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask)
+        if event.keyCode == 53, modifiers.isEmpty {
+            if noteEditor != nil { cancelNoteEditor(); return true }
+            if isAnnotatingNotes { finishAnnotating(); return true }
+        }
+        if (event.keyCode == 36 || event.keyCode == 76), modifiers == .command,
+           noteEditor != nil || !pendingNotes.isEmpty {
+            sendPendingNotes()
+            return true
+        }
         guard let match = shortcutButtons.first(where: { $0.shortcut.matches(event) }) else {
             return false
         }
@@ -454,8 +452,13 @@ final class SimulatorPaneViewController: NSViewController {
         view.addSubview(hardwareButtonRow)
         view.addSubview(statusLabel)
         view.addSubview(noteSendBar)
+        view.addSubview(annotationModeButton)
 
         NSLayoutConstraint.activate([
+            annotationModeButton.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
+            annotationModeButton.topAnchor.constraint(equalTo: screenView.topAnchor,
+                                                       constant: Design.Spacing.small),
+            annotationModeButton.widthAnchor.constraint(lessThanOrEqualTo: screenView.widthAnchor),
             // Floats over the framebuffer's bottom-trailing while annotating, like the browser's.
             noteSendBar.trailingAnchor.constraint(
                 equalTo: screenView.trailingAnchor,
@@ -523,6 +526,20 @@ final class SimulatorPaneViewController: NSViewController {
         guard presented != isPresented else { return }
         isPresented = presented
         if presented {
+            updateCaptureModifiers(NSEvent.modifierFlags)
+            captureModifierMonitor.install(
+                matching: [.flagsChanged, .leftMouseDown, .keyDown, .appKitDefined]
+            ) { [weak self] event in
+                guard let self else { return event }
+                // Activation can follow a Control release in another app, where no local
+                // flagsChanged event was delivered. Resample the keyboard on that transition.
+                if event.type == .appKitDefined {
+                    self.updateCaptureModifiers(NSEvent.modifierFlags)
+                } else if event.type == .flagsChanged || event.window === self.view.window {
+                    self.updateCaptureModifiers(event.modifierFlags)
+                }
+                return event
+            }
             if let lease {
                 presentationState = .ready(lease.device)
                 // The stream can drop while the pane is hidden (a helper loss, or a background
@@ -537,6 +554,7 @@ final class SimulatorPaneViewController: NSViewController {
                 prepare(preferredDeviceID)
             }
         } else {
+            captureModifierMonitor.remove()
             stopFrameLoop()
         }
     }
@@ -544,6 +562,7 @@ final class SimulatorPaneViewController: NSViewController {
     /// Explicit tab/session teardown. A user-owned boot stays running; a Threading-owned boot is
     /// handed back through the lease capability without retaining this controller.
     func terminate() {
+        captureModifierMonitor.remove()
         isPresented = false
         preparationTask?.cancel()
         preparationTask = nil
@@ -560,6 +579,11 @@ final class SimulatorPaneViewController: NSViewController {
 
     func selectDevice(_ id: SimulatorDeviceID) {
         guard id != selectedDeviceID else { return }
+        if noteEditor != nil { commitNoteEditor() }
+        setAnnotatingNotes(false)
+        screenView.noteMarks = []
+        screenView.selectedNoteID = nil
+        updateSendBar()
         controlActivity = .idle
         preferredDeviceID = id
         prepare(id, releasingCurrentLease: true)
@@ -1479,25 +1503,39 @@ final class SimulatorPaneViewController: NSViewController {
     // MARK: - Human note annotations
 
     private static let noteEditorWidth: CGFloat = 240
+    private static let annotationMenuWidth: CGFloat = 220
 
     private func toggleAnnotating() {
-        guard let device = lease?.device.id else { return }
-        isAnnotatingNotes.toggle()
-        annotateButton.setAccessibilityValue(isAnnotatingNotes ? "on" : "off")
-        screenView.isAnnotatingNotes = isAnnotatingNotes
-        if isAnnotatingNotes {
-            screenView.noteMarks = annotationStore.annotations(for: device)
-        } else {
-            dismissNoteEditor()
-            screenView.selectedNoteID = nil
-            screenView.noteMarks = []
+        setAnnotatingNotes(!isAnnotatingNotes)
+    }
+
+    /// Shared operation for the toolbar, palette commands and user-assigned shortcuts.
+    func setAnnotatingNotes(_ enabled: Bool) {
+        guard enabled != isAnnotatingNotes, let device = lease?.device.id,
+              !enabled || canAnnotateNotes else { return }
+        if noteEditor != nil {
+            if noteEditor?.note.isEmpty == true { cancelNoteEditor() }
+            else { commitNoteEditor() }
         }
+        isAnnotatingNotes = enabled
+        annotateButton.isSelected = enabled
+        annotationModeButton.isHidden = !enabled
+        screenView.isAnnotatingNotes = enabled
+        screenView.noteMarks = annotationStore.annotations(for: device)
+        screenView.selectedNoteID = nil
+        view.window?.makeFirstResponder(screenView)
         updateSendBar()
     }
 
+    @objc private func finishAnnotating() {
+        setAnnotatingNotes(false)
+    }
+
     private func addNote(at point: CGPoint) {
-        guard isAnnotatingNotes, let device = lease?.device.id,
-              screenView.noteMarks.count < SimulatorAnnotationStore.maximumCount else { return }
+        guard let device = lease?.device.id, screenView.image != nil else { return }
+        if noteEditor != nil { commitNoteEditor() }
+        screenView.noteMarks = annotationStore.annotations(for: device)
+        guard screenView.noteMarks.count < SimulatorAnnotationStore.maximumCount else { return }
         let annotation = ImageAnnotation(point: point)
         screenView.noteMarks.append(annotation)
         screenView.selectedNoteID = annotation.id
@@ -1507,7 +1545,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func selectNote(_ id: ImageAnnotation.ID?) {
-        guard isAnnotatingNotes else { return }
+        if noteEditor != nil { commitNoteEditor() }
         screenView.selectedNoteID = id
         if let id, screenView.noteMarks.contains(where: { $0.id == id }) {
             presentNoteEditor(for: id, isExisting: true)
@@ -1583,6 +1621,7 @@ final class SimulatorPaneViewController: NSViewController {
     private func finishNoteEditing() {
         dismissNoteEditor()
         screenView.selectedNoteID = nil
+        view.window?.makeFirstResponder(screenView)
         updateSendBar()
     }
 
@@ -1593,18 +1632,27 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func updateSendBar() {
-        if isAnnotatingNotes {
-            noteSendBar.setPending(count: pendingNotes.count, sending: isSendingNotes)
-        } else {
-            noteSendBar.isHidden = true
-        }
+        noteSendBar.setPending(count: pendingNotes.count, sending: isSendingNotes)
+    }
+
+    private func presentAnnotationMenu(from anchor: ThemedMenuAnchor) -> Bool {
         let hasNotes = !screenView.noteMarks.isEmpty
-        exportNotesButton.isHidden = !isAnnotatingNotes || !hasNotes
-        clearNotesButton.isHidden = !isAnnotatingNotes || !hasNotes
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: L10n.string("Copy annotated frame"), isEnabled: hasNotes,
+                                onChoose: { [weak self] in self?.exportAnnotatedFrame() })),
+            .item(ThemedMenuItem(title: L10n.string("Clear all notes"), isEnabled: hasNotes,
+                                onChoose: { [weak self] in self?.clearAllNotes() })),
+        ]
+        annotationMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: Self.annotationMenuWidth), from: annotateButton, anchor: anchor,
+            selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.annotationMenuSession = nil }
+        )
+        return annotationMenuSession != nil
     }
 
     private func clearAllNotes() {
-        guard isAnnotatingNotes, let device = lease?.device.id,
+        guard let device = lease?.device.id,
               !screenView.noteMarks.isEmpty else { return }
         dismissNoteEditor()
         screenView.noteMarks = []
@@ -1627,7 +1675,7 @@ final class SimulatorPaneViewController: NSViewController {
     /// Flatten the current frame with the note pins burned in and copy it to the clipboard, to share
     /// a marked-up screenshot. Reuses the app's shared flattening, so the pins match everywhere.
     private func exportAnnotatedFrame() {
-        guard isAnnotatingNotes, let image = screenView.image, !screenView.noteMarks.isEmpty,
+        guard let image = screenView.image, !screenView.noteMarks.isEmpty,
               let flattened = ImageAnnotationFlattening.flattened(
                 image, annotations: screenView.noteMarks
               ) else { return }
@@ -1669,6 +1717,31 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func captureButtonPressed() {
         if isRecording { stopRecording() } else { saveSnapshot() }
+    }
+
+    /// Only one fixed-size control changes; no device/frame work runs on modifier events.
+    private func updateCaptureModifiers(_ modifiers: NSEvent.ModifierFlags) {
+        let copies = modifiers.contains(.control)
+        guard copies != captureCopiesSnapshot else { return }
+        captureCopiesSnapshot = copies
+        refreshCaptureButton()
+    }
+
+    private func refreshCaptureButton() {
+        let copies = captureCopiesSnapshot && !isRecording
+        let title = isRecording ? L10n.string("Stop recording")
+            : copies ? L10n.string("Copy Snapshot") : L10n.string("Save snapshot")
+        captureButton.setSymbol(copies ? "doc.on.doc" : "camera", accessibility: title)
+        captureButton.toolTip = isRecording || copies ? title
+            : L10n.string("Save a snapshot of the device (hold Control to copy; right-click for options)")
+        // ThemedIconButton freezes this closure at mouse-down, so releasing Control before
+        // mouse-up cannot turn a copy into an unexpected file save.
+        captureButton.onPress = { [weak self] in
+            guard let self else { return }
+            if self.isRecording { self.stopRecording() }
+            else if copies { self.copySnapshot() }
+            else { self.saveSnapshot() }
+        }
     }
 
     private func videoURL(for device: SimulatorDevice) -> URL {
@@ -1728,7 +1801,7 @@ final class SimulatorPaneViewController: NSViewController {
         isRecording = true
         recordingStartedAt = Date()
         captureButton.isSelected = true
-        captureButton.toolTip = L10n.string("Stop recording")
+        refreshCaptureButton()
         recordingTimer?.invalidate()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateRecordingElapsed() }
@@ -1752,7 +1825,7 @@ final class SimulatorPaneViewController: NSViewController {
         recordingTimer?.invalidate()
         recordingTimer = nil
         captureButton.isSelected = false
-        captureButton.toolTip = L10n.string("Save a snapshot of the device (right-click for options)")
+        refreshCaptureButton()
         if let url {
             SimulatorCaptureSaver.reveal(url)
             flashStatus(L10n.string("Saved recording"))
@@ -1892,10 +1965,9 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     /// Hand the pending notes to the session as a message, mirroring the browser's send: save any
-    /// open note first, snapshot the pending set, and mark each delivered so it does not re-send
-    /// unless its text changes.
+    /// open note first, then remove only the unchanged notes acknowledged by delivery.
     private func sendPendingNotes() {
-        guard isAnnotatingNotes, let device = lease?.device,
+        guard let device = lease?.device,
               let sessionID = annotationSessionID else { return }
         if noteEditor != nil { commitNoteEditor() }
         let pending = pendingNotes
@@ -1910,7 +1982,23 @@ final class SimulatorPaneViewController: NSViewController {
             self.isSendingNotes = false
             switch outcome {
             case .sentNow, .queuedBehindTurn:
-                for note in pending { self.sentNoteTexts[note.id] = note.note }
+                var delivered = pending
+                if self.lease?.device.id == device.id,
+                   let editingID = self.editingNoteID, let editor = self.noteEditor {
+                    // A newer, unsaved draft belongs to the person still typing. Keep both
+                    // its pin and its editor instead of finishing their edit on delivery.
+                    delivered.removeAll { $0.id == editingID && $0.note != editor.note }
+                    if delivered.contains(where: { $0.id == editingID }) {
+                        self.finishNoteEditing()
+                    }
+                }
+                self.annotationStore.removeDelivered(delivered, for: device.id)
+                if self.lease?.device.id == device.id {
+                    self.screenView.noteMarks = self.annotationStore.annotations(for: device.id)
+                    if !self.screenView.noteMarks.contains(where: { $0.id == self.screenView.selectedNoteID }) {
+                        self.screenView.selectedNoteID = nil
+                    }
+                }
             case .noLiveSurface, .busyTerminal, .typedUnconfirmed, .notTaken:
                 break  // Stay pending; the person can send again when the chat is ready.
             }
