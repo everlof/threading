@@ -540,6 +540,109 @@ final class StreamSessionLifecycleTests: XCTestCase {
         }
     }
 
+    /// Requests are written the moment the process exists, but a booting CLI reads none of them.
+    /// A boot slower than the response bound must not fail a request the CLI goes on to answer —
+    /// which is how a launch's own fast-mode restatement reported "did not answer".
+    func testControlRequestsWrittenDuringASlowBootWaitForTheCLIsAnswers() {
+        let modelResolved = expectation(description: "model request answered after boot")
+        let fastResolved = expectation(description: "fast-mode request answered after boot")
+
+        let session = ClaudeStreamSession(
+            sessionID: SessionID(),
+            controlTimeouts: ClaudeControlTimeouts(response: 0.2, startup: 10)
+        ) {
+            self.shellPlan(
+                "/bin/sleep 0.6; read -r first; read -r second; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\"}}' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"threading-ctrl-2\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+
+        session.start()
+        session.setModel("claude-sonnet-5") { result in
+            if case .failure(let error) = result {
+                XCTFail("Expected the booted CLI's answer, got \(error)")
+            }
+            modelResolved.fulfill()
+        }
+        session.setFastMode(false) { result in
+            if case .failure(let error) = result {
+                XCTFail("Expected the booted CLI's answer, got \(error)")
+            }
+            fastResolved.fulfill()
+        }
+
+        wait(for: [modelResolved, fastResolved], timeout: 5)
+        session.terminate()
+    }
+
+    /// A launch that never answers anything still releases its requests, on the startup bound
+    /// rather than the shorter response bound.
+    func testControlRequestToASilentLaunchTimesOutOnTheStartupBound() {
+        let resolved = expectation(description: "silent launch timed out")
+        let startup: TimeInterval = 0.4
+
+        let session = ClaudeStreamSession(
+            sessionID: SessionID(),
+            controlTimeouts: ClaudeControlTimeouts(response: 0.05, startup: startup)
+        ) {
+            self.shellPlan("cat >/dev/null")
+        }
+
+        session.start()
+        let sentAt = ProcessInfo.processInfo.systemUptime
+        session.setModel("claude-sonnet-5") { result in
+            guard case .failure(let error) = result, case ClaudeControlError.timedOut = error else {
+                return XCTFail("Expected timedOut, got \(result)")
+            }
+            XCTAssertGreaterThanOrEqual(
+                ProcessInfo.processInfo.systemUptime - sentAt,
+                startup - 0.01,
+                "an unanswered launch must be given the startup bound, not the response bound"
+            )
+            resolved.fulfill()
+        }
+
+        wait(for: [resolved], timeout: 5)
+        session.terminate()
+    }
+
+    /// Once the launch has answered, the startup allowance is spent: a later request that goes
+    /// unanswered fails on the response bound.
+    func testUnansweredRequestAfterTheChannelAnswersTimesOutOnTheResponseBound() {
+        let resolved = expectation(description: "second request timed out")
+
+        let session = ClaudeStreamSession(
+            sessionID: SessionID(),
+            controlTimeouts: ClaudeControlTimeouts(response: 0.2, startup: 60)
+        ) {
+            self.shellPlan(
+                "read -r first; "
+                    + "printf '%s\\n' "
+                    + "'{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"threading-ctrl-1\"}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+
+        session.start()
+        session.setModel("claude-sonnet-5") { first in
+            if case .failure(let error) = first {
+                return XCTFail("Expected the first request to be answered, got \(error)")
+            }
+            session.setModel("claude-opus-5") { second in
+                guard case .failure(let error) = second, case ClaudeControlError.timedOut = error else {
+                    return XCTFail("Expected timedOut, got \(second)")
+                }
+                resolved.fulfill()
+            }
+        }
+
+        wait(for: [resolved], timeout: 3)
+        session.terminate()
+    }
+
     func testClaudeInitializeAndSystemInitExposeRichCommandsAndSkills() throws {
         let discovered = expectation(description: "Claude catalog discovered")
         var didFulfill = false

@@ -82,7 +82,21 @@ final class ClaudeStreamSession:
     /// on the main queue — reads, writes and the response routing all hop there — so the map needs
     /// no locking. A monotonic counter mints the ids rather than a UUID, so the wire is legible.
     private var controlRequestSequence = 0
-    private var pendingControl: [String: (Result<ControlResponse, Error>) -> Void] = [:]
+    private var pendingControl: [String: PendingControlRequest] = [:]
+
+    private struct PendingControlRequest {
+        let launch: Int
+        let writtenAt: TimeInterval
+        let completion: (Result<ControlResponse, Error>) -> Void
+    }
+
+    /// A request is written the moment the process exists, but the CLI reads none until it has
+    /// booted — so how long a request may wait depends on whether this launch has answered one
+    /// yet. See `controlDeadline(for:)`.
+    private let controlTimeouts: ClaudeControlTimeouts
+    private var controlLaunch = 0
+    private var controlLaunchStartedAt: TimeInterval = 0
+    private var controlChannelAnsweredAt: TimeInterval?
 
     /// Rich metadata arrives before the first turn through the control channel. `system/init`
     /// later identifies which advertised names are user-invocable skills.
@@ -129,12 +143,14 @@ final class ClaudeStreamSession:
         effort: String? = nil,
         subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
         hostPlan: @escaping () throws -> PTYHostChildPlan? = { nil },
+        controlTimeouts: ClaudeControlTimeouts = .standard,
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.effort = effort
         self.subagentTranscriptPlan = subagentTranscriptPlan
         self.hostPlan = hostPlan
+        self.controlTimeouts = controlTimeouts
         self.plan = plan
     }
 
@@ -197,6 +213,9 @@ final class ClaudeStreamSession:
         )
         self.process = process
         self.transport = transport
+        controlLaunch += 1
+        controlLaunchStartedAt = ProcessInfo.processInfo.systemUptime
+        controlChannelAnsweredAt = nil
         acceptsInput = true
         self.isRunning = true
         transport.start()
@@ -541,7 +560,8 @@ final class ClaudeStreamSession:
                 self.applyCommandMetadata(commands, replacing: true)
             }
             // Discovery never blocks ordinary chat indefinitely. An older CLI falls through
-            // after the control timeout, and system/init still provides a name-only fallback.
+            // after the startup control timeout, and system/init still provides a name-only
+            // fallback.
             self.capabilityInitializationFinished = true
             self.sendPendingTurnIfReady()
             self.onInteractionAvailabilityChange?()
@@ -570,31 +590,76 @@ final class ClaudeStreamSession:
             return
         }
 
-        pendingControl[requestID] = completion
-
-        // The channel answers in well under a second in practice; the timeout only guards a
-        // response that never arrives — a child that died between the write and the reply — so the
-        // completion cannot leak.
-        DispatchQueue.main.asyncAfter(deadline: .now() + ClaudeStreamDefaults.controlResponseTimeout) { [weak self] in
-            guard let pending = self?.pendingControl.removeValue(forKey: requestID) else { return }
-            pending(.failure(ClaudeControlError.timedOut))
-        }
+        pendingControl[requestID] = PendingControlRequest(
+            launch: controlLaunch,
+            writtenAt: ProcessInfo.processInfo.systemUptime,
+            completion: completion
+        )
+        scheduleControlExpiry(for: requestID)
     }
 
     private func routeControlResponse(_ response: ControlResponse) {
-        guard let requestID = response.requestID,
-              let completion = pendingControl.removeValue(forKey: requestID) else { return }
+        let request = response.requestID.flatMap { pendingControl.removeValue(forKey: $0) }
+        noteControlChannelAnswered()
+        guard let request else { return }
         if response.isError {
-            completion(.failure(ClaudeControlError.rejected(response.error ?? "unknown error")))
+            request.completion(.failure(ClaudeControlError.rejected(response.error ?? "unknown error")))
         } else {
-            completion(.success(response))
+            request.completion(.success(response))
         }
+    }
+
+    /// Any answer — even a late one to a request that already expired — proves this launch reads
+    /// its control channel. Requests written while it was booting move from the startup bound to
+    /// the response bound, counted from now rather than from a write the CLI could not yet read.
+    private func noteControlChannelAnswered() {
+        guard controlChannelAnsweredAt == nil else { return }
+        controlChannelAnsweredAt = ProcessInfo.processInfo.systemUptime
+        for requestID in pendingControl.keys { scheduleControlExpiry(for: requestID) }
+    }
+
+    /// The timeout only bounds a reply that never comes, so a completion cannot be stranded. A
+    /// child that exits fails its requests at once (`finishTermination`); this is for one that
+    /// stays alive and silent.
+    ///
+    /// It is not measured from the write. Before the CLI has answered anything, a request is
+    /// sitting unread in the pipe while the CLI boots, and a boot slower than the response
+    /// timeout used to fail requests — the launch's own fast-mode restatement among them — that
+    /// the CLI then answered moments later.
+    private func controlDeadline(for request: PendingControlRequest) -> TimeInterval {
+        // Written to a launch this session has since let go of: no answer can reach it.
+        guard request.launch == controlLaunch else { return request.writtenAt }
+        guard let answeredAt = controlChannelAnsweredAt else {
+            return controlLaunchStartedAt + controlTimeouts.startup
+        }
+        return max(request.writtenAt, answeredAt) + controlTimeouts.response
+    }
+
+    private func scheduleControlExpiry(for requestID: String) {
+        guard let request = pendingControl[requestID] else { return }
+        let delay = max(0, controlDeadline(for: request) - ProcessInfo.processInfo.systemUptime)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.expireControlRequestIfDue(requestID)
+        }
+    }
+
+    /// A deadline can move after its check was scheduled — the channel's first answer brings a
+    /// booting request's forward — so a check that finds it not yet due reschedules rather than
+    /// failing early. Answered requests are gone from the map, which makes a stale check inert.
+    private func expireControlRequestIfDue(_ requestID: String) {
+        guard let request = pendingControl[requestID] else { return }
+        guard ProcessInfo.processInfo.systemUptime >= controlDeadline(for: request) else {
+            scheduleControlExpiry(for: requestID)
+            return
+        }
+        pendingControl.removeValue(forKey: requestID)
+        request.completion(.failure(ClaudeControlError.timedOut))
     }
 
     private func failPendingControlRequests(with error: Error) {
         let pending = pendingControl
         pendingControl.removeAll()
-        for completion in pending.values { completion(.failure(error)) }
+        for request in pending.values { request.completion(.failure(error)) }
     }
 
     // MARK: - Private Methods
@@ -966,9 +1031,14 @@ enum ClaudeStreamDefaults {
     /// Stderr is diagnostic fallback only, so a broken child cannot grow memory without bound.
     static let maximumErrorBytes = 64 * 1024
 
-    /// The control channel answers in milliseconds; this only bounds the wait on a reply that
-    /// never comes, so a completion cannot be stranded.
+    /// Once a launch has answered one control request it answers the next in milliseconds; this
+    /// only bounds the wait on a reply that never comes, so a completion cannot be stranded.
     static let controlResponseTimeout: TimeInterval = 5
+
+    /// How long a fresh launch has to answer its first control request. The CLI reads nothing
+    /// until it has booted: about a second on an idle Mac (CLI 2.1.274, this app's own `--settings`
+    /// and `--mcp-config`), but seven seconds under load on 2026-09-17 — past the response bound.
+    static let controlStartupTimeout: TimeInterval = 30
 
     /// The `system/init` capability that promises an interrupt answers with `still_queued`.
     /// Without it the same request succeeds and names nothing, which is a different fact.
@@ -977,6 +1047,18 @@ enum ClaudeStreamDefaults {
     /// The `system/init` capability that promises `command_lifecycle` records for a message sent
     /// with a `uuid`.
     static let messageLifecycleCapability = "msg_lifecycle_v1"
+}
+
+/// The two bounds on a control request's wait: `startup` until the launch has answered any
+/// request, `response` after. Injectable so tests can drive both without waiting seconds.
+struct ClaudeControlTimeouts {
+    var response: TimeInterval
+    var startup: TimeInterval
+
+    static let standard = ClaudeControlTimeouts(
+        response: ClaudeStreamDefaults.controlResponseTimeout,
+        startup: ClaudeStreamDefaults.controlStartupTimeout
+    )
 }
 
 // MARK: - Message Lifecycle Wire

@@ -351,11 +351,24 @@ eligible for `/skills`, so opening-session skills remain discoverable without fa
 that every slash row is a skill. Authoritative membership replaces that provisional eligibility
 as soon as `system/init` arrives. An opening prompt may arrive during this handshake, so the
 session accepts and holds one prompt until initialization succeeds, fails, or reaches the
-existing control timeout. This avoids a second probe process (which would run hooks and discover
+startup control timeout. This avoids a second probe process (which would run hooks and discover
 a different session) and avoids losing the first turn. Claude executes a selected action by
 sending the exact `/name arguments` text back through its ordinary stream. Successful commands
 such as `/context` can return their only useful text on the terminal `result`; the timeline adds
 that result only when the turn did not already produce an assistant message.
+
+**A control request's timeout is not counted from its write.** `initialize` and the launch's
+`apply_flag_settings` restatement are written the moment the process exists, and the CLI reads
+neither until it has booted. Until a launch answers its first control request, every request
+waits on `ClaudeStreamDefaults.controlStartupTimeout` (30 s from launch). The first answer, even
+a late one to a request that already expired, proves the channel is being read: from then on each
+request gets `controlResponseTimeout` (5 s) from its write or that answer, whichever is later. A
+child that exits fails its requests at once, so both bounds only release a live, silent process.
+Measured with CLI 2.1.274 and this app's own `--settings` and `--mcp-config`, both answers
+arrive about a second after spawn on an idle Mac. Under load on 2026-09-17 the CLI took seven
+seconds to take the opening prompt. The old 5-second clock, counted from the write, had
+already failed the fast-mode restatement by then and shown "The agent did not answer the control
+request" for a setting the launch's `--settings` had applied anyway.
 
 The live Claude catalog is dispatch authority, but not unrestricted UI authority. Internal
 handoff rows (`/__remote-workflow`, `/workflow-launch-exec`) are omitted. Commands that would
