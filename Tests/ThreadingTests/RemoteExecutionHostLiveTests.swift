@@ -31,6 +31,8 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         static let childTimeout: TimeInterval = 20
         /// A real `claude` starting on the host, loading its hooks and spawning its MCP servers.
         static let agentTimeout: TimeInterval = 60
+        /// A real turn: the model answering, and a tool call crossing back to this Mac.
+        static let turnTimeout: TimeInterval = 180
     }
 
     func testPreparesAHostAndRunsAChildThereThroughTheTunnel() throws {
@@ -280,6 +282,70 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         XCTAssertTrue(app.requestLines.contains { $0.hasPrefix(tools) }, "the bridge never reached Threading: \(app.requestLines)")
     }
 
+    /// The point of the slice, with a real agent: Claude on the host is asked to use a Threading
+    /// tool, and the call arrives on this Mac — through the bridge it spawned there, the socket
+    /// forwarded back over the tunnel, addressed by this session's token.
+    ///
+    /// Spends one small turn on the host's own login.
+    @MainActor
+    func testARealRemoteClaudeCallsAThreadingToolOnThisMac() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination], let binaries = environment[Key.binaries] else {
+            throw XCTSkip("set \(Key.destination) and \(Key.binaries) to run against a real host")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let sockets = URL(fileURLWithPath: "/tmp/threading-rh-\(getpid())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sockets) }
+        try FileManager.default.createDirectory(at: sockets, withIntermediateDirectories: true)
+        let app = try FakeAppListener(path: sockets.appendingPathComponent("app.sock").path)
+        defer { app.close() }
+
+        let hosts = RemoteExecutionHosts(localDirectory: sockets)
+        defer { hosts.closeAllTunnels() }
+        let context = try prepare(hosts, destination, binaries: URL(fileURLWithPath: binaries), appSocketPath: app.path)
+
+        let session = AgentSession(kind: .claude, title: "live tool call")
+        let launch = try RemoteAgentLaunch.make(
+            for: session,
+            in: Project(name: "live", folderURL: URL(fileURLWithPath: "/tmp/live")),
+            host: ProjectExecutionHost(destination: alias, remoteDirectory: "\(context.facts.home)/remote-test"),
+            context: context,
+            initialPrompt: "Call the \(MCPDefaults.allowedToolName(FakeAppListener.toolName)) tool "
+                + "with name TRYIT, then reply with just DONE. Do nothing else.",
+            reportsLifecycle: true,
+            allowedTools: [FakeAppListener.toolName]
+        ).encode()
+
+        let output = OutputCollector()
+        let client = PTYHostClient(
+            socketPath: context.localSocketPath,
+            build: "remote-live-test",
+            events: PTYHostClient.Events(output: { output.append($0) })
+        )
+        defer { client.close() }
+        try client.connect()
+        let identity = PTYHostSessionIdentity.agentSession(session.id)
+        try client.spawn(PTYHostSpawnRequest(
+            id: identity,
+            channel: .pty(grid: PTYHostGrid(cols: 120, rows: 40, xpixel: 0, ypixel: 0)),
+            executable: launch.plan.executable,
+            arguments: launch.plan.arguments,
+            environment: launch.environment
+        ))
+        defer {
+            try? client.kill(PTYHostKill(id: identity, escalate: true))
+            _ = client.drainWrites(until: Date().addingTimeInterval(Fixture.childTimeout))
+        }
+
+        let deadline = Date().addingTimeInterval(Fixture.turnTimeout)
+        while Date() < deadline, app.toolCalls.isEmpty {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        let call = try XCTUnwrap(app.toolCalls.first, "no tool call arrived; the agent's screen was:\n\(output.text)")
+        XCTAssertEqual(call.name, FakeAppListener.toolName)
+        XCTAssertTrue(call.arguments.contains("TRYIT"), call.arguments)
+    }
+
     private func prepare(
         _ hosts: RemoteExecutionHosts,
         _ destination: RemoteHostDestination,
@@ -320,20 +386,30 @@ private final class OutputCollector: @unchecked Sendable {
     }
 }
 
-/// A unix-socket HTTP listener standing in for Threading's MCP server: it records each request line
-/// and answers every request with one JSON-RPC handshake result naming itself.
+/// A unix-socket HTTP listener standing in for Threading's MCP server: it records each request line,
+/// answers the handshake and `tools/list` as the app would, and records every tool call an agent
+/// makes. Enough of the server for a real agent on a host to find a tool and use it.
 private final class FakeAppListener: @unchecked Sendable {
     static let serverName = "threading-live-test-listener"
+    /// The one tool it offers, spelled as the app spells it.
+    static let toolName = MCPBuiltInTool.setSessionName.rawValue
 
     let path: String
     private let descriptor: Int32
     private let lock = NSLock()
     private var lines: [String] = []
+    private var calls: [(name: String, arguments: String)] = []
 
     var requestLines: [String] {
         lock.lock()
         defer { lock.unlock() }
         return lines
+    }
+
+    var toolCalls: [(name: String, arguments: String)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return calls
     }
 
     init(path: String) throws {
@@ -377,6 +453,7 @@ private final class FakeAppListener: @unchecked Sendable {
         defer { Darwin.close(connection) }
         var request = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
+        var body = Data()
         while true {
             let count = read(connection, &buffer, buffer.count)
             guard count > 0 else { return }
@@ -387,13 +464,56 @@ private final class FakeAppListener: @unchecked Sendable {
                 .first { $0.lowercased().hasPrefix("content-length:") }
                 .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
             if request.count - end.upperBound < length { continue }
+            body = request[end.upperBound...].prefix(length)
             lock.lock()
             lines.append(String(head.split(separator: "\r\n").first ?? ""))
             lock.unlock()
             break
         }
-        let body = #"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"\#(Self.serverName)","version":"0"}}}"#
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
-        _ = response.withCString { write(connection, $0, strlen($0)) }
+        send(answer(to: body), to: connection)
+    }
+
+    /// The app's half of the conversation, in miniature: a handshake, one tool, and a result for
+    /// every call of it. Anything else — a hook's report, a notification — is simply accepted.
+    private func answer(to body: Data) -> String {
+        guard let message = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let method = message["method"] as? String else {
+            return response(status: "200 OK", body: "{}")
+        }
+        guard let id = message["id"] else { return response(status: "202 Accepted", body: "") }
+
+        let result: String
+        switch method {
+        case "initialize":
+            result = #"{"protocolVersion":"2025-06-18","capabilities":{"tools":{"listChanged":true}},"#
+                + #""serverInfo":{"name":"\#(Self.serverName)","version":"0"},"#
+                + #""instructions":"This is a live test stand-in for Threading."}"#
+        case "tools/list":
+            result = #"{"tools":[{"name":"\#(Self.toolName)","description":"Rename this chat.",""#
+                + #"inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]}"#
+        case "tools/call":
+            let parameters = message["params"] as? [String: Any]
+            let name = parameters?["name"] as? String ?? ""
+            let arguments = (parameters?["arguments"]).flatMap {
+                (try? JSONSerialization.data(withJSONObject: $0)).map { String(decoding: $0, as: UTF8.self) }
+            } ?? ""
+            lock.lock()
+            calls.append((name: name, arguments: arguments))
+            lock.unlock()
+            result = #"{"content":[{"type":"text","text":"Renamed."}],"isError":false}"#
+        default:
+            result = "{}"
+        }
+        let identifier = (id as? Int).map(String.init) ?? #""\#(id)""#
+        return response(status: "200 OK", body: #"{"jsonrpc":"2.0","id":\#(identifier),"result":\#(result)}"#)
+    }
+
+    private func response(status: String, body: String) -> String {
+        "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\n"
+            + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+    }
+
+    private func send(_ text: String, to connection: Int32) {
+        _ = text.withCString { Darwin.write(connection, $0, strlen($0)) }
     }
 }

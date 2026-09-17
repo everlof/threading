@@ -302,7 +302,11 @@ for a session whose project has a host (`HookLifecycleReport.withoutHostPaths()`
 `RemoteExecutionHostLiveTests/testHooksAndTheBridgeOnTheHostReachThisMacThroughTheTunnel`: a
 listener on this Mac standing in for the MCP server; a hook-shaped `curl` on the host and the Linux
 bridge answering a handshake on the host both reached it through the reverse forward, and its reply
-came back. The same run found an older race: the upgrade probe ran before `ssh` had bound the local
+came back. Then with the real agent, through the launch `RemoteAgentLaunch` composes: its
+`SessionStart` hook arrived addressed by the session's token
+(`testARealRemoteClaudeReportsItsStartAndReachesThreadingsTools`), and asked for a tool it used one
+(`testARealRemoteClaudeCallsAThreadingToolOnThisMac`) — the host's transcript shows
+`mcp__threading__set_session_name {"name": "TRYIT"}` answered from this Mac. The same run found an older race: the upgrade probe ran before `ssh` had bound the local
 socket, read the old daemon as "not at this rendezvous" and started this build's instance against
 its lock. Preparation now waits for the tunnel (after removing the file a previous one left) before
 it probes.
