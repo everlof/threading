@@ -15266,6 +15266,17 @@
         }
       }
     },
+    "Couldn’t reach it. Trying again in %lld s." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte nå den. Försöker igen om %lld s."
+          }
+        }
+      }
+    },
     "Couldn’t remove “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34887,6 +34898,17 @@
         }
       }
     },
+    "Reconnecting to %@…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återansluter till %@…"
+          }
+        }
+      }
+    },
     "Record Video" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38032,6 +38054,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara ögonblicksbild som…"
+          }
+        }
+      }
+    },
+    "Save a snapshot of the device (hold Control to copy; right-click for options)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara en ögonblicksbild av enheten (håll Control för att kopiera; högerklicka för alternativ)"
           }
         }
       }
@@ -44577,6 +44610,17 @@
         }
       }
     },
+    "TerminalStatusBanner" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TerminalStatusBanner"
+          }
+        }
+      }
+    },
     "Terminals First" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48223,6 +48267,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sessionen visar inte gränsdialogen."
+          }
+        }
+      }
+    },
+    "The session is still running there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessionen körs fortfarande där."
           }
         }
       }
@@ -54126,13 +54181,13 @@
         }
       }
     },
-    "Uses your ssh keys and config. Leave the config file empty for ~/.ssh/config." : {
+    "Uses your ssh keys and config; leave the config file empty for ~/.ssh/config. Threading’s tools and the new-chat openings from Settings don’t reach remote sessions yet." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Använder dina ssh-nycklar och din konfiguration. Lämna konfigurationsfilen tom för ~/.ssh/config."
+            "value" : "Använder dina ssh-nycklar och din konfiguration; lämna konfigurationsfilen tom för ~/.ssh/config. Threadings verktyg och inledningarna för nya chattar i Inställningar når inte fjärrsessioner ännu."
           }
         }
       }
@@ -55168,6 +55223,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vad en session visar när dess agent dog på väg upp. Rutan är hela poängen: en agent som vägrar starta skriver ut sitt skäl till en terminal som sedan rivs ner, och i det exemplar detta byggdes mot var meddelandet läsbart i en enda bildruta. Markera texten — att kunna kopiera den är det mesta av vad den här ytan är till för. Den radbryts inte, eftersom en radbruten stackspårning slutar likna det terminalen visade."
+          }
+        }
+      }
+    },
+    "What a terminal cannot say itself — here, a remote host out of reach while its agent keeps running. Inked from the backdrop it floats on, capped in width, and read by VoiceOver as one element." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det en terminal inte kan säga själv — här en fjärrvärd utom räckhåll medan dess agent fortsätter köra. Färgad efter bakgrunden den svävar över, begränsad i bredd och läst av VoiceOver som ett element."
           }
         }
       }

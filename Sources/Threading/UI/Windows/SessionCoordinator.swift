@@ -948,8 +948,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 self.pendingPrompts.stage(
                     NewChatOpeningMessage.compose(
                         prompt: ConversationContinuation.openingPrompt(for: session),
-                        prefix: environment.settings.newChatOpeningPrefix,
-                        suffix: environment.settings.newChatOpeningSuffix
+                        for: self.environment.projectStore.project(forSessionID: session.id),
+                        settings: self.environment.settings
                     ),
                     for: session.id
                 )
@@ -975,8 +975,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let title = prompt.flatMap(SessionNaming.promptTitle(from:))
         let opening = NewChatOpeningMessage.compose(
             prompt: prompt,
-            prefix: environment.settings.newChatOpeningPrefix,
-            suffix: environment.settings.newChatOpeningSuffix
+            for: environment.projectStore.project(forSessionID: sessionID),
+            settings: environment.settings
         )
         guard let session = environment.projectStore.addSideChat(of: sessionID, title: title)
         else { return }
@@ -1073,8 +1073,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var opening = NewChatOpeningMessage.compose(
             prompt: task,
-            prefix: environment.settings.newChatOpeningPrefix,
-            suffix: environment.settings.newChatOpeningSuffix
+            for: targetProject,
+            settings: environment.settings
         )
 
         let sessionID = SessionID()
@@ -1284,13 +1284,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         prompt: String
     ) -> AgentSession? {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        var opening = NewChatOpeningMessage.compose(
-            prompt: task,
-            prefix: environment.settings.newChatOpeningPrefix,
-            suffix: environment.settings.newChatOpeningSuffix
-        )
         guard !task.isEmpty,
               let project = environment.projectStore.project(withID: projectID) else { return nil }
+        var opening = NewChatOpeningMessage.compose(
+            prompt: task,
+            for: project,
+            settings: environment.settings
+        )
 
         // Named once and used twice, as in the composer: the sidebar row, and the checkout a
         // managed session stands in for the whole conversation.
@@ -1877,6 +1877,25 @@ enum SessionReportBackRequest {
 /// simply absent rather than a blank paragraph. The caller derives the sidebar title from the
 /// task alone: reusable text should not make every chat start with the same name.
 enum NewChatOpeningMessage {
+    /// The standing text from Settings for a chat in `project`, composed around `prompt`.
+    ///
+    /// **Not for a project that runs on a remote host.** That text is written for sessions that
+    /// have Threading's tools — the common one asks the agent to name its chat with
+    /// `set_session_name` — and a remote session has none yet (slice 4 of
+    /// `remote-execution-hosts.md`), so the agent's first act would be to report that it cannot
+    /// do what it was told. The Remote Host editor says this where the host is chosen.
+    @MainActor
+    static func compose(prompt: String?, for project: Project?, settings: AppSettings) -> String? {
+        guard project?.executionHost == nil else {
+            return compose(prompt: prompt, prefix: "", suffix: "")
+        }
+        return compose(
+            prompt: prompt,
+            prefix: settings.newChatOpeningPrefix,
+            suffix: settings.newChatOpeningSuffix
+        )
+    }
+
     static func compose(prompt: String?, prefix: String, suffix: String) -> String? {
         let parts = [prefix, prompt, suffix]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }

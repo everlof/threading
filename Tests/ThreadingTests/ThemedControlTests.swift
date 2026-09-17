@@ -7987,6 +7987,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "SubagentTranscriptHeadingView",
                 "SupervisionRowView",
                 "SubmissionStatusView",
+                "TerminalStatusBanner",
                 "ThreadingMarkView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",

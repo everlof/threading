@@ -167,6 +167,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SubagentTranscriptHeadingView",
         "SupervisionRowView",
         "SubmissionStatusView",
+        "TerminalStatusBanner",
         "ThreadingMarkView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
@@ -2219,9 +2220,25 @@ final class ComponentGalleryViewController: NSViewController {
                         + "the outcome, so it survives Differentiate Without Colour — and every "
                         + "change announces itself to VoiceOver.",
                     row([submissionSamples, submissionButtons()])
+                ),
+                story(
+                    "TerminalStatusBanner",
+                    "What a terminal cannot say itself — here, a remote host out of reach while "
+                        + "its agent keeps running. Inked from the backdrop it floats on, capped "
+                        + "in width, and read by VoiceOver as one element.",
+                    galleryTerminalStatusBanner()
                 )
             ]
         )
+    }
+
+    private func galleryTerminalStatusBanner() -> NSView {
+        let banner = TerminalStatusBanner(symbol: "server.rack", identifier: "gallery.preview.terminal-status-banner")
+        banner.show(
+            title: L10n.format("Reconnecting to %@…", "raspberrypi"),
+            detail: L10n.format("Couldn’t reach it. Trying again in %lld s.", 5)
+        )
+        return banner
     }
 
     private func makeUsageAnalyticsSection() -> NSView {

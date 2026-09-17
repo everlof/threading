@@ -378,6 +378,16 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             }
         }
 
+        if runsOwnInstance {
+            for instance in plan.otherEnabledInstances {
+                try runScript(destination, RemoteHostInstallScripts.disableAtBootScript(identifier: instance),
+                              token: "disableAtBootFailed")
+                EventLog.shared.record(.session, "Disabled an older remote host daemon at boot", [
+                    "host": destination.identifier
+                ])
+            }
+        }
+
         try waitUntilAnswering(localSocketPath: localSocketPath, tunnel: tunnel)
         ThreadingLogger.ptyHost.info(
             "Remote host \(destination.identifier, privacy: .private(mask: .hash)) ready (own instance: \(runsOwnInstance, privacy: .public))"

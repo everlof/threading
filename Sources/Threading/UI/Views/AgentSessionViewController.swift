@@ -86,7 +86,19 @@ final class AgentSessionViewController: NSViewController {
 
     private var isDiscoveringIdentifier = false
     private var nextIdentifierDiscoveryAt = Date.distantPast
-    private let remoteViewportBanner = RemoteViewportBannerView()
+    private let remoteViewportBanner = TerminalStatusBanner(
+        symbol: AgentSessionBannerDefaults.remoteViewportSymbol,
+        identifier: AgentSessionBannerDefaults.remoteViewportIdentifier
+    )
+    /// Says a remote host is out of reach while its session reconnects. See `remoteReconnect`.
+    private let remoteHostBanner = TerminalStatusBanner(
+        symbol: RemoteExecutionHostMark.symbol,
+        identifier: AgentSessionBannerDefaults.remoteHostIdentifier
+    )
+    /// Both banners, stacked at the pane's corner so two statements never overlap.
+    private let bannerStack = NSStackView()
+    /// Set while a remote-host session whose connection dropped is being taken back.
+    private var remoteReconnect: RemoteReconnect?
 
     /// The one-tap way past a spent usage limit, in the pane's standing-condition ribbon.
     ///
@@ -254,7 +266,13 @@ final class AgentSessionViewController: NSViewController {
         // the view's edge, which reads as cramped beside the sidebar divider.
         session.terminalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(session.terminalView)
-        view.addSubview(remoteViewportBanner)
+        bannerStack.orientation = .vertical
+        bannerStack.alignment = .trailing
+        bannerStack.spacing = Design.Spacing.small
+        bannerStack.translatesAutoresizingMaskIntoConstraints = false
+        bannerStack.addArrangedSubview(remoteHostBanner)
+        bannerStack.addArrangedSubview(remoteViewportBanner)
+        view.addSubview(bannerStack)
         view.addSubview(limitEscapeStrip)
 
         NSLayoutConstraint.activate([
@@ -271,11 +289,11 @@ final class AgentSessionViewController: NSViewController {
                 equalTo: view.trailingAnchor,
                 constant: -TerminalPadding.trailing
             ),
-            remoteViewportBanner.trailingAnchor.constraint(
+            bannerStack.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor,
                 constant: -Design.Spacing.large
             ),
-            remoteViewportBanner.bottomAnchor.constraint(
+            bannerStack.bottomAnchor.constraint(
                 equalTo: view.bottomAnchor,
                 constant: -Design.Spacing.large
             ),
@@ -483,12 +501,20 @@ final class AgentSessionViewController: NSViewController {
         case .remote(let host):
             remoteHost = host
         case .refused(let refusal):
+            cancelRemoteReconnect()
             recordLaunchRefusal(SessionLaunchFailure(
                 origin: .preflight,
                 summary: L10n.string("Couldn’t start this session on its remote host."),
                 detail: [refusal.message],
                 knownCause: "remoteHost.\(refusal.token)"
             ))
+            return
+        }
+        // A reconnect exists only to take back a remote agent. If the host was removed from the
+        // project meanwhile there is nothing to take back, and starting the agent on this Mac
+        // instead is exactly what the reconnect must never do.
+        if remoteReconnect != nil, remoteHost == nil {
+            finishRemoteReconnectAsEnded(exitCode: nil)
             return
         }
 
@@ -530,7 +556,9 @@ final class AgentSessionViewController: NSViewController {
             return
         }
         pendingLaunchPlan = plan
-        pendingRemoteLaunch = remoteHost.map { PendingRemoteLaunch(host: $0, initialPrompt: initialPrompt) }
+        pendingRemoteLaunch = remoteHost.map {
+            PendingRemoteLaunch(host: $0, initialPrompt: initialPrompt, reattachOnly: remoteReconnect != nil)
+        }
         // Opening an existing prompt is presentation, even when this is the selected session.
         // A restart can select it and then switch away before boot output goes quiet. Apply
         // the same grace as background restoration when this launch submits no new work.
@@ -613,6 +641,12 @@ final class AgentSessionViewController: NSViewController {
         pendingLaunchPlan = nil
         clearPendingRemoteLaunch()
         externalResumePreflightID = nil
+        if remoteReconnect != nil {
+            // The path to the host is gone, so no stop can reach the agent from here; what ends is
+            // this Mac's attempt to take it back. The session is dormant and resumable as usual.
+            cancelRemoteReconnect()
+            activityTracker.markDormant()
+        }
         guard isRunning else {
             session.terminate()
             return
@@ -716,6 +750,12 @@ final class AgentSessionViewController: NSViewController {
             "cols": String(grid.cols),
             "rows": String(grid.rows)
         ])
+        if remoteReconnect != nil {
+            cancelRemoteReconnect()
+            EventLog.shared.record(.session, "Reconnected to remote host session", [
+                "session": sessionID.uuidString
+            ])
+        }
         delegate?.agentSessionDidChangeState(self)
         return true
     }
@@ -923,7 +963,18 @@ final class AgentSessionViewController: NSViewController {
             case .refused(let failure):
                 pendingLaunchPlan = nil
                 clearPendingRemoteLaunch()
+                cancelRemoteReconnect()
                 recordLaunchRefusal(failure)
+                return
+            case .retryReconnect(let reason):
+                pendingLaunchPlan = nil
+                clearPendingRemoteLaunch()
+                scheduleRemoteReconnect(reason: reason)
+                return
+            case .endedWhileDisconnected(let exitCode):
+                pendingLaunchPlan = nil
+                clearPendingRemoteLaunch()
+                finishRemoteReconnectAsEnded(exitCode: exitCode)
                 return
             case .ready(let launch, let socketPath):
                 EventLog.shared.record(.session, "Launching session on remote host", [
@@ -1038,6 +1089,8 @@ final class AgentSessionViewController: NSViewController {
     private struct PendingRemoteLaunch {
         let host: ProjectExecutionHost
         let initialPrompt: String?
+        /// A reconnect: take back a running agent or report that it ended, and never spawn one.
+        let reattachOnly: Bool
         /// Whether this launch has already asked for the host to be prepared. A later retry only
         /// reads the phase, so a failed preparation is reported rather than started again.
         var requestedPreparation = false
@@ -1058,6 +1111,10 @@ final class AgentSessionViewController: NSViewController {
         case ready(RemoteAgentLaunch, socketPath: String)
         /// The host is still running this session on a pseudo-terminal.
         case attach(PTYHostSessionSummary, RemoteHostLaunchContext)
+        /// A reconnect could not reach the host yet; try again later.
+        case retryReconnect(String)
+        /// A reconnect reached the host and the agent is no longer running there.
+        case endedWhileDisconnected(Int32?)
     }
 
     /// Where a remote launch stands. Never blocks: preparing a host is `ssh` work on
@@ -1081,6 +1138,7 @@ final class AgentSessionViewController: NSViewController {
             observeRemoteHostChanges()
             return .waiting
         case .failed(let failure):
+            if remote.reattachOnly { return .retryReconnect(failure.token) }
             return .refused(SessionLaunchFailure(
                 origin: .preflight,
                 summary: L10n.string("Couldn’t start this session on its remote host."),
@@ -1101,6 +1159,7 @@ final class AgentSessionViewController: NSViewController {
             case .asking:
                 return .waiting
             case .unanswered:
+                if remote.reattachOnly { return .retryReconnect("surveyFailed") }
                 return .refused(SessionLaunchFailure(
                     origin: .preflight,
                     summary: L10n.string("Couldn’t start this session on its remote host."),
@@ -1112,6 +1171,10 @@ final class AgentSessionViewController: NSViewController {
                     $0.sessionID == sessionID && $0.exit == nil && $0.resolvedChannel == .pty
                 }) {
                     return .attach(running, context)
+                }
+                if remote.reattachOnly {
+                    let ending = held.first { $0.sessionID == sessionID }?.exit
+                    return .endedWhileDisconnected(ending)
                 }
             }
             guard let agentSession = projectStore.session(withID: sessionID),
@@ -1148,6 +1211,59 @@ final class AgentSessionViewController: NSViewController {
                 ))
             }
         }
+    }
+
+    // MARK: - Private Methods — reconnecting to a remote host
+
+    private struct RemoteReconnect {
+        let destination: String
+        var attempt = 0
+        var retry: DispatchWorkItem?
+    }
+
+    /// Takes back the agent through the ordinary remote launch, reattach-only: prepare the host
+    /// again (the old tunnel is gone), survey it, and attach — or learn that the agent ended.
+    private func attemptRemoteReconnect() {
+        guard remoteReconnect != nil, !isRunning else { return }
+        remoteReconnect?.retry = nil
+        continueLaunch(initialPrompt: nil, checksExternalOwner: false)
+    }
+
+    /// The host is out of reach — asleep, off the network, rebooting. Retried on a backoff for as
+    /// long as the pane exists: an agent can keep working for hours while its Mac is closed, and
+    /// giving up after a few tries would strand it behind a Resume button nobody knows to press.
+    private func scheduleRemoteReconnect(reason: String) {
+        guard var reconnect = remoteReconnect else { return }
+        let delay = RemoteReconnectDefaults.delay(afterAttempt: reconnect.attempt)
+        reconnect.attempt += 1
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.attemptRemoteReconnect() }
+        }
+        reconnect.retry?.cancel()
+        reconnect.retry = work
+        remoteReconnect = reconnect
+        remoteHostBanner.show(
+            title: L10n.format("Reconnecting to %@…", reconnect.destination),
+            detail: L10n.format("Couldn’t reach it. Trying again in %lld s.", Int64(delay)),
+            toolTip: reason
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelRemoteReconnect() {
+        remoteReconnect?.retry?.cancel()
+        remoteReconnect = nil
+        remoteHostBanner.hide()
+    }
+
+    /// The host answered and the agent is not running there any more: an ending, recorded the way
+    /// any other ending is, with the status the daemon kept when it has one.
+    private func finishRemoteReconnectAsEnded(exitCode: Int32?) {
+        cancelRemoteReconnect()
+        EventLog.shared.record(.session, "Remote host session ended while disconnected", [
+            "session": sessionID.uuidString
+        ])
+        terminalSession(session, didTerminateWithExitCode: exitCode)
     }
 
     private func observeRemoteHostChanges() {
@@ -1906,12 +2022,33 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
     }
 
+    /// The link to a remote host dropped while its agent was presumably still running there.
+    /// Nothing is recorded as an exit: the pane says it is reconnecting and takes the agent back.
+    func terminalSessionDidLoseRemoteHost(_ session: TerminalSession, cause: String) -> Bool {
+        guard let host = projectStore.project(forSessionID: sessionID)?.executionHost else { return false }
+        isRunning = false
+        remoteReconnect?.retry?.cancel()
+        remoteReconnect = RemoteReconnect(destination: host.destination)
+        remoteHostBanner.show(
+            title: L10n.format("Reconnecting to %@…", host.destination),
+            detail: L10n.string("The session is still running there."),
+            toolTip: cause
+        )
+        delegate?.agentSessionDidChangeState(self)
+        attemptRemoteReconnect()
+        return true
+    }
+
     func terminalSession(
         _ session: TerminalSession,
         remoteViewportChangedTo grid: (cols: Int, rows: Int)?
     ) {
         if let grid {
-            remoteViewportBanner.show(cols: grid.cols, rows: grid.rows)
+            remoteViewportBanner.show(
+                title: L10n.format("Fit to iPhone · %lld×%lld", Int64(grid.cols), Int64(grid.rows)),
+                detail: L10n.string("Mac size returns shortly after the remote view closes"),
+                toolTip: L10n.string("The iPhone controls the terminal size while its remote view is open.")
+            )
         } else {
             remoteViewportBanner.hide()
         }
@@ -2139,85 +2276,10 @@ protocol AgentSessionViewControllerDelegate: AnyObject {
     )
 }
 
-// MARK: - Remote Viewport Banner
+// MARK: - Banners
 
-/// Explains the otherwise surprising desktop shrink while the iPhone owns the PTY geometry.
-/// It floats over the terminal's own palette, so its ink is derived from the active backdrop.
-private final class RemoteViewportBannerView: BackdropOverlay {
-    private let icon = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: L10n.string("Fit to iPhone"))
-    private let detailLabel = NSTextField(
-        labelWithString: L10n.string("Mac size returns shortly after the remote view closes")
-    )
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        translatesAutoresizingMaskIntoConstraints = false
-        isHidden = true
-        wantsLayer = true
-        layer?.cornerCurve = .continuous
-
-        icon.image = NSImage(
-            systemSymbolName: "iphone",
-            accessibilityDescription: L10n.string("Controlled from iPhone")
-        )
-        icon.symbolConfiguration = Design.Symbol.configuration(
-            Design.Symbol.control,
-            weight: .medium
-        )
-        icon.translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel.applyFont(.control)
-        detailLabel.applyFont(.detail())
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        detailLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        let labels = NSStackView(views: [titleLabel, detailLabel])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.translatesAutoresizingMaskIntoConstraints = false
-
-        let content = NSStackView(views: [icon, labels])
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = Design.Spacing.medium
-        content.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(content)
-
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(lessThanOrEqualToConstant: 320),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.inset),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.inset),
-            content.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.small),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.small),
-            icon.widthAnchor.constraint(equalToConstant: 16)
-        ])
-    }
-
-    override func applyInk(_ ink: Design.Ink) {
-        layer?.cornerRadius = Design.Radius.control
-        applyLayerBackground(ink.surface)
-        layer?.borderWidth = Design.Radius.border
-        applyLayerBorder(ink.border)
-        icon.contentTintColor = ink.label
-        titleLabel.textColor = ink.label
-        detailLabel.textColor = ink.secondary
-    }
-
-    func show(cols: Int, rows: Int) {
-        titleLabel.stringValue = L10n.format(
-            "Fit to iPhone · %lld×%lld",
-            Int64(cols),
-            Int64(rows)
-        )
-        toolTip = L10n.string(
-            "The iPhone controls the terminal size while its remote view is open."
-        )
-        isHidden = false
-    }
-
-    func hide() {
-        isHidden = true
-    }
+enum AgentSessionBannerDefaults {
+    static let remoteViewportSymbol = "iphone"
+    static let remoteViewportIdentifier = "session.banner.remote-viewport"
+    static let remoteHostIdentifier = "session.banner.remote-host"
 }

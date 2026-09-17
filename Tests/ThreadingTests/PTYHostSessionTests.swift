@@ -500,6 +500,65 @@ final class PTYHostSessionTests: XCTestCase {
         XCTAssertFalse(link.session.isHostBacked)
     }
 
+    /// On a remote host a dropped link is the path ending, not the agent: the delegate is asked to
+    /// reconnect and no exit is recorded, while the terminal stops claiming a live child.
+    func testARemoteLinkThatClosesAsksToReconnectInsteadOfEnding() throws {
+        let link = try startHostBackedSession(placement: .remote(environment: []))
+        link.recorder.reconnects = true
+
+        link.transport.drop(.readFailed(errno: EPIPE))
+        settle()
+
+        XCTAssertEqual(link.recorder.lostHostCauses.count, 1)
+        XCTAssertTrue(link.recorder.exitCodes.isEmpty, "a dropped tunnel is not an exit")
+        XCTAssertFalse(link.session.isRunning)
+        XCTAssertFalse(link.session.isHostBacked)
+        XCTAssertNil(link.session.terminalView.hostTransport)
+    }
+
+    /// A delegate that cannot reconnect gets today's ending.
+    func testARemoteLinkThatClosesEndsWhenNobodyReconnects() throws {
+        let link = try startHostBackedSession(placement: .remote(environment: []))
+
+        link.transport.drop(.readFailed(errno: EPIPE))
+        settle()
+
+        XCTAssertEqual(link.recorder.lostHostCauses.count, 1)
+        XCTAssertEqual(link.recorder.exitCodes.count, 1)
+    }
+
+    /// A remote child that really exits ends the session; reconnecting is only for a lost path.
+    func testARemoteExitIsAnEndingNotALostConnection() throws {
+        let link = try startHostBackedSession(placement: .remote(environment: []))
+        link.recorder.reconnects = true
+
+        link.transport.send(.exited(PTYHostExited(id: link.identity, status: 9, signalled: true)))
+        settle()
+
+        XCTAssertTrue(link.recorder.lostHostCauses.isEmpty)
+        XCTAssertEqual(link.recorder.exitCodes.count, 1)
+    }
+
+    /// A local host's dropped link never asks to reconnect.
+    func testALocalLinkThatClosesNeverAsksToReconnect() throws {
+        let link = try startHostBackedSession()
+        link.recorder.reconnects = true
+
+        link.transport.drop(.readFailed(errno: EPIPE))
+        settle()
+
+        XCTAssertTrue(link.recorder.lostHostCauses.isEmpty)
+        XCTAssertEqual(link.recorder.exitCodes.count, 1)
+    }
+
+    func testReconnectBackoffGrowsAndHoldsAtItsCeiling() {
+        let delays = (0..<10).map(RemoteReconnectDefaults.delay(afterAttempt:))
+        XCTAssertEqual(delays.first, RemoteReconnectDefaults.delays.first)
+        XCTAssertEqual(delays.last, RemoteReconnectDefaults.delays.last)
+        XCTAssertEqual(delays, delays.sorted())
+        XCTAssertEqual(RemoteReconnectDefaults.delay(afterAttempt: -1), RemoteReconnectDefaults.delays.first)
+    }
+
     // MARK: - Degrading
 
     /// A factory failure cannot silently change a durable launch into an app-owned one.
@@ -719,9 +778,11 @@ final class PTYHostSessionTests: XCTestCase {
     }
 
     private func startHostBackedSession(
-        confirmingSpawn: Bool = true
+        confirmingSpawn: Bool = true,
+        placement: PTYHostPlacement = .local
     ) throws -> HostedSession {
         let session = makeSession()
+        session.hostPlacement = placement
         let recorder = Recorder()
         recorders.append(recorder)
         session.delegate = recorder
@@ -989,5 +1050,13 @@ private final class Recorder: NSObject, TerminalSessionDelegate {
 
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {
         exitCodes.append(exitCode)
+    }
+
+    var reconnects = false
+    private(set) var lostHostCauses: [String] = []
+
+    func terminalSessionDidLoseRemoteHost(_ session: TerminalSession, cause: String) -> Bool {
+        lostHostCauses.append(cause)
+        return reconnects
     }
 }

@@ -937,6 +937,26 @@ final class TerminalSession: NSObject {
     }
 
     private func hostDidEnd(exitCode: Int32?, cause: String?) {
+        // A remote link that ends without an exit is the *path* ending — a dropped tunnel, a Mac
+        // that slept — while the agent goes on running on its host. Handed to the delegate to
+        // reconnect rather than recorded as an exit it never had. A signalled exit also has no
+        // status, but it arrives with no cause, which is how the two are told apart.
+        if hostPlacement.isRemote, exitCode == nil, let cause,
+           delegate?.terminalSessionDidLoseRemoteHost(self, cause: cause) == true {
+            EventLog.shared.record(.session, "Lost the connection to a remote host session", [
+                "session": identity.historyFileStem,
+                "cause": cause
+            ])
+            hostOutputParser?.invalidate()
+            hostOutputParser = nil
+            hostLink = nil
+            hostLaunchPlan = nil
+            hostForegroundGroup = nil
+            terminalView.hostTransport = nil
+            isRunning = false
+            shellPid = 0
+            return
+        }
         if let cause {
             EventLog.shared.record(
                 .session,
@@ -1360,12 +1380,17 @@ protocol TerminalSessionDelegate: AnyObject {
     /// the delegate cannot say. The session rings either way.
     func terminalSessionDidReceiveBell(_ session: TerminalSession) -> SoundEvent?
     func terminalSessionDidForwardMouseReport(_ session: TerminalSession)
+
+    /// A remote-host session's link ended without an exit: the agent is presumably still running
+    /// on its host. Answer true to reconnect it; false records the ending as an exit.
+    func terminalSessionDidLoseRemoteHost(_ session: TerminalSession, cause: String) -> Bool
 }
 
 // MARK: - Default Delegate Implementation
 
 extension TerminalSessionDelegate {
     func terminalSessionDidStart(_ session: TerminalSession) {}
+    func terminalSessionDidLoseRemoteHost(_ session: TerminalSession, cause: String) -> Bool { false }
     func terminalSession(_ session: TerminalSession, didFailToStart failure: PTYHostLaunchError) {}
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {}
     func terminalSession(_ session: TerminalSession, directoryChangedTo directory: URL?) {}

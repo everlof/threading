@@ -224,9 +224,31 @@ reached no child `ChildProcessSpawn` started, because children inherited a dispa
 blocked signal mask. Fixed at the spawn for every child; see
 [`sessions.md`](../architecture/sessions.md).
 
-**Not yet.** Mac-side sleep and network changes beyond `ServerAlive` (a dead tunnel is noticed when
-`ssh` exits; the running terminal is not yet told), bundling the binaries in the app, hooks and MCP
-(slice 4).
+**A lost connection is not an exit.** On the Lima VM a killed tunnel left the agent running while
+the app showed "Agent exited". A remote link that closes with no exit status now goes to
+`TerminalSessionDelegate.terminalSessionDidLoseRemoteHost` instead of the termination path (a
+signalled exit also has no status, but it arrives without a close cause, which is how the two
+differ). The session view shows a `TerminalStatusBanner` ("Reconnecting to <host>…") and retries
+with `RemoteReconnectDefaults` backoff (1, 2, 5, 10, 20, then every 30 s). A reconnect attempt is
+**reattach-only**: it takes the session back if the host still runs it, finishes as ended with the
+held exit if it ended meanwhile, and never spawns. Stopping the session cancels the retries.
+Measured by `PTYHostSessionTests` for the routing; the retry loop is exercised by hand against the VM.
+
+**Older instances are disabled for boot.** The unit template is shared, so an instance left
+enabled comes back at the next boot on whatever paths the template names by then. On the VM the
+spike's instance did exactly that, and a binary older than the state-directory lock took the
+rendezvous. The probe now reports `default.target.wants` entries, and once this build's instance
+runs every other enabled instance is `systemctl --user disable`d — without `--now`, so nothing
+running is stopped. Instance names read off the host are held to `[A-Za-z0-9._-]`, because they go
+back into a command run there.
+
+**No standing openings.** The new-chat opening text from Settings asks for Threading's tools
+(`set_session_name`), which a remote session does not have until slice 4, so
+`NewChatOpeningMessage.compose(prompt:for:settings:)` sends only the chat's own task to a project on
+a remote host. The Remote Host editor says so.
+
+**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it),
+bundling the binaries in the app, hooks and MCP (slice 4).
 
 ## Remote-session spike, 2026-09-17
 

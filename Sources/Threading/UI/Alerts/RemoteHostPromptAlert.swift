@@ -99,7 +99,7 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
     }
 
     private static var helperText: String {
-        L10n.string("Uses your ssh keys and config. Leave the config file empty for ~/.ssh/config.")
+        L10n.string("Uses your ssh keys and config; leave the config file empty for ~/.ssh/config. Threading’s tools and the new-chat openings from Settings don’t reach remote sessions yet.")
     }
 
     init(current: ProjectExecutionHost?) {

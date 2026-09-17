@@ -77,3 +77,16 @@ enum RemoteExecutionHostMark {
         L10n.format("Runs on %@", destination)
     }
 }
+
+// MARK: - Reconnecting
+
+/// When a remote session whose connection dropped tries again.
+enum RemoteReconnectDefaults {
+    /// Quick at first — a dropped tunnel on a working network comes back at once — then settling
+    /// at half a minute, which is cheap (one bounded `ssh` probe) and quick enough after a wake.
+    static let delays: [TimeInterval] = [1, 2, 5, 10, 20, 30]
+
+    static func delay(afterAttempt attempt: Int) -> TimeInterval {
+        delays[min(max(attempt, 0), delays.count - 1)]
+    }
+}

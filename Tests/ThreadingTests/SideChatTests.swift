@@ -835,6 +835,29 @@ final class SessionCoordinatorTests: XCTestCase {
         )
     }
 
+    /// A project on a remote host gets only the chat's own task: the standing text asks for
+    /// Threading's tools, which a remote session does not have.
+    func testARemoteHostProjectGetsNoStandingOpeningText() {
+        let suite = "SessionCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.newChatOpeningPrefix = "Read the tests first."
+        settings.newChatOpeningSuffix = "Rename this chat with set_session_name."
+
+        let local = Project(name: "Local", folderURL: URL(fileURLWithPath: "/tmp/local"))
+        var remote = Project(name: "Remote", folderURL: URL(fileURLWithPath: "/tmp/remote"))
+        remote.executionHost = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app")
+
+        XCTAssertEqual(
+            NewChatOpeningMessage.compose(prompt: "Fix it.", for: local, settings: settings),
+            "Read the tests first.\n\nFix it.\n\nRename this chat with set_session_name."
+        )
+        XCTAssertEqual(NewChatOpeningMessage.compose(prompt: "Fix it.", for: remote, settings: settings), "Fix it.")
+        XCTAssertNil(NewChatOpeningMessage.compose(prompt: nil, for: remote, settings: settings),
+                     "an empty remote chat is not opened with the standing text alone")
+    }
+
     func testNewChatOpeningMessagePersistsVerbatimAndCanBeCleared() {
         let suite = "SessionCoordinatorTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

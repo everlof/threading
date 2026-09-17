@@ -49,6 +49,8 @@ final class RemoteExecutionHostTests: XCTestCase {
         installed=0123456789abcdef
         installed=fedcba9876543210
         active=threading-ptyd@0123456789abcdef.service
+        enabled=threading-ptyd@0123456789abcdef.service
+        enabled=threading-ptyd@spike-gen2.service
         claude=/home/david.guest/.local/bin/claude
         """
 
@@ -61,6 +63,7 @@ final class RemoteExecutionHostTests: XCTestCase {
         XCTAssertEqual(facts.lingerEnabled, false)
         XCTAssertEqual(facts.installedBinaries, ["0123456789abcdef", "fedcba9876543210"])
         XCTAssertEqual(facts.activeInstances, ["0123456789abcdef"])
+        XCTAssertEqual(facts.enabledInstances, ["0123456789abcdef", "spike-gen2"])
         XCTAssertEqual(facts.claudePath, "/home/david.guest/.local/bin/claude")
         XCTAssertTrue(facts.hasPOSIXLoginShell)
         XCTAssertEqual(facts.remoteSocketPath, "/home/david.guest/.local/state/threading/pty/ptyd.sock")
@@ -134,6 +137,20 @@ final class RemoteExecutionHostTests: XCTestCase {
         XCTAssertEqual(plan.otherActiveInstances, ["0123456789abcdef"])
     }
 
+    /// The spike's VM, exactly: an old instance left enabled came back at boot on this build's
+    /// paths. Once this build runs, every other enabled instance is disabled for boot — and only
+    /// for boot, so an agent under a running one is not touched.
+    func testOtherEnabledInstancesAreDisabledForBootButNeverStopped() throws {
+        let facts = try RemoteHostFacts.parse(Self.debianProbe)
+        let plan = RemoteHostInstallPlan.make(facts: facts, binary: binary("0123456789abcdef"))
+        XCTAssertEqual(plan.otherEnabledInstances, ["spike-gen2"])
+
+        let script = RemoteHostInstallScripts.disableAtBootScript(identifier: "spike-gen2")
+        XCTAssertEqual(script, "systemctl --user disable threading-ptyd@spike-gen2.service")
+        XCTAssertFalse(script.contains("--now"))
+        XCTAssertFalse(script.contains("stop"))
+    }
+
     func testTheUnitNeverRestartsARetiredDaemonAndNamesItsPaths() {
         let unit = RemoteHostInstallScripts.unitTemplate
         XCTAssertTrue(unit.contains("Restart=on-failure"), "a retire exits 0 and must stay stopped")
@@ -158,6 +175,8 @@ final class RemoteExecutionHostTests: XCTestCase {
         XCTAssertEqual(RemoteHostFacts.instanceName(fromUnit: "threading-ptyd@abc.service"), "abc")
         XCTAssertNil(RemoteHostFacts.instanceName(fromUnit: "threading-ptyd@.service"))
         XCTAssertNil(RemoteHostFacts.instanceName(fromUnit: "sshd.service"))
+        XCTAssertNil(RemoteHostFacts.instanceName(fromUnit: "threading-ptyd@a;rm -rf ~.service"),
+                     "a name read off the host must not become shell syntax there")
     }
 
     // MARK: - Project host

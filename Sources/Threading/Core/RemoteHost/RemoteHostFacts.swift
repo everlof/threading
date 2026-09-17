@@ -38,6 +38,10 @@ struct RemoteHostFacts: Equatable, Sendable {
     let installedBinaries: Set<String>
     /// Active `threading-ptyd@<id>.service` instances, by instance name.
     let activeInstances: [String]
+    /// Instances enabled to start at boot, by instance name. Separate from `activeInstances`:
+    /// an instance can be enabled and stopped, and it will still start at the next boot — on
+    /// whatever paths the shared unit template names by then.
+    var enabledInstances: [String] = []
     /// Where a login shell resolves `claude`, or nil when it does not.
     let claudePath: String?
 
@@ -67,8 +71,13 @@ enum RemoteHostFactsDefaults {
         static let linger = "linger"
         static let installed = "installed"
         static let active = "active"
+        static let enabled = "enabled"
         static let claude = "claude"
     }
+
+    static let instanceNameCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+    )
 
     static let lingerYes = "yes"
     static let lingerNo = "no"
@@ -104,6 +113,9 @@ extension RemoteHostFacts {
         for binary in "$HOME"/\(RemoteHostDefaults.remoteLibraryDirectory)/*/\(RemoteHostDefaults.daemonExecutableName); do
           [ -x "$binary" ] && printf 'installed=%s\\n' "$(basename "$(dirname "$binary")")"
         done
+        for unit in "$HOME"/\(RemoteHostDefaults.remoteUnitDirectory)/default.target.wants/\(RemoteHostDefaults.remoteUnitPrefix)*\(RemoteHostDefaults.remoteUnitSuffix); do
+          [ -e "$unit" ] && printf 'enabled=%s\\n' "$(basename "$unit")"
+        done
         if command -v systemctl >/dev/null 2>&1; then
           systemctl --user list-units '\(RemoteHostDefaults.remoteUnitPrefix)*' --state=active --plain --no-legend 2>/dev/null \\
             | awk '{print "active=" $1}'
@@ -118,6 +130,7 @@ extension RemoteHostFacts {
         var single: [String: String] = [:]
         var installed = Set<String>()
         var active: [String] = []
+        var enabled: [String] = []
 
         for line in output.split(whereSeparator: \.isNewline) {
             guard let separator = line.firstIndex(of: "=") else { continue }
@@ -128,6 +141,8 @@ extension RemoteHostFacts {
                 if !value.isEmpty { installed.insert(value) }
             case Key.active:
                 if let instance = instanceName(fromUnit: value) { active.append(instance) }
+            case Key.enabled:
+                if let instance = instanceName(fromUnit: value) { enabled.append(instance) }
             case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude:
                 single[key] = value
             default:
@@ -159,6 +174,7 @@ extension RemoteHostFacts {
             lingerEnabled: linger,
             installedBinaries: installed,
             activeInstances: active,
+            enabledInstances: enabled,
             claudePath: claude
         )
     }
@@ -170,6 +186,11 @@ extension RemoteHostFacts {
         let instance = unit
             .dropFirst(RemoteHostDefaults.remoteUnitPrefix.count)
             .dropLast(RemoteHostDefaults.remoteUnitSuffix.count)
-        return instance.isEmpty ? nil : String(instance)
+        // A name read off the host goes back into a command run there, so it is held to the
+        // characters an instance name is made of rather than quoted.
+        guard !instance.isEmpty,
+              instance.unicodeScalars.allSatisfy({ RemoteHostFactsDefaults.instanceNameCharacters.contains($0) })
+        else { return nil }
+        return String(instance)
     }
 }

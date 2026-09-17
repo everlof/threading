@@ -87,6 +87,12 @@ struct RemoteHostInstallPlan: Equatable, Sendable {
     let otherActiveInstances: [String]
     /// Whether this build's own instance is already running.
     let isRunning: Bool
+    /// Other instances still enabled to start at boot. Disabled — never stopped — once this
+    /// build's instance runs, because the unit template is shared: an old instance left enabled
+    /// comes back at the next boot on *this* build's paths, and a binary older than the
+    /// state-directory lock would then take the rendezvous from the running daemon (measured on
+    /// the spike's VM).
+    let otherEnabledInstances: [String]
 
     static func make(facts: RemoteHostFacts, binary: RemoteHostBinary) -> RemoteHostInstallPlan {
         let identifier = binary.installIdentifier
@@ -94,7 +100,8 @@ struct RemoteHostInstallPlan: Equatable, Sendable {
             uploadsBinary: !facts.installedBinaries.contains(identifier),
             enablesLinger: facts.lingerEnabled != true,
             otherActiveInstances: facts.activeInstances.filter { $0 != identifier },
-            isRunning: facts.activeInstances.contains(identifier)
+            isRunning: facts.activeInstances.contains(identifier),
+            otherEnabledInstances: facts.enabledInstances.filter { $0 != identifier }
         )
     }
 }
@@ -168,6 +175,12 @@ enum RemoteHostInstallScripts {
         if systemctl --user is-active --quiet "$unit"; then exit 3; fi
         systemctl --user disable "$unit"
         """
+    }
+
+    /// Stops an instance from starting at boot, and nothing else. `disable` without `--now` leaves
+    /// a running instance running, so no agent under it is touched.
+    static func disableAtBootScript(identifier: String) -> String {
+        "systemctl --user disable \(RemoteHostDefaults.remoteUnitPrefix)\(identifier)\(RemoteHostDefaults.remoteUnitSuffix)"
     }
 
     static func isActiveScript(identifier: String) -> String {
