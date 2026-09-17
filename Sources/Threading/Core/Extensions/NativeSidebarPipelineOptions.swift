@@ -16,6 +16,7 @@ enum NativeSidebarPipelineOptionID: String, CaseIterable, Sendable {
     case branchGrouping = "branch-grouping"
     case loneBranchHeadings = "lone-branch-headings"
     case compactTree = "compact-tree"
+    case chatPreview = "chat-preview"
     case groupByFact = "group-by-fact"
     case sortByFact = "sort-by-fact"
 }
@@ -36,7 +37,7 @@ enum NativeSidebarPipelineSessionOrderValue: String, CaseIterable, Sendable {
 ///
 /// Tree construction and menu construction pass this value down rather than consulting defaults
 /// per row, per comparator, or once for every menu entry. `jsonValues` is the exact public
-/// projection of the five static options; registered-fact selections remain typed and separate,
+/// projection of the six static options; registered-fact selections remain typed and separate,
 /// just as they do in an extension pipeline. Native preserves its existing implementation
 /// without decoding its own JSON.
 struct NativeSidebarPipelineOptionValues: Equatable {
@@ -45,6 +46,7 @@ struct NativeSidebarPipelineOptionValues: Equatable {
     let branchGrouping: Bool
     let loneBranchHeadings: Bool
     let compactTree: Bool
+    let chatPreview: Bool
     let groupByFact: ExtensionFactKey?
     let sortByFact: ExtensionFactKey?
     let jsonValues: [String: ExtensionJSONValue]
@@ -55,6 +57,7 @@ struct NativeSidebarPipelineOptionValues: Equatable {
         branchGrouping: Bool,
         loneBranchHeadings: Bool,
         compactTree: Bool,
+        chatPreview: Bool = false,
         groupByFact: ExtensionFactKey? = nil,
         sortByFact: ExtensionFactKey? = nil
     ) {
@@ -63,6 +66,7 @@ struct NativeSidebarPipelineOptionValues: Equatable {
         self.branchGrouping = branchGrouping
         self.loneBranchHeadings = loneBranchHeadings
         self.compactTree = compactTree
+        self.chatPreview = chatPreview
         self.groupByFact = groupByFact
         self.sortByFact = sortByFact
         jsonValues = [
@@ -77,6 +81,7 @@ struct NativeSidebarPipelineOptionValues: Equatable {
                 loneBranchHeadings
             ),
             NativeSidebarPipelineOptionID.compactTree.rawValue: .bool(compactTree),
+            NativeSidebarPipelineOptionID.chatPreview.rawValue: .bool(chatPreview),
         ]
     }
 }
@@ -92,7 +97,7 @@ enum NativeSidebarPipelineOptions {
             id: NativeSidebarPipelineOptionID.sessionOrder.rawValue,
             title: L10n.string("Session Order"),
             control: .choice(
-                defaultValue: NativeSidebarPipelineSessionOrderValue.orderAdded.rawValue,
+                defaultValue: NativeSidebarPipelineSessionOrderValue.recentActivity.rawValue,
                 options: [
                     .init(
                         id: NativeSidebarPipelineSessionOrderValue.orderAdded.rawValue,
@@ -133,6 +138,11 @@ enum NativeSidebarPipelineOptions {
             title: L10n.string("Compact Tree"),
             control: .toggle(defaultValue: false)
         ),
+        ExtensionWorkspaceNavigatorOption(
+            id: NativeSidebarPipelineOptionID.chatPreview.rawValue,
+            title: L10n.string("Show Five Chats per Project"),
+            control: .toggle(defaultValue: true)
+        ),
     ]
 
     /// Public-shaped defaults for Native's registry pickers.
@@ -163,6 +173,7 @@ enum NativeSidebarPipelineOptions {
             branchGrouping: branchGrouping,
             loneBranchHeadings: loneBranchHeadings,
             compactTree: compactTree,
+            chatPreview: chatPreview,
             groupByFact: selectedRegisteredFact(
                 from: NativeSidebarParity.option(
                     .groupByFact,
@@ -210,6 +221,13 @@ enum NativeSidebarPipelineOptions {
         )
     }
 
+    static var chatPreview: Bool {
+        NativeSidebarParity.option(
+            .chatPreview,
+            AppSettings.previewsSidebarChats
+        )
+    }
+
     static func setSessionOrder(_ value: SidebarSessionOrder) {
         NativeSidebarParity.option(
             .sessionOrder,
@@ -245,6 +263,34 @@ enum NativeSidebarPipelineOptions {
         )
     }
 
+    static func setChatPreview(_ value: Bool) {
+        NativeSidebarParity.option(
+            .chatPreview,
+            AppSettings.shared.previewsSidebarChats = value
+        )
+    }
+
+    /// Chooses a static order the way every surface offering the choice must: a registered fact
+    /// sort gives way to it and starts over in its natural direction, and the tree is told once.
+    /// The sidebar's Sort menu and Settings both come through here, so neither can forget half.
+    static func chooseSessionOrder(_ order: SidebarSessionOrder) {
+        let hadRegisteredSort = current.sortByFact != nil
+        setSessionOrder(order)
+        if hadRegisteredSort {
+            setSessionOrderReversed(false)
+        }
+        setRegisteredFactSelection(nil, for: .sortByFact)
+        if !hadRegisteredSort {
+            NotificationCenter.default.post(ProjectsDidChange())
+        }
+    }
+
+    /// Chooses the direction of whichever order is in force, and rebuilds the tree for it.
+    static func chooseSessionOrderReversed(_ isReversed: Bool) {
+        setSessionOrderReversed(isReversed)
+        NotificationCenter.default.post(ProjectsDidChange())
+    }
+
     static func setRegisteredFactSelection(
         _ key: ExtensionFactKey?,
         for optionID: NativeSidebarPipelineOptionID
@@ -264,7 +310,7 @@ enum NativeSidebarPipelineOptions {
                 AppSettings.shared.nativeSidebarSortByFact = wire
             )
         case .sessionOrder, .sessionOrderReversed, .branchGrouping,
-             .loneBranchHeadings, .compactTree:
+             .loneBranchHeadings, .compactTree, .chatPreview:
             preconditionFailure("A static native option cannot store a registered fact")
         }
         NotificationCenter.default.post(NativeSidebarArrangementDidChange())
@@ -278,7 +324,7 @@ enum NativeSidebarPipelineOptions {
         case .groupByFact: values.groupByFact
         case .sortByFact: values.sortByFact
         case .sessionOrder, .sessionOrderReversed, .branchGrouping,
-             .loneBranchHeadings, .compactTree: nil
+             .loneBranchHeadings, .compactTree, .chatPreview: nil
         }
     }
 
@@ -292,6 +338,12 @@ enum NativeSidebarPipelineOptions {
 
     static func toggleCompactTree() {
         setCompactTree(!compactTree)
+    }
+
+    /// Flips the preview and rebuilds the tree, since the cut decides which rows exist at all.
+    static func toggleChatPreview() {
+        setChatPreview(!chatPreview)
+        NotificationCenter.default.post(ProjectsDidChange())
     }
 
     nonisolated static func publicValue(

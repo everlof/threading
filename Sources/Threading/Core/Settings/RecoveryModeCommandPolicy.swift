@@ -20,7 +20,7 @@ enum RecoveryModeCommandPolicy {
     /// Ours that survive.
     ///
     /// The sidebar is on screen and is the evidence somebody in a crash loop came for, so its
-    /// toggle and its three arrangement switches stay — all four act on settings rather than on a
+    /// toggle and its four arrangement switches stay — all five act on settings rather than on a
     /// session, and the density one already works without a window. Checking for updates stays
     /// because a new build is a legitimate fix for a crash loop, and refusing to look for one
     /// would be the app deciding it cannot be repaired.
@@ -29,6 +29,7 @@ enum RecoveryModeCommandPolicy {
         AppCommands.ID.groupByBranch,
         AppCommands.ID.loneBranchHeadings,
         AppCommands.ID.compactTree,
+        AppCommands.ID.chatPreview,
         AppCommands.ID.checkForUpdates
     ]
 

@@ -3588,7 +3588,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             sidebarViewController.reveal(terminalID: terminalID)
         case let .project(projectID):
             sidebarViewController.reveal(projectID: projectID)
-        case .repository, .branch, .registeredFactGroup:
+        case .repository, .branch, .registeredFactGroup, .chatDisclosure:
             return false
         }
 

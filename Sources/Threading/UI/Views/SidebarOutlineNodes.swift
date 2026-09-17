@@ -20,6 +20,9 @@ enum SidebarNodeKey: Hashable {
     case registeredFactGroup(ProjectID, ExtensionFactKey, ExtensionFactValue?)
     case session(SessionID)
     case terminal(TerminalID)
+    /// The "Show 5 more" row closing a project's chat preview. One per project, so the project
+    /// is its whole identity: the row stays the same row while what it offers changes.
+    case chatDisclosure(ProjectID)
 
     /// The project and branch behind a branch heading, or nil for every other row. Lets a
     /// caller ask what a key *is* without a `switch` whose other four cases say nothing.
@@ -83,7 +86,8 @@ final class ProjectNode: NSObject {
     var terminalNodes: [TerminalNode] = []
 
     /// What the outline actually shows under the project: the selected branch/fact grouping,
-    /// bare session rows where that grouping permits them, and standalone terminals.
+    /// bare session rows where that grouping permits them, standalone terminals, and — last —
+    /// the chat preview's disclosure row when the project's chats run past it.
     var childNodes: [NSObject] = [] {
         didSet { outlineChildren = nil }
     }
@@ -91,6 +95,12 @@ final class ProjectNode: NSObject {
 
     init(projectID: ProjectID) {
         self.projectID = projectID
+    }
+
+    /// The row closing this project's chat preview, when its chats run past the first page.
+    /// Always the last child, so asking costs one look rather than a walk.
+    var chatDisclosureNode: ChatDisclosureNode? {
+        childNodes.last as? ChatDisclosureNode
     }
 }
 
@@ -158,6 +168,39 @@ extension SessionNode: SidebarOutlineNode {
     ) {
         guard let rebuilt = rebuilt as? SessionNode else { return }
         childNodes = rebuilt.childNodes.map(substituting.callAsFunction)
+    }
+}
+
+/// The row under a project's first page of chats: "Show 5 more", then "Show remaining", then
+/// "Show fewer". See `SidebarChatPreview`.
+///
+/// Carries its preview as content rather than reading the store when drawn, because what it says
+/// depends on the order, the visibility scope and the stage — the tree builder's inputs, not a
+/// record's. A rebuild that keeps the row hands the new preview to the node on screen.
+final class ChatDisclosureNode: NSObject {
+    let projectID: ProjectID
+    private(set) var preview: SidebarChatPreview
+
+    init(projectID: ProjectID, preview: SidebarChatPreview) {
+        self.projectID = projectID
+        self.preview = preview
+    }
+}
+
+extension ChatDisclosureNode: SidebarOutlineNode {
+    var sidebarKey: SidebarNodeKey { .chatDisclosure(projectID) }
+    var sidebarChildren: [NSObject] { [] }
+    var sidebarOutlineChildCount: Int { 0 }
+    func sidebarOutlineChild(at index: Int) -> NSObject {
+        preconditionFailure("A chat disclosure node has no outline children")
+    }
+
+    func adoptContent(
+        of rebuilt: any SidebarOutlineNode,
+        substituting: SidebarNodeSubstitution
+    ) {
+        guard let rebuilt = rebuilt as? ChatDisclosureNode else { return }
+        preview = rebuilt.preview
     }
 }
 
@@ -415,7 +458,9 @@ enum SidebarTreeBuilder {
         excludingSessionIDs: Set<SessionID> = [],
         at date: Date = Date(),
         optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current,
-        factSnapshot: ExtensionFactSnapshot? = nil
+        factSnapshot: ExtensionFactSnapshot? = nil,
+        chatPreviewStages: [ProjectID: SidebarChatPreviewStage] = [:],
+        revealingSessionIDs: Set<SessionID> = []
     ) -> [NSObject] {
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
         let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
@@ -427,6 +472,11 @@ enum SidebarTreeBuilder {
         let registeredFactSnapshot = NativeSidebarParity.host(
             .registeredFactResolution,
             factSnapshot
+        )
+        let previewStages = NativeSidebarParity.host(.transientDisclosure, chatPreviewStages)
+        let revealedSessions = NativeSidebarParity.host(
+            .transientDisclosure,
+            revealingSessionIDs
         )
         let arranged = pinningScratchpad(classifiedProjects)
         // The scratchpad answers "no repository" for grouping even though it is one, which is
@@ -469,7 +519,11 @@ enum SidebarTreeBuilder {
                 excludingSessionIDs: transientExclusions,
                 date: evaluationDate,
                 checkoutBranch: identity == nil ? nil : checkoutBranch(of: project),
-                factSnapshot: registeredFactSnapshot
+                factSnapshot: registeredFactSnapshot,
+                chatPreviewStage: previewStages[
+                    NativeSidebarParity.host(.entityIdentity, project.id)
+                ] ?? .compact,
+                revealingSessionIDs: revealedSessions
             )
 
             guard let identity else {
@@ -547,7 +601,9 @@ enum SidebarTreeBuilder {
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
         optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current,
-        factSnapshot: ExtensionFactSnapshot? = nil
+        factSnapshot: ExtensionFactSnapshot? = nil,
+        chatPreviewStage: SidebarChatPreviewStage = .compact,
+        revealingSessionIDs: Set<SessionID> = []
     ) -> ProjectNode? {
         let classifiedProjectID = NativeSidebarParity.host(.entityIdentity, projectID)
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
@@ -574,7 +630,12 @@ enum SidebarTreeBuilder {
             visibility: visibilityScope,
             excludingSessionIDs: transientExclusions,
             checkoutBranch: checkoutBranch(of: project),
-            factSnapshot: registeredFactSnapshot
+            factSnapshot: registeredFactSnapshot,
+            chatPreviewStage: NativeSidebarParity.host(.transientDisclosure, chatPreviewStage),
+            revealingSessionIDs: NativeSidebarParity.host(
+                .transientDisclosure,
+                revealingSessionIDs
+            )
         )
     }
 
@@ -621,7 +682,9 @@ enum SidebarTreeBuilder {
         excludingSessionIDs: Set<SessionID> = [],
         date: Date = Date(),
         checkoutBranch: String? = nil,
-        factSnapshot: ExtensionFactSnapshot? = nil
+        factSnapshot: ExtensionFactSnapshot? = nil,
+        chatPreviewStage: SidebarChatPreviewStage = .compact,
+        revealingSessionIDs: Set<SessionID> = []
     ) -> ProjectNode {
         let order = optionValues.sessionOrder
         let isReversed = optionValues.sessionOrderReversed
@@ -658,17 +721,84 @@ enum SidebarTreeBuilder {
         // Side chats hang off the session they were forked from, so only what remains
         // at the project's own level is grouped by branch below.
         let top = attachSideChats(sessions: activeSessions, nodes: node.sessionNodes)
+        // The preview cuts before grouping, so a heading gathers only rows that are showing and
+        // a hidden chat never becomes a row, a view or a constraint. Side chats travel with the
+        // chat they were forked from. The snoozed scope is a list asked for on purpose, and shows
+        // it whole — the phone's archived and snoozed lists do the same.
+        let shown = chatPreview(
+            sessions: top.sessions,
+            nodes: top.nodes,
+            isEnabled: optionValues.chatPreview && visibility == .attention,
+            stage: chatPreviewStage,
+            revealing: revealingSessionIDs
+        )
         node.childNodes = childNodes(
             projectID: projectID,
-            sessions: top.sessions,
-            sessionNodes: top.nodes,
+            sessions: shown.sessions,
+            sessionNodes: shown.nodes,
             terminals: terminals,
             terminalNodes: node.terminalNodes,
             optionValues: optionValues,
             checkoutBranch: checkoutBranch,
             factSnapshot: factSnapshot
         )
+        if let preview = shown.preview {
+            node.childNodes.append(ChatDisclosureNode(projectID: projectID, preview: preview))
+        }
         return node
+    }
+
+    /// The top-level chats a project's preview shows, and what its disclosure row says about the
+    /// rest — nil when the preview is off or the project fits its first page.
+    ///
+    /// A revealed chat — the selected one — raises the stage just far enough to include it, so a
+    /// chat opened from a notification or search is never selected into a row that does not
+    /// exist. The work is bounded by the chats being cut, and the reveal walk only runs over the
+    /// ones past the stage when something asks to be revealed at all.
+    private static func chatPreview(
+        sessions: [AgentSession],
+        nodes: [SessionNode],
+        isEnabled: Bool,
+        stage: SidebarChatPreviewStage,
+        revealing: Set<SessionID>
+    ) -> (sessions: [AgentSession], nodes: [SessionNode], preview: SidebarChatPreview?) {
+        guard isEnabled,
+              SidebarChatPreview.isWorthShowing(totalCount: nodes.count) else {
+            return (sessions, nodes, nil)
+        }
+
+        func contains(_ node: SessionNode) -> Bool {
+            revealing.contains(node.sessionID) || node.childNodes.contains(where: contains)
+        }
+
+        var effectiveStage = stage
+        if !revealing.isEmpty, stage.limit < nodes.count {
+            // Walked from the end, so the first match is the deepest revealed chat.
+            for offset in nodes.indices.reversed() where offset >= stage.limit {
+                guard contains(nodes[offset]) else { continue }
+                effectiveStage = .revealing(offset: offset)
+                break
+            }
+        }
+
+        let visibleCount = min(nodes.count, effectiveStage.limit)
+        var hiddenSessionIDs = Set<SessionID>()
+        func collect(_ node: SessionNode) {
+            hiddenSessionIDs.insert(node.sessionID)
+            node.childNodes.forEach(collect)
+        }
+        nodes.dropFirst(visibleCount).forEach(collect)
+
+        return (
+            Array(sessions.prefix(visibleCount)),
+            Array(nodes.prefix(visibleCount)),
+            SidebarChatPreview(
+                stage: effectiveStage,
+                totalCount: nodes.count,
+                visibleCount: visibleCount,
+                hiddenSessionIDs: hiddenSessionIDs
+            )
+        )
     }
 
     /// Filters and orders one project's visible sessions.

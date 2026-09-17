@@ -741,6 +741,54 @@ the slot expands before the two actions appear and contracts after they leave, s
 controls do not permanently tax every title while visible targets never overhang their hit-tested
 parent.
 
+### A project's chats, five at a time
+
+**The Mac lists chats the way the phone does, by default.** `sidebarSessionOrder` reads as Recent
+Activity when nothing was chosen (it had been Order Added), and `previewsSidebarChats` (on) ends
+each project after five top-level chats with a disclosure row — **Show 5 more** twice, **Show
+remaining (N)**, then **Show fewer** — the phone dashboard's `MobileProjectChatPreview` stages at
+the Mac's page size (`SidebarChatPreviewStage`). The order and direction are also Settings rows, and
+the Sort menu and Settings both go through `NativeSidebarPipelineOptions.chooseSessionOrder`, so a
+registered fact sort gives way identically from either.
+
+Rules that are load-bearing:
+
+- **The cut happens in the tree builder, before grouping.** `SidebarTreeBuilder` attaches side
+  chats, keeps the first `stage.limit` top-level chats and only then builds branch or fact
+  groups, so a hidden chat never becomes a node, a row view or a constraint, and a heading gathers
+  only rows that are showing. `ProjectNode.sessionNodes` still holds every chat, which is what a
+  collapsed project's count reads. The disclosure (`ChatDisclosureNode`, key
+  `.chatDisclosure(projectID)`) is always the project's last child, after terminals, so asking
+  for it is one look. The snoozed scope is never cut.
+- **The selected chat is never cut.** Every build receives the selection as
+  `revealingSessionIDs`, and the stage rises to the smallest one showing it. Without that, a
+  rebuild removed the row it was about to restore the selection to. `select(sessionID:)` for a
+  hidden chat (notifications, search, restore) rebuilds the project revealing it first, and the
+  raised stage is recorded, so an unrelated rebuild later does not fold away what the reveal
+  opened. Only the disclosure row folds a project back. Stages live for the window's life, as on
+  the phone.
+- **The exact add/remove paths step aside for a cut project.** A leaf append or removal cannot
+  say that a chat crossed the page boundary or that the row's count changed, so they fall back to
+  the project-local rebuild whenever a project has a disclosure, or would gain one. A reorder
+  under the preview legitimately changes which keys are on the page, so `applySessionOrderChange`
+  routes that to the same project-local path instead of treating it as identity drift. Events for a
+  hidden chat (work under Recent Activity, a title under Name) reach its project through
+  `previewedProjectNode(owningHiddenSessionID:)`.
+- **The row's words are node content.** A chat arriving past the page changes "Show remaining (7)"
+  without moving a row, so the equal-shape reload path adopts disclosure content (one look per
+  project) before refreshing rows.
+- **The row is a button, not a selection.** One borderless `ThemedButton` spans the cell with no
+  surface of its own, the hover capsule is the row's `SidebarHoverRowView`, and `RowControls` lets
+  the press through the outline. The activity summary sits *under* the button so a press there is
+  still the button's. The press is deferred one turn, because it reshapes the list the row stands
+  in. The hidden-activity counts walk the running sessions, since a chat with no process is dormant
+  by definition. That bounds them by process retention rather than by the project's size.
+
+`SidebarChatPreviewTests` holds the stages, the cut, reveal and side-chat travel, and the live
+outline's press, hit target, reveal, removal and Recent Activity arrival. The sidebar stress fixture
+pins the preview off so its recorded baselines still measure every chat as a row (see
+`performance.md`).
+
 ### The compact tree
 
 **An opt-in trade: the indentation for a narrower column** (`AppSettings.compactsSidebarTree`,

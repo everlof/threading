@@ -15,6 +15,23 @@ final class SidebarTreeBuilderTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    /// These rules are stated against the store's own order and every chat as a row. The app's
+    /// unchosen arrangement is Recent Activity with a five-chat preview, so a test that does not
+    /// pick an order would otherwise be asserting against creation timestamps and a cut list.
+    /// `SidebarChatPreviewTests` owns the preview; a test here that wants another order still says
+    /// so with `withDefault`.
+    override func setUp() async throws {
+        try await super.setUp()
+        UserDefaults.standard.set(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder")
+        UserDefaults.standard.set(false, forKey: "previewsSidebarChats")
+    }
+
+    override func tearDown() async throws {
+        UserDefaults.standard.removeObject(forKey: "sidebarSessionOrder")
+        UserDefaults.standard.removeObject(forKey: "previewsSidebarChats")
+        try await super.tearDown()
+    }
+
     private func project(
         _ name: String,
         sessions: [AgentSession],
@@ -1894,8 +1911,15 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let stressOrder = ProcessInfo.processInfo.environment["THREADING_SIDEBAR_STRESS_ORDER"]
             .flatMap(SidebarSessionOrder.init(rawValue:))
             ?? .manual
+        // The preview is off unless asked for: the recorded baselines measure every chat as a row,
+        // which is still the list "Show remaining" opens and the worst case this sweep guards.
+        let previewsChats = ProcessInfo.processInfo.environment[
+            "THREADING_SIDEBAR_STRESS_CHAT_PREVIEW"
+        ] == "1"
         var deterministicDefaults: [(String, Any)] = [
             ("sidebarSessionOrder", stressOrder.rawValue),
+            ("sidebarSessionOrderIsReversed", false),
+            ("previewsSidebarChats", previewsChats),
             ("groupsSessionsByBranch", true),
             ("groupsLoneBranches", true)
         ]

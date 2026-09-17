@@ -321,10 +321,12 @@ With Reduce Motion the same reading is shown as a still frame.
 ### Arranging the sidebar
 The arrangement control at the sidebar's top opens the sidebar's view
 options in one menu: how the tree presents (**Group Sessions by Branch**, **Headings for Lone
-Branches** — disabled while grouping is off — and **Compact Tree**), then how sessions sort:
+Branches** — disabled while grouping is off — **Compact Tree** and **Show Five Chats per
+Project**), then how sessions sort:
 
-- **Sort by Order Added** — the order sessions were created in; the default
-- **Sort by Recent Activity** — the most recently active session first
+- **Sort by Order Added** — the order sessions were created in
+- **Sort by Recent Activity** — the most recently used session first; the default, and the order
+  the iPhone app lists chats in
 - **Sort by Name** — alphabetical, case-insensitive
 - **Sort by Type** — chats and standalone terminals in separate stable groups
 
@@ -334,6 +336,9 @@ First** for Order Added, **Most Recent First** or **Least Recent First** for Rec
 **A to Z** or **Z to A** for Name. Picking a different order starts it at its own natural
 direction, and Type offers **Chats First** or **Terminals First**. A reversal made about names is
 not inherited by a sort about dates or row kinds.
+
+The order and its direction are also in **Settings > General > Sort sessions by** and **Sort
+direction**. To put the newest chats on top under Order Added, pick **Newest First**.
 
 A pinned session carries a filled pin beside its title and leads the list under every order and
 either direction — pinning is a stronger statement than any sort, and reversing reverses the
@@ -348,6 +353,18 @@ them, while the type keeps carrying the levels the way it already does. Nothing 
 changes — grouping, sorting, expansion and every row action work the same. Toggle it from
 the arrangement menu, **View ▸ Compact Tree** (rebindable in Settings ▸ Keyboard), or
 **Settings > General > Compact tree**.
+
+**Show Five Chats per Project** (on by default) keeps a long project short, the way the iPhone
+app's dashboard does: each project lists its first five chats in the current order, then a
+**Show 5 more** row. Pressing it shows five more, a second press five more again, then **Show
+remaining (N)** shows the rest and the row becomes **Show fewer**, which folds the project back to
+five. Side chats count with the chat they were forked from. While chats are folded away, the row
+also says how many of them need attention or are working. The chat you have open is never folded
+away: selecting a chat further down — from a notification, search or the palette — opens the
+project just far enough to show it. Terminals always show. The Snoozed list is never shortened.
+Every project starts folded to five when Threading opens. Turn it off from the arrangement menu,
+**View ▸ Show Five Chats per Project** (rebindable in Settings ▸ Keyboard), or **Settings > General
+> Show five chats per project**.
 
 Whichever tree you keep, the list tightens as you narrow the column. Drag the divider in from
 the width the app opens at and the step between levels closes along with the space on either

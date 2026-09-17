@@ -12,6 +12,9 @@ final class GeneralPreferencesViewController: NSViewController {
     private let terminalTitleToggle = ThemedToggle()
     private let branchGroupingToggle = ThemedToggle()
     private let compactTreeToggle = ThemedToggle()
+    private let sessionOrderPopUp = ThemedPopUp()
+    private let sessionOrderDirectionPopUp = ThemedPopUp()
+    private let chatPreviewToggle = ThemedToggle()
     private let branchFollowToggle = ThemedToggle()
     private let projectIconToggle = ThemedToggle()
     private let accountAvatarToggle = ThemedToggle()
@@ -155,6 +158,11 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(compactTreeToggle,
                   isOn: nativeSidebarOptions.compactTree,
                   action: #selector(compactTreeChanged))
+        configureSessionOrderPopUps(nativeSidebarOptions)
+        configure(chatPreviewToggle,
+                  isOn: nativeSidebarOptions.chatPreview,
+                  action: #selector(chatPreviewChanged))
+        chatPreviewToggle.setAccessibilityIdentifier("settings.general.chat-preview")
         configure(branchFollowToggle,
                   isOn: AppSettings.shared.followsCheckoutBranch,
                   action: #selector(branchFollowChanged))
@@ -309,6 +317,47 @@ final class GeneralPreferencesViewController: NSViewController {
         toggle.action = action
     }
 
+    /// The sidebar's order and its direction, the same two choices its Sort menu offers.
+    ///
+    /// The direction's two items are worded for the order in force — "Most Recent First" says
+    /// something about a list of chats that "Descending" does not — so they are rebuilt whenever
+    /// the order changes.
+    private func configureSessionOrderPopUps(_ values: NativeSidebarPipelineOptionValues) {
+        for order in SidebarSessionOrder.allCases {
+            sessionOrderPopUp.addItem(
+                ThemedMenuItem(title: order.settingsTitle, representedValue: order)
+            )
+        }
+        sessionOrderPopUp.selectItem(
+            at: SidebarSessionOrder.allCases.firstIndex(of: values.sessionOrder) ?? 0
+        )
+        sessionOrderPopUp.target = self
+        sessionOrderPopUp.action = #selector(sessionOrderChanged)
+        sessionOrderPopUp.setAccessibilityIdentifier("settings.general.session-order")
+        SettingsUI.preferControlWidth(sessionOrderPopUp)
+
+        sessionOrderDirectionPopUp.target = self
+        sessionOrderDirectionPopUp.action = #selector(sessionOrderDirectionChanged)
+        sessionOrderDirectionPopUp.setAccessibilityIdentifier(
+            "settings.general.session-order-direction"
+        )
+        SettingsUI.preferControlWidth(sessionOrderDirectionPopUp)
+        reloadSessionOrderDirections(values)
+    }
+
+    private func reloadSessionOrderDirections(_ values: NativeSidebarPipelineOptionValues) {
+        sessionOrderDirectionPopUp.removeAllItems()
+        sessionOrderDirectionPopUp.addItem(ThemedMenuItem(
+            title: values.sessionOrder.naturalDirectionTitle,
+            representedValue: false
+        ))
+        sessionOrderDirectionPopUp.addItem(ThemedMenuItem(
+            title: values.sessionOrder.reversedDirectionTitle,
+            representedValue: true
+        ))
+        sessionOrderDirectionPopUp.selectItem(at: values.sessionOrderReversed ? 1 : 0)
+    }
+
     private func configureStartupSpeedPopUp(
         _ popUp: ThemedPopUp,
         kind: AgentKind,
@@ -437,6 +486,23 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.row(title: "Name sessions after the agent's own title",
                            subtitle: "Agents name the conversation as it develops. Renaming a session keeps your name.",
                            control: terminalTitleToggle),
+            SettingsUI.row(
+                title: "Sort sessions by",
+                subtitle: "How chats are ordered inside each project in the sidebar. Pinned "
+                    + "chats stay on top.",
+                control: sessionOrderPopUp
+            ),
+            SettingsUI.row(
+                title: "Sort direction",
+                subtitle: "Most Recent First is how the iPhone app lists them.",
+                control: sessionOrderDirectionPopUp
+            ),
+            SettingsUI.row(
+                title: "Show five chats per project",
+                subtitle: "Longer projects end in Show 5 more. The chat you have open always "
+                    + "stays in view.",
+                control: chatPreviewToggle
+            ),
             SettingsUI.row(
                 title: "Group sessions by branch",
                 subtitle: "Sessions that ran on the same branch gather under it, "
@@ -1478,6 +1544,27 @@ final class GeneralPreferencesViewController: NSViewController {
     @objc private func branchGroupingChanged() {
         NativeSidebarPipelineOptions.setBranchGrouping(branchGroupingToggle.state == .on)
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
+        NotificationCenter.default.post(ProjectsDidChange())
+    }
+
+    @objc private func sessionOrderChanged(_ sender: ThemedPopUp) {
+        guard let order = sender.selectedItem?.representedValue as? SidebarSessionOrder else {
+            return
+        }
+        // The sidebar's Sort menu goes through the same call, so a registered fact sort gives way
+        // here exactly as it does there.
+        NativeSidebarPipelineOptions.chooseSessionOrder(order)
+        reloadSessionOrderDirections(NativeSidebarPipelineOptions.current)
+    }
+
+    @objc private func sessionOrderDirectionChanged(_ sender: ThemedPopUp) {
+        guard let isReversed = sender.selectedItem?.representedValue as? Bool else { return }
+        NativeSidebarPipelineOptions.chooseSessionOrderReversed(isReversed)
+    }
+
+    @objc private func chatPreviewChanged() {
+        NativeSidebarPipelineOptions.setChatPreview(chatPreviewToggle.state == .on)
+        // The preview decides which rows exist, so the tree is rebuilt rather than re-laid out.
         NotificationCenter.default.post(ProjectsDidChange())
     }
 

@@ -653,10 +653,11 @@ final class AppSettings {
     }
 
     /// Same access pattern again; no seeding needed — an absent or unknown raw value reads
-    /// as `.manual`, which is the documented default.
+    /// as `.recentActivity`, which is the documented default: the order the iPhone app lists a
+    /// project's chats in, so the one worked on last leads on both.
     nonisolated static var sidebarSessionOrder: SidebarSessionOrder {
         let raw = AppSettingDefinitions.sidebarSessionOrder.read(from: .standard)
-        return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .manual
+        return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .recentActivity
     }
 
     /// How a project's chats and terminals are arranged in the sidebar. Pinned chats are
@@ -692,6 +693,20 @@ final class AppSettings {
         get { Self.sidebarSessionOrderIsReversed }
         set {
             AppSettingDefinitions.sidebarSessionOrderIsReversed.write(newValue, to: defaults)
+        }
+    }
+
+    /// Whether a project's chat list stops at five with a "Show 5 more" row under it, the
+    /// staged preview the iPhone app's dashboard uses. On by default; the chat that is selected
+    /// is always revealed, whatever the stage. See `SidebarChatPreview`.
+    nonisolated static var previewsSidebarChats: Bool {
+        AppSettingDefinitions.previewsSidebarChats.read(from: .standard) ?? true
+    }
+
+    var previewsSidebarChats: Bool {
+        get { Self.previewsSidebarChats }
+        set {
+            AppSettingDefinitions.previewsSidebarChats.write(newValue, to: defaults)
         }
     }
 
@@ -2076,6 +2091,17 @@ enum SidebarSessionOrder: String, CaseIterable {
         case .recentActivity: L10n.string("Sort by Recent Activity")
         case .name: L10n.string("Sort by Name")
         case .type: L10n.string("Sort by Type")
+        }
+    }
+
+    /// The same choice beside a "Sort sessions by" label in Settings, where "Sort by" would say
+    /// it twice.
+    var settingsTitle: String {
+        switch self {
+        case .manual: L10n.string("Order added")
+        case .recentActivity: L10n.string("Recent activity")
+        case .name: L10n.string("Name")
+        case .type: L10n.string("Type")
         }
     }
 

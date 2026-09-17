@@ -38,7 +38,8 @@ final class SidebarArrangementMenuTests: XCTestCase {
                 XCTAssertEqual(
                     titles,
                     ["Snoozed Sessions", "—", "Group by",
-                     "Headings for Lone Branches", "Compact Tree", "—", "Sort by", "—",
+                     "Headings for Lone Branches", "Compact Tree", "Show Five Chats per Project",
+                     "—", "Sort by", "—",
                      "Oldest First", "Newest First"]
                 )
                 XCTAssertEqual(
@@ -102,6 +103,15 @@ final class SidebarArrangementMenuTests: XCTestCase {
                             XCTAssertEqual(
                                 item(in: entries, titled: "Compact Tree")?.isSelected,
                                 false
+                            )
+                            // Unchosen, the preview is on — the iPhone app's arrangement.
+                            UserDefaults.standard.removeObject(forKey: "previewsSidebarChats")
+                            XCTAssertEqual(
+                                ProjectSidebarViewController().arrangementMenuEntries()
+                                    .compactMap(\.item)
+                                    .first { $0.title == "Show Five Chats per Project" }?
+                                    .isSelected,
+                                true
                             )
 
                             let orderTitles = Set(SidebarSessionOrder.allCases.map(\.menuTitle))

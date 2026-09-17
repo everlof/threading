@@ -4341,6 +4341,10 @@ sessions, plus recent-activity, name and type order at 5,000, in fresh `xctest` 
 optional `THREADING_SIDEBAR_STRESS_REGISTERED_FACT=sort` layer selects a registered integer fact as
 the primary sort; `group` uses 5,000 distinct date buckets to cover heading format and allocation.
 The compatibility spelling `1` means `sort`, and each run labels the mode in `registered_fact`.
+The fixture pins `previewsSidebarChats` off, so every recorded point keeps measuring each chat as a
+row — the list **Show remaining** opens, and the worst case — while the shipping default cuts each
+project to five rows plus one disclosure before any node exists (`SidebarChatPreview`).
+`THREADING_SIDEBAR_STRESS_CHAT_PREVIEW=1` measures the cut tree instead.
 The profiler's DerivedData lives inside that run's artifact directory: parallel developer builds
 cannot lock its build database, while the deterministic workloads in `full` reuse the same isolated
 build. Results are `THREADING_PERF project-sidebar` lines in `project-sidebar-stress.log`.

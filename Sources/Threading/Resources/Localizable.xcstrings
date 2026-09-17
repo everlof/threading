@@ -2344,6 +2344,17 @@
         }
       }
     },
+    "%lld need attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld behöver uppmärksamhet"
+          }
+        }
+      }
+    },
     "%lld of %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3066,6 +3077,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 rad till visas inte."
+          }
+        }
+      }
+    },
+    "1 needs attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 behöver uppmärksamhet"
           }
         }
       }
@@ -18017,6 +18039,17 @@
         }
       }
     },
+    "Ends each project's chat list after five chats with Show 5 more, the way the iPhone app does." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutar varje projekts chattlista efter fem chattar med Visa 5 till, som iPhone-appen gör."
+          }
+        }
+      }
+    },
     "Ends this session when the standing quiet hours next begin." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22013,6 +22046,17 @@
         }
       }
     },
+    "How chats are ordered inside each project in the sidebar. Pinned chats stay on top." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hur chattar ordnas inom varje projekt i sidofältet. Fästa chattar ligger kvar överst."
+          }
+        }
+      }
+    },
     "How far back to look. Measured from the last time a turn ran in the conversation, not from the last time Threading opened it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25352,6 +25396,17 @@
         }
       }
     },
+    "Longer projects end in Show 5 more. The chat you have open always stays in view." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Längre projekt slutar med Visa 5 till. Chatten du har öppen syns alltid."
+          }
+        }
+      }
+    },
     "Looking for Tailscale…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26419,6 +26474,17 @@
         }
       }
     },
+    "Most Recent First is how the iPhone app lists them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senast aktiva först är så iPhone-appen listar dem."
+          }
+        }
+      }
+    },
     "Most recent first. Unfinished, non-resumable, visible, or remotely viewed work is never stopped by this limit." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26767,6 +26833,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "NIGHTLY"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Namn"
           }
         }
       }
@@ -30921,6 +31004,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Beställ Claude Code-dekaler"
+          }
+        }
+      }
+    },
+    "Order added" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Order added"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordning tillagda"
           }
         }
       }
@@ -40266,6 +40366,17 @@
         }
       }
     },
+    "Show %lld more" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa %lld till"
+          }
+        }
+      }
+    },
     "Show %lld more lines" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40317,6 +40428,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa enhetsverktygsfält"
+          }
+        }
+      }
+    },
+    "Show Five Chats per Project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Five Chats per Project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa fem chattar per projekt"
           }
         }
       }
@@ -40571,6 +40699,17 @@
         }
       }
     },
+    "Show fewer chats in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa färre chattar i %@"
+          }
+        }
+      }
+    },
     "Show files outside this project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40578,6 +40717,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa filer utanför det här projektet"
+          }
+        }
+      }
+    },
+    "Show five chats per project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa fem chattar per projekt"
           }
         }
       }
@@ -40655,6 +40805,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa mindre"
+          }
+        }
+      }
+    },
+    "Show more chats in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa fler chattar i %@"
           }
         }
       }
@@ -40787,6 +40948,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa plan"
+          }
+        }
+      }
+    },
+    "Show remaining (%lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa resten (%lld)"
           }
         }
       }
@@ -41992,6 +42164,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sortera efter typ"
+          }
+        }
+      }
+    },
+    "Sort direction" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sorteringsriktning"
+          }
+        }
+      }
+    },
+    "Sort sessions by" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sortera sessioner efter"
           }
         }
       }

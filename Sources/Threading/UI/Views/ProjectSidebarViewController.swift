@@ -359,6 +359,11 @@ final class ProjectSidebarViewController: NSViewController {
     private var projectNodesByTerminalID: [TerminalID: ProjectNode] = [:]
     private var ancestorsByTerminalID: [TerminalID: [NSObject]] = [:]
 
+    /// How far each project's chat preview has been opened, by "Show 5 more" or by revealing a
+    /// chat past the first page. Absent means the first page. Kept for the window's life rather
+    /// than persisted, as on the phone: a relaunch starts every project folded to what is recent.
+    private var chatPreviewStages: [ProjectID: SidebarChatPreviewStage] = [:]
+
     weak var delegate: ProjectSidebarViewControllerDelegate?
 
     /// Suppresses the selection delegate callback during programmatic selection.
@@ -705,7 +710,12 @@ private extension ProjectSidebarViewController {
             self?.projectsDidChange(change)
         }
         appEvents.observe(SessionWorkDidChange.self) { [weak self] event in
-            guard let self, projectNodesBySessionID[event.sessionID] != nil else { return }
+            // A chat past its project's preview is not a row, but under Recent Activity the work
+            // that just happened in it is exactly what moves it onto the page.
+            guard let self,
+                  projectNodesBySessionID[event.sessionID] != nil
+                    || previewedProjectNode(owningHiddenSessionID: event.sessionID) != nil
+            else { return }
             if NativeSidebarPipelineOptions.current.sessionOrder == .recentActivity {
                 applySessionOrderChange(event.sessionID)
             }
@@ -1090,7 +1100,9 @@ extension ProjectSidebarViewController {
             visibility: sessionVisibility,
             excludingSessionIDs: optimisticallyArchivedSessionIDs,
             optionValues: optionValues,
-            factSnapshot: factSnapshot
+            factSnapshot: factSnapshot,
+            chatPreviewStages: chatPreviewStages,
+            revealingSessionIDs: sessionIDsToReveal()
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         #if DEBUG
@@ -1110,6 +1122,10 @@ extension ProjectSidebarViewController {
             // those same objects before repainting.
             if optionValues.groupByFact != nil {
                 rootNodes = SidebarOutlineUpdate.adopt(rebuilt, reusing: rootNodes)
+            } else {
+                // A disclosure row's words are node content too: a chat arriving past the page
+                // changes "Show remaining (7)" without moving a row. One look per project.
+                adoptChatDisclosureContent(from: rebuilt)
             }
             reloadKind = "content"
             refreshRows()
@@ -1144,6 +1160,7 @@ extension ProjectSidebarViewController {
         measuredReload.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
             - indexingStarted
         #endif
+        allProjectNodes.forEach(recordChatPreviewStage(of:))
         migrateCollapsedBranchKeys(renames)
 
         setEmptyStateVisible(rootNodes.isEmpty)
@@ -1208,14 +1225,19 @@ extension ProjectSidebarViewController {
         let optionValues = NativeSidebarPipelineOptions.current
         let factSnapshot = registeredFactSnapshot(for: optionValues)
         presentedFactSnapshot = factSnapshot
-        guard let presentedProject = projectNodesBySessionID[sessionID],
+        // A chat past its project's preview has no node, but it still belongs to a presented
+        // project whose page it can move onto — or whose disclosure row it is counted by.
+        guard let presentedProject = projectNodesBySessionID[sessionID]
+                ?? previewedProjectNode(owningHiddenSessionID: sessionID),
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: presentedProject.projectID,
                   from: visibleProjects,
                   visibility: sessionVisibility,
                   excludingSessionIDs: optimisticallyArchivedSessionIDs,
                   optionValues: optionValues,
-                  factSnapshot: factSnapshot
+                  factSnapshot: factSnapshot,
+                  chatPreviewStage: chatPreviewStage(for: presentedProject.projectID),
+                  revealingSessionIDs: sessionIDsToReveal()
               )
         else {
             reload()
@@ -1225,7 +1247,19 @@ extension ProjectSidebarViewController {
         let presentedProjectShape = SidebarTreeShape(roots: [presentedProject])
         let rebuiltProjectShape = SidebarTreeShape(roots: [rebuiltProject])
         guard presentedProjectShape.keys == rebuiltProjectShape.keys else {
-            reload()
+            // Under a preview, a reorder legitimately changes which chats are on the page — the
+            // one worked on now arrives and the fifth leaves. That is one project's structure,
+            // not identity drift, so it stays proportional to the project.
+            if rebuiltProject.chatDisclosureNode != nil
+                || presentedProject.chatDisclosureNode != nil {
+                applyProjectStructureChange(
+                    presentedProject.projectID,
+                    optionValues: optionValues,
+                    factSnapshot: factSnapshot
+                )
+            } else {
+                reload()
+            }
             return
         }
 
@@ -1271,7 +1305,8 @@ extension ProjectSidebarViewController {
     private func applyProjectStructureChange(
         _ projectID: ProjectID,
         optionValues: NativeSidebarPipelineOptionValues,
-        factSnapshot: ExtensionFactSnapshot?
+        factSnapshot: ExtensionFactSnapshot?,
+        revealing: SessionID? = nil
     ) {
         let selectedSessionID = selectedNode()?.sessionID
         let selectedTerminalID = selectedTerminalNode()?.terminalID
@@ -1292,7 +1327,9 @@ extension ProjectSidebarViewController {
                   visibility: sessionVisibility,
                   excludingSessionIDs: optimisticallyArchivedSessionIDs,
                   optionValues: optionValues,
-                  factSnapshot: factSnapshot
+                  factSnapshot: factSnapshot,
+                  chatPreviewStage: chatPreviewStage(for: projectID),
+                  revealingSessionIDs: sessionIDsToReveal(including: revealing)
               )
         else {
             reload()
@@ -1349,6 +1386,7 @@ extension ProjectSidebarViewController {
             for: adoptedProject,
             removing: presentedProjectShape.keys
         )
+        recordChatPreviewStage(of: adoptedProject)
         #if DEBUG
         measuredUpdate.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
             - indexingStarted
@@ -1357,6 +1395,11 @@ extension ProjectSidebarViewController {
         applyStructure(steps: steps, wholesale: false)
         var refreshedRows = IndexSet()
         if let row = projectRow(for: projectID) { refreshedRows.insert(row) }
+        // A disclosure row that stayed a row can still have changed what it offers.
+        if let disclosure = adoptedProject.chatDisclosureNode {
+            let row = outlineView.row(forItem: disclosure)
+            if row >= 0 { refreshedRows.insert(row) }
+        }
         if optionValues.groupByFact != nil {
             for case let group as RegisteredFactGroupNode in adoptedProject.childNodes {
                 let row = outlineView.row(forItem: group)
@@ -1396,7 +1439,12 @@ extension ProjectSidebarViewController {
               !session.isPinned,
               session.forkedFrom == nil,
               let projectNode = projectNodesByID[projectID],
-              sessionNodesByID[sessionID] == nil
+              sessionNodesByID[sessionID] == nil,
+              // An append at the end of a project the preview cuts lands past the page — or is
+              // the chat that makes the page overflow. The builder owns that boundary.
+              !optionValues.chatPreview || !SidebarChatPreview.isWorthShowing(
+                  totalCount: projectNode.sessionNodes.count + 1
+              )
         else {
             applyProjectStructureChange(projectID)
             return
@@ -1525,7 +1573,10 @@ extension ProjectSidebarViewController {
               let terminal = projectStore.terminal(withID: terminalID),
               let project = projectStore.project(withID: projectID),
               let projectNode = projectNodesByID[projectID],
-              terminalNodesByID[terminalID] == nil else {
+              terminalNodesByID[terminalID] == nil,
+              // The disclosure row stays the project's last child; the builder places the
+              // terminal ahead of it.
+              projectNode.chatDisclosureNode == nil else {
             applyProjectStructureChange(projectID)
             return
         }
@@ -1659,6 +1710,12 @@ extension ProjectSidebarViewController {
             applyProjectStructureChange(projectID)
             return
         }
+        // A project the preview cuts pulls its next chat onto the page when one leaves it, and
+        // its disclosure row counts a hidden one leaving — neither of which a leaf removal says.
+        guard projectNodesByID[projectID]?.chatDisclosureNode == nil else {
+            applyProjectStructureChange(projectID)
+            return
+        }
         guard let sessionNode = sessionNodesByID[sessionID] else {
             // Archived or filtered into the other attention scope: no presented row changed.
             return
@@ -1779,7 +1836,7 @@ extension ProjectSidebarViewController {
                 terminalNodesByID.removeValue(forKey: terminalID)
                 projectNodesByTerminalID.removeValue(forKey: terminalID)
                 ancestorsByTerminalID.removeValue(forKey: terminalID)
-            case .repository, .project, .branch, .registeredFactGroup:
+            case .repository, .project, .branch, .registeredFactGroup, .chatDisclosure:
                 break
             }
         }
@@ -2353,7 +2410,16 @@ extension ProjectSidebarViewController {
             if sessionID == selectedSessionID { refreshSelectedSessionBeam() }
         }
 
-        guard let node = sessionNode(for: sessionID) else { return }
+        guard let node = sessionNode(for: sessionID) else {
+            // A chat past the preview has no row of its own, but its disclosure row speaks for
+            // its activity — a hidden chat starting work or asking for you changes that line.
+            if let disclosure = previewedProjectNode(owningHiddenSessionID: sessionID)?
+                .chatDisclosureNode {
+                let row = outlineView.row(forItem: disclosure)
+                if row >= 0 { reconfigureRow(at: row) }
+            }
+            return
+        }
 
         let row = outlineView.row(forItem: node)
         guard row >= 0 else { return }
@@ -2516,6 +2582,27 @@ extension ProjectSidebarViewController {
         (0..<outlineView.numberOfRows).compactMap {
             (outlineView.item(atRow: $0) as? any SidebarOutlineNode)?.sidebarKey
         }
+    }
+
+    /// The disclosure row's press: the next page, the rest, or back to the first page.
+    ///
+    /// Internal so a test can press the row the way the button does without presenting a window.
+    func advanceChatPreview(ofProjectID projectID: ProjectID) {
+        guard let disclosure = projectNodesByID[projectID]?.chatDisclosureNode else { return }
+        let next = disclosure.preview.nextStage
+        if next == .compact {
+            chatPreviewStages.removeValue(forKey: projectID)
+        } else {
+            chatPreviewStages[projectID] = next
+        }
+        applyProjectStructureChange(projectID)
+    }
+
+    /// What a project's disclosure row is offering, or nil when its chats fit the page or the
+    /// preview is off. Beside `presentedRowKeys` for the same reason: a test reads the production
+    /// node rather than re-deriving the stage.
+    func presentedChatPreview(ofProjectID projectID: ProjectID) -> SidebarChatPreview? {
+        projectNodesByID[projectID]?.chatDisclosureNode?.preview
     }
 
     /// Where a row is now, or nil when nothing is showing it.
@@ -2743,7 +2830,9 @@ extension ProjectSidebarViewController {
             requestSessionPresentation(sessionID, requiresVisibleRow: false)
             return
         }
-        guard let node = sessionNode(for: sessionID) else { return }
+        guard let node = sessionNode(for: sessionID) ?? revealPreviewedSession(sessionID) else {
+            return
+        }
 
         // Expand the whole chain, outermost first, so each level's children are loaded before
         // the next is asked for. The chain used to be spelled out here as repository →
@@ -3248,6 +3337,104 @@ private extension ProjectSidebarViewController {
         sessionNodesByID[sessionID]
     }
 
+    // MARK: Chat Preview
+
+    /// The chats no project's preview may cut, whatever its stage: the selected one, so a rebuild
+    /// never removes the row it is about to restore the selection to — plus one a caller is about
+    /// to select.
+    private func sessionIDsToReveal(including extra: SessionID? = nil) -> Set<SessionID> {
+        var revealed = Set<SessionID>()
+        if let selected = selectedNode()?.sessionID ?? projectStore.selectedSessionID {
+            revealed.insert(selected)
+        }
+        if let extra { revealed.insert(extra) }
+        return revealed
+    }
+
+    private func chatPreviewStage(for projectID: ProjectID) -> SidebarChatPreviewStage {
+        chatPreviewStages[projectID] ?? .compact
+    }
+
+    /// Keeps a stage a reveal raised. Without it the chats opened to show a selection would fold
+    /// away at the next unrelated rebuild once the selection moved on; only the disclosure row
+    /// folds a project back.
+    private func recordChatPreviewStage(of projectNode: ProjectNode) {
+        guard let stage = projectNode.chatDisclosureNode?.preview.stage,
+              stage.rawValue > chatPreviewStage(for: projectNode.projectID).rawValue
+        else { return }
+        chatPreviewStages[projectNode.projectID] = stage
+    }
+
+    /// The presented project whose preview is hiding this chat, or nil when the chat is on a page,
+    /// in no presented project, or excluded for another reason (archived, snoozed).
+    private func previewedProjectNode(owningHiddenSessionID sessionID: SessionID) -> ProjectNode? {
+        guard let projectID = projectStore.project(forSessionID: sessionID)?.id,
+              let projectNode = projectNodesByID[projectID],
+              projectNode.chatDisclosureNode?.preview.hiddenSessionIDs.contains(sessionID) == true
+        else { return nil }
+        return projectNode
+    }
+
+    /// Opens a project's preview just far enough to show one chat, for a caller selecting a chat
+    /// past it — a notification, search, or the window restoring its last session.
+    private func revealPreviewedSession(_ sessionID: SessionID) -> SessionNode? {
+        guard let projectNode = previewedProjectNode(owningHiddenSessionID: sessionID) else {
+            return nil
+        }
+        let optionValues = NativeSidebarPipelineOptions.current
+        let factSnapshot = registeredFactSnapshot(for: optionValues)
+        presentedFactSnapshot = factSnapshot
+        applyProjectStructureChange(
+            projectNode.projectID,
+            optionValues: optionValues,
+            factSnapshot: factSnapshot,
+            revealing: sessionID
+        )
+        return sessionNode(for: sessionID)
+    }
+
+    /// Hands a rebuild's disclosure content to the rows on screen when the tree kept its shape —
+    /// a chat arriving or leaving past the page changes the row's words, not the rows. Bounded by
+    /// the projects, since a disclosure row is always its project's last child.
+    private func adoptChatDisclosureContent(from rebuilt: [NSObject]) {
+        let noSubstitution = SidebarNodeSubstitution(nodesByRebuilt: [:])
+        for root in rebuilt {
+            let projects = (root as? RepoGroupNode)?.projectNodes
+                ?? [root as? ProjectNode].compactMap { $0 }
+            for project in projects {
+                guard let rebuiltDisclosure = project.chatDisclosureNode,
+                      let presented = nodesByKey[rebuiltDisclosure.sidebarKey]
+                          as? ChatDisclosureNode
+                else { continue }
+                presented.adoptContent(of: rebuiltDisclosure, substituting: noSubstitution)
+            }
+        }
+    }
+
+    /// What the chats past a preview are doing that the user would want to know about.
+    ///
+    /// Walks the running sessions rather than the hidden ones: a chat with no process is dormant
+    /// by definition, so the live set is the whole answer, and it is bounded by process retention
+    /// where a project's hidden chats are not bounded at all.
+    private func hiddenChatActivity(
+        of preview: SidebarChatPreview
+    ) -> SidebarChatDisclosureRowView.HiddenActivity {
+        var activity = SidebarChatDisclosureRowView.HiddenActivity()
+        let runtime = AgentRuntime.shared
+        for sessionID in runtime.runningSessionIDs
+        where preview.hiddenSessionIDs.contains(sessionID) {
+            switch runtime.activity(sessionID: sessionID) {
+            case .needsAttention, .awaitingUser, .limitReached:
+                activity.attentionCount += 1
+            case .working:
+                activity.workingCount += 1
+            case .dormant, .idle, .readyWithBackgroundWork:
+                break
+            }
+        }
+        return activity
+    }
+
     /// The row a context menu action applies to: a hover button's pinned row, else the
     /// clicked row, else the selected row.
     private func contextRow() -> Int? {
@@ -3593,6 +3780,19 @@ private extension ProjectSidebarViewController {
         ))
     }
 
+    /// The chat preview, beside the compact tree: both decide how much of the list is drawn
+    /// rather than what comes first.
+    private func chatPreviewEntry(
+        _ optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: L10n.string("Show Five Chats per Project"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.chatPreview),
+            isSelected: optionValues.chatPreview,
+            onChoose: { NativeSidebarPipelineOptions.toggleChatPreview() }
+        ))
+    }
+
     /// One order as a checkable row; the chosen one carries the check.
     private func orderEntry(
         _ order: SidebarSessionOrder,
@@ -3656,15 +3856,7 @@ private extension ProjectSidebarViewController {
     }
 
     private func sessionOrderChosen(_ order: SidebarSessionOrder) {
-        let hadRegisteredSort = NativeSidebarPipelineOptions.current.sortByFact != nil
-        NativeSidebarPipelineOptions.setSessionOrder(order)
-        if hadRegisteredSort {
-            NativeSidebarPipelineOptions.setSessionOrderReversed(false)
-        }
-        NativeSidebarPipelineOptions.setRegisteredFactSelection(nil, for: .sortByFact)
-        if !hadRegisteredSort {
-            NotificationCenter.default.post(ProjectsDidChange())
-        }
+        NativeSidebarPipelineOptions.chooseSessionOrder(order)
     }
 
     private func groupByNoneChosen() {
@@ -3694,8 +3886,7 @@ private extension ProjectSidebarViewController {
     }
 
     private func sessionOrderDirectionChosen(_ isReversed: Bool) {
-        NativeSidebarPipelineOptions.setSessionOrderReversed(isReversed)
-        NotificationCenter.default.post(ProjectsDidChange())
+        NativeSidebarPipelineOptions.chooseSessionOrderReversed(isReversed)
     }
 }
 
@@ -3776,6 +3967,13 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if item is TerminalNode {
             let cell = dequeueCell(SidebarIdentifiers.terminalCell) { ProjectTerminalRowView() }
+            return apply(item, to: cell) ? cell : nil
+        }
+
+        if item is ChatDisclosureNode {
+            let cell = dequeueCell(SidebarIdentifiers.chatDisclosureCell) {
+                SidebarChatDisclosureRowView()
+            }
             return apply(item, to: cell) ? cell : nil
         }
 
@@ -3894,6 +4092,23 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
             return true
         }
 
+        if let disclosure = item as? ChatDisclosureNode,
+           let cell = view as? SidebarChatDisclosureRowView {
+            guard let project = projectStore.project(withID: disclosure.projectID) else {
+                return false
+            }
+            let projectID = disclosure.projectID
+            cell.configure(
+                with: disclosure.preview,
+                hiddenActivity: hiddenChatActivity(of: disclosure.preview),
+                projectName: project.name
+            )
+            cell.onPress = { [weak self] in
+                self?.advanceChatPreview(ofProjectID: projectID)
+            }
+            return true
+        }
+
         if let sessionNode = item as? SessionNode, let cell = view as? SessionRowView {
             guard let session = projectStore.session(withID: sessionNode.sessionID) else {
                 return false
@@ -3922,7 +4137,9 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
     /// Clickable rows highlight under the pointer; group headings do not, since they only
     /// respond at their disclosure triangle.
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        if item is ProjectNode || item is SessionNode || item is TerminalNode {
+        // The disclosure row takes the same hover capsule: the whole row is its press.
+        if item is ProjectNode || item is SessionNode || item is TerminalNode
+            || item is ChatDisclosureNode {
             return SidebarHoverRowView()
         }
 
@@ -3998,6 +4215,8 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
     /// Chats and terminals open their page; projects open the composer. Repository headings group
     /// their checkouts and select nothing themselves.
+    /// The chat preview's disclosure row selects nothing either: it is a button, and a selection
+    /// moving onto it would take the pane away from the chat the user is reading.
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         item is SessionNode || item is TerminalNode || item is ProjectNode
     }
@@ -4123,7 +4342,9 @@ extension ProjectSidebarViewController {
             entries = projectMenuEntries(row: row)
         } else if let group = item as? BranchGroupNode {
             entries = branchHeadingMenuEntries(for: group.branch)
-        } else if item is RegisteredFactGroupNode {
+        } else if item is RegisteredFactGroupNode || item is ChatDisclosureNode {
+            // The disclosure row is the arrangement's own output, so its right-click is where
+            // the preview is switched off or the order changed.
             entries = arrangementMenuEntries()
         } else if let node = item as? SessionNode,
                   let session = projectStore.session(withID: node.sessionID) {
@@ -4669,6 +4890,7 @@ enum SidebarIdentifiers {
     static let branchCell = NSUserInterfaceItemIdentifier("SidebarBranchCell")
     static let sessionCell = NSUserInterfaceItemIdentifier("SidebarSessionCell")
     static let terminalCell = NSUserInterfaceItemIdentifier("SidebarTerminalCell")
+    static let chatDisclosureCell = NSUserInterfaceItemIdentifier("SidebarChatDisclosureCell")
 }
 
 // MARK: - ProjectSidebarViewControllerDelegate
@@ -4778,6 +5000,7 @@ extension ProjectSidebarViewController {
             groupByEntry(groupBy, optionValues: optionValues),
             loneBranchHeadingsEntry(optionValues),
             compactTreeEntry(optionValues),
+            chatPreviewEntry(optionValues),
             .separator,
             sortByEntry(sortBy, optionValues: optionValues),
             .separator,

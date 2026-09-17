@@ -168,6 +168,7 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "sidebarSessionOrderIsReversed",
                 valueType: .boolean
             ),
+            .previewsSidebarChats: .init(key: "previewsSidebarChats", valueType: .boolean),
             .nativeSidebarGroupByFact: .init(
                 key: "nativeSidebarGroupByFact",
                 valueType: .string
@@ -477,9 +478,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 86)
+        XCTAssertEqual(authoredRows.count, 89)
 #else
-        XCTAssertEqual(authoredRows.count, 85)
+        XCTAssertEqual(authoredRows.count, 88)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -505,6 +506,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         }
         XCTAssertEqual(actual["general"], [
             "New sessions use", "Name sessions after the agent's own title",
+            "Sort sessions by", "Sort direction", "Show five chats per project",
             "Group sessions by branch", "Compact tree", "Follow the checkout's branch",
             "Discover project icons", "Discover account avatars", "Claude sessions start in",
             "Codex sessions start in", "Before the task you write",

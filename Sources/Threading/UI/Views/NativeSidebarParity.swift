@@ -6,6 +6,7 @@ enum NativeSidebarOptionDependency: String, CaseIterable, Sendable {
     case branchGrouping
     case loneBranchHeadings
     case compactTree
+    case chatPreview
     case groupByFact
     case sortByFact
 }
@@ -22,6 +23,9 @@ enum NativeSidebarHostDependency: String, CaseIterable, Sendable {
     case clock
     case visibilityScope
     case transientExclusion
+    /// How far the user has opened each project's chat preview, and the chats that must stay
+    /// revealed whatever the stage — the selected one. Interaction state, never session data.
+    case transientDisclosure
     case customizationPresentation
     case identityPresentation
     case registeredFactResolution
@@ -50,6 +54,7 @@ enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
     case branchGrouping = "AppSettings.groupsSessionsByBranch"
     case loneBranchHeadings = "AppSettings.groupsLoneBranches"
     case compactTree = "AppSettings.compactsSidebarTree"
+    case chatPreview = "AppSettings.previewsSidebarChats"
     case groupByFact = "AppSettings.nativeSidebarGroupByFact"
     case sortByFact = "AppSettings.nativeSidebarSortByFact"
 }
@@ -61,9 +66,13 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case rootVisibility = "SidebarTreeBuilder.rootNodes.visibility"
     case rootExclusions = "SidebarTreeBuilder.rootNodes.excludingSessionIDs"
     case rootClock = "SidebarTreeBuilder.rootNodes.date"
+    case rootChatPreviewStages = "SidebarTreeBuilder.rootNodes.chatPreviewStages"
+    case rootRevealedSessions = "SidebarTreeBuilder.rootNodes.revealingSessionIDs"
     case projectNodeIdentity = "SidebarTreeBuilder.projectNode.projectID"
     case projectNodeVisibility = "SidebarTreeBuilder.projectNode.visibility"
     case projectNodeExclusions = "SidebarTreeBuilder.projectNode.excludingSessionIDs"
+    case projectNodeChatPreviewStage = "SidebarTreeBuilder.projectNode.chatPreviewStage"
+    case projectNodeRevealedSessions = "SidebarTreeBuilder.projectNode.revealingSessionIDs"
     case rootFactSnapshot = "SidebarTreeBuilder.rootNodes.factSnapshot"
     case projectNodeFactSnapshot = "SidebarTreeBuilder.projectNode.factSnapshot"
     case repositoryIdentity = "GitInfo.repositoryIdentity"
@@ -90,6 +99,7 @@ enum NativeSidebarParity {
         .branchGrouping: .branchGrouping,
         .loneBranchHeadings: .loneBranchHeadings,
         .compactTree: .compactTree,
+        .chatPreview: .chatPreview,
         .groupByFact: .groupByFact,
         .sortByFact: .sortByFact,
     ]
@@ -102,6 +112,7 @@ enum NativeSidebarParity {
         .branchGrouping: .branchGrouping,
         .loneBranchHeadings: .loneBranchHeadings,
         .compactTree: .compactTree,
+        .chatPreview: .chatPreview,
         .groupByFact: .groupByFact,
         .sortByFact: .sortByFact,
     ]
@@ -114,9 +125,13 @@ enum NativeSidebarParity {
         .rootVisibility: .visibilityScope,
         .rootExclusions: .transientExclusion,
         .rootClock: .clock,
+        .rootChatPreviewStages: .transientDisclosure,
+        .rootRevealedSessions: .transientDisclosure,
         .projectNodeIdentity: .entityIdentity,
         .projectNodeVisibility: .visibilityScope,
         .projectNodeExclusions: .transientExclusion,
+        .projectNodeChatPreviewStage: .transientDisclosure,
+        .projectNodeRevealedSessions: .transientDisclosure,
         .rootFactSnapshot: .registeredFactResolution,
         .projectNodeFactSnapshot: .registeredFactResolution,
         .repositoryIdentity: .localRepositoryContext,

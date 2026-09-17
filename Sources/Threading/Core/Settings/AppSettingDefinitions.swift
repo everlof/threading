@@ -26,6 +26,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case followsCheckoutBranch
     case sidebarSessionOrder
     case sidebarSessionOrderIsReversed
+    case previewsSidebarChats
     case nativeSidebarGroupByFact
     case nativeSidebarSortByFact
     case promptReturnKey
@@ -698,7 +699,7 @@ enum AppSettingDefinitions {
         identity: .restoresLastSession,
         persistenceKey: "restoresLastSession",
         absence: .registered(true),
-        presentations: [row("general", 13, "Startup", "Reopen the last session at launch",
+        presentations: [row("general", 16, "Startup", "Reopen the last session at launch",
                             ["relaunch", "restore", "startup"])]
     )
     static let restoresRunningSessions = AppSettingDescriptor<Bool>(
@@ -711,7 +712,7 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestorePolicy",
         absence: .legacy(.restoresRunningSessions),
         validation: .allowedStrings(Set(SessionRestorePolicy.allCases.map(\.rawValue))),
-        presentations: [row("general", 14, "Session Processes", "Bring back at launch",
+        presentations: [row("general", 17, "Session Processes", "Bring back at launch",
                             ["reopen", "resume automatically", "running at quit", "restore"])]
     )
     static let sessionRestoreWindowDays = AppSettingDescriptor<Int>(
@@ -719,7 +720,7 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestoreWindowDays",
         absence: .registered(SessionRestoreDefaults.windowDays),
         validation: .range((SessionRestoreDefaults.windowDayChoices.first ?? 1)...(SessionRestoreDefaults.windowDayChoices.last ?? 30)),
-        presentations: [row("general", 15, "Session Processes", "Stop idle agents after",
+        presentations: [row("general", 18, "Session Processes", "Stop idle agents after",
                             ["recently used", "days", "dormant", "process retention"])]
     )
     static let sessionRestoreLimit = AppSettingDescriptor<Int>(
@@ -727,7 +728,7 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestoreLimit",
         absence: .registered(SessionRestoreDefaults.limit),
         validation: .range((SessionRestoreDefaults.limitChoices.first ?? 4)...(SessionRestoreDefaults.limitChoices.last ?? 32)),
-        presentations: [row("general", 16, "Session Processes", "Keep idle agents running",
+        presentations: [row("general", 19, "Session Processes", "Keep idle agents running",
                             ["restore limit", "process limit", "warm agents"])]
     )
     static let newChatOpeningPrefix = AppSettingDescriptor<String>(
@@ -736,7 +737,7 @@ enum AppSettingDefinitions {
         absence: .emptyString,
         validation: .maximumBytes(1_048_576),
         encoding: .removeEmpty,
-        presentations: [row("general", 9, "Opening Message", "Before the task you write",
+        presentations: [row("general", 12, "Opening Message", "Before the task you write",
                             ["first message", "instructions", "opening message", "prefix",
                              "prepend"])]
     )
@@ -748,7 +749,7 @@ enum AppSettingDefinitions {
         absence: .emptyString,
         validation: .maximumBytes(1_048_576),
         encoding: .removeEmpty,
-        presentations: [row("general", 10, "Opening Message", "After the task you write",
+        presentations: [row("general", 13, "Opening Message", "After the task you write",
                             ["first message", "instructions", "opening message", "suffix",
                              "append", "add to every new chat"])]
     )
@@ -770,7 +771,7 @@ enum AppSettingDefinitions {
         identity: .hiddenNotices,
         persistenceKey: "hiddenNotices",
         absence: .emptyCollection,
-        presentations: [row("general", 17, "Confirmations", "Hidden extension messages",
+        presentations: [row("general", 20, "Confirmations", "Hidden extension messages",
                             ["notices"])]
     )
     static let closingConfirmationMigration = AppSettingDescriptor<Bool>(
@@ -791,7 +792,7 @@ enum AppSettingDefinitions {
         identity: .groupsSessionsByBranch,
         persistenceKey: "groupsSessionsByBranch",
         absence: .registered(true),
-        presentations: [row("general", 2, "Sessions", "Group sessions by branch", ["branch"])]
+        presentations: [row("general", 5, "Sessions", "Group sessions by branch", ["branch"])]
     )
     static let groupsLoneBranches = AppSettingDescriptor<Bool>(
         identity: .groupsLoneBranches,
@@ -802,26 +803,39 @@ enum AppSettingDefinitions {
         identity: .compactsSidebarTree,
         persistenceKey: "compactsSidebarTree",
         absence: .falseValue,
-        presentations: [row("general", 3, "Sessions", "Compact tree",
+        presentations: [row("general", 6, "Sessions", "Compact tree",
                             ["indentation", "sidebar density"])]
     )
     static let followsCheckoutBranch = AppSettingDescriptor<Bool>(
         identity: .followsCheckoutBranch,
         persistenceKey: "followsCheckoutBranch",
         absence: .registered(true),
-        presentations: [row("general", 4, "Sessions", "Follow the checkout's branch",
+        presentations: [row("general", 7, "Sessions", "Follow the checkout's branch",
                             ["branch", "checkout"])]
     )
+    /// Recent activity by default — the order the iPhone app lists chats in — so the chat
+    /// worked on last is at the top of its project on both. The raw value is the persisted wire.
     static let sidebarSessionOrder = AppSettingDescriptor<String>(
         identity: .sidebarSessionOrder,
         persistenceKey: "sidebarSessionOrder",
-        absence: .fallback("manual"),
-        validation: .allowedStrings(Set(SidebarSessionOrder.allCases.map(\.rawValue)))
+        absence: .fallback("recentActivity"),
+        validation: .allowedStrings(Set(SidebarSessionOrder.allCases.map(\.rawValue))),
+        presentations: [row("general", 2, "Sessions", "Sort sessions by",
+                            ["order", "sort", "recent", "newest", "sidebar"])]
     )
     static let sidebarSessionOrderIsReversed = AppSettingDescriptor<Bool>(
         identity: .sidebarSessionOrderIsReversed,
         persistenceKey: "sidebarSessionOrderIsReversed",
-        absence: .falseValue
+        absence: .falseValue,
+        presentations: [row("general", 3, "Sessions", "Sort direction",
+                            ["reverse", "invert", "newest first", "oldest first"])]
+    )
+    static let previewsSidebarChats = AppSettingDescriptor<Bool>(
+        identity: .previewsSidebarChats,
+        persistenceKey: "previewsSidebarChats",
+        absence: .registered(true),
+        presentations: [row("general", 4, "Sessions", "Show five chats per project",
+                            ["collapse", "show more", "long projects", "sidebar"])]
     )
     static let nativeSidebarGroupByFact = AppSettingDescriptor<String>(
         identity: .nativeSidebarGroupByFact,
@@ -850,14 +864,14 @@ enum AppSettingDefinitions {
         identity: .discoversProjectIcons,
         persistenceKey: "discoversProjectIcons",
         absence: .registered(true),
-        presentations: [row("general", 5, "Sessions", "Discover project icons",
+        presentations: [row("general", 8, "Sessions", "Discover project icons",
                             ["project icons", "favicon"])]
     )
     static let discoversAccountAvatars = AppSettingDescriptor<Bool>(
         identity: .discoversAccountAvatars,
         persistenceKey: "discoversAccountAvatars",
         absence: .registered(true),
-        presentations: [row("general", 6, "Sessions", "Discover account avatars",
+        presentations: [row("general", 9, "Sessions", "Discover account avatars",
                             ["account avatars", "Gravatar"])]
     )
     static let harmonizesTerminalBackgrounds = AppSettingDescriptor<Bool>(
@@ -888,7 +902,7 @@ enum AppSettingDefinitions {
         identity: .notifiesOnAttention,
         persistenceKey: "notifiesOnAttention",
         absence: .registered(true),
-        presentations: [row("general", 18, "Notifications", "Notify when a session needs you",
+        presentations: [row("general", 21, "Notifications", "Notify when a session needs you",
                             ["notifications", "alerts", "needs attention"])]
     )
     static let disabledAttentionAlerts = AppSettingDescriptor<[String]>(
@@ -906,14 +920,14 @@ enum AppSettingDefinitions {
         identity: .attentionAlertSound,
         persistenceKey: "attentionAlertSound",
         absence: .systemDefault,
-        presentations: [row("general", 19, "Notifications", "Alert sound",
+        presentations: [row("general", 22, "Notifications", "Alert sound",
                             ["sound", "alerts", "notifications"])]
     )
     static let terminalBellSound = AppSettingDescriptor<String>(
         identity: .terminalBellSound,
         persistenceKey: "terminalBellSound",
         absence: .systemDefault,
-        presentations: [row("general", 21, "Terminal Bell", "Bell sound",
+        presentations: [row("general", 24, "Terminal Bell", "Bell sound",
                             ["bell", "beep", "terminal bell", "alert sound"])]
     )
     static let soundEventChoices = AppSettingDescriptor<[String: String]>(
@@ -922,9 +936,9 @@ enum AppSettingDefinitions {
         absence: .emptyCollection,
         encoding: .removeEmpty,
         presentations: [
-            row("general", 20, "Notifications", "Sounds for each alert",
+            row("general", 23, "Notifications", "Sounds for each alert",
                 ["custom sounds", "per-event sounds", "customize events", "override"]),
-            row("general", 22, "Terminal Bell", "Sounds for each bell",
+            row("general", 25, "Terminal Bell", "Sounds for each bell",
                 ["custom sounds", "beep", "override"])
         ]
     )
@@ -942,7 +956,7 @@ enum AppSettingDefinitions {
         identity: .silencesAllSounds,
         persistenceKey: "silencesAllSounds",
         absence: .falseValue,
-        presentations: [row("general", 23, "Silence", "Silence every sound",
+        presentations: [row("general", 26, "Silence", "Silence every sound",
                             ["silence", "silence sounds", "mute"])]
     )
 
@@ -955,14 +969,14 @@ enum AppSettingDefinitions {
         identity: .includesAttachmentsOutsideProject,
         persistenceKey: "includesAttachmentsOutsideProject",
         absence: .falseValue,
-        presentations: [row("general", 11, "Attachments",
+        presentations: [row("general", 14, "Attachments",
                             "Include files outside the project", ["attachments"])]
     )
     static let capturesPageBeforeAgentActions = AppSettingDescriptor<Bool>(
         identity: .capturesPageBeforeAgentActions,
         persistenceKey: "capturesPageBeforeAgentActions",
         absence: .falseValue,
-        presentations: [row("general", 12, "Attachments",
+        presentations: [row("general", 15, "Attachments",
                             "Keep the page as it was before each agent action",
                             ["attachments", "browser"])]
     )
@@ -1080,14 +1094,14 @@ enum AppSettingDefinitions {
         identity: .reportsClaudeLifecycleEvents,
         persistenceKey: "reportsClaudeLifecycleEvents",
         absence: .registered(true),
-        presentations: [row("general", 26, "Claude Hooks",
+        presentations: [row("general", 29, "Claude Hooks",
                             "Report Claude turn and subagent activity", ["hooks"])]
     )
     static let installsCodexHooks = AppSettingDescriptor<Bool>(
         identity: .installsCodexHooks,
         persistenceKey: "installsCodexHooks",
         absence: .falseValue,
-        presentations: [row("general", 29, "Codex Hooks", "Report Codex turn boundaries",
+        presentations: [row("general", 32, "Codex Hooks", "Report Codex turn boundaries",
                             ["Codex hooks", "hooks.json"])]
     )
     static let readsClaudeLoginFromKeychain = AppSettingDescriptor<Bool>(
@@ -1101,21 +1115,21 @@ enum AppSettingDefinitions {
         identity: .suppressesClaudeStatusLine,
         persistenceKey: "suppressesClaudeStatusLine",
         absence: .falseValue,
-        presentations: [row("general", 27, "Claude Hooks",
+        presentations: [row("general", 30, "Claude Hooks",
                             "Hide Claude's status line in Threading terminals", ["status line"])]
     )
     static let bypassesCodexHookTrust = AppSettingDescriptor<Bool>(
         identity: .bypassesCodexHookTrust,
         persistenceKey: "bypassesCodexHookTrust",
         absence: .falseValue,
-        presentations: [row("general", 30, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
+        presentations: [row("general", 33, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
     )
     static let claudeRemoteControl = AppSettingDescriptor<String>(
         identity: .claudeRemoteControl,
         persistenceKey: "claudeRemoteControl",
         absence: .fallback("followClaude"),
         validation: .allowedStrings(Set(ClaudeRemoteControl.allCases.map(\.rawValue))),
-        presentations: [row("general", 25, "Claude Remote Control",
+        presentations: [row("general", 28, "Claude Remote Control",
                             "Remote Control for new Claude sessions",
                             ["Claude Remote Control", "claude.ai", "mobile"])]
     )
@@ -1124,7 +1138,7 @@ enum AppSettingDefinitions {
         persistenceKey: "claudeTerminalRenderer",
         absence: .fallback("terminalScrollback"),
         validation: .allowedStrings(Set(ClaudeTerminalRenderer.allCases.map(\.rawValue))),
-        presentations: [row("general", 28, "Claude Terminal",
+        presentations: [row("general", 31, "Claude Terminal",
                             "Scrolling in new Claude terminals",
                             ["fullscreen", "alternate screen", "scrollback", "virtual scroll"])]
     )
@@ -1133,7 +1147,7 @@ enum AppSettingDefinitions {
         persistenceKey: "claudeStartupSpeed",
         absence: .fallback("agentSetting"),
         validation: .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
-        presentations: [row("general", 7, "Conversation Speed", "Claude sessions start in",
+        presentations: [row("general", 10, "Conversation Speed", "Claude sessions start in",
                             ["fast mode", "standard mode", "credits", "conversation speed"])]
     )
     static let codexStartupSpeed = AppSettingDescriptor<String>(
@@ -1141,7 +1155,7 @@ enum AppSettingDefinitions {
         persistenceKey: "codexStartupSpeed",
         absence: .fallback("agentSetting"),
         validation: .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
-        presentations: [row("general", 8, "Conversation Speed", "Codex sessions start in",
+        presentations: [row("general", 11, "Conversation Speed", "Codex sessions start in",
                             ["service tier", "credits", "conversation speed"])]
     )
     static let defaultPermissionMode = AppSettingDescriptor<String>(
@@ -1149,7 +1163,7 @@ enum AppSettingDefinitions {
         persistenceKey: "defaultPermissionMode",
         absence: .inherit,
         validation: .allowedStrings(Set(AgentPermissionMode.allCases.map(\.rawValue))),
-        presentations: [row("general", 24, "Permission Mode", "New sessions start in",
+        presentations: [row("general", 27, "Permission Mode", "New sessions start in",
                             ["permission mode", "ask before"])]
     )
 
@@ -1358,14 +1372,14 @@ enum AppSettingDefinitions {
         validation: .allowedStrings(
             Set(UpdateChannelSubscription.allCases.map(\.rawValue)).union([""])
         ),
-        presentations: [row("general", 31, "Software Updates", "Updates you receive",
+        presentations: [row("general", 34, "Software Updates", "Updates you receive",
                             ["beta", "channel", "prerelease", "nightly", "updates"])]
     )
     static let automaticUpdateChecksEnabled = AppSettingDescriptor<Bool>(
         identity: .automaticUpdateChecksEnabled,
         persistenceKey: "automaticUpdateChecksEnabled",
         absence: .registered(true),
-        presentations: [row("general", 32, "Software Updates",
+        presentations: [row("general", 35, "Software Updates",
                             "Check for updates automatically", [
                                 "updates", "Sparkle", "agent", "CLI", "Claude", "Codex",
                                 "Grok", "OpenCode", "Cursor"
@@ -1436,7 +1450,8 @@ enum AppSettingDefinitions {
         .init(closingConfirmationMigration), .init(usesAgentTitleInSidebar),
         .init(groupsSessionsByBranch), .init(groupsLoneBranches), .init(compactsSidebarTree),
         .init(followsCheckoutBranch), .init(sidebarSessionOrder),
-        .init(sidebarSessionOrderIsReversed), .init(nativeSidebarGroupByFact),
+        .init(sidebarSessionOrderIsReversed), .init(previewsSidebarChats),
+        .init(nativeSidebarGroupByFact),
         .init(nativeSidebarSortByFact), .init(promptReturnKey),
         .init(discoversProjectIcons), .init(discoversAccountAvatars),
         .init(harmonizesTerminalBackgrounds), .init(convertsDroppedImages),

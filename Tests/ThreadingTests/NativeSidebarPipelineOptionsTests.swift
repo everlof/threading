@@ -15,6 +15,7 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
                 "branch-grouping",
                 "lone-branch-headings",
                 "compact-tree",
+                "chat-preview",
             ]
         )
         XCTAssertTrue(
@@ -25,11 +26,12 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
         XCTAssertEqual(
             declarations.map(\.control.defaultValue),
             [
-                .string("order-added"),
+                .string("recent-activity"),
                 .bool(false),
                 .bool(true),
                 .bool(true),
                 .bool(false),
+                .bool(true),
             ]
         )
 
@@ -101,7 +103,8 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
             sessionOrderReversed: true,
             branchGrouping: false,
             loneBranchHeadings: true,
-            compactTree: true
+            compactTree: true,
+            chatPreview: true
         )
 
         XCTAssertEqual(
@@ -112,6 +115,7 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
                 "branch-grouping": .bool(false),
                 "lone-branch-headings": .bool(true),
                 "compact-tree": .bool(true),
+                "chat-preview": .bool(true),
             ]
         )
         for declaration in NativeSidebarPipelineOptions.declarations {
@@ -140,6 +144,52 @@ final class NativeSidebarPipelineOptionsTests: XCTestCase {
             NativeSidebarPipelineOptions.current.jsonValues["session-order"],
             .string("recent-activity")
         )
+    }
+
+    /// With nothing chosen, the Mac lists a project's chats the way the iPhone app does: the
+    /// most recently used first, five at a time.
+    func testAnUnchosenArrangementMatchesTheIPhoneApp() {
+        let defaults = UserDefaults.standard
+        let keys = ["sidebarSessionOrder", "sidebarSessionOrderIsReversed", "previewsSidebarChats"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previous {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        keys.forEach(defaults.removeObject(forKey:))
+
+        let values = NativeSidebarPipelineOptions.current
+        XCTAssertEqual(values.sessionOrder, .recentActivity)
+        XCTAssertFalse(values.sessionOrderReversed)
+        XCTAssertTrue(values.chatPreview)
+    }
+
+    /// Choosing an order from Settings or the Sort menu gives a registered fact sort way and lands
+    /// on the order's natural direction; choosing a direction keeps the order.
+    func testChoosingAnOrderClearsAFactSortAndItsReversal() {
+        let defaults = UserDefaults.standard
+        let keys = ["sidebarSessionOrder", "sidebarSessionOrderIsReversed", "nativeSidebarSortByFact"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previous {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(
+            NativeSidebarPipelineOptions.registeredFactWire(ExtensionFactKey(id: "probe.rank")),
+            forKey: "nativeSidebarSortByFact"
+        )
+        defaults.set(true, forKey: "sidebarSessionOrderIsReversed")
+
+        NativeSidebarPipelineOptions.chooseSessionOrder(.name)
+        XCTAssertEqual(NativeSidebarPipelineOptions.current.sessionOrder, .name)
+        XCTAssertNil(NativeSidebarPipelineOptions.current.sortByFact)
+        XCTAssertFalse(NativeSidebarPipelineOptions.current.sessionOrderReversed)
+
+        NativeSidebarPipelineOptions.chooseSessionOrderReversed(true)
+        XCTAssertEqual(NativeSidebarPipelineOptions.current.sessionOrder, .name)
+        XCTAssertTrue(NativeSidebarPipelineOptions.current.sessionOrderReversed)
     }
 
     func testRegisteredFactSelectionHasAValidatedStableRoundTrip() {

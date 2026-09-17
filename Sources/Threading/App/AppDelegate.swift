@@ -2545,6 +2545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.groupByBranch, action: #selector(toggleBranchGrouping)))
         menu.addItem(commandItem(AppCommands.ID.loneBranchHeadings, action: #selector(toggleLoneBranchHeadings)))
         menu.addItem(commandItem(AppCommands.ID.compactTree, action: #selector(toggleCompactTree)))
+        menu.addItem(commandItem(AppCommands.ID.chatPreview, action: #selector(toggleChatPreview)))
 
         menu.addItem(.separator())
 
@@ -2892,6 +2893,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         if menuItem.action == #selector(toggleCompactTree) {
             menuItem.state = NativeSidebarPipelineOptions.compactTree ? .on : .off
+            return true
+        }
+        if menuItem.action == #selector(toggleChatPreview) {
+            menuItem.state = NativeSidebarPipelineOptions.chatPreview ? .on : .off
             return true
         }
         // The silence gate carries state too, and it is always available: it needs no window,
@@ -3335,6 +3340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             NativeSidebarPipelineOptions.toggleLoneBranchHeadings()
             NotificationCenter.default.post(ProjectsDidChange())
         case AppCommands.ID.compactTree: NativeSidebarPipelineOptions.toggleCompactTree()
+        case AppCommands.ID.chatPreview: NativeSidebarPipelineOptions.toggleChatPreview()
         // No extra post: the setter's own settings event is what the sidebar's footer control
         // and the Settings row both follow, which is what keeps the three surfaces one state.
         case AppCommands.ID.silenceSounds: AppSettings.shared.silencesAllSounds.toggle()
@@ -3882,6 +3888,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // what the sidebar re-lays out on. See `ProjectSidebarViewController.applyTreeDensity`.
     @MainActor @objc private func toggleCompactTree() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.compactTree)
+    }
+
+    // The preview decides which rows exist, so its toggle rebuilds the tree itself.
+    @MainActor @objc private func toggleChatPreview() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.chatPreview)
     }
 
     @MainActor @objc private func toggleSilenceSounds() {

@@ -137,6 +137,7 @@ enum AppCommands {
         static let groupByBranch = "view.groupByBranch"
         static let loneBranchHeadings = "view.loneBranchHeadings"
         static let compactTree = "view.compactTree"
+        static let chatPreview = "view.chatPreview"
         static let newTerminalTab = "view.terminal"
         static let browser = "view.browser"
         static let files = "view.files"
@@ -284,6 +285,12 @@ enum AppCommands {
         AppCommand(id: ID.compactTree, group: .view, title: "Compact Tree",
                    detail: "Starts every sidebar row at the same edge, separating projects "
                        + "with spacing and a rule instead of indentation.",
+                   defaultShortcut: nil, isEditable: true),
+        // No default chord either, for the same reason: how much of a project the list shows is
+        // a standing preference, and "Show 5 more" is the in-the-moment control.
+        AppCommand(id: ID.chatPreview, group: .view, title: "Show Five Chats per Project",
+                   detail: "Ends each project's chat list after five chats with Show 5 more, "
+                       + "the way the iPhone app does.",
                    defaultShortcut: nil, isEditable: true),
         // ⌘T for the terminal, which is what T means everywhere else. The browser keeps ⇧⌘B
         // rather than taking ⌘T from it.
