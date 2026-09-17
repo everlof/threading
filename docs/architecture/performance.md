@@ -5294,3 +5294,23 @@ settings fixture in 40 ms and revoked one grant in 11 ms. The two-grant case ret
 controls and revoked in 2 ms; its first mount included cold framework initialization (118 ms),
 so those mount timings are not a before/after speed comparison. The regression boundary is
 viewport-sized control ownership and exact per-chat revocation, not a machine-specific timing.
+
+## Panel commands and hidden-project projection (2026-09-17)
+
+Panel discovery expects a handful of installed bundles and is bounded at 32 results and 256
+inspected directory entries. App activation and palette opening coalesce into one background
+scan; search, menu construction and validation consume cached URL/title values. The registry
+retains only extension panel identities and titles, not their semantic view trees. Existing
+palette filtering stays cancellable with at most 100 results and viewport-owned cells.
+
+Native sidebar project visibility expects tens to hundreds of projects. Its stress test projects
+25,000 value records before any sidebar-node construction. Changing Show Hidden Projects is
+O(projects); hidden projects construct no session rows. Incremental events for a hidden project
+are rejected through store indexes before any tree rebuild. Human-input auto-unhide uses the
+session index and only writes while the owning project is hidden; subsequent keystrokes are O(1)
+checks with no persistence. `ProjectVisibilityTests` covers both visibility modes in the shipping
+shell and measures five stress hide/show pairs separately from fixture construction.
+
+The focused Debug run on 2026-09-17 measured 35.03 ms for five 25,000-project hide/show
+pairs (7.01 ms per pair), excluding value construction. This is a projection cost, not a
+whole-sidebar render or a Release launch measurement. All visibility assertions passed.

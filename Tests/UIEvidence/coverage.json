@@ -1389,7 +1389,8 @@
         "Command list and inline shortcuts",
         "Filtered session target input",
         "Shortcut recording",
-        "Refresh Models action"
+        "Refresh Models action",
+        "Browser panel commands"
       ],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
@@ -1691,6 +1692,41 @@
       },
       "capture": {
         "glob": "share-chat-grants-*.png"
+      }
+    },
+    {
+      "id": "hidden-projects",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Hidden projects and sidebar actions",
+      "description": "Hidden project filtering and the Settings-leading, icon-actions-trailing footer in the shipping main window.",
+      "states": [
+        "Hidden projects excluded",
+        "Hidden projects shown",
+        "Narrow sidebar footer"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Swiss Minimalist"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "260-point sidebar in a 1120×720 main window"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ProjectVisibilityTests.swift",
+        "test": "ThreadingTests/ProjectVisibilityTests/testRendersHiddenProjectsAndFooterInShippingShell"
+      },
+      "capture": {
+        "glob": "hidden-projects-*.png"
       }
     }
   ]

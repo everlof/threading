@@ -383,6 +383,13 @@ nothing about it — read [`plugins.md`](docs/architecture/plugins.md) before to
 for code we sign; it does not replace the safe tier, and an install review has to say plainly which
 one a thing is.
 
+## Command-first actions
+
+User-invokable actions use the command registry by default, so the command palette and editable
+shortcuts can reach them. Menus and buttons invoke the same host operation. Register a stable
+identity even when no default shortcut is assigned; panel contributions register automatically.
+See [control-plane.md](docs/architecture/control-plane.md#frontend-neutral-interactive-host-operations).
+
 ## Code Style Guidelines
 
 **Fix the root cause each time, no band-aids.**

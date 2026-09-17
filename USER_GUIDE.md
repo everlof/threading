@@ -5719,3 +5719,20 @@ directory of the account that created them:
 
 Removing a project or deleting a session in Threading never deletes these files.
 It does delete that session's Threading-owned execution ledger, including its rotated segments.
+
+### Panel commands and hidden projects
+
+Every action in the display panel's **+** menu is available in the command palette, including
+**iOS Simulator**, **Device logs**, **Execution audit**, **New Browser**, **Private Browser**,
+**Overview**, **Compare Files…**, installed plugin panels and enabled extension panels. Assign
+shortcuts in the palette or **Settings → Keyboard**. **Browser** reveals an existing browser;
+**New Browser** adds a tab.
+
+Choose **Hide Project** from a project's menu to remove it from the native sidebar. Its chats and
+running work stay intact. The eye button beside mute toggles **Show Hidden Projects**; while shown,
+use **Show Project** on its menu to restore it permanently. These actions also have palette commands.
+In **Settings → General → Sessions**, enable **Unhide projects when writing in their chats** to
+restore a hidden project when you type in one of its chats (off by default).
+
+The sidebar footer keeps **Settings** on the left and the icon-only **Triggers**, mute and
+hidden-project controls on the right.

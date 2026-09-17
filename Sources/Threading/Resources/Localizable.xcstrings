@@ -12034,6 +12034,23 @@
         }
       }
     },
+    "Close a browser tab before opening another." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close a browser tab before opening another."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng en webbläsarflik innan du öppnar en till."
+          }
+        }
+      }
+    },
     "Close comparison" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12988,6 +13005,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Jämför"
+          }
+        }
+      }
+    },
+    "Compare Files…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compare Files…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jämför filer…"
           }
         }
       }
@@ -21598,6 +21632,23 @@
         }
       }
     },
+    "Hide Hidden Projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide Hidden Projects"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dölj dolda projekt"
+          }
+        }
+      }
+    },
     "Hide Layout Shifts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21616,6 +21667,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Göm övriga"
+          }
+        }
+      }
+    },
+    "Hide Project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide Project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dölj projekt"
           }
         }
       }
@@ -21693,6 +21761,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dölj vitrymme"
+          }
+        }
+      }
+    },
+    "Hide/Show Project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide/Show Project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dölj/visa projekt"
           }
         }
       }
@@ -27023,6 +27108,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avbryter aldrig — vägrar allt som skulle kräva godkännande."
+          }
+        }
+      }
+    },
+    "New Browser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New Browser"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny webbläsare"
           }
         }
       }
@@ -38560,6 +38662,23 @@
         }
       }
     },
+    "Select a manager chat first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a manager chat first."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en chefchatt först."
+          }
+        }
+      }
+    },
     "Select a project first." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40224,6 +40343,23 @@
         }
       }
     },
+    "Show Hidden Projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Hidden Projects"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa dolda projekt"
+          }
+        }
+      }
+    },
     "Show Layout Shifts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40242,6 +40378,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa alternativ"
+          }
+        }
+      }
+    },
+    "Show Project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa projekt"
           }
         }
       }
@@ -40788,6 +40941,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa “%@” i %@?"
+          }
+        }
+      }
+    },
+    "Show/Hide Hidden Projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show/Hide Hidden Projects"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa/dölj dolda projekt"
           }
         }
       }
@@ -49590,6 +49760,23 @@
         }
       }
     },
+    "This panel could not be opened." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This panel could not be opened."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Panelen kunde inte öppnas."
+          }
+        }
+      }
+    },
     "This permanently clears cookies, caches, local storage, IndexedDB, service workers, and other WebKit data for this site. WebKit groups subdomains under their parent site, so related subdomains may also be signed out.\n\nThe current document stays loaded until it is reloaded or navigated." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51977,6 +52164,23 @@
         }
       }
     },
+    "Typing in a hidden project's chat makes the project visible again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typing in a hidden project's chat makes the project visible again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När du skriver i ett dolt projekts chatt blir projektet synligt igen."
+          }
+        }
+      }
+    },
     "Ultra" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52105,6 +52309,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ångra det senaste meddelandet"
+          }
+        }
+      }
+    },
+    "Unhide projects when writing in their chats" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unhide projects when writing in their chats"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa projekt när du skriver i deras chattar"
           }
         }
       }

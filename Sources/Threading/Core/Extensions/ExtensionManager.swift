@@ -2286,7 +2286,8 @@ final class ExtensionManager:
                     CommandRegistry.shared.replaceExtensionCommands(
                         extensionIdentifier: identifier,
                         extensionName: localization.string(bundle.manifest.name),
-                        commands: localizedRegistration.commands
+                        commands: localizedRegistration.commands,
+                        panels: localizedRegistration.panels
                     )
                     self.statuses[identifier] = .running(
                         commands: started.registration.commands.count,

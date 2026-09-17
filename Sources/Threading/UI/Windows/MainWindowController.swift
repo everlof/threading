@@ -1431,6 +1431,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Appended last, so it takes divider index 1 and leaves the toolbar's tracking separator
     /// — which is bound to divider 0, between sidebar and terminal — undisturbed.
     private func setupDisplayPane() {
+        displayPaneController.onInvokePanelCommand = { id in
+            (NSApp.delegate as? AppDelegate)?.invokePanelCommand(id)
+        }
         displayPaneController.onClose = { [weak self] in
             self?.setDisplayPaneVisible(false)
         }
@@ -4179,7 +4182,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 {
                     continue
                 }
-                if commandID == AppCommands.ID.revokeManager,
+                if (commandID == AppCommands.ID.revokeManager || commandID == PanelCommands.supervision.id),
                    !ControlGrantStore.shared.isManager(session.id)
                 {
                     continue
@@ -4280,6 +4283,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Opens a shell in the display pane. Unlike the others this *adds* one every time, which is
     /// the point — the browser and the review answer a question with one answer, while a second
     /// shell is a thing people actually want.
+    func performPanelCommand(_ target: PanelCommandTarget, title: String) -> Bool {
+        guard let sessionID = currentSessionID else { return false }
+        window?.makeKeyAndOrderFront(nil)
+        displayPaneController.showSessionTabs(sessionID)
+        setDisplayPaneVisible(true)
+        return displayPaneController.performPanelCommand(target, title: title, for: sessionID)
+    }
+
     func showTerminalTab() {
         window?.makeKeyAndOrderFront(nil)
 

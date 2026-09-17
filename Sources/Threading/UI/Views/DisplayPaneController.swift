@@ -459,155 +459,103 @@ final class DisplayPaneController: NSViewController {
   /// Not private: the entries are the menu's contract and are asserted directly, since presenting
   /// one needs a window on screen.
   func newTabEntries(for sessionID: SessionID) -> [ThemedMenuEntry] {
-    let canAddBrowser =
-      tabs(for: sessionID).lazy.filter { $0.browser != nil }.count
-      < DisplayPaneDefaults.maximumBrowserTabs
-
-    var choices: [(String, String, String?, Bool, () -> Void)] = [
-      (
-        "Terminal", "terminal", AppCommands.ID.newTerminalTab, true,
-        {
-          [weak self] in _ = self?.addTerminalTab(for: sessionID)
-        }
-      ),
-      (
-        L10n.string("iOS Simulator"), "iphone", nil, true,
-        {
-          [weak self] in _ = self?.activateSimulator(for: sessionID)
-        }
-      ),
-      (
-        L10n.string("Device logs"), "list.bullet.rectangle", nil, true,
-        {
-          [weak self] in _ = self?.activateDeviceLog(for: sessionID)
-        }
-      ),
-      (
-        L10n.string("Execution audit"), "checklist.checked", nil, canAddBrowser,
-        {
-          [weak self] in _ = self?.addAuditTab(for: sessionID)
-        }
-      ),
-      (
-        "Browser", "globe", nil, canAddBrowser,
-        {
-          [weak self] in _ = self?.addBrowserTab(for: sessionID)
-        }
-      ),
-      (
-        "Private Browser", "hand.raised.fill", nil, canAddBrowser,
-        {
-          [weak self] in
-          _ = self?.addBrowserTab(for: sessionID, contextKind: .private)
-        }
-      ),
-      (
-        L10n.string("Overview"), "rectangle.grid.1x2", nil, true,
-        {
-          [weak self] in _ = self?.activateOverview(for: sessionID)
-        }
-      ),
-      (
-        "Review", "plus.forwardslash.minus", AppCommands.ID.review, true,
-        {
-          [weak self] in _ = self?.activateReview(for: sessionID)
-        }
-      ),
-      (
-        "Compare Files…", "rectangle.on.rectangle", nil, true,
-        {
-          [weak self] in self?.chooseFilesToCompare(for: sessionID)
-        }
-      ),
-      (
-        "Attachments", "paperclip", AppCommands.ID.attachments, true,
-        {
-          [weak self] in _ = self?.activateAttachments(for: sessionID)
-        }
-      ),
-    ]
-    // Installed native plugins, listed by name. The enumeration is shallow and capped by the
-    // catalogue, and this runs when the menu opens rather than on every render.
-    for bundle in NativePluginCatalog.installedBundles()
-    where bundle.deletingPathExtension().lastPathComponent != "DeviceLogsPlugin" {
-      let name = bundle.deletingPathExtension().lastPathComponent
-      choices.append(
-        (
-          name, "puzzlepiece.extension", nil, true,
-          {
-            [weak self] in _ = self?.activateNativePlugin(bundleURL: bundle, for: sessionID)
-          }
-        )
-      )
-    }
+    var choices = PanelCommands.entries
     if ControlGrantStore.shared.isManager(sessionID) {
-      choices.insert(
-        (
-          L10n.string("Chats"), "person.3", nil, true,
-          { [weak self] in _ = self?.activateSupervision(for: sessionID) }
-        ),
-        at: 0
-      )
+      choices.insert(PanelCommands.supervision, at: 0)
     }
-    var entries = choices.map { title, symbol, commandID, isEnabled, action in
-      ThemedMenuEntry.item(
-        ThemedMenuItem(
-          title: title,
-          shortcut: commandID.flatMap {
-            ShortcutOverrideStore.shared.shortcut(forID: $0)
-          },
-          image: ThemedMenuIcon.symbol(symbol),
-          representedValue: commandID,
-          isEnabled: isEnabled,
-          onChoose: action
-        ))
+    var entries = choices.map { entry in
+      panelCommandEntry(id: entry.id, title: L10n.string(entry.title), icon: entry.icon,
+                        target: entry.target, sessionID: sessionID)
+    }
+    for command in CommandRegistry.shared.panelCommands {
+      guard case .nativePlugin = command.panelTarget else { continue }
+      entries.append(panelCommandEntry(id: command.id, title: command.title,
+                                      icon: "puzzlepiece.extension", target: command.panelTarget,
+                                      sessionID: sessionID))
     }
     if MCPToolCatalog.hasEnabledThemeTools {
       entries.append(.separator)
-      entries.append(
-        .item(
-          ThemedMenuItem(
-            title: L10n.string("Current Theme"),
-            shortcut: ShortcutOverrideStore.shared.shortcut(
-              forID: AppCommands.ID.currentTheme
-            ),
-            image: ThemedMenuIcon.symbol("paintbrush.pointed"),
-            onChoose: { [weak self] in
-              guard let self else { return }
-              // The window's route also uncollapses the panel and leaves Settings, neither of
-              // which this controller can see. Showing directly is the standalone fallback.
-              if let onShowCurrentTheme {
-                onShowCurrentTheme()
-              } else {
-                showCurrentTheme()
-              }
-            }
-          )))
+      entries.append(panelCommandEntry(id: AppCommands.ID.currentTheme,
+                                      title: L10n.string("Current Theme"), icon: "paintbrush.pointed",
+                                      target: nil, sessionID: sessionID))
     }
-
     let contributedPanels = extensionPanels.extensionPanelInventory
     if !contributedPanels.isEmpty {
       entries.append(.separator)
-      entries.append(
-        contentsOf: contributedPanels.map { item in
-          ThemedMenuEntry.item(
-            ThemedMenuItem(
-              title: item.panel.title,
-              subtitle: item.extensionName,
-              image: ThemedMenuIcon.symbol("puzzlepiece.extension"),
-              onChoose: { [weak self] in
-                _ = self?.activateExtensionPanel(
-                  extensionIdentifier: item.extensionIdentifier,
-                  panelID: item.panel.id,
-                  title: item.panel.title,
-                  for: sessionID
-                )
-              }
-            ))
-        })
+      entries.append(contentsOf: contributedPanels.map { item in
+        panelCommandEntry(
+          id: PanelCommands.extensionPanelID(identifier: item.extensionIdentifier, panelID: item.panel.id),
+          title: item.panel.title, icon: "puzzlepiece.extension",
+          target: .extensionPanel(identifier: item.extensionIdentifier, panelID: item.panel.id),
+          sessionID: sessionID, subtitle: item.extensionName)
+      })
     }
-
     return entries
+  }
+
+  /// The real window routes through the host plane; standalone fixtures use the same panel
+  /// operation without needing to construct an application delegate.
+  var onInvokePanelCommand: ((String) -> Void)?
+
+  private func panelCommandEntry(
+    id: String, title: String, icon: String, target: PanelCommandTarget?,
+    sessionID: SessionID, subtitle: String? = nil
+  ) -> ThemedMenuEntry {
+    .item(ThemedMenuItem(
+      title: title, subtitle: subtitle,
+      shortcut: ShortcutOverrideStore.shared.shortcut(forID: id),
+      image: ThemedMenuIcon.symbol(icon), representedValue: id,
+      isEnabled: target.map { panelCommandRefusal($0, for: sessionID) == nil } ?? true,
+      onChoose: { [weak self] in
+        guard let self else { return }
+        if let onInvokePanelCommand { onInvokePanelCommand(id); return }
+        if let target { _ = performPanelCommand(target, title: title, for: sessionID); return }
+        switch id {
+        case AppCommands.ID.newTerminalTab: _ = addTerminalTab(for: sessionID)
+        case AppCommands.ID.review: _ = activateReview(for: sessionID)
+        case AppCommands.ID.attachments: _ = activateAttachments(for: sessionID)
+        case AppCommands.ID.currentTheme:
+          if let onShowCurrentTheme { onShowCurrentTheme() } else { showCurrentTheme() }
+        default: break
+        }
+      }))
+  }
+
+  func panelCommandRefusal(_ target: PanelCommandTarget, for sessionID: SessionID) -> String? {
+    switch target {
+    case .browser, .privateBrowser, .audit:
+      let tabs = tabs(for: sessionID)
+      if target == .audit, tabs.contains(where: { $0.audit != nil }) { return nil }
+      let count = sessionBrowserCount?(sessionID) ?? tabs.lazy.filter { $0.browser != nil }.count
+      if count >= DisplayPaneDefaults.maximumBrowserTabs {
+        return L10n.string("Close a browser tab before opening another.")
+      }
+    case .supervision:
+      if !ControlGrantStore.shared.isManager(sessionID) {
+        return L10n.string("Select a manager chat first.")
+      }
+    default: break
+    }
+    return nil
+  }
+
+  @discardableResult
+  func performPanelCommand(_ target: PanelCommandTarget, title: String, for sessionID: SessionID) -> Bool {
+    guard panelCommandRefusal(target, for: sessionID) == nil else { return false }
+    switch target {
+    case .simulator: return activateSimulator(for: sessionID) != nil
+    case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
+    case .audit: return addAuditTab(for: sessionID) != nil
+    case .browser: return addBrowserTab(for: sessionID) != nil
+    case .privateBrowser: return addBrowserTab(for: sessionID, contextKind: .private) != nil
+    case .overview: return activateOverview(for: sessionID) != nil
+    case .compare: chooseFilesToCompare(for: sessionID); return view.window != nil
+    case .supervision: return activateSupervision(for: sessionID) != nil
+    case .nativePlugin(let url): return activateNativePlugin(bundleURL: url, for: sessionID) != nil
+    case .extensionPanel(let identifier, let panelID):
+      return activateExtensionPanel(extensionIdentifier: identifier, panelID: panelID,
+                                    title: title, for: sessionID) != nil
+    }
   }
 
   private func setupTabBar() {
@@ -946,8 +894,7 @@ final class DisplayPaneController: NSViewController {
       if sessionID == currentSessionID { render() }
       return audit
     }
-    guard tabs.lazy.filter({ $0.browser != nil }).count < DisplayPaneDefaults.maximumBrowserTabs
-    else { return nil }
+    guard panelCommandRefusal(.audit, for: sessionID) == nil else { return nil }
 
     let controller = makeAudit(for: sessionID)
     let tab = DisplayTab(body: .audit(controller))

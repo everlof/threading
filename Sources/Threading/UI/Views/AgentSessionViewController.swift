@@ -1737,6 +1737,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didReceiveUserInput input: TerminalUserInput) {
+        ProjectStore.shared.noteUserWriting(in: sessionID)
         activityTracker.noteUserInput(submitsLine: input.submitsLine)
     }
 

@@ -1272,6 +1272,28 @@ final class ProjectStore {
         return .applied
     }
 
+    @discardableResult
+    func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        guard projects[index].isHidden != hidden else { return .unchanged }
+        projects[index].isHidden = hidden
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .structure)
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: .structure)
+        return .applied
+    }
+
+    /// Called only at human input boundaries, never from provider output or draft restoration.
+    /// The indexed lookup is O(1); after the first write subsequent keystrokes do no persistence.
+    func noteUserWriting(in sessionID: SessionID) {
+        guard AppSettings.shared.unhidesProjectsOnWriting,
+              let location = locate(sessionID: sessionID),
+              projects[location.projectIndex].isHidden else { return }
+        setProjectHidden(false, projectID: projects[location.projectIndex].id)
+    }
+
     /// The same for a whole checkout.
     @discardableResult
     func setNotificationsMuted(

@@ -54,6 +54,7 @@ final class GeneralPreferencesViewController: NSViewController {
     /// The global silence gate, mirrored. Its storage is the sidebar footer's and the menu
     /// item's — one Boolean, three surfaces — so this row follows the setting rather than only
     /// its own clicks; see `observeSilenceGate`.
+    private let unhideProjectsToggle = ThemedToggle()
     private let silenceToggle = ThemedToggle()
     /// Holds that subscription for the page's lifetime.
     private let appEvents = AppEventObservations()
@@ -213,6 +214,13 @@ final class GeneralPreferencesViewController: NSViewController {
         }
         configureAlertSoundPopUp()
         configureBellSoundPopUp()
+        configure(unhideProjectsToggle, isOn: AppSettings.shared.unhidesProjectsOnWriting,
+                  action: #selector(unhideProjectsChanged))
+        unhideProjectsToggle.setAccessibilityIdentifier("settings.general.unhide-projects-on-writing")
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] change in
+            guard change.affects(AppSettingIdentity.unhidesProjectsOnWriting.rawValue) else { return }
+            self?.unhideProjectsToggle.state = AppSettings.shared.unhidesProjectsOnWriting ? .on : .off
+        }
         configure(silenceToggle,
                   isOn: AppSettings.shared.silencesAllSounds,
                   action: #selector(silenceChanged))
@@ -447,6 +455,11 @@ final class GeneralPreferencesViewController: NSViewController {
                     + "checkout switches — from another session or outside Threading alike. "
                     + "Off, it keeps the branch it last ran on.",
                 control: branchFollowToggle
+            ),
+            SettingsUI.row(
+                title: "Unhide projects when writing in their chats",
+                subtitle: "Typing in a hidden project's chat makes the project visible again.",
+                control: unhideProjectsToggle
             ),
             SettingsUI.row(
                 title: "Discover project icons",
@@ -1403,6 +1416,10 @@ final class GeneralPreferencesViewController: NSViewController {
     /// Writes the same Boolean the footer's speaker and the menu item write, and nothing else:
     /// the gate stores no choice of its own, so both pickers above keep whatever they were set
     /// to while it holds.
+    @objc private func unhideProjectsChanged() {
+        AppSettings.shared.unhidesProjectsOnWriting = unhideProjectsToggle.state == .on
+    }
+
     @objc private func silenceChanged() {
         AppSettings.shared.silencesAllSounds = silenceToggle.state == .on
     }

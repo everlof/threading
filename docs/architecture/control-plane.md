@@ -404,6 +404,16 @@ implementing commands beside it. Invocation enumerates again before dispatch, so
 selection, missing surface, or disabled extension becomes an honest refusal with its current
 reason. `CommandRegistryDidChange` causes an open palette to discard removed extension rows.
 
+**Register user-invokable actions by default.** A menu or button must not be the only way to
+open a durable surface. Give it a stable command identity and route the palette, menu and shortcut
+to the same operation. Unbound commands remain editable; adding a shortcut needs no feature code.
+`PanelCommands` declares the panel menu's fixed actions and their targets. New Browser deliberately
+creates a tab while the existing Browser command reveals one. Native plugin discovery runs a
+bounded background scan at activation and palette opening (32 bundles, 256 inspected directory
+entries); the registry retains only URLs and titles, never plugin views or loaded code. Safe
+extension panels automatically contribute host-owned opening commands with their registration and
+lose them when disabled. Plugin loading and approval remain in the existing host path.
+
 A session-scoped command whose only missing prerequisite is session identity, or an extension
 command that declares semantic project input, additionally carries a `HostCommandInputRequest`.
 Menus still see unavailable state and never present a picker; project-row invocation uses the

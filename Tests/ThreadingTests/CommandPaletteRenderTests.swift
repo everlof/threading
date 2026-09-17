@@ -30,6 +30,7 @@ final class CommandPaletteRenderTests: XCTestCase {
         /// each naming its page and section where a shortcut would otherwise be.
         case settings
         case refreshModels = "refresh-models"
+        case panelActions = "panel-actions"
     }
 
     private struct Variant {
@@ -38,12 +39,18 @@ final class CommandPaletteRenderTests: XCTestCase {
         let appearance: NSAppearance.Name
     }
 
-    func testRendersCommandSessionAndShortcutStatesInTheNativeShell() throws {
+    func testRendersCommandSessionAndShortcutStatesInTheNativeShell() async throws {
         try FileManager.default.createDirectory(
             at: Render.directory,
             withIntermediateDirectories: true
         )
-        defer { AppThemePalette.set(.system) }
+        let priorTheme = AppThemePalette.current
+        let priorMotion = Design.Motion.reduceMotionOverrideForTesting
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer {
+            AppThemePalette.set(priorTheme)
+            Design.Motion.reduceMotionOverrideForTesting = priorMotion
+        }
 
         let variants = [
             Variant(name: "system-light", theme: .system, appearance: .aqua),
@@ -55,8 +62,9 @@ final class CommandPaletteRenderTests: XCTestCase {
         for variant in variants {
             for state in State.allCases {
                 AppThemePalette.set(variant.theme)
+                let rendered = await image(appearance: variant.appearance, state: state)
                 let data = try XCTUnwrap(
-                    image(appearance: variant.appearance, state: state),
+                    rendered,
                     "Could not render \(state.rawValue) under \(variant.name)"
                 )
                 try data.write(to: Render.directory.appendingPathComponent(
@@ -70,9 +78,9 @@ final class CommandPaletteRenderTests: XCTestCase {
         print("Rendered command-palette evidence to \(Render.directory.path)")
     }
 
-    private func image(appearance name: NSAppearance.Name, state: State) -> Data? {
+    private func image(appearance name: NSAppearance.Name, state: State) async -> Data? {
         guard let appearance = NSAppearance(named: name) else { return nil }
-        var data: Data?
+        var presentation: (TitlebarActionWindow, CommandPaletteViewController)?
         appearance.performAsCurrentDrawingAppearance {
             let window = TitlebarActionWindow(
                 contentRect: NSRect(origin: .zero, size: Render.size),
@@ -99,54 +107,63 @@ final class CommandPaletteRenderTests: XCTestCase {
                 )
             )
             controller.present(in: window)
-            drain(until: {
-                controller.visibleCommandIDsForTesting.count
-                    == self.fixtureCommandIDs.count + self.settingsDestinations.count
+            presentation = (window, controller)
+        }
+        guard let (window, controller) = presentation else { return nil }
+        defer { controller.dismiss() }
+        await drain(until: {
+            controller.visibleCommandIDsForTesting.count
+                == self.fixtureCommandIDs.count + self.settingsDestinations.count
+        })
+
+        switch state {
+        case .commands:
+            break
+        case .sessionTarget:
+            controller.confirmSelectionForTesting()
+            await drain(until: { controller.visibleInputIDsForTesting.count == self.sessionOptions.count })
+            controller.setSearchQueryForTesting("web")
+            await drain(until: { controller.visibleInputIDsForTesting == ["beta"] })
+        case .recording:
+            controller.setSearchQueryForTesting("activity")
+            await drain(until: { controller.visibleCommandIDsForTesting == [AppCommands.ID.files] })
+            controller.view.layoutSubtreeIfNeeded()
+            await drain(until: {
+                controller.shortcutRecorderForTesting(commandID: AppCommands.ID.files) != nil
             })
+            guard let recorder = controller.shortcutRecorderForTesting(
+                commandID: AppCommands.ID.files
+            ) else { return nil }
+            _ = recorder.performPrimaryAction()
+            await drain(until: { recorder.isRecording })
+        case .settings:
+            controller.setSearchQueryForTesting("sound")
+            await drain(until: {
+                controller.visibleCommandIDsForTesting.first == AppCommands.ID.silenceSounds
+                    && controller.visibleCommandIDsForTesting.count > 1
+            })
+            // Selected one row down, so the picture carries both halves: the command that
+            // performs the thing on top, and the footer a settings row changes to "Open".
+            controller.moveSelectionForTesting(by: 1)
+        case .panelActions:
+            controller.setSearchQueryForTesting("browser")
+            await drain(until: { controller.visibleCommandIDsForTesting.count == 3 })
+        case .refreshModels:
+            controller.setSearchQueryForTesting("refresh models")
+            await drain(until: {
+                controller.visibleCommandIDsForTesting == [AppCommands.ID.refreshModels]
+            })
+        }
 
-            switch state {
-            case .commands:
-                break
-            case .sessionTarget:
-                controller.confirmSelectionForTesting()
-                drain(until: { controller.visibleInputIDsForTesting.count == self.sessionOptions.count })
-                controller.setSearchQueryForTesting("web")
-                drain(until: { controller.visibleInputIDsForTesting == ["beta"] })
-            case .recording:
-                controller.setSearchQueryForTesting("activity")
-                drain(until: { controller.visibleCommandIDsForTesting == [AppCommands.ID.files] })
-                controller.view.layoutSubtreeIfNeeded()
-                drain(until: {
-                    controller.shortcutRecorderForTesting(commandID: AppCommands.ID.files) != nil
-                })
-                guard let recorder = controller.shortcutRecorderForTesting(
-                    commandID: AppCommands.ID.files
-                ) else { return }
-                _ = recorder.performPrimaryAction()
-                drain(until: { recorder.isRecording })
-            case .settings:
-                controller.setSearchQueryForTesting("sound")
-                drain(until: {
-                    controller.visibleCommandIDsForTesting.first == AppCommands.ID.silenceSounds
-                        && controller.visibleCommandIDsForTesting.count > 1
-                })
-                // Selected one row down, so the picture carries both halves: the command that
-                // performs the thing on top, and the footer a settings row changes to "Open".
-                controller.moveSelectionForTesting(by: 1)
-            case .refreshModels:
-                controller.setSearchQueryForTesting("refresh models")
-                drain(until: {
-                    controller.visibleCommandIDsForTesting == [AppCommands.ID.refreshModels]
-                })
-            }
 
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
             guard let root = window.contentView else { return }
             AppThemeRefresh.repaint(root)
             root.layoutSubtreeIfNeeded()
             guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
             root.cacheDisplay(in: root.bounds, to: rep)
             data = rep.representation(using: .png, properties: [:])
-            controller.dismiss()
         }
         return data
     }
@@ -231,6 +248,9 @@ final class CommandPaletteRenderTests: XCTestCase {
         AppCommands.ID.newSession,
         AppCommands.ID.silenceSounds,
         AppCommands.ID.refreshModels,
+        AppCommands.ID.browser,
+        "panel.browser",
+        "panel.privateBrowser",
     ]
 
     /// Stated here rather than read from `SettingsPages`, so the picture does not change every
@@ -279,11 +299,12 @@ final class CommandPaletteRenderTests: XCTestCase {
         } + settingsDestinations.map { $0.hostDescriptor() }
     }
 
-    private func drain(until condition: () -> Bool, timeout: TimeInterval = 2) {
+    private func drain(until condition: () -> Bool, timeout: TimeInterval = 2,
+                       file: StaticString = #filePath, line: UInt = #line) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            try? await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertTrue(condition(), "command palette evidence state did not settle")
+        XCTAssertTrue(condition(), "command palette evidence state did not settle", file: file, line: line)
     }
 }

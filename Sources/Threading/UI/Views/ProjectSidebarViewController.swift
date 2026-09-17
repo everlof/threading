@@ -142,19 +142,38 @@ final class ProjectSidebarViewController: NSViewController {
         button.action = #selector(settingsClicked)
         return button
     }()
-    private lazy var triggersButton: ThemedButton = {
-        let button = ThemedButton()
-        button.title = L10n.string("Triggers")
-        button.image = NSImage(
-            systemSymbolName: "bolt.badge.clock",
-            accessibilityDescription: L10n.string("Triggers")
-        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-        button.isBordered = false
-        button.applyFont(.controlRegular)
-        button.target = self
-        button.action = #selector(triggersClicked)
+    private lazy var triggersButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: "bolt.badge.clock", accessibility: L10n.string("Triggers"),
+                                      target: .inline, inkSource: .chrome)
+        button.toolTip = L10n.string("Triggers")
+        button.onPress = { (NSApp.delegate as? AppDelegate)?.invokePanelCommand(AppCommands.ID.triggers) }
         return button
     }()
+    private var appliedHiddenProjectsState: Bool?
+    private lazy var hiddenProjectsButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: "eye.slash", accessibility: L10n.string("Show Hidden Projects"),
+                                      target: .inline, inkSource: .chrome)
+        button.setAccessibilityIdentifier("sidebar.show-hidden-projects")
+        button.onPress = { (NSApp.delegate as? AppDelegate)?.invokePanelCommand(AppCommands.ID.showHiddenProjects) }
+        return button
+    }()
+
+    private var visibleProjects: [Project] {
+        ProjectVisibility.visible(projectStore.projects, showHidden: AppSettings.shared.showsHiddenProjects)
+    }
+
+    private func applyHiddenProjectsState() {
+        let shown = AppSettings.shared.showsHiddenProjects
+        guard appliedHiddenProjectsState != shown else { return }
+        let hadState = appliedHiddenProjectsState != nil
+        appliedHiddenProjectsState = shown
+        let title = shown ? L10n.string("Hide Hidden Projects") : L10n.string("Show Hidden Projects")
+        hiddenProjectsButton.setSymbol(shown ? "eye" : "eye.slash", accessibility: title)
+        hiddenProjectsButton.toolTip = title
+        hiddenProjectsButton.isSelected = shown
+        if hadState { reload() }
+    }
+
     /// The global silence gate, at the band's trailing edge.
     ///
     /// The speaker becomes slashed while the gate holds, and the selected surface reinforces
@@ -180,12 +199,10 @@ final class ProjectSidebarViewController: NSViewController {
     /// destinations rather than about controls.
     // A non-release build carries its channel mark beside Settings — see `BuildChannelBadge`.
     private lazy var footer = PaneFooterView(
-        leading: [triggersButton, settingsButton, BuildChannelBadge.make()].compactMap { $0 },
-        trailing: [silenceButton],
-        // A split pane owns its width. The new destination is the footer member whose title
-        // truncates at the narrow floor; without naming that ownership its intrinsic title
-        // outranks the sidebar holding priority and silently raises the floor by twenty points.
-        compressing: triggersButton,
+        leading: [settingsButton, BuildChannelBadge.make()].compactMap { $0 },
+        trailing: [triggersButton, silenceButton, hiddenProjectsButton],
+        // Settings yields title width before the three trailing icon actions lose their targets.
+        compressing: settingsButton,
         margin: .paneEdge
     )
 
@@ -607,6 +624,7 @@ private extension ProjectSidebarViewController {
     /// window's bottom curve, so taking it put the gear two steps inboard of every row above
     /// it. See `PaneBandMargin`.
     private func setupFooter() {
+        applyHiddenProjectsState()
         view.addSubview(footer)
 
         NSLayoutConstraint.activate([
@@ -739,6 +757,7 @@ private extension ProjectSidebarViewController {
             // setting rather than its own press. It repaints only on a real change —
             // `ThemedIconButton.isSelected` guards that for it.
             self?.applySilenceState()
+            self?.applyHiddenProjectsState()
         }
         appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
             self?.refreshRow(sessionID: event.sessionID)
@@ -1038,7 +1057,7 @@ extension ProjectSidebarViewController {
             }
         }
 
-        let projects = projectStore.projects
+        let projects = visibleProjects
         let reloadSpan = PerformanceRecorder.shared.begin(
             "sidebar.reload",
             category: "sidebar",
@@ -1192,7 +1211,7 @@ extension ProjectSidebarViewController {
         guard let presentedProject = projectNodesBySessionID[sessionID],
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: presentedProject.projectID,
-                  from: projectStore.projects,
+                  from: visibleProjects,
                   visibility: sessionVisibility,
                   excludingSessionIDs: optimisticallyArchivedSessionIDs,
                   optionValues: optionValues,
@@ -1269,7 +1288,7 @@ extension ProjectSidebarViewController {
         guard let presentedProject = projectNodesByID[projectID],
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: projectID,
-                  from: projectStore.projects,
+                  from: visibleProjects,
                   visibility: sessionVisibility,
                   excludingSessionIDs: optimisticallyArchivedSessionIDs,
                   optionValues: optionValues,
@@ -2714,6 +2733,16 @@ extension ProjectSidebarViewController {
     }
 
     func select(sessionID: SessionID, notifyDelegate: Bool = true) {
+        if !AppSettings.shared.showsHiddenProjects,
+           projectStore.project(forSessionID: sessionID)?.isHidden == true,
+           projectStore.session(withID: sessionID)?.isArchived == false {
+            guard notifyDelegate else { return }
+            suppressSelectionCallback = true
+            outlineView.deselectAll(nil)
+            suppressSelectionCallback = false
+            requestSessionPresentation(sessionID, requiresVisibleRow: false)
+            return
+        }
         guard let node = sessionNode(for: sessionID) else { return }
 
         // Expand the whole chain, outermost first, so each level's children are loaded before
@@ -2773,7 +2802,7 @@ extension ProjectSidebarViewController {
 
     /// Returns to the event loop before constructing or swapping the session surface. That one
     /// turn lets AppKit paint the selection and start the layer-backed spinner immediately.
-    private func requestSessionPresentation(_ sessionID: SessionID) {
+    private func requestSessionPresentation(_ sessionID: SessionID, requiresVisibleRow: Bool = true) {
         projectStore.selectedSessionID = sessionID
         setSessionLoading(true, reason: .presentation, for: sessionID)
 
@@ -2789,7 +2818,9 @@ extension ProjectSidebarViewController {
             defer { self.setSessionLoading(false, reason: .presentation, for: sessionID) }
 
             guard self.selectionRequestGeneration == generation,
-                  self.selectedNode()?.sessionID == sessionID else { return }
+                  (requiresVisibleRow
+                    ? self.selectedNode()?.sessionID == sessionID
+                    : self.projectStore.selectedSessionID == sessionID) else { return }
             self.delegate?.projectSidebar(self, didSelectSession: sessionID)
         }
     }
@@ -2833,7 +2864,7 @@ extension ProjectSidebarViewController {
             addButton.isHidden = true
             arrangeButton.isHidden = true
             settingsButton.contentTintColor = Design.Text.label
-            triggersButton.contentTintColor = Design.Text.secondary
+            triggersButton.isSelected = false
         } else {
             // The query leaves with the visit that asked it — `SettingsSidebar.resetSearch`
             // says why. Cleared on the way *out* rather than on the way in, so nothing about
@@ -2849,7 +2880,7 @@ extension ProjectSidebarViewController {
     }
 
     func setTriggersMode(_ on: Bool) {
-        triggersButton.contentTintColor = on ? Design.Text.label : Design.Text.secondary
+        triggersButton.isSelected = on
         if on, isSettingsMode { setSettingsMode(false) }
     }
 
@@ -3164,6 +3195,18 @@ private extension ProjectSidebarViewController {
     }
 
     private func projectsDidChange(_ change: ProjectsDidChange) {
+        if !AppSettings.shared.showsHiddenProjects {
+            let projectID: ProjectID?
+            switch change.sidebarImpact {
+            case .projectStructure(let id), .projectRow(let id),
+                 .sessionAdded(let id, _), .sessionRemoved(let id, _),
+                 .sessionStructure(let id, _), .terminalAdded(let id, _): projectID = id
+            case .sessionTitle(let id, _), .sessionRow(let id):
+                projectID = projectStore.project(forSessionID: id)?.id
+            default: projectID = nil
+            }
+            if let projectID, projectStore.project(withID: projectID)?.isHidden == true { return }
+        }
         switch change.sidebarImpact {
         case .structure, .projectRemoved:
             // Archive, add, remove, reorder, branch and grouping changes add, drop or move rows.
@@ -4211,6 +4254,18 @@ extension ProjectSidebarViewController {
             entries.append(projectSoundEntry(for: projectID))
             entries.append(projectChangeRequestEntry(for: projectID))
             entries.append(projectMuteEntry(for: projectID, row: row))
+            let hidden = projectStore.project(withID: projectID)?.isHidden ?? false
+            entries.append(.item(ThemedMenuItem(
+                title: hidden ? L10n.string("Show Project") : L10n.string("Hide Project"),
+                image: ThemedMenuIcon.symbol(hidden ? "eye" : "eye.slash"),
+                representedValue: AppCommands.ID.hideProject,
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    if !projectStore.setProjectHidden(!hidden, projectID: projectID).succeeded {
+                        presentProjectNotice(L10n.string("The project data could not be saved."))
+                    }
+                }
+            )))
             entries.append(projectLimitRecoveryEntry(for: projectID, row: row))
             if let curfew = projectCurfewEntry(for: projectID, row: row) {
                 entries.append(curfew)

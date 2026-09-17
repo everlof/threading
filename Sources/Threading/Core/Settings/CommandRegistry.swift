@@ -15,13 +15,20 @@ struct CommandRegistryDidChange: AppEvent {
 final class CommandRegistry {
     static let shared = CommandRegistry()
 
+    private struct Panel {
+        let id: String
+        let title: String
+    }
+
     private struct ExtensionCommands {
         let name: String
         let commands: [ExtensionCommand]
+        let panels: [Panel]
     }
 
     private let builtInCommands: [AppCommand]
     private var extensions: [String: ExtensionCommands] = [:]
+    private var nativePluginBundles: [URL] = []
     private var projectScripts: [ProjectScript] = []
     private var resolvedCommands: [AppCommand]
 
@@ -35,7 +42,7 @@ final class CommandRegistry {
     }
 
     var extensionCommands: [AppCommand] {
-        resolvedCommands.filter { $0.origin.extensionIdentifier != nil }
+        resolvedCommands.filter { $0.origin.extensionIdentifier != nil && $0.panelTarget == nil }
     }
 
     var projectScriptCommands: [AppCommand] {
@@ -59,11 +66,13 @@ final class CommandRegistry {
     func replaceExtensionCommands(
         extensionIdentifier: String,
         extensionName: String,
-        commands: [ExtensionCommand]
+        commands: [ExtensionCommand],
+        panels: [ExtensionPanel] = []
     ) {
         extensions[extensionIdentifier] = ExtensionCommands(
             name: extensionName,
-            commands: commands
+            commands: commands,
+            panels: panels.map { Panel(id: $0.id, title: $0.title) }
         )
         rebuildAndNotify()
     }
@@ -84,6 +93,15 @@ final class CommandRegistry {
         projectScripts = scripts
         rebuildAndNotify()
     }
+
+    func replaceNativePluginBundles(_ bundles: [URL]) {
+        let bounded = Array(bundles.prefix(32))
+        guard bounded != nativePluginBundles else { return }
+        nativePluginBundles = bounded
+        rebuildAndNotify()
+    }
+
+    var panelCommands: [AppCommand] { resolvedCommands.filter { $0.panelTarget != nil } }
 
     static func qualifiedID(extensionIdentifier: String, commandID: String) -> String {
         "extension.\(extensionIdentifier).\(commandID)"
@@ -145,7 +163,24 @@ final class CommandRegistry {
                     iconName: script.icon
                 )
             }
-        resolvedCommands = builtInCommands + scriptCommands + extensionCommands
+        let nativePanels = nativePluginBundles.filter {
+            $0.deletingPathExtension().lastPathComponent != "DeviceLogsPlugin"
+        }.map { url in
+            AppCommand(id: PanelCommands.nativePluginID(url), group: .view,
+                       title: url.deletingPathExtension().lastPathComponent,
+                       defaultShortcut: nil, isEditable: true, scope: .session,
+                       iconName: "puzzlepiece.extension", panelTarget: .nativePlugin(url))
+        }
+        let extensionPanels = extensions.sorted { $0.key < $1.key }.flatMap { identifier, contribution in
+            contribution.panels.map { panel in
+                AppCommand(id: PanelCommands.extensionPanelID(identifier: identifier, panelID: panel.id),
+                           group: .extensions, title: panel.title, defaultShortcut: nil, isEditable: true,
+                           origin: .extensionCommand(identifier: identifier, name: contribution.name, localID: panel.id),
+                           scope: .session, iconName: "puzzlepiece.extension",
+                           panelTarget: .extensionPanel(identifier: identifier, panelID: panel.id))
+            }
+        }
+        resolvedCommands = builtInCommands + scriptCommands + extensionCommands + nativePanels + extensionPanels
         NotificationCenter.default.post(CommandRegistryDidChange())
     }
 }

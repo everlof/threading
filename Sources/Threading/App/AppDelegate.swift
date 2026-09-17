@@ -2087,6 +2087,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Re-applying beats rebuilding the menu bar: `setupMenuBar` also re-points `NSApp.windowsMenu`
     /// and `NSApp.helpMenu`, and running all of that again to change one character is both more
     /// work and more ways to be wrong.
+    private var panelCommandsMenu: NSMenu?
+    private var panelDiscoveryTask: Task<Void, Never>?
     private var commandItems: [String: NSMenuItem] = [:]
     private var extensionMenu: NSMenu?
     private var projectScriptsSeparator: NSMenuItem?
@@ -2150,6 +2152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.helpMenu = helpMenuItem.submenu
 
         NSApp.mainMenu = mainMenu
+        refreshPanelCommands()
+        menuEvents.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
+            self?.refreshPanelCommands()
+        }
 
         // The menu is built once, so a rebinding has to be pushed into the items that already
         // exist — otherwise a shortcut changed in Settings would not work until the next launch.
@@ -2158,6 +2164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         menuEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
             self?.rebuildExtensionMenus()
+            self?.rebuildPanelCommandsMenu()
         }
         menuEvents.observe(ProjectScriptsDidChange.self) { [weak self] _ in
             self?.rebuildProjectScriptsMenu()
@@ -2165,6 +2172,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menuEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             self?.updateCurrentThemeMenuVisibility()
         }
+    }
+
+    /// One bounded scan per activation; palette searches and menu validation only read values.
+    private func refreshPanelCommands() {
+        guard panelDiscoveryTask == nil else { return }
+        panelDiscoveryTask = Task { [weak self] in
+            let bundles = await Task.detached(priority: .utility) {
+                NativePluginCatalog.installedBundles()
+            }.value
+            guard let self else { return }
+            CommandRegistry.shared.replaceNativePluginBundles(bundles)
+            panelDiscoveryTask = nil
+        }
+    }
+
+    private func rebuildPanelCommandsMenu() {
+        guard let menu = panelCommandsMenu else { return }
+        menu.removeAllItems()
+        for id in Array(commandItems.keys) where id.hasPrefix("panel.") {
+            commandItems.removeValue(forKey: id)
+        }
+        for command in CommandRegistry.shared.panelCommands {
+            let item = commandItem(command.id, action: #selector(performHostMenuCommand(_:)))
+            item.target = self
+            menu.addItem(item)
+        }
+    }
+
+    func invokePanelCommand(_ id: String) {
+        _ = hostCommandPlane.invoke(commandID: id)
     }
 
     private func makeExtensionsMenuItem() -> NSMenuItem {
@@ -2476,6 +2513,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.commandPalette, action: #selector(openCommandPalette)))
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.toggleSidebar, action: #selector(toggleSidebar)))
+        for id in [AppCommands.ID.showHiddenProjects, AppCommands.ID.hideProject, AppCommands.ID.triggers] {
+            let item = commandItem(id, action: #selector(performHostMenuCommand(_:)))
+            item.target = self
+            menu.addItem(item)
+        }
 
         let navigatorMenu = NSMenu(title: L10n.string("Navigator"))
         navigatorMenu.delegate = self
@@ -2510,6 +2552,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // the reasoning for each now sits — ⇧⌘R rather than ⇧⌘G (the platform's Find Previous),
         // ⇧⌘I rather than ⌘I (Get Info) or ⌥⌘I (the element inspector), and ⌃` for the shell,
         // free because ⌘` is the platform's cycle-windows.
+        let panels = NSMenuItem(title: L10n.string("Panels"), action: nil, keyEquivalent: "")
+        let panelMenu = NSMenu(title: panels.title)
+        panelCommandsMenu = panelMenu
+        panels.submenu = panelMenu
+        rebuildPanelCommandsMenu()
+        menu.addItem(panels)
         menu.addItem(commandItem(AppCommands.ID.newTerminalTab, action: #selector(openTerminalTab)))
         menu.addItem(commandItem(AppCommands.ID.browser, action: #selector(openBrowser)))
         menu.addItem(commandItem(AppCommands.ID.files, action: #selector(openFilesTab)))
@@ -3053,6 +3101,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case .project, .session: break
         }
 
+        if let target = command.panelTarget,
+           let sessionID = mainWindowController?.currentSessionID,
+           let reason = mainWindowController?.displayPaneController.panelCommandRefusal(target, for: sessionID) {
+            return .unavailable(reason)
+        }
+
         switch command.id {
         case AppCommands.ID.closeTab:
             guard mainWindowController?.canCloseActiveTab == true else {
@@ -3162,7 +3216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     )
                 }
 
-                if case .extensionCommand = command.origin {
+                if case .extensionCommand = command.origin, command.panelTarget == nil {
                     let context = ExtensionCommandContext(
                         projectID: controller.projectID(forCommandTarget: sessionID)?
                             .uuidString.lowercased(),
@@ -3225,7 +3279,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             )
         }
 
-        if case .extensionCommand = command.origin {
+        if let target = command.panelTarget {
+            guard mainWindowController?.performPanelCommand(target, title: command.title) == true else {
+                return .refused(commandID: id, reason: L10n.string("This panel could not be opened."))
+            }
+            return .invoked(commandID: id)
+        }
+
+        if case .extensionCommand = command.origin, command.panelTarget == nil {
             let context = ExtensionCommandContext(
                 projectID: mainWindowController?.currentProjectID?.uuidString.lowercased(),
                 sessionID: mainWindowController?.currentSessionID?.uuidString.lowercased()
@@ -3288,6 +3349,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()
         case AppCommands.ID.displayPanel: mainWindowController?.toggleDisplayPane()
         case AppCommands.ID.statusCard: mainWindowController?.toggleStatusCard()
+        case AppCommands.ID.showHiddenProjects: AppSettings.shared.showsHiddenProjects.toggle()
+        case AppCommands.ID.hideProject:
+            guard let projectID = mainWindowController?.currentProjectID,
+                  let project = ProjectStore.shared.project(withID: projectID),
+                  ProjectStore.shared.setProjectHidden(!project.isHidden, projectID: projectID).succeeded else {
+                return .refused(commandID: id, reason: L10n.string("The project data could not be saved."))
+            }
+        case AppCommands.ID.triggers: mainWindowController?.showTriggers()
         case AppCommands.ID.currentTheme: mainWindowController?.toggleCurrentTheme()
         case AppCommands.ID.componentGallery: showComponentGalleryImplementation()
         case AppCommands.ID.biggerText: mainWindowController?.increaseFontSize()
@@ -3432,6 +3501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @objc private func showCommandPalette() {
+        refreshPanelCommands()
         guard commandPaletteController == nil, let window = mainWindowController?.window else { return }
         let controller = CommandPaletteViewController(
             catalog: { [weak self] in self?.hostCommandPlane.commands() ?? [] },

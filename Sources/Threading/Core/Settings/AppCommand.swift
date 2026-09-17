@@ -69,6 +69,7 @@ struct AppCommand {
     let menuPlacements: [ExtensionMenuPlacement]
     let extensionInput: ExtensionCommandInput?
     let iconName: String?
+    let panelTarget: PanelCommandTarget?
 
     init(
         id: String,
@@ -82,7 +83,8 @@ struct AppCommand {
         risk: ExtensionCommandRisk = .ordinary,
         menuPlacements: [ExtensionMenuPlacement] = [],
         extensionInput: ExtensionCommandInput? = nil,
-        iconName: String? = nil
+        iconName: String? = nil,
+        panelTarget: PanelCommandTarget? = nil
     ) {
         self.id = id
         self.group = group
@@ -102,6 +104,7 @@ struct AppCommand {
         self.menuPlacements = menuPlacements
         self.extensionInput = extensionInput
         self.iconName = iconName
+        self.panelTarget = panelTarget
     }
 }
 
@@ -145,6 +148,9 @@ enum AppCommands {
         static let shell = "view.shell"
         static let displayPanel = "view.displayPanel"
         static let statusCard = "view.statusCard"
+        static let showHiddenProjects = "view.showHiddenProjects"
+        static let hideProject = "project.hide"
+        static let triggers = "view.triggers"
         static let currentTheme = "view.currentTheme"
         static let componentGallery = "view.componentGallery"
         static let biggerText = "view.biggerText"
@@ -316,6 +322,12 @@ enum AppCommands {
                    defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.statusCard, group: .view, title: "Session Status Card",
                    defaultShortcut: nil, isEditable: true, scope: .session),
+        AppCommand(id: ID.showHiddenProjects, group: .view, title: "Show/Hide Hidden Projects",
+                   defaultShortcut: nil, isEditable: true),
+        AppCommand(id: ID.hideProject, group: .view, title: "Hide/Show Project",
+                   defaultShortcut: nil, isEditable: true, scope: .project),
+        AppCommand(id: ID.triggers, group: .view, title: "Triggers",
+                   defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.currentTheme, group: .view, title: "Current Theme",
                    defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.componentGallery, group: .view, title: "Component Gallery",
@@ -390,7 +402,7 @@ enum AppCommands {
                    isEditable: false)
     }
 
-    static let all: [AppCommand] = editable + fixed
+    static let all: [AppCommand] = editable + PanelCommands.additionalCommands + fixed
 
     static func command(id: String) -> AppCommand? {
         all.first { $0.id == id }

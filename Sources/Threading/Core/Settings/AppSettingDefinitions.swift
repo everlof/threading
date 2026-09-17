@@ -40,6 +40,8 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case attentionAlertSound
     case terminalBellSound
     case soundEventChoices
+    case showsHiddenProjects
+    case unhidesProjectsOnWriting
     case silencesAllSounds
     case disabledAttachmentDetectionAgentKinds
     case includesAttachmentsOutsideProject
@@ -926,6 +928,16 @@ enum AppSettingDefinitions {
                 ["custom sounds", "beep", "override"])
         ]
     )
+    static let showsHiddenProjects = AppSettingDescriptor<Bool>(
+        identity: .showsHiddenProjects, persistenceKey: "showsHiddenProjects", absence: .falseValue
+    )
+    static let unhidesProjectsOnWriting = AppSettingDescriptor<Bool>(
+        identity: .unhidesProjectsOnWriting, persistenceKey: "unhidesProjectsOnWriting",
+        absence: .falseValue,
+        presentations: [row("general", 0, "Sessions", "Unhide projects when writing in their chats",
+                            ["hidden projects", "show hidden", "auto unhide"])]
+    )
+
     static let silencesAllSounds = AppSettingDescriptor<Bool>(
         identity: .silencesAllSounds,
         persistenceKey: "silencesAllSounds",
@@ -1431,7 +1443,7 @@ enum AppSettingDefinitions {
         .init(copiesTerminalSelection), .init(notifiesOnAttention),
         .init(disabledAttentionAlerts), .init(legacyPlaysAttentionAlertSound),
         .init(attentionAlertSound), .init(terminalBellSound), .init(soundEventChoices),
-        .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
+        .init(showsHiddenProjects), .init(unhidesProjectsOnWriting), .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(sessionCheckoutAuthorityPolicy),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),

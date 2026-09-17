@@ -1329,3 +1329,19 @@ memory; checks the central-directory CRC; and validates dimensions with ImageIO 
 and normalizing the result. `PLEDIT`, transport, equalizer, playlist, cursor, and executable
 content are ignored. This is why drag-and-drop can share exactly the same importer as the open
 panel without becoming a second security path.
+
+### Project visibility and sidebar footer actions
+
+Settings and the build-channel mark occupy the leading footer run. Triggers, mute and the
+Show Hidden Projects toggle are icon controls in the trailing run. Each has an accessible name,
+hover help and a registered, rebindable command. Settings yields title width at narrow sizes.
+
+Project Hide/Show changes `Project.isHidden`, persisted in its existing JSON row. Hidden projects
+are filtered before the native sidebar builds nodes; Show Hidden Projects includes them again.
+Hiding preserves sessions, processes, notifications and project ownership. It applies
+to native sidebar navigation, not to agent project access or replacement extension navigators.
+The General setting “Unhide projects when writing in their chats” defaults off. Human native
+composer edits, accepted remote prompts and terminal input consult it through an indexed store
+lookup; provider output, loading a draft and merely visiting a chat do not unhide it. Only the
+first input while hidden writes the project row. Hidden-project incremental events are ignored
+by the native sidebar until the visibility flag changes.

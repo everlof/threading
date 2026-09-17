@@ -504,6 +504,16 @@ final class AppSettings {
     ///
     /// It persists across relaunch, which a hidden state could not honestly do: the speaker at
     /// the sidebar's foot is worn while it holds, so a quiet app is explicable from the window.
+    var showsHiddenProjects: Bool {
+        get { AppSettingDefinitions.showsHiddenProjects.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.showsHiddenProjects.write(newValue, to: defaults) }
+    }
+
+    var unhidesProjectsOnWriting: Bool {
+        get { AppSettingDefinitions.unhidesProjectsOnWriting.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.unhidesProjectsOnWriting.write(newValue, to: defaults) }
+    }
+
     var silencesAllSounds: Bool {
         get { AppSettingDefinitions.silencesAllSounds.read(from: defaults) ?? false }
         set {

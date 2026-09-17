@@ -400,6 +400,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
         prompt.onChange = { [weak self, weak prompt] text in
             guard let self, let prompt else { return }
+            if !text.isEmpty { ProjectStore.shared.noteUserWriting(in: self.sessionID) }
             SessionContinuityStore.shared.setConversationDraft(
                 text,
                 context: prompt.contextAttachments,
@@ -2304,7 +2305,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         context: [ConversationContextAttachment] = [],
         authorization: RemoteAuthorization
     ) -> Bool {
-        submit(text, context: context, authorization: authorization)
+        let accepted = submit(text, context: context, authorization: authorization)
+        if accepted { ProjectStore.shared.noteUserWriting(in: sessionID) }
+        return accepted
     }
 
     /// A prompt the app composed on the user's behalf — the sidebar's "Rename with Agent".
