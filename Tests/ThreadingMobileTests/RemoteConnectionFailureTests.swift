@@ -1,4 +1,5 @@
 import Darwin
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 import XCTest
 @testable import ThreadingMobile
@@ -862,6 +863,19 @@ final class RemoteRESTErrorTests: XCTestCase {
         XCTAssertEqual(
             MobileDiagnostics.errorCode(future),
             "remote.refusal.futureGuard"
+        )
+    }
+
+    /// A phone away from home refused because the Mac was not connected to the hosted service
+    /// recorded `other.8`, and reading it took compiling the enum.
+    func testHostedRendezvousRefusalsAreNamedInDiagnostics() {
+        XCTAssertEqual(
+            MobileDiagnostics.errorCode(PeerRendezvousError.hostOffline),
+            "rendezvous.hostOffline"
+        )
+        XCTAssertEqual(
+            MobileDiagnostics.errorCode(PeerRendezvousError.service("https://x.test/#secret")),
+            "rendezvous.service"
         )
     }
 

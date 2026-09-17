@@ -12,6 +12,38 @@ public enum PeerRendezvousBounds {
     public static let maximumSessionLifetime: TimeInterval = 5 * 60
 }
 
+/// How the Mac's long-lived control socket proves it still reaches the rendezvous service.
+///
+/// A socket nobody writes to cannot tell a quiet service from a dead path. After a sleep, a Wi-Fi
+/// hop or a VPN going away, `URLSessionWebSocketTask.receive()` simply never returns: nothing
+/// fails, the Mac goes on reporting Hosted Direct as ready, and the service answers every phone
+/// with `hostOffline`. On 2026-09-17 a phone was refused that way at 06:33, 06:38 and 07:15, hours
+/// after the Mac woke at 04:50, with nothing logged on the Mac, because only the daily credential
+/// renewal ever replaced the socket. So the Mac asks, and an unanswered question is a lost
+/// connection.
+///
+/// The messages are the service's own: `HostRendezvous` registers them as a WebSocket
+/// auto-response, which answers without waking the Durable Object and without the message ever
+/// reaching the envelope parser. They are text frames, never envelopes, and the socket consumes
+/// the answer itself. `rendezvousKeepaliveStaleMilliseconds` in the service's `BOUNDS` is derived
+/// from `interval` and `answerDeadline`; change them together.
+public struct PeerRendezvousKeepalive: Equatable, Sendable {
+    public static let pingMessage = "threading-ping"
+    public static let pongMessage = "threading-pong"
+    public static let standard = PeerRendezvousKeepalive(interval: 25, answerDeadline: 10)
+
+    /// How long the socket may go without being asked. Also short enough to keep an idle NAT
+    /// mapping between the Mac and the service open.
+    public let interval: TimeInterval
+    /// How long an asked question may go unanswered before the connection counts as lost.
+    public let answerDeadline: TimeInterval
+
+    public init(interval: TimeInterval, answerDeadline: TimeInterval) {
+        self.interval = interval
+        self.answerDeadline = answerDeadline
+    }
+}
+
 public enum PeerRendezvousKind: String, Codable, Sendable {
     case hostHello
     case hostReady
@@ -305,5 +337,32 @@ extension PeerRendezvousError: LocalizedError {
         case .connectionClosed:
             return "The hosted rendezvous connection closed."
         }
+    }
+}
+
+extension PeerRendezvousError {
+    /// A bounded machine token for a diagnostic record: `rendezvous.hostOffline`.
+    ///
+    /// Without it a report carries what `NSError` bridging makes of the enum, and a phone refused
+    /// because the Mac was not connected recorded `other.8` — an answer nobody could read without
+    /// compiling the enum to find its eighth tag. Never the payload: `service` carries text the
+    /// service chose.
+    public var diagnosticCode: String {
+        let name: String
+        switch self {
+        case .invalidEndpoint: name = "invalidEndpoint"
+        case .invalidCredential: name = "invalidCredential"
+        case .invalidEnvelope: name = "invalidEnvelope"
+        case .unsupportedVersion: name = "unsupportedVersion"
+        case .invalidExpiry: name = "invalidExpiry"
+        case .envelopeTooLarge: name = "envelopeTooLarge"
+        case .unauthorized: name = "unauthorized"
+        case .hostOffline: name = "hostOffline"
+        case .sessionExpired: name = "sessionExpired"
+        case .timedOut: name = "timedOut"
+        case .service: name = "service"
+        case .connectionClosed: name = "connectionClosed"
+        }
+        return "rendezvous.\(name)"
     }
 }

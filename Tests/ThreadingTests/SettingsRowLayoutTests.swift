@@ -308,6 +308,122 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
     }
 
+    // MARK: - Beside or beneath
+
+    /// Remote Access's Connection card in a narrow pane: a three-way choice beside a sentence left
+    /// the words a hundred points, so the title read "Keep this…" and the sentence ran four words
+    /// a line. The row now puts the control under its words instead, and the words keep the row.
+    func testAWideControlGoesUnderItsWordsWhenTheyWouldLoseTheirMeasure() throws {
+        let control = threeWayChoice()
+        let built = row(width: 320, control: control)
+
+        let adaptive = try XCTUnwrap(adaptiveRow(in: built))
+        XCTAssertTrue(adaptive.isStacked)
+
+        let words = try subtitle(in: built)
+        let wordsFrame = words.convert(words.bounds, to: nil)
+        let controlFrame = control.convert(control.bounds, to: nil)
+        XCTAssertGreaterThanOrEqual(wordsFrame.width, SettingsUIDefaults.minimumTextWidth)
+        // Window coordinates grow upwards: beneath is a smaller y.
+        XCTAssertLessThanOrEqual(controlFrame.maxY, wordsFrame.minY + 0.5, "the control is not below")
+        XCTAssertLessThanOrEqual(
+            control.convert(control.bounds, to: built).maxX,
+            320 - Design.Spacing.inset + 0.5,
+            "the control left the card"
+        )
+        let title = try XCTUnwrap(label(in: built, text: Fixture.title))
+        XCTAssertGreaterThanOrEqual(
+            title.frame.width + 0.5,
+            ceil(title.intrinsicContentSize.width),
+            "the title is still truncated"
+        )
+    }
+
+    func testTheSameControlStaysBesideItsWordsWhenThereIsRoom() throws {
+        let control = threeWayChoice()
+        let built = row(width: 720, control: control)
+
+        let adaptive = try XCTUnwrap(adaptiveRow(in: built))
+        XCTAssertFalse(adaptive.isStacked)
+
+        let words = try subtitle(in: built)
+        let wordsFrame = words.convert(words.bounds, to: nil)
+        let controlFrame = control.convert(control.bounds, to: nil)
+        XCTAssertGreaterThan(controlFrame.minX, wordsFrame.maxX, "the control is not beside")
+    }
+
+    /// The choice follows the pane both ways, and only the row's width decides it.
+    func testWideningThePanePutsTheControlBackBeside() throws {
+        let control = threeWayChoice()
+        let built = SettingsUI.row(
+            title: Fixture.title,
+            subtitle: Fixture.subtitle,
+            control: control
+        )
+        built.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 400))
+        container.addSubview(built)
+        let width = container.widthAnchor.constraint(equalToConstant: 320)
+        NSLayoutConstraint.activate([
+            width,
+            built.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            built.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            built.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+        let adaptive = try XCTUnwrap(adaptiveRow(in: built))
+        XCTAssertTrue(adaptive.isStacked)
+
+        width.constant = 720
+        container.layoutSubtreeIfNeeded()
+        XCTAssertFalse(adaptive.isStacked)
+
+        width.constant = 320
+        container.layoutSubtreeIfNeeded()
+        XCTAssertTrue(adaptive.isStacked)
+    }
+
+    /// A preferred measure is a wish a narrow pane takes back first, so it does not by itself
+    /// send a control under its words: only what the control will not give up counts.
+    func testAPreferredControlWidthDoesNotStackARowOnItsOwn() throws {
+        let control = popUp()
+        SettingsUI.preferControlWidth(control, width: SettingsUIDefaults.wideSegmentedControlWidth)
+        let built = row(width: 420, control: control)
+
+        let adaptive = try XCTUnwrap(adaptiveRow(in: built))
+        XCTAssertFalse(adaptive.isStacked)
+        XCTAssertLessThan(
+            SettingsAdaptiveControlRow.narrowestWidth(of: control),
+            SettingsUIDefaults.wideSegmentedControlWidth
+        )
+    }
+
+    private func threeWayChoice() -> ThemedSegmentedControl {
+        let control = ThemedSegmentedControl()
+        control.configure(titles: ["Off", "Plugged in", "Always"], selectedIndex: 0)
+        SettingsUI.preferControlWidth(
+            control,
+            width: SettingsUIDefaults.compactSegmentedControlWidth
+        )
+        return control
+    }
+
+    private func adaptiveRow(in view: NSView) -> SettingsAdaptiveControlRow? {
+        if let row = view as? SettingsAdaptiveControlRow { return row }
+        for subview in view.subviews {
+            if let found = adaptiveRow(in: subview) { return found }
+        }
+        return nil
+    }
+
+    private func label(in view: NSView, text: String) -> NSTextField? {
+        if let field = view as? NSTextField, field.stringValue == text { return field }
+        for subview in view.subviews {
+            if let found = label(in: subview, text: text) { return found }
+        }
+        return nil
+    }
+
     /// A long title is allowed to truncate; moving the setting's control outside the card is
     /// not. This is the exact pressure shape the 420pt General-page evidence exposed.
     func testALongTitleKeepsTheControlInsideANarrowRow() throws {

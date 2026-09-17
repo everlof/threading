@@ -1,5 +1,6 @@
 import CryptoKit
 import OSLog
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
@@ -250,6 +251,10 @@ enum MobileDiagnostics {
         }
         if let url = error as? URLError {
             return "url.\(url.code.rawValue)"
+        }
+        // Before this, bridging made a hosted refusal `other.8`, which is `hostOffline`.
+        if let rendezvous = error as? PeerRendezvousError {
+            return rendezvous.diagnosticCode
         }
         let cocoa = error as NSError
         if cocoa.domain == NSPOSIXErrorDomain {

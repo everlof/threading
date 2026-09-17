@@ -152,6 +152,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// Remote Access is useful with no visible window, so keep its process schedulable while its
     /// listener is starting or live. The concrete activity deliberately permits idle sleep.
     private let processActivity: any RemoteAccessProcessActivityManaging
+    /// Holds idle sleep off while Remote Access is active, when the person chose that. It covers
+    /// exactly the process activity's window, so every begin and end below tells both.
+    private let keepAwake: any RemoteAccessKeepAwakeManaging
     private(set) var guestSharePersistenceError: String?
     private var pairingBootstrapToken: String?
     private static let hostedPairingDeviceID = "hosted-pairing"
@@ -178,7 +181,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         tailnetTransport: (any RemoteTailnetTransport)? = nil,
         identityStore: RemoteAccessIdentityStore? = nil,
         tailscaleDoor: RemoteTailscaleDoorImplementation = .current,
-        processActivity: (any RemoteAccessProcessActivityManaging)? = nil
+        processActivity: (any RemoteAccessProcessActivityManaging)? = nil,
+        keepAwake: (any RemoteAccessKeepAwakeManaging)? = nil
     ) {
         self.appSettings = appSettings
         self.tailscaleDoor = tailscaleDoor
@@ -204,6 +208,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             )
             : RemoteHostedServiceController.notOffered())
         self.processActivity = processActivity ?? RemoteAccessProcessActivity()
+        self.keepAwake = keepAwake ?? RemoteAccessKeepAwakeInhibitor(
+            choice: { appSettings.remoteAccessKeepAwake }
+        )
         server.authorizer = authority
         server.invitationRedeemer = self
         server.hostCommands = self
@@ -1977,6 +1984,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         pairingRedemptions.removeAll()
         status = .disabled
         processActivity.end()
+        keepAwake.setRemoteAccessActive(false)
     }
 
     // MARK: - Start
@@ -2012,6 +2020,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
 
         processActivity.begin()
+        keepAwake.setRemoteAccessActive(true)
 
         // The photographed value is a bootstrap, never the durable capability. It is consumed
         // and rotated when a device exchanges it for its own 256-bit bearer.
@@ -2021,6 +2030,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             )
             status = .failed(reason: L10n.string("A secure remote access token could not be created."))
             processActivity.end()
+            keepAwake.setRemoteAccessActive(false)
             return
         }
         lifecycleGeneration += 1
@@ -2080,6 +2090,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 self.listenerStatus = .idle
                 self.status = .failed(reason: failure.statement)
                 self.processActivity.end()
+                self.keepAwake.setRemoteAccessActive(false)
                 EventLog.shared.record(
                     .remote,
                     "Remote access failed to start",

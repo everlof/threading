@@ -11,6 +11,8 @@ public enum PeerHostedFailure: String, Equatable, Sendable {
     case hostBusy
     case signaling
     case transport
+    /// The control socket stopped answering its keepalive: a dead path rather than a refusal.
+    case unresponsive
 }
 
 public enum PeerHostedHostEvent: Equatable, Sendable {
@@ -337,6 +339,11 @@ public final class PeerHostedHostTunnel: @unchecked Sendable {
 
 /// Long-lived Mac control connection. Session negotiations and retained tunnels are capped
 /// independently; the listener is one-shot and app reconnect policy creates a fresh instance.
+///
+/// The listener is also the only party that can notice its connection has died, so it keeps
+/// asking (`PeerRendezvousKeepalive`) and ends as `.unresponsive` when an answer does not come.
+/// Ending is what hands the problem to the reconnect policy; a listener that stays up on a dead
+/// socket leaves the Mac unreachable while every state reads ready.
 public actor PeerHostedHostListener {
     private struct PendingSession: Sendable {
         let deviceID: String
@@ -350,8 +357,11 @@ public actor PeerHostedHostListener {
     private let hostID: String
     private let credential: PeerRendezvousCredential
     private let targetPort: UInt16
+    private let keepalive: PeerRendezvousKeepalive
     private var controlSocket: PeerRendezvousWebSocket?
     private var controlTask: Task<Void, Never>?
+    private var keepaliveTask: Task<Void, Never>?
+    private var livenessProbe: Task<Void, Never>?
     private var pending: [String: PendingSession] = [:]
     private var sessions: [String: PeerHostedHostTunnel] = [:]
     private var didStart = false
@@ -361,12 +371,14 @@ public actor PeerHostedHostListener {
         endpoint: PeerRendezvousServiceEndpoint,
         hostID: String,
         credential: PeerRendezvousCredential,
-        targetPort: UInt16
+        targetPort: UInt16,
+        keepalive: PeerRendezvousKeepalive = .standard
     ) {
         self.endpoint = endpoint
         self.hostID = hostID
         self.credential = credential
         self.targetPort = targetPort
+        self.keepalive = keepalive
         let stream = AsyncStream<PeerHostedHostEvent>.makeStream(
             bufferingPolicy: .bufferingNewest(64)
         )
@@ -376,6 +388,8 @@ public actor PeerHostedHostListener {
 
     deinit {
         controlTask?.cancel()
+        keepaliveTask?.cancel()
+        livenessProbe?.cancel()
         eventContinuation.finish()
     }
 
@@ -401,6 +415,17 @@ public actor PeerHostedHostListener {
             controlTask = Task { [weak self] in
                 await self?.receiveControlMessages(socket)
             }
+            keepaliveTask = Task { [weak self, keepalive] in
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(nanoseconds: nanoseconds(keepalive.interval))
+                    } catch {
+                        return
+                    }
+                    guard let self else { return }
+                    await self.checkLiveness()
+                }
+            }
         } catch {
             await socket.close()
             isStopped = true
@@ -408,11 +433,29 @@ public actor PeerHostedHostListener {
         }
     }
 
+    /// Asks the service to answer now rather than at the next keepalive, and returns once the
+    /// question is settled: answered, or the listener has ended as `.unresponsive`.
+    ///
+    /// For a caller that knows the path may have changed under the socket — the Mac waking, the
+    /// network changing. A dead socket is then replaced within `answerDeadline`, while a live
+    /// one, and the device tunnels this listener owns, are left alone; tearing down on every
+    /// path change would drop working tunnels for a VPN coming up beside Wi-Fi. Concurrent calls
+    /// share one question.
+    public func checkLiveness() async {
+        guard !isStopped, controlSocket != nil else { return }
+        let probe = livenessProbe ?? startLivenessProbe()
+        await probe.value
+    }
+
     public func stop() async {
         guard !isStopped else { return }
         isStopped = true
         controlTask?.cancel()
         controlTask = nil
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
+        livenessProbe?.cancel()
+        livenessProbe = nil
         let pendingTasks = pending.values.map(\.task)
         pending.removeAll(keepingCapacity: false)
         pendingTasks.forEach { $0.cancel() }
@@ -469,10 +512,41 @@ public actor PeerHostedHostListener {
         } catch is CancellationError {
             return
         } catch {
-            guard !isStopped else { return }
-            eventContinuation.yield(.listenerFailed(reason: hostedFailure(error)))
-            await stop()
+            await fail(hostedFailure(error))
         }
+    }
+
+    private func startLivenessProbe() -> Task<Void, Never> {
+        let probe = Task { [weak self] in
+            guard let self else { return }
+            await self.probeLiveness()
+        }
+        livenessProbe = probe
+        return probe
+    }
+
+    private func probeLiveness() async {
+        defer { livenessProbe = nil }
+        guard !isStopped, let socket = controlSocket else { return }
+        let askedAt = DispatchTime.now().uptimeNanoseconds
+        // Not awaited: on a dead path a send can wait on a full buffer as long as a receive waits
+        // for a frame, and the deadline has to run either way. A send that fails is simply a
+        // question nobody answers.
+        Task { try? await socket.sendKeepalive() }
+        do {
+            try await Task.sleep(nanoseconds: nanoseconds(keepalive.answerDeadline))
+        } catch {
+            return
+        }
+        guard !isStopped, controlSocket === socket else { return }
+        guard await !socket.hasReceived(sinceUptimeNanoseconds: askedAt) else { return }
+        await fail(.unresponsive)
+    }
+
+    private func fail(_ reason: PeerHostedFailure) async {
+        guard !isStopped else { return }
+        eventContinuation.yield(.listenerFailed(reason: reason))
+        await stop()
     }
 
     private func beginSession(
@@ -775,6 +849,10 @@ private func finishSignaling(
         }
         await socket.close()
     }
+}
+
+private func nanoseconds(_ seconds: TimeInterval) -> UInt64 {
+    UInt64(max(0, seconds) * 1_000_000_000)
 }
 
 private func throwIfFailure(_ envelope: PeerRendezvousEnvelope) throws {

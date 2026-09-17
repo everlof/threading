@@ -2686,14 +2686,14 @@ error becomes visible again.
   Teleport and WireGuard. It follows **This network** and has no switch of its own. Connect the VPN
   on the phone first; a phone can run only one VPN at a time, so this and Tailscale cannot both be
   connected.
-- **Tailscale** (off). Reach this Mac from anywhere on your tailnet. Threading answers on the
-  address this Mac holds there, with the same certificate the other ways in present, so the status
-  line names it the same way: `Reachable at 100.65.47.126:8760`, and your Mac's `*.ts.net` name
-  beside it once Threading has read it. Turning it on does not put Threading on any other network:
-  every way in is bound separately, so "tailnet only" means this one on and the others off. If the
-  door is not up, the line says which of the three reasons it is: Tailscale is not installed, this
-  Mac is not signed in, or Tailscale is not connected. All three come back on their own once
-  Tailscale does; there is nothing to press.
+- **Tailscale** (off). Reach this Mac from anywhere on your tailnet while it is awake. Threading
+  answers on the address this Mac holds there, with the same certificate the other ways in present,
+  so the status line names it the same way: `Reachable at 100.65.47.126:8760`, and your Mac's
+  `*.ts.net` name beside it once Threading has read it. Turning it on does not put Threading on any
+  other network: every way in is bound separately, so "tailnet only" means this one on and the
+  others off. If the door is not up, the line says which of the three reasons it is: Tailscale is
+  not installed, this Mac is not signed in, or Tailscale is not connected. All three come back on
+  their own once Tailscale does; there is nothing to press.
   - **Open in a browser on your tailnet** (off) is a sub-option under it, and not a way in. It runs
     Tailscale Serve, which publishes Threading at your Mac's `*.ts.net` name with a publicly
     trusted certificate, so a *browser* on your tailnet opens it without a certificate warning. The
@@ -2703,14 +2703,37 @@ error becomes visible again.
     where it is serving, or which admin-console setting is missing, with the button that opens it.
 - **Threading Direct** (development builds only). Available after signing in under **Hosted
   Direct**. Paired iPhones and invited chat guests can connect across networks without a VPN while
-  this Mac is online. Release, beta and nightly builds do not include Hosted Direct: their page has
-  no Hosted Direct row, and a phone pairs over This network, a VPN or Tailscale.
+  this Mac is online and awake. Release, beta and nightly builds do not include Hosted Direct: their
+  page has no Hosted Direct row, and a phone pairs over This network, a VPN or Tailscale.
 
 In a Debug build or Threading's internal `/Applications` build, **Advanced > Developer Settings >
 Hosted service** selects **Production** or the isolated **Development** service. Switching it
 restarts only Hosted Direct; it does not quit Threading or close the local and Tailscale
 connections. Public releases always use Production. After switching, open Threading on the iPhone
 once so its hosted push registration is refreshed for that service.
+
+**A sleeping Mac cannot be reached from away.** No way in answers while the Mac sleeps; only a
+phone on the same network can wake it, and only when the **This network** panel says it can. The
+ways in that work away from home say so in their "?" panels: "yes, while this Mac is awake".
+
+**Keep this Mac awake** on the **Connection** card chooses what Threading does about it while Remote
+Access is on:
+
+- **Off** (the default). Your Mac sleeps as its energy settings say.
+- **Plugged in**. Threading keeps the Mac awake on its power adapter. Unplug it and it sleeps as
+  usual on battery; plug it back in and it is kept awake again.
+- **Always**. Awake on battery too, which uses charge while the Mac sits idle.
+
+Only while Remote Access is on: turning Remote Access off lets the Mac sleep normally at once. The
+display still turns off, and closing a laptop's lid (unless an external display is connected),
+choosing Sleep, or a critical battery still put the Mac to sleep. Nothing can wake a Mac that is
+already asleep from away, and nothing is kept awake while Threading is not running.
+
+Under the choice, a line says when your Mac goes to sleep given its energy settings and that choice,
+for example "On battery this Mac goes to sleep after 5 minutes idle, and a phone away from home
+cannot reach it while it sleeps. Plugged in, it stays awake. Choose “Always” above to keep it awake
+on battery too." While Threading is keeping the Mac awake, `pmset -g assertions` in Terminal lists
+"Threading is keeping this Mac reachable for Remote Access".
 
 A way in that cannot carry traffic says why on its own line, with the fix beside it. If the macOS
 firewall may be blocking the listener, the page says so and where to allow it; because a Mac cannot
@@ -5099,7 +5122,8 @@ downloading a stable build yourself and replacing the app.
 prevents automatic system sleep while at least one agent turn is working or waiting for your
 answer. It is off by default and does nothing merely because an agent is open at its prompt. The
 display may still turn off, and closing a MacBook's lid can still put it to sleep; the switch does
-not override either of those macOS behaviours.
+not override either of those macOS behaviours. To keep the Mac reachable from your phone whether or
+not an agent is working, use **Keep this Mac awake** under [Remote Access](#remote-access-beta).
 
 When an update is found, the offer appears as a sheet in Threading's own style: the new
 version, what you are on, the release notes rendered right there, and three answers —

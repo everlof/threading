@@ -13,7 +13,7 @@ protocol IdleSystemSleepAsserting: AnyObject {
     func release() -> Bool
 }
 
-/// Owns the one process-wide IOKit assertion.
+/// Owns one process-wide IOKit assertion.
 ///
 /// IOKit releases assertions when their process exits, but Threading still releases explicitly:
 /// changing the preference or finishing the last turn must give macOS its ordinary idle policy
@@ -21,6 +21,13 @@ protocol IdleSystemSleepAsserting: AnyObject {
 @MainActor
 final class SystemIdleSleepAssertion: IdleSystemSleepAsserting {
     private var assertionID: IOPMAssertionID?
+    /// What `pmset -g assertions` names beside Threading. Each owner states its own, so a person
+    /// reading that list can tell an agent turn from Remote Access.
+    private let reason: String
+
+    init(reason: String = ActiveTurnSleepInhibitorDefaults.assertionReason) {
+        self.reason = reason
+    }
 
     func acquire() -> Bool {
         guard assertionID == nil else { return true }
@@ -29,7 +36,7 @@ final class SystemIdleSleepAssertion: IdleSystemSleepAsserting {
         let result = IOPMAssertionCreateWithName(
             kIOPMAssertPreventUserIdleSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            ActiveTurnSleepInhibitorDefaults.assertionReason as CFString,
+            reason as CFString,
             &createdID
         )
         guard result == kIOReturnSuccess else {

@@ -89,6 +89,69 @@ written against port 8443 were written for Serve.** The way in is the listener's
 by default, so a rule that restricts Threading has to name that one; nothing about ACL enforcement
 itself changed, because Tailscale filters packets between nodes whatever port they are on.
 
+### A sleeping Mac answers no way in
+
+Not the LAN listener, not the tailnet address, not Threading Direct: a Mac asleep runs none of them,
+and only a phone on the same network can wake it, through a sleep proxy (the **This network**
+panel's wake line). So every way in that works away from home answers its fourth question "yes,
+while this Mac is awake", and the Tailscale and Threading Direct promises say "while it is awake".
+
+That alone does not tell a person *when* their Mac is not awake, which is what they need before
+relying on it from away. On 2026-09-17 an owner reached their MacBook over Tailscale reliably and
+over Threading Direct only sometimes, and the explanation was not only the transport: `pmset -g custom` said
+**never** on the adapter and `sleep 1` on battery, and each Claude session was holding
+`caffeinate -i -t 300` while it worked. Plugged in or busy, it was awake; idle on battery, it was
+not. (Threading Direct also had the dead control socket described under
+[Hosted service](#hosted-service), which made it fail while awake too.)
+
+So the **Connection** card, under the Remote Access switch, carries a **Keep this Mac awake**
+choice and, directly under it, a sleep line read from `pmset -g custom` each time the page appears
+(`RemoteSleepFacts`, `RemoteDoorStatus.sleep(_:keepAwake:)`).
+
+**Keep this Mac awake** (`remoteAccessKeepAwake`, `RemoteAccessKeepAwake`) is **Off**, **Plugged
+in** or **Always**, and Off by default because it changes the Mac's power use. While Remote Access
+is active — from `start()` until it stops or fails, the same window its process activity covers —
+`RemoteAccessKeepAwakeInhibitor` holds a `PreventUserIdleSystemSleep` assertion (what
+`caffeinate -i` holds, named "Threading is keeping this Mac reachable for Remote Access" in
+`pmset -g assertions`) when the choice says so for the power source in use. **Plugged in** reads the
+providing source from IOKit and is told when it changes, so unplugging hands idle sleep back to
+macOS at once and plugging in takes it again; a source macOS will not name counts as battery.
+**Always** holds on battery too and says it costs charge. Changing the choice takes effect without
+restarting Remote Access, and with Remote Access off nothing is held and nothing is watched. It
+reuses `SystemIdleSleepAssertion`, the boundary the agent-turn inhibitor owns, with its own reason.
+
+What it does not do is stated beside it, because each is a way a person could still find the Mac
+asleep: the display still sleeps, and closing a laptop's lid (without an external display),
+choosing Sleep, a critical battery or heat still put it to sleep. It cannot wake a Mac that is
+already asleep, and it does nothing while Threading is not running. It is catalogue-only rather
+than owner-mutable: a phone can reach this Mac only while it is already awake, so the setting a
+phone would want to change is the one it cannot use.
+
+The sleep line resolves the settings and the choice together, and every remedy names the control
+above it rather than a System Settings pane, so a person can have their Mac reachable for as long
+as Remote Access is on without changing how it sleeps the rest of the time:
+
+- **Off, sleeps on battery only**: "On battery this Mac goes to sleep after 5 minutes idle, and a
+  phone away from home cannot reach it while it sleeps." with "Plugged in, it stays awake. Choose
+  “Always” above to keep it awake on battery too." Neutral: it is a trade either way.
+- **Off, sleeps plugged in too**: the idle time, "even plugged in" on a laptop, and "Choose
+  “Plugged in” above…", as an attention line, because this is the setting to change before relying
+  on a way in from away.
+- **Plugged in, on a laptop that sleeps on battery**: what is kept awake and what is still left, with
+  "Choose “Always” above…".
+- **Always**, or either choice on a Mac with no battery: a ready line; on a laptop, the battery cost
+  and the lid. "Always" does not wait for `pmset`, since Threading keeps that promise itself.
+- **Never sleeps on its own**: a ready line, plus the lid on a laptop.
+- **Could not be read**: the one thing that is always true, never "does not sleep".
+
+The idle time is the larger of `sleep` and `displaysleep`, and never when either is zero: `powerd`
+holds "Prevent sleep while display is on", so `sleep 1` beside `displaysleep 5` sleeps after five
+minutes. The line is a fact rather than a way in's status, so it lives on the card every way in
+shares instead of being repeated in each panel. `RemoteSleepFactsTests` pins the reading (from that
+MacBook's verbatim output) and every sentence; `RemoteAccessKeepAwakeTests` pins which choice holds
+on which source and that the assertion follows Remote Access, the choice and the power source in
+both directions; the render tests pin that the choice sits above the line and rewrites it.
+
 ## Pair an iPhone
 
 1. Keep Threading running on the Mac.
@@ -2061,6 +2124,44 @@ WebRTC. Its only push mapping is the encrypted, device-credential-bound APNs reg
 an authenticated Mac submits one bounded, sanitized event and opaque registration id for each
 delivery. Presence remains connection-derived rather than a database heartbeat.
 
+**The Mac's control connection proves it is alive, because a dead one says nothing.** Hosted
+Direct is reachable only while the Mac holds one outbound WebSocket to `HostRendezvous`. After a
+sleep, a Wi-Fi change or a VPN going away that socket can be dead with every state reading ready:
+`URLSessionWebSocketTask.receive()` never returns, nothing is logged, and the service answers every
+phone `hostOffline` until something replaces it. Until 2026-09-17 only the daily credential renewal
+did. A phone off the Mac's network recorded that refusal at 06:33, 06:38 and 07:15, hours after the
+Mac woke at 04:50, as the opaque `other.8`. Four rules now hold:
+
+- **The listener asks.** `PeerHostedHostListener` sends the service's `threading-ping` auto-response
+  text every `PeerRendezvousKeepalive.standard.interval` (25 s) and ends as `.unresponsive` when
+  nothing arrives within `answerDeadline` (10 s); the ordinary reconnect takes over. The socket
+  consumes `threading-pong` itself, so an answer never reaches the envelope parser, where it would
+  be an invalid envelope that kills the connection it proves alive. The auto-response is answered by
+  the runtime without waking the Durable Object. `PeerHostedHostKeepaliveTests` runs the real
+  listener against an in-process WebSocket server that can go quiet.
+- **A wake or a path change asks at once.** `RemoteHostedConnectivityMonitor` watches
+  `NSWorkspace.didWakeNotification` and `NWPathMonitor` while Hosted Direct is wanted, and
+  `RemoteHostedServiceController.connectivityChanged(_:)` probes a standing listener
+  (`checkLiveness()`) or starts a reconnect that is waiting out its backoff, unless the path reaches
+  nothing. It probes rather than reconnects: a live socket keeps the device tunnels riding on it, and
+  a Wi-Fi change on the same interface — the case that kills the socket — is invisible to a filter
+  on interface kinds, so every settled path update counts. `RemoteHostedConnectivityTests` is the
+  boundary.
+- **The service stops trusting a host that stopped asking.** A host socket whose last auto-response
+  is older than `BOUNDS.rendezvousKeepaliveStaleMilliseconds` (75 s, two missed rounds) is closed
+  with 4004 when a device arrives, and the device is told `hostOffline` at once instead of waiting
+  out its negotiation timeout on a sleeping Mac. A host that has never asked is not judged, so an
+  older Mac is unaffected. This half needs the Worker deployed; the Mac's half does not.
+- **Losing the connection leaves a trace.** The controller journals the control connection coming
+  and going — transitions only — as `relayConnected`/`relayFailed` with transport `hosted` in the
+  share-safe diagnostic journal and as `Remote transport connected/unavailable` in the event log.
+  A rendezvous failure is recorded by name on both ends (`PeerRendezvousError.diagnosticCode`,
+  `rendezvous.hostOffline`), never by its bridged `NSError` tag.
+
+None of this can reach a Mac that is asleep: a phone away from home finds it only while it is awake
+and online. The settings page says so where it is configured; see
+[A sleeping Mac answers no way in](#a-sleeping-mac-answers-no-way-in).
+
 Only development builds use it. A release, beta or nightly build holds
 `RemoteHostedServiceController.notOffered()`: no endpoint, so it settles on `.notConfigured`
 without a request; an in-memory store, so it never reads the hosted Keychain record a development
@@ -2552,8 +2653,9 @@ resumed session starts in the background and does not activate or bring Threadin
 the front. While Remote Access is starting or listening, Threading holds a
 `userInitiatedAllowingIdleSystemSleep` process activity. This prevents App Nap from suspending the
 main-actor work behind an otherwise healthy listener when the app has no visible window, while
-deliberately preserving normal system sleep. The activity ends when Remote Access stops or its
-listener fails.
+deliberately preserving normal system sleep unless **Keep this Mac awake** says otherwise (see
+[A sleeping Mac answers no way in](#a-sleeping-mac-answers-no-way-in)). The activity ends when
+Remote Access stops or its listener fails, and so does any keep-awake assertion.
 
 Remote session creation intentionally exposes only checkouts the Mac already knows. Git Review,
 the read-only repository browser, detected image/PDF previews, and browser follow snapshots have
@@ -2592,7 +2694,11 @@ with no AppKit window graph or ambient project/runtime lookup.
   (`RemoteListenerSet`, `RemoteAccessDoors`), the pinned identity the routable doors present
   (`RemoteAccessIdentity` and the `RemoteIdentity*` encoders behind it), durable owner-device
   registry, authentication, the Tailscale Serve transport, routing, the application
-  command capability, and live session mirrors.
+  command capability, and live session mirrors. Hosted Direct's Mac half is
+  `RemoteHostedServiceController`, with `RemoteHostedConnectivityMonitor` telling it when a wake or
+  a network change may have killed its control socket.
+- `Packages/ThreadingPeerTransport`: the rendezvous socket and envelope, the host listener and its
+  keepalive (`PeerRendezvousKeepalive`), and the WebRTC tunnel both ends of Hosted Direct use.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client. A browser on the
   LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;
   **Open in a browser on your tailnet** (`TailscaleServeTransport`) is the opt-in way around that

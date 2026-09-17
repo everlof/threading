@@ -4099,6 +4099,17 @@
         }
       }
     },
+    "A phone away from home cannot reach this Mac while it sleeps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En telefon utanför hemmet kan inte nå den här Mac-datorn medan den är i viloläge."
+          }
+        }
+      }
+    },
     "A photo out of Finder is a HEIC and a scan is often a TIFF, and neither agent reads either — so one is written out as a PNG first, keeping its name, and the agent is handed that. Turn this off to give the agent the file itself, which is what you want when the format is the thing you are working on. The shell drawer never converts." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6726,6 +6737,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Går också att nå på %@."
+          }
+        }
+      }
+    },
+    "Always" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alltid"
           }
         }
       }
@@ -10646,6 +10668,17 @@
         }
       }
     },
+    "Checking when this Mac goes to sleep…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar när den här Mac-datorn går i viloläge…"
+          }
+        }
+      }
+    },
     "Checking your shell's PATH…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11270,6 +11303,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj vilket tillägg som ersätter agentleverantörsmarkeringar."
+          }
+        }
+      }
+    },
+    "Choose “Always” above to keep it awake on battery too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ”Alltid” ovan för att hålla den vaken även på batteri."
+          }
+        }
+      }
+    },
+    "Choose “Plugged in” above to keep it awake while Remote Access is on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ”Med laddare” ovan för att hålla den vaken medan fjärråtkomst är på."
           }
         }
       }
@@ -12205,6 +12260,17 @@
         }
       }
     },
+    "Closing a laptop’s lid, choosing Sleep, or a critical battery still puts it to sleep. Nothing is held while Remote Access is off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Att stänga locket på en bärbar dator, välja Viloläge eller kritiskt låg batterinivå försätter den ändå i viloläge. Inget hålls kvar medan fjärråtkomst är av."
+          }
+        }
+      }
+    },
     "Closing a session ends its agent but keeps it in the sidebar so it can be resumed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12234,6 +12300,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När du stänger avslutas agenten, men konversationen ligger kvar i sidofältet och kan fortsättas. Arkivering, flytt och byte av gränssnitt stoppar också en agent som körs och omfattas av den här bekräftelsen."
+          }
+        }
+      }
+    },
+    "Closing the lid still puts it to sleep unless an external display is connected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Att stänga locket försätter den ändå i viloläge, om inte en extern skärm är ansluten."
           }
         }
       }
@@ -23801,6 +23878,17 @@
         }
       }
     },
+    "Keep this Mac awake" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Håll den här Mac-datorn vaken"
+          }
+        }
+      }
+    },
     "Keep this Mac awake while agents work" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29666,6 +29754,28 @@
         }
       }
     },
+    "On battery this Mac goes to sleep after %@ idle, and a phone away from home cannot reach it while it sleeps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "På batteri går den här Mac-datorn i viloläge efter %@ utan aktivitet, och en telefon utanför hemmet kan inte nå den medan den är i viloläge."
+          }
+        }
+      }
+    },
+    "On battery this uses charge while the Mac sits idle. Closing the lid still puts it to sleep unless an external display is connected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "På batteri drar det laddning medan datorn står oanvänd. Att stänga locket försätter den ändå i viloläge, om inte en extern skärm är ansluten."
+          }
+        }
+      }
+    },
     "On toggle" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32021,6 +32131,50 @@
         }
       }
     },
+    "Plugged in" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Med laddare"
+          }
+        }
+      }
+    },
+    "Plugged in keeps it awake on the power adapter and lets it sleep as usual on battery. Always keeps it awake on battery too, which uses charge while the Mac sits idle." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Med laddare håller den vaken på nätadaptern och låter den gå i viloläge som vanligt på batteri. Alltid håller den vaken även på batteri, vilket drar laddning medan datorn står oanvänd."
+          }
+        }
+      }
+    },
+    "Plugged in, Threading keeps this Mac awake while Remote Access is on. On battery it goes to sleep after %@ idle, and a phone away from home cannot reach it then." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Med laddare håller Threading den här Mac-datorn vaken medan fjärråtkomst är på. På batteri går den i viloläge efter %@ utan aktivitet, och då kan en telefon utanför hemmet inte nå den."
+          }
+        }
+      }
+    },
+    "Plugged in, it stays awake. Choose “Always” above to keep it awake on battery too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Med laddare förblir den vaken. Välj ”Alltid” ovan för att hålla den vaken även på batteri."
+          }
+        }
+      }
+    },
     "Plugin" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34007,24 +34161,24 @@
         }
       }
     },
-    "Reach this Mac from anywhere on your tailnet. Needs Tailscale installed and signed in on both devices." : {
+    "Reach this Mac from anywhere on your tailnet while it is awake. Needs Tailscale installed and signed in on both devices." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nå den här Mac-datorn var som helst i ditt tailnet. Kräver att Tailscale är installerat och inloggat på båda enheterna."
+            "value" : "Nå den här Mac-datorn var som helst i ditt tailnet medan den är vaken. Kräver att Tailscale är installerat och inloggat på båda enheterna."
           }
         }
       }
     },
-    "Reach this Mac from anywhere, with no VPN. Threading connects the two devices directly when it can, and falls back to a relay when your network will not allow a direct connection." : {
+    "Reach this Mac from anywhere while it is awake, with no VPN. Threading connects the two devices directly when it can, and falls back to a relay when your network will not allow a direct connection." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nå den här Mac-datorn var som helst, utan VPN. Threading kopplar ihop de två enheterna direkt när det går och faller tillbaka på ett relä när nätverket inte tillåter en direktanslutning."
+            "value" : "Nå den här Mac-datorn var som helst medan den är vaken, utan VPN. Threading kopplar ihop de två enheterna direkt när det går och faller tillbaka på ett relä när nätverket inte tillåter en direktanslutning."
           }
         }
       }
@@ -49360,6 +49514,39 @@
         }
       }
     },
+    "This Mac does not go to sleep on its own." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här Mac-datorn går inte i viloläge av sig själv."
+          }
+        }
+      }
+    },
+    "This Mac goes to sleep after %@ idle, and a phone away from home cannot reach it while it sleeps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här Mac-datorn går i viloläge efter %@ utan aktivitet, och en telefon utanför hemmet kan inte nå den medan den är i viloläge."
+          }
+        }
+      }
+    },
+    "This Mac goes to sleep after %@ idle, even plugged in, and a phone away from home cannot reach it while it sleeps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här Mac-datorn går i viloläge efter %@ utan aktivitet, även när den är ansluten till ström, och en telefon utanför hemmet kan inte nå den medan den är i viloläge."
+          }
+        }
+      }
+    },
     "This Mac has no certificate yet." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50631,6 +50818,17 @@
         }
       }
     },
+    "Threading could not read when it goes to sleep. See System Settings ▸ Energy." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte läsa när den går i viloläge. Se Systeminställningar ▸ Energi."
+          }
+        }
+      }
+    },
     "Threading could not refresh this checkout’s visible files." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50957,6 +51155,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading körs men svarar inte"
+          }
+        }
+      }
+    },
+    "Threading keeps this Mac awake while Remote Access is on, plugged in or on battery." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading håller den här Mac-datorn vaken medan fjärråtkomst är på, både med laddare och på batteri."
+          }
+        }
+      }
+    },
+    "Threading keeps this Mac awake while Remote Access is on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading håller den här Mac-datorn vaken medan fjärråtkomst är på."
           }
         }
       }
@@ -54937,6 +55157,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vart härnäst?"
+          }
+        }
+      }
+    },
+    "While Remote Access is on, so a phone away from home can reach it. The display still turns off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medan fjärråtkomst är på, så att en telefon utanför hemmet kan nå den. Skärmen stängs ändå av."
           }
         }
       }
@@ -60456,13 +60687,24 @@
         }
       }
     },
-    "yes, while the VPN is connected" : {
+    "yes, while the VPN is connected and this Mac is awake" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ja, så länge VPN:et är anslutet"
+            "value" : "ja, så länge VPN:et är anslutet och den här Mac-datorn är vaken"
+          }
+        }
+      }
+    },
+    "yes, while this Mac is awake" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ja, så länge den här Mac-datorn är vaken"
           }
         }
       }

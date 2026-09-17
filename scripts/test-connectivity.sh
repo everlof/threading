@@ -48,6 +48,7 @@ run_software() {
     -only-testing:ThreadingTests/RemoteWebSocketTests \
     -only-testing:ThreadingTests/RemoteServerIntegrationTests \
     -only-testing:ThreadingTests/RemoteTransportInjectionTests \
+    -only-testing:ThreadingTests/RemoteHostedConnectivityTests \
     "$@"
 
   run_mobile_tests \

@@ -18,6 +18,11 @@ export const BOUNDS = {
   maximumCandidateMidBytes: 256,
   maximumCandidatesPerPeer: 64,
   maximumSessionsPerHost: 8,
+  // A host socket that has answered the `threading-ping` auto-response before and has not for
+  // this long has lost its path: the Mac asks at most every 25 s plus a 10 s answer deadline
+  // (`PeerRendezvousKeepalive.standard`), so this is two missed rounds and some slack. Change the
+  // two together. A host that has never asked — an app from before the keepalive — is not judged.
+  rendezvousKeepaliveStaleMilliseconds: 75_000,
 } as const;
 
 export const kinds = [

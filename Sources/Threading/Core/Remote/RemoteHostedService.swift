@@ -200,9 +200,13 @@ final class RemoteHostedServiceController {
     private var connectionTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var maintenanceTask: Task<Void, Never>?
+    private let connectivity: RemoteHostedConnectivityObserving
     private var desiredPort: UInt16?
     private var lifecycleGeneration = 0
     private var retryAttempt = 0
+    /// What the journal last said about the control connection, so it records the connection
+    /// coming and going rather than every retry of a Mac that is offline for an hour.
+    private var journaledConnection: Bool?
     // NotificationCenter's opaque token is created in init and read only in deinit. Marking this
     // storage nonisolated avoids treating NSObjectProtocol as transferable actor state.
     nonisolated(unsafe) private var credentialRevokedObserver: NSObjectProtocol?
@@ -215,12 +219,14 @@ final class RemoteHostedServiceController {
         hostName: String = RemoteHostIdentity.current.name,
         localDevelopmentAuthentication: Bool = RemoteHostedServiceController
             .configuredLocalDevelopmentAuthentication(),
-        developmentBrowserAuthentication: Bool? = nil
+        developmentBrowserAuthentication: Bool? = nil,
+        connectivity: (any RemoteHostedConnectivityObserving)? = nil
     ) {
         self.store = store ?? Self.defaultStore(endpoint: endpoint)
         self.endpoint = endpoint
         self.hostID = hostID
         self.hostName = hostName
+        self.connectivity = connectivity ?? RemoteHostedConnectivityMonitor()
         self.localDevelopmentAuthentication = localDevelopmentAuthentication
         self.developmentBrowserAuthentication = developmentBrowserAuthentication
             ?? Self.configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
@@ -277,6 +283,9 @@ final class RemoteHostedServiceController {
             state = .notConfigured
             return
         }
+        connectivity.start { [weak self] change in
+            self?.connectivityChanged(change)
+        }
         guard persistenceError == nil else {
             state = .unavailable("credentials")
             return
@@ -315,8 +324,36 @@ final class RemoteHostedServiceController {
         desiredPort = nil
         lifecycleGeneration &+= 1
         stopConnection(keepingDesiredPort: false)
+        connectivity.stop()
+        journaledConnection = nil
         state = .stopped
     }
+
+    /// The Mac woke or its network changed, so the control socket may be dead without knowing.
+    ///
+    /// A standing listener is asked to prove it (`checkLiveness`): a dead one ends as
+    /// `.unresponsive` within the keepalive's answer deadline and the ordinary reconnect takes
+    /// over, while a live one keeps the device tunnels riding on it. A reconnect that is waiting
+    /// out its backoff is started now instead, unless the path reaches nothing, because a Mac
+    /// that has just come back online should not sit out a minute it no longer needs to.
+    func connectivityChanged(_ change: RemoteHostedConnectivityChange) {
+        guard let targetPort = desiredPort else { return }
+        if let listener {
+            Task { await listener.checkLiveness() }
+            return
+        }
+        guard retryTask != nil, change != .networkPath(isSatisfied: false) else { return }
+        retryTask?.cancel()
+        retryTask = nil
+        state = .connecting
+        let generation = lifecycleGeneration
+        connectionTask = Task { [weak self] in
+            await self?.connect(targetPort: targetPort, generation: generation)
+        }
+    }
+
+    /// Whether a failed connection is waiting out its backoff. For tests.
+    var isWaitingToReconnect: Bool { retryTask != nil }
 
     func signInWithApple(
         identityToken: String,
@@ -659,6 +696,7 @@ final class RemoteHostedServiceController {
             self.listener = listener
             retryAttempt = 0
             state = .ready
+            journalConnection(connected: true)
             listenerEventsTask = Task { [weak self] in
                 for await event in listener.events {
                     await self?.handle(event, listener: listener, generation: generation)
@@ -676,11 +714,40 @@ final class RemoteHostedServiceController {
             ) {
                 return
             }
+            let code = Self.errorCode(error)
             ThreadingLogger.remote.error(
-                "Hosted remote connection failed code=\(Self.errorCode(error), privacy: .public)"
+                "Hosted remote connection failed code=\(code, privacy: .public)"
             )
+            journalConnection(connected: false, reason: code)
             state = Self.requiresSignIn(error) ? .signInRequired : .unavailable("service")
             if !Self.requiresSignIn(error) { scheduleReconnect(generation: generation) }
+        }
+    }
+
+    /// Records the control connection coming and going in the durable event log and in the
+    /// share-safe diagnostic journal a phone's report is joined with. Hosted Direct failing is
+    /// otherwise visible only in the live unified log, which is how a Mac that stayed unreachable
+    /// for hours left no trace a report could show.
+    private func journalConnection(connected: Bool, reason: String? = nil) {
+        guard journaledConnection != connected else { return }
+        journaledConnection = connected
+        let transport = RemoteHostEndpointKind.hosted.rawValue
+        if connected {
+            MacRemoteDiagnostics.record(.relayConnected, fields: [.transport: transport])
+            EventLog.shared.record(.remote, "Remote transport connected", [
+                "transport": transport,
+            ])
+        } else {
+            let reason = reason ?? "unknown"
+            MacRemoteDiagnostics.record(
+                .relayFailed,
+                level: .warning,
+                fields: [.transport: transport, .reason: reason]
+            )
+            EventLog.shared.record(.remote, "Remote transport unavailable", [
+                "transport": transport,
+                "reason": reason,
+            ])
         }
     }
 
@@ -707,6 +774,7 @@ final class RemoteHostedServiceController {
             ThreadingLogger.remote.error(
                 "Hosted remote listener failed reason=\(reason.rawValue, privacy: .public)"
             )
+            journalConnection(connected: false, reason: reason.rawValue)
             self.listener = nil
             listenerEventsTask = nil
             maintenanceTask?.cancel()
@@ -1121,7 +1189,10 @@ final class RemoteHostedServiceController {
     }
 
     private static func errorCode(_ error: Error) -> String {
-        switch error as? PeerControlPlaneError {
+        if let rendezvous = error as? PeerRendezvousError {
+            return rendezvous.diagnosticCode
+        }
+        return switch error as? PeerControlPlaneError {
         case .invalidCredential: "credential"
         case .rejected(let status, _): "http_\(status)"
         case .transport: "network"

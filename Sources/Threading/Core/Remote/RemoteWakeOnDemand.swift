@@ -144,7 +144,8 @@ enum RemoteWakeOnDemandProbe {
     private static let settingsArgument = "-g"
     private static let wompKey = "womp"
 
-    private static func runSynchronously(_ executable: String, _ arguments: [String]) -> String? {
+    /// Blocking; call it off the main actor. `RemoteSleepProbe` reads `pmset` through it too.
+    static func runSynchronously(_ executable: String, _ arguments: [String]) -> String? {
         guard FileManager.default.isExecutableFile(atPath: executable) else { return nil }
         guard let result = try? BoundedChildProcess.run(
             executable: executable,

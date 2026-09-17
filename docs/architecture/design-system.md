@@ -3764,3 +3764,35 @@ gates a wash, where the bytes live — are in
 [`themes.md`](themes.md#2026-09-10--backdrops-for-the-broad-grounds-and-a-plane-under-the-sidebar-an-extension-may-dress).
 The rule for a new broad ground is unchanged: opt in with `.backdrop` and it wears whatever the
 theme states; do not draw a wash of your own.
+
+## 2026-09-17 — A settings row puts its control under its words when both cannot fit
+
+Reported from Remote Access in a narrow pane: "Hosted Dir…" and "Keep this…" as titles, and a
+sentence beside each control wrapping three words a line. Every row was built beside: words, then
+the control, which keeps its width by contract. The label column's readable floor
+(`SettingsUIDefaults.minimumTextWidth`, 180pt) is a preference the row's required edges outrank, so
+a sign-in button or a three-way choice in a 300-point row left the words about a hundred points and
+the floor quietly broke. `stackedControlRow` had the shape that reads well there, but only as a
+choice a page made once for every width, and a wide pane then wasted a line on it.
+
+`SettingsUI.row` now builds `SettingsAdaptiveControlRow`, which chooses per width. **Beside** while
+the row is at least `minimumTextWidth + Design.Spacing.medium` plus the control's narrowest width;
+**stacked** — words across the row, control on the trailing edge beneath them — below that. Three
+rules make it hold:
+
+- **The control's narrowest width is what it will not give up**, not `fittingSize`: its intrinsic
+  width, or a stack's fitting width, or a width it *requires*. A measure stated through
+  `SettingsUI.preferControlWidth` is a wish the narrow pane takes back first, so it never stacks a
+  row by itself; a popup that would like 380 points still sits beside its words in a 420-point pane.
+- **Only the row's width decides**, and the row's width comes from its card, never from its
+  arrangement, so the choice cannot feed back into itself. Widening the pane puts the control back.
+- **The switch is ordered against `NSStackView`'s lazy constraints.** The "words span the row"
+  constraint is released before the run turns horizontal and activated only after
+  `updateConstraintsForSubtreeIfNeeded()` has built the vertical run. Activated straight after
+  setting the orientation it met the old horizontal constraints, and AppKit logged "Unable to
+  simultaneously satisfy constraints" and broke one, once per row per switch: the first version of
+  this row logged 180 of them across five settings render suites, and the ordered one logs none.
+
+`SettingsRowLayoutTests` pins both arrangements, the round trip across widths, and that a preferred
+measure alone does not stack a row. A page that wants the stacked shape at every width still asks
+for `stackedControlRow`.

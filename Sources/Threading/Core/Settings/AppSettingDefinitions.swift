@@ -79,6 +79,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessAdvertisedHostname
     case remoteAccessDiscoveryEnabled
     case remoteInputControlDefault
+    case remoteAccessKeepAwake
     case phoneReportWorkspace
     case automaticUpdateChecksEnabled
     case updateChannelSubscription
@@ -1184,13 +1185,25 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
     )
+    /// Whether Threading keeps this Mac awake while Remote Access is on. See
+    /// `RemoteAccessKeepAwake`: off by default because it changes the Mac's power use, and
+    /// catalogue-only because a phone can reach this Mac only while it is already awake.
+    static let remoteAccessKeepAwake = AppSettingDescriptor<String>(
+        identity: .remoteAccessKeepAwake,
+        persistenceKey: "remoteAccessKeepAwake",
+        absence: .registered(RemoteAccessKeepAwake.off.rawValue),
+        validation: .allowedStrings(Set(RemoteAccessKeepAwake.allCases.map(\.rawValue))),
+        presentations: [row("remote-access", 1, "Connection", "Keep this Mac awake",
+                            ["sleep", "awake", "battery", "plugged in", "power", "energy",
+                             "away from home", "lid"])]
+    )
     static let remoteNotificationMacActivityWindow = AppSettingDescriptor<String>(
         identity: .remoteNotificationMacActivityWindow,
         persistenceKey: "remoteNotificationMacActivityWindow",
         absence: .registered(MacNotificationActivityWindow.twoMinutes.rawValue),
         validation: .allowedStrings(Set(MacNotificationActivityWindow.allCases.map(\.rawValue))),
         presentations: [row(
-            "remote-access", 4, "Notification Delivery", "Mac activity window",
+            "remote-access", 5, "Notification Delivery", "Mac activity window",
             ["notifications", "active", "iPhone", "completion", "timeout"]
         )]
     )
@@ -1282,7 +1295,7 @@ enum AppSettingDefinitions {
         identity: .remoteAccessDoors,
         persistenceKey: "remoteAccessDoors",
         absence: .registered([RemoteAccessDoor.lan.rawValue]),
-        presentations: [row("remote-access", 1, "Ways In", "This network",
+        presentations: [row("remote-access", 2, "Ways In", "This network",
                             ["Wi-Fi", "LAN", "local network", "VPN", "Teleport"])]
     )
     /// Whether this Mac is reachable on its tailnet.
@@ -1294,7 +1307,7 @@ enum AppSettingDefinitions {
         identity: .remoteAccessTailscaleEnabled,
         persistenceKey: "remoteAccessTailscaleEnabled",
         absence: .registered(false),
-        presentations: [row("remote-access", 2, "Ways In", "Tailscale",
+        presentations: [row("remote-access", 3, "Ways In", "Tailscale",
                             ["tailnet", "Tailscale", "VPN", "away from home"])]
     )
     /// The browser convenience on the tailnet, and nothing else.
@@ -1309,7 +1322,7 @@ enum AppSettingDefinitions {
         identity: .remoteAccessTailscaleServeEnabled,
         persistenceKey: "remoteAccessTailscaleServeEnabled",
         absence: .registered(false),
-        presentations: [row("remote-access", 3, "Ways In", "Open in a browser on your tailnet",
+        presentations: [row("remote-access", 4, "Ways In", "Open in a browser on your tailnet",
                             ["browser", "Serve", "certificate", "tailnet", "HTTPS"])]
     )
     /// An address to advertise beside the ones enumerated from the interfaces.
@@ -1345,7 +1358,7 @@ enum AppSettingDefinitions {
         persistenceKey: "phoneReportWorkspace",
         absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
         validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 6, "Sharing & Security", "Reports from your phone",
+        presentations: [row("remote-access", 7, "Sharing & Security", "Reports from your phone",
                             ["shake", "report", "worktree", "workspace", "isolated"])]
     )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
@@ -1353,7 +1366,7 @@ enum AppSettingDefinitions {
         persistenceKey: "remoteInputControlDefault",
         absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
         validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 5, "Sharing & Security", "New shared chats",
+        presentations: [row("remote-access", 6, "Sharing & Security", "New shared chats",
                             ["security", "collaborative", "focused", "share"])],
         remotePolicy: .ownerMutable
     )
@@ -1472,6 +1485,7 @@ enum AppSettingDefinitions {
         .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
         .init(remoteAccessEnabled),
+        .init(remoteAccessKeepAwake),
         .init(remoteHostedServiceEnvironment),
         .init(remoteAccessDoorMigration),
         .init(remoteAccessPublicChannelMigration),
@@ -1529,7 +1543,7 @@ enum AppSettingDefinitions {
         // to borrow the connection mode's second presentation, and that descriptor is now a
         // migration record with no row of its own. Only a channel that offers Hosted Direct
         // lists it; see `definitions(on:)`.
-        surfaced(hostedDirectIdentity, pageID: "remote-access", order: 7,
+        surfaced(hostedDirectIdentity, pageID: "remote-access", order: 8,
                   section: "Connection", title: "Hosted Direct",
                   "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,

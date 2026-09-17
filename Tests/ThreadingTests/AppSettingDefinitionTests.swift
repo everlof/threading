@@ -328,6 +328,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             .chromeFontFamily: .init(key: "chromeFontFamily", valueType: .string),
             .conversationFontFamily: .init(key: "conversationFontFamily", valueType: .string),
             .appTextSize: .init(key: "appTextSize", valueType: .string),
+            .remoteAccessKeepAwake: .init(key: "remoteAccessKeepAwake", valueType: .string),
             .updateChannelSubscription: .init(
                 key: "updateChannelSubscription", valueType: .string
             ),
@@ -478,9 +479,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 89)
+        XCTAssertEqual(authoredRows.count, 90)
 #else
-        XCTAssertEqual(authoredRows.count, 88)
+        XCTAssertEqual(authoredRows.count, 89)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -548,7 +549,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         // sign-in row is last because it is the one row on this page that is not a stored
         // setting, so it is surfaced rather than persisted and cannot be interleaved.
         XCTAssertEqual(actual["remote-access"], [
-            "Remote Access", "This network", "Tailscale",
+            "Remote Access", "Keep this Mac awake", "This network", "Tailscale",
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
             "Reports from your phone", "Hosted Direct"
         ])
@@ -560,7 +561,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             .sorted { $0.catalogueOrder < $1.catalogueOrder }
             .map(\.rowAnchor)
         XCTAssertEqual(publicRemoteAccess, [
-            "Remote Access", "This network", "Tailscale",
+            "Remote Access", "Keep this Mac awake", "This network", "Tailscale",
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
             "Reports from your phone"
         ])

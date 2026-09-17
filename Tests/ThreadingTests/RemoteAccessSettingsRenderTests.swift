@@ -481,6 +481,87 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         XCTAssertEqual(page.marks.first, .attention)
     }
 
+    /// A MacBook that sleeps on battery and never on its adapter, which is the Mac this line was
+    /// written for and the one every photograph of the page shows.
+    nonisolated private static let laptopSleep = RemoteSleepFacts(
+        adapterIdleMinutes: 0,
+        batteryIdleMinutes: 5,
+        hasBattery: true,
+        readAt: Date(timeIntervalSince1970: 1_760_000_000)
+    )
+
+    /// "From anywhere" is true only while the Mac is awake, so the card that turns Remote Access
+    /// on says when this Mac is not — whichever way in is selected, and before any is.
+    func testTheConnectionCardSaysWhenThisMacGoesToSleep() throws {
+        for state in [PageState.lanBound, .tailnetBound, .nothingOn] {
+            let page = self.page(state: state)
+            let line = try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.sleepStatus
+            ))
+            XCTAssertFalse(isEffectivelyHidden(line), "\(state) hides the sleep line")
+            XCTAssertTrue(
+                line.stringValue.contains("cannot reach it while it sleeps"),
+                "\(state): \(line.stringValue)"
+            )
+            let hint = try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.sleepStatusHint
+            ))
+            XCTAssertEqual(
+                hint.stringValue,
+                "Plugged in, it stays awake. Choose “Always” above to keep it awake on battery too."
+            )
+        }
+
+        let page = self.page(state: .lanBound)
+        page.controller.apply(RemoteSleepFacts(
+            adapterIdleMinutes: 10,
+            batteryIdleMinutes: 5,
+            hasBattery: true,
+            readAt: Date(timeIntervalSince1970: 1_760_000_000)
+        ))
+        let mark = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.sleepStatusMark
+        ))
+        XCTAssertEqual(mark.stringValue, "!", "a Mac that sleeps plugged in is not a neutral fact")
+    }
+
+    /// The choice sits directly above the line it changes, all three options on screen, and
+    /// choosing one rewrites the line without a round trip through the coordinator.
+    func testTheKeepAwakeChoiceSitsAboveTheSleepLineAndRewritesIt() throws {
+        let page = self.page(state: .lanBound)
+        let control = try XCTUnwrap(
+            view(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.keepAwakeControl
+            ) as? ThemedSegmentedControl
+        )
+        XCTAssertEqual(control.titles, ["Off", "Plugged in", "Always"])
+        XCTAssertEqual(control.selectedIndex, 0)
+        XCTAssertNotNil(help(in: page.view, titled: "Keep this Mac awake"))
+
+        let line = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.sleepStatus
+        ))
+        // Window coordinates grow upwards, so above is a larger y.
+        XCTAssertGreaterThan(
+            control.convert(control.bounds, to: nil).minY,
+            line.convert(line.bounds, to: nil).maxY,
+            "the line reads as the choice's consequence only if it comes after it"
+        )
+
+        page.controller.apply(keepAwake: .always)
+        XCTAssertEqual(control.selectedIndex, 2)
+        XCTAssertTrue(line.stringValue.hasPrefix("Threading keeps this Mac awake"), line.stringValue)
+
+        page.controller.apply(keepAwake: .whilePluggedIn)
+        XCTAssertEqual(control.selectedIndex, 1)
+        XCTAssertTrue(line.stringValue.hasPrefix("Plugged in, Threading keeps"), line.stringValue)
+    }
+
     func testNothingSwitchedOnIsAStateWithAFactInIt() throws {
         let page = self.page(state: .nothingOn)
         let detail = try XCTUnwrap(statusDetail(in: page.view))
@@ -1673,6 +1754,10 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
         controller.apply(doors)
         controller.apply(discovery ?? state.discovery)
+        // Stated rather than read: the controller would otherwise pick up the choice from the
+        // developer's own defaults, and the photographs would depend on whose Mac ran them.
+        controller.apply(keepAwake: .off)
+        controller.apply(Self.laptopSleep)
         controller.applyListeningState(
             connection: RemoteConnectionStatusPresentation.resolve(
                 statuses: doors.offeredStatuses,

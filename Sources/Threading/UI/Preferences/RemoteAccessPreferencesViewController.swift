@@ -87,6 +87,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// every notification would re-probe for every answer it received.
     private var wakeFactsDoorState: RemoteAccessDoorState?
     private var wakeFactsTask: Task<Void, Never>?
+    /// The Connection card's sleep line, and what it was last handed. See `RemoteSleepFacts`.
+    private var sleepStatusViews: WayInStatusViews?
+    private var lastSleep = RemoteSleepFacts.unknown
+    private var sleepFactsTask: Task<Void, Never>?
     private let identityCaption = NSTextField(labelWithString: "")
     /// Wrapping, and by character: 26 characters a person compares glyph by glyph must not be
     /// truncated, and in a squeezed pane the only alternative to truncating them is a second
@@ -109,6 +113,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let hostedStatusLabel = NSTextField(labelWithString: "")
     private let hostedAccountControls = NSStackView()
     private let inputControlDefault = ThemedSegmentedControl()
+    private let keepAwakeControl = ThemedSegmentedControl()
+    /// The choice the sleep line was last rendered against. See `apply(keepAwake:)`.
+    private var lastKeepAwake = RemoteAccessKeepAwake.off
     private let phoneReportWorkspacePopUp = ThemedPopUp()
     private let macActivityWindowPopUp = ThemedPopUp()
     private let openLocallyButton = ThemedButton()
@@ -169,10 +176,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         // read when somebody is looking at it and when the door under it moves. Never on a
         // timer: it costs a child process and a multicast browse each time.
         readWakeOnDemandFacts(force: true)
+        readSleepFacts()
     }
 
     deinit {
         wakeFactsTask?.cancel()
+        sleepFactsTask?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -266,6 +275,28 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 of: AppSettings.shared.remoteInputControlDefault
             ) ?? 0
         )
+        keepAwakeControl.configure(
+            titles: RemoteAccessKeepAwake.allCases.map(\.title),
+            selectedIndex: RemoteAccessKeepAwake.allCases.firstIndex(
+                of: AppSettings.shared.remoteAccessKeepAwake
+            ) ?? 0
+        )
+        keepAwakeControl.onSelect = { [weak self] index in
+            guard RemoteAccessKeepAwake.allCases.indices.contains(index) else { return }
+            let choice = RemoteAccessKeepAwake.allCases[index]
+            AppSettings.shared.remoteAccessKeepAwake = choice
+            self?.apply(keepAwake: choice)
+        }
+        keepAwakeControl.setAccessibilityIdentifier(Identifier.keepAwakeControl)
+        keepAwakeControl.setAccessibilityLabel(L10n.string("Keep this Mac awake"))
+        // A stated measure, for the reason `inputControlDefault` has one below: left to its
+        // intrinsic width the run and the sentence beside it settle differently in a window than
+        // in a tree laid out once.
+        SettingsUI.preferControlWidth(
+            keepAwakeControl,
+            width: SettingsUIDefaults.compactSegmentedControlWidth
+        )
+
         inputControlDefault.onSelect = { index in
             guard RemoteInputControlDefault.allCases.indices.contains(index) else { return }
             AppSettings.shared.remoteInputControlDefault =
@@ -610,7 +641,45 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             ))
         }
         rows.append(SettingsUI.fullRow(connectionStatusRow()))
+        rows.append(SettingsUI.row(
+            title: "Keep this Mac awake",
+            subtitle: "While Remote Access is on, so a phone away from home can reach it. The "
+                + "display still turns off.",
+            help: HelpTopic(
+                title: L10n.string("Keep this Mac awake"),
+                paragraphs: [
+                    L10n.string(
+                        "Plugged in keeps it awake on the power adapter and lets it sleep as usual "
+                            + "on battery. Always keeps it awake on battery too, which uses charge "
+                            + "while the Mac sits idle."
+                    ),
+                    L10n.string(
+                        "Closing a laptop’s lid, choosing Sleep, or a critical battery still puts "
+                            + "it to sleep. Nothing is held while Remote Access is off."
+                    )
+                ]
+            ),
+            control: keepAwakeControl
+        ))
+        rows.append(SettingsUI.fullRow(sleepStatusRow()))
         return SettingsCard(rows: rows)
+    }
+
+    /// When this Mac goes to sleep, under the switch that turns Remote Access on.
+    ///
+    /// On the Connection card rather than in a way in's panel because it is true of every one of
+    /// them: a sleeping Mac answers nothing, and "from anywhere" is the promise a person is
+    /// reading when they decide which to turn on. Each way in's "Away from home" line says the
+    /// same thing in its own words; this line says when it applies to *this* Mac.
+    private func sleepStatusRow() -> NSView {
+        let views = statusViews(
+            statusIdentifier: Identifier.sleepStatus,
+            markIdentifier: Identifier.sleepStatusMark,
+            hintIdentifier: Identifier.sleepStatusHint
+        )
+        sleepStatusViews = views
+        apply(RemoteDoorStatus.sleep(lastSleep, keepAwake: lastKeepAwake), to: views)
+        return statusRow(views, action: nil)
     }
 
     private func connectionStatusRow() -> NSView {
@@ -1087,6 +1156,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
         ) ?? 0
+        apply(keepAwake: AppSettings.shared.remoteAccessKeepAwake)
         phoneReportWorkspacePopUp.selectItem(
             at: PhoneReportWorkspacePolicy.allCases
                 .firstIndex(of: AppSettings.shared.phoneReportWorkspace) ?? 0
@@ -1265,6 +1335,42 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             self.wakeFactsTask = nil
             self.refresh()
         }
+    }
+
+    /// Reads when this Mac goes to sleep, once per visit to the page.
+    ///
+    /// Not on a timer and not on a power-source change: the line states both sources on a laptop,
+    /// and the settings behind it change only in System Settings, which a person leaves this page
+    /// to visit.
+    private func readSleepFacts() {
+        guard sleepFactsTask == nil else { return }
+        sleepFactsTask = Task { [weak self] in
+            let facts = await RemoteSleepProbe.read()
+            guard let self else { return }
+            self.sleepFactsTask = nil
+            self.apply(facts)
+        }
+    }
+
+    /// Renders the sleep line. An entry point a test drives, because no test can change what
+    /// `pmset` says about the machine running it.
+    func apply(_ sleep: RemoteSleepFacts) {
+        lastSleep = sleep
+        applySleepLine()
+    }
+
+    /// Selects a keep-awake choice and renders the sleep line against it. The control writes the
+    /// setting before calling this; a test calls it directly so it never writes a preference.
+    func apply(keepAwake: RemoteAccessKeepAwake) {
+        lastKeepAwake = keepAwake
+        keepAwakeControl.selectedIndex = RemoteAccessKeepAwake.allCases.firstIndex(of: keepAwake)
+            ?? 0
+        applySleepLine()
+    }
+
+    private func applySleepLine() {
+        guard let sleepStatusViews else { return }
+        apply(RemoteDoorStatus.sleep(lastSleep, keepAwake: lastKeepAwake), to: sleepStatusViews)
     }
 
     /// Renders the ways in. The one entry point a test drives, for the same reason
@@ -1990,6 +2096,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         static let announcedName = "settings.remote-access.announced-as"
         static let wakeOnDemand = "settings.remote-access.wake-on-demand"
         static let wakeOnDemandMark = "settings.remote-access.wake-on-demand-mark"
+        static let sleepStatus = "settings.remote-access.status.sleep"
+        static let sleepStatusMark = "settings.remote-access.status-mark.sleep"
+        static let sleepStatusHint = "settings.remote-access.status-hint.sleep"
+        static let keepAwakeControl = "settings.remote-access.keep-awake"
 
         static func doorToggle(_ wayIn: RemoteAccessWayIn) -> String {
             "settings.remote-access.door.\(wayIn.identifierComponent)"

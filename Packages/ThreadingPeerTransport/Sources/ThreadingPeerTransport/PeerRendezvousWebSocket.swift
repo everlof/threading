@@ -75,6 +75,8 @@ public actor PeerRendezvousWebSocket {
     private var task: URLSessionWebSocketTask?
     private var isClosed = false
     private var didTimeOut = false
+    /// When anything last arrived, on the uptime clock `Task.sleep(nanoseconds:)` also uses.
+    private var lastReceivedUptimeNanoseconds: UInt64?
 
     public init(url: URL, credential: PeerRendezvousCredential) throws {
         guard url.scheme == "wss" || url.scheme == "ws" else {
@@ -121,26 +123,33 @@ public actor PeerRendezvousWebSocket {
         }
     }
 
+    /// The next envelope. A keepalive answer is consumed here, never returned: it is evidence
+    /// the path works (`hasReceived(sinceUptimeNanoseconds:)`), not a message for the protocol.
     public func receive() async throws -> PeerRendezvousEnvelope {
         guard let task, !isClosed else { throw PeerRendezvousError.connectionClosed }
         do {
-            let message = try await task.receive()
-            let data: Data
-            switch message {
-            case .data(let received):
-                data = received
-            case .string(let received):
-                guard received.utf8.count <= PeerRendezvousBounds.maximumEnvelopeBytes else {
-                    throw PeerRendezvousError.envelopeTooLarge(
-                        actual: received.utf8.count,
-                        limit: PeerRendezvousBounds.maximumEnvelopeBytes
-                    )
+            while true {
+                let message = try await task.receive()
+                lastReceivedUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
+                let data: Data
+                switch message {
+                case .data(let received):
+                    data = received
+                case .string(PeerRendezvousKeepalive.pongMessage):
+                    continue
+                case .string(let received):
+                    guard received.utf8.count <= PeerRendezvousBounds.maximumEnvelopeBytes else {
+                        throw PeerRendezvousError.envelopeTooLarge(
+                            actual: received.utf8.count,
+                            limit: PeerRendezvousBounds.maximumEnvelopeBytes
+                        )
+                    }
+                    data = Data(received.utf8)
+                @unknown default:
+                    throw PeerRendezvousError.invalidEnvelope
                 }
-                data = Data(received.utf8)
-            @unknown default:
-                throw PeerRendezvousError.invalidEnvelope
+                return try PeerRendezvousEnvelope.decode(data)
             }
-            return try PeerRendezvousEnvelope.decode(data)
         } catch let error as PeerRendezvousError {
             throw error
         } catch {
@@ -176,6 +185,24 @@ public actor PeerRendezvousWebSocket {
             guard !Task.isCancelled else { return }
             await onTimeout()
         }
+    }
+
+    /// Asks the service to answer. The answer arrives through whoever is receiving, so this only
+    /// works on a socket with a receive loop; `hasReceived(sinceUptimeNanoseconds:)` reads it.
+    public func sendKeepalive() async throws {
+        guard let task, !isClosed else { throw PeerRendezvousError.connectionClosed }
+        do {
+            try await task.send(.string(PeerRendezvousKeepalive.pingMessage))
+        } catch {
+            throw PeerRendezvousError.service(error.localizedDescription)
+        }
+    }
+
+    /// Whether anything, a keepalive answer included, has arrived since `instant`, read from
+    /// `DispatchTime.now().uptimeNanoseconds`.
+    public func hasReceived(sinceUptimeNanoseconds instant: UInt64) -> Bool {
+        guard let lastReceivedUptimeNanoseconds else { return false }
+        return lastReceivedUptimeNanoseconds >= instant
     }
 
     public func ping() async throws {

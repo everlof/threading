@@ -107,6 +107,67 @@ describe("host rendezvous durable object", () => {
     expect(await failure).toMatchObject({ kind: "failure", errorCode: "hostOffline" });
   });
 
+  it("treats a host that stopped answering keepalives as offline", async () => {
+    let currentTime = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+    const hostID = `host-${crypto.randomUUID()}`;
+    const stub = testEnv.HOST_RENDEZVOUS.getByName(hostID);
+    // Credentials outlive the clock jump below, so only the keepalive rule can end the host.
+    const credentialExpiresAt = currentTime + 10 * 60_000;
+    const host = await connect(stub, {
+      kind: "host",
+      accountID: "account-1",
+      hostID,
+      expiresAt: credentialExpiresAt,
+    });
+    const hostReady = nextEnvelope(host);
+    host.send(encodeEnvelope({ version: 1, kind: "hostHello", hostID }));
+    expect(await hostReady).toMatchObject({ kind: "hostReady", hostID });
+    const pong = nextText(host);
+    host.send("threading-ping");
+    expect(await pong).toBe("threading-pong");
+
+    // Recently answered: the session is forwarded to the Mac as before.
+    const waitingDeviceID = `device-${crypto.randomUUID()}`;
+    const waitingDevice = await connect(stub, {
+      kind: "device",
+      accountID: "account-1",
+      hostID,
+      deviceID: waitingDeviceID,
+      expiresAt: credentialExpiresAt,
+    });
+    const incoming = nextEnvelope(host);
+    waitingDevice.send(encodeEnvelope({
+      version: 1,
+      kind: "deviceConnect",
+      hostID,
+      deviceID: waitingDeviceID,
+    }));
+    expect(await incoming).toMatchObject({ kind: "incomingSession", deviceID: waitingDeviceID });
+
+    // Well past two missed rounds, the Mac is gone as far as a phone is concerned. The runtime
+    // stamps the answer with the real clock, a few milliseconds after the mocked one started.
+    currentTime += 90_000;
+    const hostClosed = new Promise<number>((resolve) => {
+      host.addEventListener("close", (event) => resolve(event.code), { once: true });
+    });
+    const waitingFailure = nextEnvelope(waitingDevice);
+    const deviceID = `device-${crypto.randomUUID()}`;
+    const device = await connect(stub, {
+      kind: "device",
+      accountID: "account-1",
+      hostID,
+      deviceID,
+      expiresAt: credentialExpiresAt,
+    });
+    const failure = nextEnvelope(device);
+    device.send(encodeEnvelope({ version: 1, kind: "deviceConnect", hostID, deviceID }));
+
+    expect(await failure).toMatchObject({ kind: "failure", errorCode: "hostOffline" });
+    expect(await waitingFailure).toMatchObject({ kind: "failure", errorCode: "hostOffline" });
+    expect(await hostClosed).toBe(4004);
+  });
+
   it("rejects delayed use after a credential or session reservation expires", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const deviceID = `device-${crypto.randomUUID()}`;
@@ -256,6 +317,15 @@ async function connect(
   if (!response.webSocket) throw new Error("Expected WebSocket upgrade");
   response.webSocket.accept();
   return response.webSocket;
+}
+
+function nextText(socket: WebSocket): Promise<string> {
+  return new Promise((resolve, reject) => {
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data === "string") resolve(event.data);
+      else reject(new Error("Expected a text frame"));
+    }, { once: true });
+  });
 }
 
 function nextEnvelope(socket: WebSocket): Promise<Envelope> {

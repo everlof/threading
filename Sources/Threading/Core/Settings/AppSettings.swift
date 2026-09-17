@@ -1428,6 +1428,21 @@ final class AppSettings {
         }
     }
 
+    /// Whether Threading keeps this Mac awake while Remote Access is on. An unrecognized stored
+    /// value reads as `.off`, which never holds an assertion nobody chose.
+    var remoteAccessKeepAwake: RemoteAccessKeepAwake {
+        get {
+            guard let raw = AppSettingDefinitions.remoteAccessKeepAwake.read(from: defaults),
+                  let value = RemoteAccessKeepAwake(rawValue: raw) else {
+                return .off
+            }
+            return value
+        }
+        set {
+            AppSettingDefinitions.remoteAccessKeepAwake.write(newValue.rawValue, to: defaults)
+        }
+    }
+
     /// How a newly shared session starts. The choice is only a default: the owner can switch
     /// the live session between collaborative and focused control at any time.
     var remoteInputControlDefault: RemoteInputControlDefault {

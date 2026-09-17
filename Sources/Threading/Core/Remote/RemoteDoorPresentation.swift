@@ -41,14 +41,14 @@ enum RemoteAccessWayIn: String, CaseIterable, Sendable {
             )
         case .tailscale:
             return L10n.string(
-                "Reach this Mac from anywhere on your tailnet. Needs Tailscale installed and "
-                    + "signed in on both devices."
+                "Reach this Mac from anywhere on your tailnet while it is awake. Needs Tailscale "
+                    + "installed and signed in on both devices."
             )
         case .threadingDirect:
             return L10n.string(
-                "Reach this Mac from anywhere, with no VPN. Threading connects the two devices "
-                    + "directly when it can, and falls back to a relay when your network will "
-                    + "not allow a direct connection."
+                "Reach this Mac from anywhere while it is awake, with no VPN. Threading connects "
+                    + "the two devices directly when it can, and falls back to a relay when your "
+                    + "network will not allow a direct connection."
             )
         }
     }
@@ -69,7 +69,7 @@ enum RemoteAccessWayIn: String, CaseIterable, Sendable {
                 whoCanReachIt: L10n.string("anyone on the VPN who has your pairing code"),
                 whoCanSeeTheTraffic: L10n.string("whoever operates the VPN, which is you"),
                 afterARestart: L10n.string("the address stays the same"),
-                awayFromHome: L10n.string("yes, while the VPN is connected")
+                awayFromHome: L10n.string("yes, while the VPN is connected and this Mac is awake")
             )
         case .tailscale:
             return RemoteDoorDisclosure(
@@ -79,7 +79,7 @@ enum RemoteAccessWayIn: String, CaseIterable, Sendable {
                         + "is not possible"
                 ),
                 afterARestart: L10n.string("the address stays the same"),
-                awayFromHome: L10n.string("yes")
+                awayFromHome: L10n.string("yes, while this Mac is awake")
             )
         case .threadingDirect:
             return RemoteDoorDisclosure(
@@ -88,7 +88,7 @@ enum RemoteAccessWayIn: String, CaseIterable, Sendable {
                     "nobody. A fallback relay carries encrypted data it cannot read"
                 ),
                 afterARestart: L10n.string("the address stays the same"),
-                awayFromHome: L10n.string("yes")
+                awayFromHome: L10n.string("yes, while this Mac is awake")
             )
         }
     }

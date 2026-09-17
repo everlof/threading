@@ -244,6 +244,15 @@ export class HostRendezvous {
       this.failSocket(socket, "hostOffline", "The Mac is not connected");
       return;
     }
+    if (this.hostStoppedAnsweringKeepalives(host)) {
+      // A sleeping or unplugged Mac leaves its socket open here until the edge notices, which
+      // can take far longer than a phone waits. Forwarding the session to it would cost the
+      // phone its whole negotiation timeout for a Mac that cannot answer; say so now instead.
+      this.closeCounterpartIfWaiting(host, "hostOffline", "The Mac disconnected");
+      try { host.close(4004, "Host stopped answering keepalives"); } catch { /* already closed */ }
+      this.failSocket(socket, "hostOffline", "The Mac is not connected");
+      return;
+    }
     const sessionCount = this.ctx.getWebSockets().filter((candidate) => {
       const role = this.attachment(candidate).role;
       return role === "device-waiting" || role === "device-paired";
@@ -446,6 +455,12 @@ export class HostRendezvous {
         this.failSocket(socket, "sessionExpired", "The signaling session expired");
       }
     }
+  }
+
+  private hostStoppedAnsweringKeepalives(host: WebSocket): boolean {
+    const lastAnswered = this.ctx.getWebSocketAutoResponseTimestamp(host);
+    if (lastAnswered === null) return false;
+    return lastAnswered.getTime() <= Date.now() - BOUNDS.rendezvousKeepaliveStaleMilliseconds;
   }
 
   private pendingHandshakeExpired(connectedAt: number): boolean {

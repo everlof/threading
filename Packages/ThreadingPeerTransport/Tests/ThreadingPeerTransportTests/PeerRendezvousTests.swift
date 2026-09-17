@@ -28,6 +28,19 @@ final class PeerRendezvousTests: XCTestCase {
         XCTAssertTrue(didFire)
     }
 
+    func testRendezvousErrorsNameThemselvesWithoutTheirPayload() {
+        XCTAssertEqual(PeerRendezvousError.hostOffline.diagnosticCode, "rendezvous.hostOffline")
+        XCTAssertEqual(PeerRendezvousError.timedOut.diagnosticCode, "rendezvous.timedOut")
+        XCTAssertEqual(
+            PeerRendezvousError.service("https://example.test/#bearer").diagnosticCode,
+            "rendezvous.service"
+        )
+        XCTAssertEqual(
+            PeerRendezvousError.envelopeTooLarge(actual: 2, limit: 1).diagnosticCode,
+            "rendezvous.envelopeTooLarge"
+        )
+    }
+
     func testReadyEnvelopeRoundTripsOnlyBoundedICEConfiguration() throws {
         let now = Date()
         let server = try PeerIceServer(
