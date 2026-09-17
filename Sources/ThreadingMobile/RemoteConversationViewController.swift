@@ -1854,7 +1854,7 @@ private final class InsetsLabel: UILabel {
 /// stored `CGColor` does not follow a live theme change or a trait collection.
 ///
 /// Internal rather than private because the composer's attachment chips need the same stroke.
-final class MobileThemeOutlineView: UIView {
+class MobileThemeOutlineView: UIView {
     private var color: UIColor = .clear
     private var radius: CGFloat = 0
     private var width: CGFloat = 0
@@ -1892,14 +1892,14 @@ final class MobileThemeOutlineView: UIView {
            glow.opacity > 0 {
             let glowWidth = min(CGFloat(glow.radius), MobileDesign.Spacing.tight)
             let glowInset = glowWidth / 2
-            let glowPath = UIBezierPath(
-                roundedRect: rect
+            let glowPath = Self.path(
+                in: bounds
                     .insetBy(dx: glowInset, dy: glowInset)
                     .offsetBy(
                         dx: CGFloat(glow.offsetX ?? 0),
                         dy: CGFloat(-(glow.offsetY ?? 0))
                     ),
-                cornerRadius: max(0, radius - glowInset)
+                radius: max(0, radius - glowInset)
             )
             glowPath.lineWidth = glowWidth
             glowColor.withAlphaComponent(CGFloat(glow.opacity / 6)).setStroke()
@@ -1907,13 +1907,20 @@ final class MobileThemeOutlineView: UIView {
         }
 
         let inset = width / 2
-        let borderPath = UIBezierPath(
-            roundedRect: rect.insetBy(dx: inset, dy: inset),
-            cornerRadius: max(0, radius - inset)
-        )
+        let strokeBounds = bounds.insetBy(dx: inset, dy: inset)
+        let strokeRadius = max(0, radius - inset)
+        let borderPath = Self.path(in: strokeBounds, radius: strokeRadius)
         borderPath.lineWidth = width
         color.setStroke()
         borderPath.stroke()
+    }
+
+    /// UIKit's zero-radius rounded path leaves degenerate corner segments. A thick
+    /// stroke exposes their butt ends; a rectangle has four properly joined corners.
+    static func path(in rect: CGRect, radius: CGFloat) -> UIBezierPath {
+        radius <= 0
+            ? UIBezierPath(rect: rect)
+            : UIBezierPath(roundedRect: rect, cornerRadius: radius)
     }
 }
 

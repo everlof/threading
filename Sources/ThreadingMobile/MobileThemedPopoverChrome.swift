@@ -429,9 +429,9 @@ final class MobileThemedPopoverBackgroundView: UIPopoverBackgroundView {
     }
 
     override func draw(_ rect: CGRect) {
-        let body = UIBezierPath(
-            roundedRect: bodyRect,
-            cornerRadius: fittedCornerRadius
+        let body = MobileThemeOutlineView.path(
+            in: bodyRect,
+            radius: fittedCornerRadius
         )
         let arrow = arrowPath(body: bodyRect, cornerRadius: fittedCornerRadius)
         style.fill.setFill()

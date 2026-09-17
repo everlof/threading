@@ -25,12 +25,13 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         /// Where the bar has nothing drawn: the action row's middle, between the top-row cap and
         /// the trailing controls.
         static let surfaceSample = CGPoint(x: 195, y: 17)
-        /// The rows without their hairlines: the top overlay and the divider between the rows.
+        /// The rows without their hairlines: the top separator and the divider between the rows.
         static let actionRowBand: Range<CGFloat> = 2..<40
         static let keyRowBand: Range<CGFloat> = 47..<81
         /// Through the middle of the top cap, away from its rounded corners.
         static let topCapColumn: CGFloat = 65
-        static let topCapBand: Range<CGFloat> = 4..<38
+        // The fallback theme reserves one point for its top separator before the four-point inset.
+        static let topCapBand: Range<CGFloat> = 5..<39
         /// A plate over the surface is eighteen levels apart; anti-aliased ink and the hairline
         /// dividers are further. Anything nearer than this is the surface.
         static let surfaceTolerance = 8

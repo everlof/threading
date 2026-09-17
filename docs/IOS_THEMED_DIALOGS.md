@@ -585,3 +585,24 @@ Use these modes as the initial fixtures for the future `ThreadingMobileUITests` 
 When the primitive gains a materially different control or layout state, add a fixture at the
 same time. Review at least a compact iPhone, a large iPhone, an accessibility Dynamic Type size,
 and a deliberately different remote theme.
+
+## Key-bar separators and attachment outlines
+
+The terminal key bar reserves layout space for both horizontal separators. A top overlay consumes
+part of the action row's inset: with a four-point border it erases the entire four-point gap above
+a custom top-row cap. The separator is therefore a sibling of the row, independent of theme
+border weight; the existing cap padding owns the equal air above and below.
+
+`MobileThemeOutlineView` draws against its bounds, never the dirty rectangle passed to `draw`.
+A square stroke uses a rectangular path: UIKit's zero-radius rounded path has degenerate corner
+segments whose stroke ends leave notches at thick border weights. Rounded themes retain their
+rounded path. Conversation tool cards use this same outline instead of a second implementation
+with the same square-corner defect. The popover body and outline glow also use the shared path
+constructor, so a zero-radius material never enters UIKit’s rounded stroke path. The attachment strip's remove symbol uses an explicit two-color palette so the X
+is opaque floating-surface ink inside the label-colored disc, rather than a transparent cutout
+through which a thumbnail can show.
+
+These remain host-owned controls. Themes supply material; the host retains key dispatch, file
+custody, preview and removal. Drawing remains constant work per existing view, and the attachment
+strip retains its eight-item bound. `ComposerChromeRenderTests` checks corner pixels, partial
+redraw geometry and thumbnail-independent close-mark pixels.

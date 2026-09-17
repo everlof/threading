@@ -1242,3 +1242,107 @@ final class MobileThemeGlowTests: XCTestCase {
         return Data(bytes)
     }
 }
+
+@MainActor
+final class ComposerChromeRenderTests: XCTestCase {
+    func testSurfaceRefreshReplacesOnlyItsOwnOutline() {
+        let surface = UIView(frame: CGRect(x: 0, y: 0, width: 52, height: 52))
+        let childOutline = MobileThemeOutlineView()
+        surface.addSubview(childOutline)
+        for radius: CGFloat in [0, 10, 0] {
+            surface.applyRemoteSurface(fill: .white, radius: radius, border: .black, borderWidth: 4)
+            XCTAssertTrue(childOutline.superview === surface)
+            XCTAssertEqual(surface.subviews.count, 2)
+        }
+        surface.applyRemoteSurface(fill: .white, radius: 0)
+        XCTAssertEqual(surface.subviews, [childOutline])
+    }
+
+    func testSquareOutlineHasCompleteCornersAtEveryBorderWeight() throws {
+        for width: CGFloat in [1, 2, 4] {
+            let outline = MobileThemeOutlineView(frame: CGRect(x: 0, y: 0, width: 52, height: 52))
+            outline.update(color: .black, radius: 0, width: width, glow: nil)
+            let image = render(outline)
+            for point in [CGPoint(x: 0, y: 0), CGPoint(x: 51, y: 0),
+                          CGPoint(x: 0, y: 51), CGPoint(x: 51, y: 51)] {
+                XCTAssertEqual(try pixel(image, point)[3], 255, "Missing corner at \(point), width \(width)")
+            }
+            XCTAssertEqual(try pixel(image, CGPoint(x: 26, y: 26))[3], 0)
+        }
+    }
+
+    func testPartialRedrawKeepsOutlineOnViewBounds() throws {
+        let outline = MobileThemeOutlineView(frame: CGRect(x: 0, y: 0, width: 52, height: 52))
+        outline.update(color: .black, radius: 0, width: 4, glow: nil)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(bounds: outline.bounds, format: format).image { _ in
+            outline.draw(CGRect(x: 10, y: 10, width: 20, height: 20))
+        }
+        XCTAssertEqual(try pixel(image, CGPoint(x: 10, y: 10))[3], 0)
+        XCTAssertEqual(try pixel(image, CGPoint(x: 0, y: 0))[3], 255)
+    }
+
+    func testAttachmentRemoveMarkDoesNotRevealThumbnailThroughItsCross() throws {
+        for radius: CGFloat in [0, 10] {
+            let theme = RemoteThemePalette(RemoteThemeDTO(
+                id: "attachment-test", name: "Attachment test", mode: .light,
+                colors: ["ground": "#FFFFFF", "floating_surface": "#FFFFFF", "label": "#000000", "border": "#000000"],
+                material: .init(panelRadius: Double(radius), controlRadius: Double(radius), borderWidth: 4)
+            ))
+            func capture(_ color: UIColor) throws -> UIImage {
+                let strip = ComposerAttachmentStripView(frame: CGRect(x: 0, y: 0, width: 100, height: 66))
+                let thumbnail = UIGraphicsImageRenderer(size: CGSize(width: 52, height: 52)).image { context in
+                    color.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 52, height: 52))
+                }
+                var item = ComposerAttachmentItem(name: "Image", thumbnail: thumbnail, systemImage: "photo")
+                item.state = .ready(uploadID: "test")
+                strip.update(items: [item], theme: theme)
+                strip.layoutIfNeeded()
+                let remove = try XCTUnwrap(descendants(strip).first {
+                    $0.accessibilityIdentifier == "composer.attachment.remove"
+                } as? UIButton)
+                // Render the actual configured symbol over the two thumbnail colours. Its
+                // centre must be opaque even where the glyph used to cut through the disc.
+                let mark = try XCTUnwrap(remove.image(for: .normal))
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 3
+                return UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24), format: format).image { context in
+                    color.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
+                    mark.draw(in: CGRect(x: 0, y: 0, width: 24, height: 24))
+                }
+            }
+            let red = try capture(.red)
+            let blue = try capture(.blue)
+            for y in 30..<42 {
+                for x in 30..<42 {
+                    XCTAssertEqual(try pixel(red, CGPoint(x: x, y: y)), try pixel(blue, CGPoint(x: x, y: y)))
+                }
+            }
+        }
+    }
+
+    private func descendants(_ view: UIView) -> [UIView] {
+        view.subviews.flatMap { [$0] + descendants($0) }
+    }
+
+    private func render(_ view: UIView) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
+            view.layer.render(in: context.cgContext)
+        }
+    }
+
+    private func pixel(_ image: UIImage, _ point: CGPoint) throws -> [UInt8] {
+        let cropped = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(origin: point, size: CGSize(width: 1, height: 1))))
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: 1, height: 1,
+            bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return bytes
+    }
+}

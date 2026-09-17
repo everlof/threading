@@ -2999,7 +2999,8 @@ extension UIView {
             $0.removeFromSuperview()
         }
         if let border, borderWidth > 0 {
-            let outline = RemoteSurfaceBorderView(
+            let outline = RemoteSurfaceBorderView()
+            outline.update(
                 color: border,
                 radius: radius,
                 width: borderWidth,
@@ -3028,63 +3029,6 @@ private extension UIFont {
     }
 }
 
-private final class RemoteSurfaceBorderView: UIView {
-    private let color: UIColor
-    private let radius: CGFloat
-    private let width: CGFloat
-    private let glow: RemoteThemeDTO.Material.Glow?
-
-    init(
-        color: UIColor,
-        radius: CGFloat,
-        width: CGFloat,
-        glow: RemoteThemeDTO.Material.Glow?
-    ) {
-        self.color = color
-        self.radius = radius
-        self.width = width
-        self.glow = glow
-        super.init(frame: .zero)
-        backgroundColor = .clear
-        isOpaque = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func draw(_ rect: CGRect) {
-        if let glow,
-           let glowColor = UIColor(remoteHex: glow.color),
-           glow.radius > 0,
-           glow.opacity > 0 {
-            // UIKit's layer shadow API freezes a CGColor, which would violate live theme
-            // updates. Draw a soft inner halo from the current semantic theme instead.
-            let glowWidth = min(
-                CGFloat(glow.radius),
-                MobileDesign.Spacing.tight
-            )
-            let glowInset = glowWidth / 2
-            let glowPath = UIBezierPath(
-                roundedRect: rect
-                    .insetBy(dx: glowInset, dy: glowInset)
-                    .offsetBy(
-                        dx: CGFloat(glow.offsetX ?? 0),
-                        dy: CGFloat(-(glow.offsetY ?? 0))
-                    ),
-                cornerRadius: max(0, radius - glowInset)
-            )
-            glowPath.lineWidth = glowWidth
-            glowColor.withAlphaComponent(CGFloat(glow.opacity / 6)).setStroke()
-            glowPath.stroke()
-        }
-
-        let inset = width / 2
-        let path = UIBezierPath(
-            roundedRect: rect.insetBy(dx: inset, dy: inset),
-            cornerRadius: max(0, radius - inset)
-        )
-        path.lineWidth = width
-        color.setStroke()
-        path.stroke()
-    }
-}
+/// A distinct identity lets surface reconfiguration remove only the outline it owns.
+/// All drawing and theme updates belong to the shared outline implementation.
+private final class RemoteSurfaceBorderView: MobileThemeOutlineView {}

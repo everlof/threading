@@ -651,7 +651,12 @@ private final class ComposerAttachmentChipView: UIView {
         removeButton.translatesAutoresizingMaskIntoConstraints = false
         removeButton.accessibilityIdentifier = "composer.attachment.remove"
         removeButton.setImage(
-            UIImage(systemName: "xmark.circle.fill"),
+            UIImage(
+                systemName: "xmark.circle.fill",
+                withConfiguration: UIImage.SymbolConfiguration(paletteColors: [
+                    theme.uiFloatingSurface, theme.uiLabel,
+                ])
+            ),
             for: .normal
         )
         removeButton.tintColor = theme.uiLabel

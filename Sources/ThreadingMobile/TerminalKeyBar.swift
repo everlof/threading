@@ -502,6 +502,8 @@ struct TerminalKeyBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+
             actionRow
 
             Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
@@ -509,9 +511,6 @@ struct TerminalKeyBar: View {
             keyRow
         }
         .background(theme.surface)
-        .overlay(alignment: .top) {
-            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
-        }
         .onAppear {
             isKeyboardVisible = bridge.isKeyboardShowing
             keyFeedback.prepare()

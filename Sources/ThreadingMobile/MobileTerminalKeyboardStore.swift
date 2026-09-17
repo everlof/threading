@@ -76,8 +76,8 @@ final class MobileTerminalKeyboardStore: ObservableObject {
     /// still holds at least one key, the stock layout for that kind otherwise.
     func layout(forAgentKind agentKind: String) -> RemoteTerminalKeyboardLayout {
 #if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
-            == "terminal-custom-key-layout-custom-dark",
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?
+            .hasPrefix("terminal-custom-key-layout-") == true,
            agentKind == "codex"
         {
             var keys = RemoteTerminalKeyboardLayout.standard(forAgentKind: agentKind).keys
