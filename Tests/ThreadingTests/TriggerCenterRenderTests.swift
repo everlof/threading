@@ -7,6 +7,12 @@ import XCTest
 /// the evidence keeps all three visible under both system appearances.
 @MainActor
 final class TriggerCenterRenderTests: XCTestCase {
+    /// A real wide pane on this machine, rather than a measure the page happens to fill. The
+    /// destination is hosted at the full width of the window beside the sidebar, and the fixture
+    /// used to be narrow enough that a run of tabs stretched across the whole window — and a row
+    /// with its action a window away from the name it acts on — looked like ordinary layout.
+    private static let paneWidth: CGFloat = 1280
+
     private var outputDirectory: URL {
         if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
            !override.isEmpty {
@@ -43,12 +49,12 @@ final class TriggerCenterRenderTests: XCTestCase {
                 var violations: [ThemeBoundaryAudit.Violation] = []
 
                 appearance.performAsCurrentDrawingAppearance {
-                    let host = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 640))
+                    let host = NSView(frame: NSRect(x: 0, y: 0, width: Self.paneWidth, height: 640))
                     host.appearance = appearance
                     controller.view.translatesAutoresizingMaskIntoConstraints = false
                     host.addSubview(controller.view)
                     NSLayoutConstraint.activate([
-                        host.widthAnchor.constraint(equalToConstant: 900),
+                        host.widthAnchor.constraint(equalToConstant: Self.paneWidth),
                         host.heightAnchor.constraint(equalToConstant: 640),
                         controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
                         controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
@@ -71,6 +77,18 @@ final class TriggerCenterRenderTests: XCTestCase {
                 XCTAssertTrue(
                     violations.isEmpty,
                     violations.map(\.description).joined(separator: "\n")
+                )
+                XCTAssertEqual(
+                    controller.drawnPagesWidth,
+                    TriggerCenterViewController.expectedPagesWidth,
+                    accuracy: 0.5,
+                    "The page tabs took the pane's width instead of their own on \(pageName)."
+                )
+                XCTAssertEqual(
+                    controller.drawnColumnWidth,
+                    TriggerCenterViewController.expectedColumnWidth,
+                    accuracy: 0.5,
+                    "The page column did not keep its measure in a wide pane on \(pageName)."
                 )
                 let data = try XCTUnwrap(png)
                 XCTAssertGreaterThan(data.count, 1_000)

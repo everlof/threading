@@ -4,11 +4,28 @@ import AppKit
 final class TriggerCenterViewController: NSViewController {
     private enum Page: Int { case triggers, activity, sources }
 
+    private enum Layout {
+        /// The page's column, centred in whatever pane it is given.
+        ///
+        /// The readable measure plus the inset `PanelListView` keeps its own content on, rather
+        /// than a width of this page's choosing. The list vocabulary here is the display panel's,
+        /// where a row is a name with its action just beyond the copy; given the whole of a wide
+        /// window, that same row put its button a thousand points from the name it acts on, and
+        /// the three page tabs stretched across the window above it because
+        /// `ThemedSegmentedControl` states `noIntrinsicMetric` and takes every point offered.
+        static let contentWidth: CGFloat =
+            Design.Size.readableWidth + Design.Spacing.inset * 2
+
+        /// Three one- or two-word choices — the shared settings measure for exactly that run.
+        static let pagesWidth: CGFloat = SettingsUIDefaults.compactSegmentedControlWidth
+    }
+
     private let store: TriggerStore
     private let pages = ThemedSegmentedControl()
     private let primaryAction = ThemedButton()
     private let list = PanelListView(rowSpacing: Design.Spacing.small)
     private let status = NSTextField(labelWithString: "")
+    private let column = NSView()
     private let events = AppEventObservations()
     private var page: Page = .triggers
 
@@ -43,7 +60,7 @@ final class TriggerCenterViewController: NSViewController {
 
         status.applyFont(.detail())
         status.textColor = Design.Text.tertiary
-        status.alignment = .right
+        status.alignment = .natural
 
         pages.configure(titles: [
             L10n.string("Triggers"),
@@ -66,35 +83,52 @@ final class TriggerCenterViewController: NSViewController {
         heading.orientation = .vertical
         heading.alignment = .leading
         heading.spacing = Design.Spacing.tight
+        heading.translatesAutoresizingMaskIntoConstraints = false
 
-        let top = NSStackView(views: [heading, NSView(), status])
-        top.orientation = .horizontal
-        top.alignment = .centerY
-        top.spacing = Design.Spacing.medium
-        top.translatesAutoresizingMaskIntoConstraints = false
-
-        let controls = NSStackView(views: [pages, NSView(), primaryAction])
+        // The count stands next to the tabs it counts rather than at the far end of the title
+        // line: "No triggers" is about the page you are on, and at the other end of a wide window
+        // it read as an unrelated word in the opposite corner.
+        let controls = NSStackView(views: [pages, status, NSView(), primaryAction])
         controls.orientation = .horizontal
         controls.alignment = .centerY
+        controls.spacing = Design.Spacing.medium
         controls.translatesAutoresizingMaskIntoConstraints = false
 
         list.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(top)
-        view.addSubview(controls)
-        view.addSubview(list)
+
+        // One centred column, so the header block, the tabs and the rows' ink stand on the same
+        // line whatever the window is doing. `PanelListView` insets its own content by
+        // `Spacing.inset`, and the header block matches it rather than choosing a second margin.
+        column.translatesAutoresizingMaskIntoConstraints = false
+        column.addSubview(heading)
+        column.addSubview(controls)
+        column.addSubview(list)
+        SettingsUI.install(page: column, in: view, width: Layout.contentWidth)
 
         NSLayoutConstraint.activate([
-            top.topAnchor.constraint(equalTo: view.topAnchor, constant: Design.Spacing.large),
-            top.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.large),
-            top.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.large),
-            controls.topAnchor.constraint(equalTo: top.bottomAnchor, constant: Design.Spacing.medium),
-            controls.leadingAnchor.constraint(equalTo: top.leadingAnchor),
-            controls.trailingAnchor.constraint(equalTo: top.trailingAnchor),
-            pages.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
+            heading.topAnchor.constraint(equalTo: column.topAnchor, constant: Design.Spacing.large),
+            heading.leadingAnchor.constraint(
+                equalTo: column.leadingAnchor,
+                constant: Design.Spacing.inset
+            ),
+            heading.trailingAnchor.constraint(
+                lessThanOrEqualTo: column.trailingAnchor,
+                constant: -Design.Spacing.inset
+            ),
+            controls.topAnchor.constraint(
+                equalTo: heading.bottomAnchor,
+                constant: Design.Spacing.large
+            ),
+            controls.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            controls.trailingAnchor.constraint(
+                equalTo: column.trailingAnchor,
+                constant: -Design.Spacing.inset
+            ),
+            pages.widthAnchor.constraint(equalToConstant: Layout.pagesWidth),
             list.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: Design.Spacing.medium),
-            list.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            list.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            list.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            list.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            list.bottomAnchor.constraint(equalTo: column.bottomAnchor),
         ])
     }
 
@@ -135,6 +169,14 @@ final class TriggerCenterViewController: NSViewController {
     }
 
     #if DEBUG
+    /// What a wide pane may not take for itself. A run of tabs with no intrinsic width and a
+    /// list pinned to the window will each swallow every point on offer, which is a defect the
+    /// renders showed and no assertion here was making.
+    static var expectedPagesWidth: CGFloat { Layout.pagesWidth }
+    static var expectedColumnWidth: CGFloat { Layout.contentWidth }
+    var drawnPagesWidth: CGFloat { pages.frame.width }
+    var drawnColumnWidth: CGFloat { column.frame.width }
+
     /// Deterministic render-test seam: the shipping segmented control owns the same selection,
     /// while the evidence test awaits the async store projection before capturing pixels.
     func prepareEvidencePage(index: Int) async throws {
@@ -616,7 +658,7 @@ private final class TriggerCenterRowView: NSView {
         copy.alignment = .leading
         copy.spacing = Design.Spacing.tight
 
-        var views: [NSView] = [copy, NSView()]
+        var views: [NSView] = [copy]
         if let secondaryActionTitle {
             let button = ThemedButton()
             button.title = secondaryActionTitle
@@ -639,7 +681,18 @@ private final class TriggerCenterRowView: NSView {
         row.spacing = Design.Spacing.medium
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
+
+        // The copy has to *ask* for the row, the way `ControlRowView` does: a wrapping label has
+        // no intrinsic width to hug with, so a spacer beside it took the slack and the detail
+        // line broke after two words with half the row still empty. One step under a button's
+        // compression resistance, so the actions keep their size and the copy takes the rest.
+        let stretch = copy.widthAnchor.constraint(equalTo: row.widthAnchor)
+        stretch.priority = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+        )
+
         NSLayoutConstraint.activate([
+            stretch,
             row.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.small),
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
             row.trailingAnchor.constraint(equalTo: trailingAnchor),

@@ -136,16 +136,19 @@ enum SettingsUI {
     ///
     /// - Parameter top: where the page starts, for a pane with a header strip above it. The
     ///   host's own top edge when there is none.
+    /// - Parameter width: the canvas this page keeps. The shared Settings measure unless a
+    ///   destination states its own — the Triggers workspace is a page in this same pane with a
+    ///   narrower composition, and the priorities above are the part neither page should redecide.
     @discardableResult
     static func install(
         page content: NSView,
         in host: NSView,
-        top: NSLayoutYAxisAnchor? = nil
+        top: NSLayoutYAxisAnchor? = nil,
+        width pageWidth: CGFloat = SettingsUIDefaults.pageWidth
     ) -> [NSLayoutConstraint] {
         content.translatesAutoresizingMaskIntoConstraints = false
         if content.superview !== host { host.addSubview(content) }
 
-        let pageWidth = SettingsUIDefaults.pageWidth
         // Keep a comfortable inset when the pane can afford it, but do not make either page edge
         // equal to the pane. Only a <= relationship may mention the host's width here: content
         // inside a split item must never supply that item's preferred measure.

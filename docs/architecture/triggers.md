@@ -68,6 +68,18 @@ The sidebar's **Triggers** destination has three pages:
 - **Activity** shows durable run state and bounded results even when no session started.
 - **Sources** connects the first adapter, overlays daemon health, and pauses or resumes polling.
 
+The destination is hosted at the pane's full width, but it draws one centred column at
+`Design.Size.readableWidth` plus the inset `PanelListView` keeps its rows on, installed through
+the same `SettingsUI.install(page:in:top:width:)` the Settings pages use. It is the display
+panel's list vocabulary — a name, a detail line, an action just beyond the copy — and given a
+whole wide window it stopped reading as one: the three page tabs stretched across the window
+because `ThemedSegmentedControl` states `noIntrinsicMetric`, the count sat alone in the opposite
+corner, and a row's button stood a thousand points from the name it acts on. The page count now
+stands beside the tabs it counts, and a row's copy asks for the row the way `ControlRowView`
+does, since a wrapping label has no intrinsic width to hug with and a spacer beside it broke the
+detail line after two words. `TriggerCenterRenderTests` renders at a real wide pane and asserts
+both measures, because none of this was visible at the fixture width that shipped.
+
 This destination and its approval sheets are host-only security surfaces. Extensions may observe
 only future explicitly published facts; they cannot replace credentials, authority or run-state
 presentation. The seven built-in MCP tools are the supported agent automation seam: three lists,
