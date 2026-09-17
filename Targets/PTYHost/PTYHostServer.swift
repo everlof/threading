@@ -67,6 +67,10 @@ final class PTYHostServer: @unchecked Sendable {
     private var lossDetectedAt: Date?
 
     private var isRetiring = false
+
+    /// The descriptor holding the state directory's exclusive lock. Never closed: the kernel
+    /// releases the lock when this process ends, and not before.
+    private var ownershipLock: Int32 = -1
     private var ringBudget = PTYHostDefaults.aggregateRingBytes
 
     /// A `.pipes` child's three parent-side descriptors, held between the spawn that made them
@@ -87,17 +91,53 @@ final class PTYHostServer: @unchecked Sendable {
 
     // MARK: - Public Methods
 
-    /// Prepares the state directory, reads what the previous daemon left, and binds the socket.
+    /// How `start()` ended. A held state directory is its own answer, because it is the one refusal
+    /// that is not this process's failure and clears on its own when the owner exits.
+    enum StartOutcome {
+        case listening
+        case stateDirectoryHeld
+        case failed
+    }
+
+    /// Prepares and takes ownership of the state directory, reads what the previous daemon left,
+    /// and binds the socket.
     ///
-    /// Answers false having said why. There is no degraded mode: a daemon that cannot be reached
-    /// is a daemon whose sessions nobody can attach to, and the app's availability decision keeps
-    /// a selected background session stopped when the socket is not there.
-    func start() -> Bool {
+    /// Any outcome but `.listening` has already said why on standard error. There is no degraded
+    /// mode: a daemon that cannot be reached is a daemon whose sessions nobody can attach to, and
+    /// the app's availability decision keeps a selected background session stopped when the socket
+    /// is not there.
+    ///
+    /// **One daemon per state directory.** A second one used to run the recovery below against the
+    /// first one's live `sessions.jsonl`, take its running agents for a crashed predecessor's
+    /// orphans, and `SIGKILL` their groups — measured in the remote-host spike, where a new
+    /// generation was started beside a draining one. launchd never orders it that way, since
+    /// `KeepAlive` restarts a job only after it exits, but an operator, a leftover unit or a
+    /// half-finished upgrade can, so the daemon refuses rather than trusting every caller.
+    func start() -> StartOutcome {
         guard prepareStateDirectory() else {
             FileHandle.standardError.write(
                 Data("threading-ptyd: cannot prepare the state directory\n".utf8)
             )
-            return false
+            return .failed
+        }
+
+        // Before anything reads or writes the directory: a second daemon must not append to the
+        // first one's journal or state file, and above all must not run the recovery below.
+        switch PTYHostPOSIX.lockExclusively(
+            stateDirectory.appendingPathComponent(PTYHostDefaults.ownershipLockFileName).path
+        ) {
+        case .held(let descriptor):
+            ownershipLock = descriptor
+        case .heldElsewhere:
+            FileHandle.standardError.write(Data(
+                "threading-ptyd: another daemon owns \(stateDirectory.path); not starting\n".utf8
+            ))
+            return .stateDirectoryHeld
+        case .failed(let code):
+            FileHandle.standardError.write(Data(
+                "threading-ptyd: cannot lock \(stateDirectory.path): \(String(cString: strerror(code)))\n".utf8
+            ))
+            return .failed
         }
 
         journal.prune()
@@ -109,9 +149,9 @@ final class PTYHostServer: @unchecked Sendable {
 
         recoverPreviousSessions()
 
-        guard bindListener() else { return false }
+        guard bindListener() else { return .failed }
         journal.record(.listening, [Field.socket: socketPath])
-        return true
+        return .listening
     }
 
     // MARK: - Private Methods — startup

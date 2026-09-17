@@ -50,6 +50,14 @@ final class PTYHostDaemonTests: XCTestCase {
         static let helperName = "threading-ptyd"
         /// The package build's way to name the daemon under test. Unused by the hosted target.
         static let helperOverrideKey = "THREADING_PTYD_EXECUTABLE"
+        /// The package build's statement of the three generation values the binary under test was
+        /// built with — the same names as the Xcode build settings. An absent one was not given.
+        /// Unused by the hosted target.
+        static let expectedShortVersionKey = "MARKETING_VERSION"
+        static let expectedBundleVersionKey = "CURRENT_PROJECT_VERSION"
+        static let expectedSourceRevisionKey = "THREADING_SOURCE_REVISION"
+        /// The daemon's `EX_TEMPFAIL`: another daemon owns the state directory.
+        static let stateDirectoryHeldExitCode: Int32 = 75
         static let shell = "/bin/sh"
 
         /// Larger than the daemon's 512 KiB ring, so the replay has to be a cut.
@@ -659,6 +667,87 @@ final class PTYHostDaemonTests: XCTestCase {
         XCTAssertTrue(daemon.isRunning)
     }
 
+    // MARK: - One daemon per state directory
+
+    /// A daemon refuses a state directory another daemon owns, and touches nothing of the owner's.
+    ///
+    /// Without the lock the second daemon's startup recovery read the owner's live
+    /// `sessions.jsonl`, took its running agent for a crashed predecessor's orphan and killed the
+    /// agent's group. The intruder is given a socket of its own on purpose: the refusal is about
+    /// the state, not the rendezvous. The owner is then killed the way a crash kills it, because
+    /// the lock is only right if the kernel gives it back however the owner ends.
+    ///
+    /// The agent is left **detached** while the intruder starts, which is also the case that
+    /// matters — a daemon holding agents nobody is watching. It is detached for a second reason:
+    /// under Docker Desktop's x86_64 emulation, launching a process from the test closed the test's
+    /// own open socket (measured, and not on arm64 or macOS), so no watcher is open across that
+    /// launch.
+    func testASecondDaemonRefusesAStateDirectoryAnotherDaemonOwns() throws {
+        let owner = try startDaemon()
+        let spawner = try connect(to: owner)
+        let id = Self.newIdentity()
+        let spawned = try spawn(on: spawner, id: id, script: "printf READY; sleep 60")
+        try spawner.waitForOutput(containing: "READY", timeout: Fixture.childTimeout)
+        spawner.hangUp()
+
+        let intruder = try DaemonProcess(
+            helper: try helperURL(),
+            socketPath: directory.appendingPathComponent("x.sock").path,
+            stateDirectory: owner.stateDirectory,
+            ringBudget: nil
+        )
+        // Not in `daemons`: it owns no endpoint the teardown should drain. If the lock ever
+        // regresses it is a live daemon, and it must not outlive the test.
+        defer {
+            intruder.terminateIfRunning()
+            intruder.finishDiagnostics()
+        }
+        XCTAssertTrue(
+            intruder.waitUntilExited(timeout: Fixture.replyTimeout),
+            "a daemon on an owned state directory exits instead of serving: \(intruder.diagnosticText)"
+        )
+        XCTAssertEqual(intruder.terminationStatus, Fixture.stateDirectoryHeldExitCode)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: intruder.socketPath),
+            "the refused daemon bound nothing"
+        )
+        XCTAssertEqual(DaemonTestPOSIX.kill(spawned.pid, 0), 0, "the owner's agent is still running")
+        let client = try connect(to: owner)
+        client.send(.list)
+        let held = try nextSessions(on: client)
+        XCTAssertEqual(held.map(\.id), [id])
+        XCTAssertNil(held.first?.exit)
+
+        owner.crash()
+        client.hangUp()
+        try waitUntil(timeout: Fixture.exitTimeout, "the owner is gone") { !owner.isRunning }
+        let successor = try startDaemon(reusing: owner)
+        let observer = try connect(to: successor, greeting: false)
+        observer.send(.hello(PTYHostHello(build: "test", pid: getpid())))
+        _ = try nextHello(on: observer)
+        XCTAssertEqual(try nextLost(on: observer).ids, [id], "a crashed owner's lock is released")
+    }
+
+    #if SWIFT_PACKAGE
+    /// A Linux binary has no `Info.plist`, so its generation is whatever its build defined — and
+    /// `? (?)` when the build defined nothing, never a guess that could match an app's.
+    ///
+    /// Hosted runs do not need this: `PTYHostDaemonIntegrationTests` pins the embedded plist's
+    /// generation to the app's.
+    func testHelloCarriesTheGenerationTheBuildWasGiven() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon, greeting: false)
+        client.send(.hello(PTYHostHello(build: "test", pid: getpid())))
+        let environment = ProcessInfo.processInfo.environment
+        let expected = PTYHostGeneration.string(
+            shortVersion: environment[Fixture.expectedShortVersionKey],
+            bundleVersion: environment[Fixture.expectedBundleVersionKey],
+            sourceRevision: environment[Fixture.expectedSourceRevisionKey]
+        )
+        XCTAssertEqual(try nextHello(on: client).build, expected)
+    }
+    #endif
+
     /// The version pair is the gate, and it is the first thing that happens on a connection.
     func testAnIncompatibleHelloIsRefusedAndAFrameBeforeHelloIsNotAnswered() throws {
         let daemon = try startDaemon()
@@ -1149,6 +1238,16 @@ private final class DaemonProcess: @unchecked Sendable {
     // MARK: - Public Methods
 
     var isRunning: Bool { process.isRunning }
+
+    /// Meaningful once the process has exited.
+    var terminationStatus: Int32 { process.terminationStatus }
+
+    /// `SIGTERM`, for a daemon a test started but that holds nothing worth draining.
+    func terminateIfRunning() {
+        guard process.isRunning else { return }
+        process.terminate()
+        _ = waitUntilExited(timeout: PTYHostTestProcessCleanup.childTimeout)
+    }
 
     /// Ready means *connectable*, not "the file is there".
     ///

@@ -147,6 +147,10 @@ enum PTYHostDefaults {
     /// knows about the one before it.
     static let stateFileName = "sessions.jsonl"
 
+    /// The file whose exclusive `flock` makes a daemon the one owner of its state directory. Held
+    /// for the process's whole life and released by the kernel however it ends.
+    static let ownershipLockFileName = "ptyd.lock"
+
     /// Bumped when a record's shape changes. Read leniently: an unreadable line is skipped and
     /// counted, never a reason to refuse the file, because the file's whole purpose is to be
     /// readable after a crash wrote half a line.
@@ -182,6 +186,9 @@ enum PTYHostDefaults {
     /// prepared — nothing this process can do about it, and staying up would be a listener
     /// nobody can reach.
     static let startupFailureExitCode: Int32 = 69
+    /// `EX_TEMPFAIL`. Another daemon holds the state directory. Not this process's failure and not
+    /// permanent: that daemon may be draining towards an exit, after which a start succeeds.
+    static let stateDirectoryHeldExitCode: Int32 = 75
     static let successExitCode: Int32 = 0
 
     // MARK: - Wire

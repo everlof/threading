@@ -4,8 +4,9 @@
 // wrapper on musl or on older glibc, `pipe2` is hidden behind `_GNU_SOURCE`, which the Swift Glibc
 // module is not built with, and `ioctl` is variadic, which Swift cannot call. Each is a
 // one-line forward here and nothing more: every decision about what to call and when stays in
-// `PTYHostPlatform.swift`. Only the Linux build compiles this; Darwin reaches the same calls
-// directly.
+// `PTYHostPlatform.swift`. It also carries the build's generation, which Darwin reads from an
+// embedded Info.plist a Linux binary does not have. Only the Linux build compiles this; Darwin
+// reaches the same calls directly.
 #ifndef CPTYHOSTPLATFORM_H
 #define CPTYHOSTPLATFORM_H
 
@@ -27,5 +28,13 @@ int threading_pidfd_open(pid_t pid);
 
 /// `sysconf(_SC_CLK_TCK)`: the unit of `/proc/<pid>/stat` field 22.
 long threading_clock_ticks_per_second(void);
+
+/// The three build values a Darwin helper reads from its embedded `Info.plist`, which a Linux
+/// binary does not have. Each is the string the build defined with `-Xcc -D<name>="<value>"`
+/// (`THREADING_PTYD_SHORT_VERSION`, `THREADING_PTYD_BUNDLE_VERSION`,
+/// `THREADING_PTYD_SOURCE_REVISION`), or NULL when the build named none.
+const char *threading_build_short_version(void);
+const char *threading_build_bundle_version(void);
+const char *threading_build_source_revision(void);
 
 #endif

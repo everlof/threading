@@ -15,6 +15,14 @@
 #      runs — then the daemon suite again against that exact binary, and a check that it links
 #      nothing dynamically.
 #
+# The static binary reports a generation in `hello`, as the macOS helper does from its Info.plist:
+# `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION` and `THREADING_SOURCE_REVISION` from the
+# environment, the same names as the Xcode build settings, so whatever builds an app passes the
+# same three values to both. Unset, they are 0.0.0, 0.0.0 and this checkout's HEAD — the local
+# autoinstaller's shape — and the revision is left out when the daemon's sources differ from HEAD,
+# because a binary must not claim a commit it was not built from. The debug build names none and
+# is tested to report `? (?)`.
+#
 # The static binaries land in build/linux/<arch>/threading-ptyd. Build products and the SDK are
 # cached in Docker volumes, so a second run compiles only what changed. The container runs with
 # `--init` because the restart tests orphan a child on purpose and need something to reap it.
@@ -68,6 +76,29 @@ while (( $# > 0 )); do
 done
 (( ${#architectures[@]} > 0 )) || architectures=("$(native_architecture)")
 
+short_version="${MARKETING_VERSION:-0.0.0}"
+bundle_version="${CURRENT_PROJECT_VERSION:-0.0.0}"
+if [[ -n "${THREADING_SOURCE_REVISION+set}" ]]; then
+  source_revision="${THREADING_SOURCE_REVISION}"
+else
+  daemon_sources=(Targets/PTYHost Packages/ThreadingPTYHostKit Packages/ThreadingDomain)
+  if git -C "${repository_directory}" diff --quiet HEAD -- "${daemon_sources[@]}" \
+    && [[ -z "$(git -C "${repository_directory}" ls-files --others --exclude-standard -- "${daemon_sources[@]}")" ]]; then
+    source_revision="$(git -C "${repository_directory}" rev-parse HEAD)"
+  else
+    source_revision=""
+    echo "test-ptyd-linux: the daemon's sources differ from HEAD; the static binary names no revision" >&2
+  fi
+fi
+# Each value becomes a C string literal on a compiler command line, so it is held to the characters
+# a version or a commit is made of.
+for value in "${short_version}" "${bundle_version}" "${source_revision}"; do
+  if [[ ! "${value}" =~ ^[A-Za-z0-9._+-]*$ ]]; then
+    echo "test-ptyd-linux: generation value '${value}' has characters outside [A-Za-z0-9._+-]" >&2
+    exit 64
+  fi
+done
+
 if ! docker info >/dev/null 2>&1; then
   echo "test-ptyd-linux: Docker is not running. Start Docker Desktop and try again." >&2
   exit 69
@@ -93,6 +124,9 @@ run_architecture() {
     --env "STATIC_SDK_URL=${static_sdk_url}" \
     --env "STATIC_SDK_CHECKSUM=${static_sdk_checksum}" \
     --env "SDK_TRIPLE=${sdk_triple}" \
+    --env "GENERATION_SHORT_VERSION=${short_version}" \
+    --env "GENERATION_BUNDLE_VERSION=${bundle_version}" \
+    --env "GENERATION_SOURCE_REVISION=${source_revision}" \
     "${swift_image}" \
     bash -euo pipefail -c '
       package=/src/Targets/PTYHost
@@ -119,6 +153,14 @@ run_architecture() {
         # on arm64, measured), and the stripped binary is the one a host is handed.
         static=(--package-path "${package}" --scratch-path /work/static
           --swift-sdks-path /work/sdks --swift-sdk "${SDK_TRIPLE}" -c release -Xlinker -s)
+        # The generation, for the C shim (`threading_build_*`). An empty value is not defined, so
+        # it reads as absent exactly as a missing Info.plist key does on macOS.
+        for pair in SHORT_VERSION="${GENERATION_SHORT_VERSION}" \
+          BUNDLE_VERSION="${GENERATION_BUNDLE_VERSION}" \
+          SOURCE_REVISION="${GENERATION_SOURCE_REVISION}"; do
+          [[ -n "${pair#*=}" ]] || continue
+          static+=(-Xcc "-DTHREADING_PTYD_${pair%%=*}=\"${pair#*=}\"")
+        done
         swift build "${static[@]}" --product threading-ptyd
         install -m 0755 "$(swift build "${static[@]}" --show-bin-path)/threading-ptyd" /out/threading-ptyd
 
@@ -128,8 +170,12 @@ run_architecture() {
           exit 1
         fi
         echo "--- daemon tests against the static binary"
-        THREADING_PTYD_EXECUTABLE=/out/threading-ptyd \
+        env THREADING_PTYD_EXECUTABLE=/out/threading-ptyd \
+          MARKETING_VERSION="${GENERATION_SHORT_VERSION}" \
+          CURRENT_PROJECT_VERSION="${GENERATION_BUNDLE_VERSION}" \
+          THREADING_SOURCE_REVISION="${GENERATION_SOURCE_REVISION}" \
           "${watchdog}" "${tests}" ThreadingPTYHostTests.PTYHostDaemonTests
+        echo "--- generation ${GENERATION_SHORT_VERSION} (${GENERATION_BUNDLE_VERSION})${GENERATION_SOURCE_REVISION:+ @${GENERATION_SOURCE_REVISION}}, asserted by testHelloCarriesTheGenerationTheBuildWasGiven"
         ls -l /out/threading-ptyd
       fi
     '

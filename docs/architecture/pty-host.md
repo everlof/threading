@@ -473,10 +473,13 @@ the master, cancels the timers, unbinds any watcher still holding it, and is jou
 
 ### Retire
 
-`retire` stops accepting, closes the listener and **unlinks the socket immediately** so a
-replacement binary can bind the path, keeps serving what is already attached, and `exit(0)`s when
+`retire` stops accepting, closes the listener and **unlinks the socket immediately** so no new
+client reaches a daemon on its way out, keeps serving what is already attached, and `exit(0)`s when
 the last session ends — after a short flush, because writes are asynchronous and exiting the
-instant the last session is released can truncate the frame that said so.
+instant the last session is released can truncate the frame that said so. The replacement starts
+only after that exit: it cannot own the state directory before (see
+[Failure model](#failure-model)), and launchd's `KeepAlive` restarts a job only once it has exited
+anyway.
 
 **A daemon that has not been asked to retire never exits on its own**, however idle it is. launchd
 binds the registration to the path rather than to the code, so an exit is an upgrade only when
@@ -519,8 +522,22 @@ than one that ended. It is R4 in the design's risk register, answered.
 - **`SIGPIPE` is ignored process-wide** and `SO_NOSIGPIPE` is set on every socket. Either alone is
   one edit away from being removed by somebody who saw only the other. Linux has no
   `SO_NOSIGPIPE`, so on Linux the process-wide ignore is the only guard.
+- **One daemon per state directory.** Before it reads, writes or recovers anything, the daemon
+  takes an exclusive `flock` on `ptyd.lock` in the state directory, holds it for its whole life on
+  a close-on-exec descriptor, and exits `EX_TEMPFAIL` (75) having said why when another daemon
+  holds it. Without it a second daemon — started beside a draining one in the remote-host spike —
+  read the first one's live `sessions.jsonl`, took its running agents for a crashed predecessor's
+  orphans and `SIGKILL`ed their groups. launchd never orders it that way; an operator, a leftover
+  systemd unit or a half-finished upgrade can, so the daemon refuses rather than trusting every
+  caller. `flock` rather than an `fcntl` record lock, because a record lock belongs to the process
+  and is dropped when *any* descriptor for the file closes; the kernel releases a `flock` however
+  the process ends, `SIGKILL` included. Close-on-exec matters as much as the lock: an agent that
+  inherited the descriptor and outlived its daemon would keep every later daemon out.
+  `PTYHostDaemonTests/testASecondDaemonRefusesAStateDirectoryAnotherDaemonOwns` fails without it,
+  with the owner's agent killed.
 - **The daemon unlinks a stale socket, not the app.** It is the only process that may be listening
-  there, so it is the only one that can tell a leftover file from a live listener without a race.
+  there, so it is the only one that can tell a leftover file from a live listener without a race —
+  and, holding the state directory's lock, the only daemon that can be doing so.
 - **The state directory is created `0700` and set `0700` again**, because it may already exist from
   a run with a different mask. That directory is the whole authorization boundary: no frame carries
   a token, and this is why none needs to.
@@ -552,6 +569,12 @@ Nothing registers or starts a Linux daemon yet; what exists is the build and the
   leak it, on the one serial queue that forks.
 - **`SIGPIPE`**: no `SO_NOSIGPIPE`, so the process-wide ignore is the only guard.
 - **No registration.** `status` says so on Linux instead of asking `launchctl`.
+- **The generation is compiled in.** Darwin reads it from the embedded `Info.plist`; a Linux
+  binary has none, so `PTYHostBuildIdentity` reads three strings the build defines for the C shim
+  (`-Xcc -DTHREADING_PTYD_SHORT_VERSION="…"` and its `BUNDLE_VERSION`/`SOURCE_REVISION`
+  siblings). A build that defines none reports `? (?)`, which matches no app. The upgrade table
+  above cannot compare a generation that is not there, so a host is never installed from a build
+  without one.
 
 **The build.** `Targets/PTYHost/Package.swift` is a SwiftPM manifest over the same directory, used
 only for Linux and for running the Linux half's tests on a Mac without a container. The Xcode
@@ -571,9 +594,14 @@ the fixture's own client, and `THREADING_PTYD_EXECUTABLE` names the binary under
 `scripts/test-ptyd-linux.sh [--arch arm64|amd64|all]` runs, in a `swift:6.3.2-noble` container
 (the Swift the repository's Xcode ships): the `ThreadingPTYHostKit` tests, the debug daemon suite,
 then the static release build, a check that it links nothing dynamically, and the daemon suite
-again against that exact binary. Measured 2026-09-17 on Docker Desktop (kernel 6.12), on linux/arm64
+again against that exact binary. The static build is stamped from `MARKETING_VERSION`,
+`CURRENT_PROJECT_VERSION` and `THREADING_SOURCE_REVISION` — the Xcode build settings' own names —
+defaulting to `0.0.0`, `0.0.0` and `HEAD`, with the revision left out when the daemon's sources
+differ from `HEAD`; `testHelloCarriesTheGenerationTheBuildWasGiven` asserts `hello` carries exactly
+that, and `? (?)` for the unstamped debug build. Measured 2026-09-17 on Docker Desktop (kernel 6.12), on linux/arm64
 natively and linux/amd64 emulated: 77 kit tests, 30 package tests and 25 static-binary tests on
-each, all passing, none skipped.
+each, all passing, none skipped. With the state-directory lock and the stamped generation, the same
+day: 77, 32 and 27 on each, none skipped.
 
 **Every Linux XCTest runs through `scripts/linux/xctest-watchdog.sh`**, one case per process.
 swift-corelibs-xctest wraps each `setUp`/`tearDown` in `awaitUsingExpectation`, and on Linux that
@@ -584,6 +612,15 @@ finishes. The watchdog backtraces a case still running after ten seconds and ret
 the main thread is inside `awaitUsingExpectation` — the harness wrapper, never a test body — and
 prints every retry. Anything else still running at 180 seconds fails with its backtrace, and a skip
 is reported as a skip, not a pass. Delete the runner when the pinned toolchain has the fix.
+
+**Under x86_64 emulation the watchdog cannot tell that hang from a real one.** Docker Desktop's
+emulated `linux/amd64` gives LLDB no frames — every thread's backtrace is empty — so a case caught
+in the harness deadlock is held to the 180-second limit and reported failed instead of retried.
+Measured on 2026-09-17: two of five `--arch amd64` runs failed one unchanged `ThreadingPTYHostKit`
+value test this way, and the runs either side passed all of it. Rerun an emulated failure whose
+backtrace is empty before believing it; native `arm64` classifies every hang. The same emulation
+also closed a test process's own open socket when that process launched a child, which is why
+`testASecondDaemonRefusesAStateDirectoryAnotherDaemonOwns` holds no watcher across its launch.
 
 ## Availability and launch ownership
 

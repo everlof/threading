@@ -135,7 +135,14 @@ enum ThreadingPTYHost {
             stateDirectory: URL(fileURLWithPath: arguments.stateDirectory, isDirectory: true),
             build: buildString
         )
-        guard server.start() else { exit(PTYHostDefaults.startupFailureExitCode) }
+        switch server.start() {
+        case .listening:
+            break
+        case .stateDirectoryHeld:
+            exit(PTYHostDefaults.stateDirectoryHeldExitCode)
+        case .failed:
+            exit(PTYHostDefaults.startupFailureExitCode)
+        }
 
         // Everything after this is a queue event: an accepted connection, a decoded frame, a
         // burst of a child's output, a timer. A daemon that has not been asked to retire never
@@ -145,16 +152,11 @@ enum ThreadingPTYHost {
 
     /// Reported in `hello` and journalled; never compared for admission.
     ///
-    /// Read from the processed `Info.plist` embedded in this executable. The app and helper use
-    /// `PTYHostGeneration` over the same three build values, so an offline bundle replacement is
-    /// visible even though this already-running process keeps executing its old text pages.
+    /// The app and helper use `PTYHostGeneration` over the same three build values, so an offline
+    /// bundle replacement is visible even though this already-running process keeps executing its
+    /// old text pages. Where each platform reads them is `PTYHostBuildIdentity`.
     private static var buildString: String {
-        let info = Bundle.main.infoDictionary
-        return PTYHostGeneration.string(
-            shortVersion: info?["CFBundleShortVersionString"] as? String,
-            bundleVersion: info?["CFBundleVersion"] as? String,
-            sourceRevision: info?["ThreadingSourceRevision"] as? String
-        )
+        PTYHostBuildIdentity.generation
     }
 }
 

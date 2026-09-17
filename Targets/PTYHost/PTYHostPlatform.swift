@@ -260,6 +260,35 @@ enum PTYHostPOSIX {
         #endif
     }
 
+    // MARK: - Ownership
+
+    /// What asking for a file's exclusive lock came to.
+    enum ExclusiveLock {
+        /// Held, through this descriptor, until the process ends. The descriptor is close-on-exec
+        /// so no child inherits it: an agent that outlived the daemon holding it would keep every
+        /// later daemon out.
+        case held(Int32)
+        /// Another open file description holds it — another daemon.
+        case heldElsewhere
+        /// The file could not be opened or locked at all; the `errno`.
+        case failed(Int32)
+    }
+
+    /// Takes `flock(LOCK_EX | LOCK_NB)` on `path`, creating it owner-only if needed.
+    ///
+    /// `flock` rather than `fcntl` record locks: those belong to the *process* and are dropped by
+    /// closing any descriptor for the file, which a later `FileManager` read of the directory could
+    /// do by accident. A `flock` belongs to this one open file description, on Darwin and Linux
+    /// alike, and the kernel releases it when the process exits by any means, `SIGKILL` included.
+    static func lockExclusively(_ path: String) -> ExclusiveLock {
+        let descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, PTYHostDefaults.filePermissions)
+        guard descriptor >= 0 else { return .failed(errno) }
+        if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return .held(descriptor) }
+        let code = errno
+        close(descriptor)
+        return code == EWOULDBLOCK ? .heldElsewhere : .failed(code)
+    }
+
     // MARK: - Process identity
 
     /// The kernel start time of a pid, to the resolution the kernel keeps.
@@ -387,5 +416,34 @@ enum PTYHostProcStat {
             return UInt64(parts[1])
         }
         return nil
+    }
+}
+
+// MARK: - Build identity
+
+/// The generation this binary reports in `hello` and journals at start.
+///
+/// The app compares it to its own to decide whether a running daemon came from the bundle now on
+/// disk, so it has to be the same three values on both sides. A Darwin helper reads them from the
+/// processed `Info.plist` Xcode embeds in `__TEXT,__info_plist`. A Linux binary has no plist, so the
+/// build defines them for the C shim instead (`scripts/test-ptyd-linux.sh`). A build that named
+/// none reports `? (?)` — honestly unknown, never an invented generation that might match.
+enum PTYHostBuildIdentity {
+
+    static var generation: String {
+        #if os(Linux)
+        return PTYHostGeneration.string(
+            shortVersion: threading_build_short_version().map { String(cString: $0) },
+            bundleVersion: threading_build_bundle_version().map { String(cString: $0) },
+            sourceRevision: threading_build_source_revision().map { String(cString: $0) }
+        )
+        #else
+        let info = Bundle.main.infoDictionary
+        return PTYHostGeneration.string(
+            shortVersion: info?["CFBundleShortVersionString"] as? String,
+            bundleVersion: info?["CFBundleVersion"] as? String,
+            sourceRevision: info?["ThreadingSourceRevision"] as? String
+        )
+        #endif
     }
 }

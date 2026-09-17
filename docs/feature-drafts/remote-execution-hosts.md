@@ -2,7 +2,8 @@
 
 > Status: feature draft — slice 1 (a Linux build of `threading-ptyd`) builds and passes its
 > suite on Linux; its durable decisions are in [`pty-host.md`](../architecture/pty-host.md#linux).
-> Nothing else has started. This is the implementation plan for slice C of
+> The remote-session spike (below) ran on 2026-09-17 and settles slice 2's transport, install and
+> upgrade shape. Nothing else has started. This is the implementation plan for slice C of
 > [SSH remote hosts and SFTP attachment sources](ssh-remote-hosts-and-sftp-attachments.md#c-remote-execution-host),
 > pulled forward and cut so its first slices do not wait on SFTP.
 
@@ -98,12 +99,12 @@ matters.
 - The SSH host profile, trust and credential model from the SSH draft — adopted here first rather
   than after SFTP. Dependency selection is that draft's gate 1 and applies unchanged.
 - Install: detect `uname -m`, copy the matching static binary to
-  `~/.local/lib/threading/<generation>/threading-ptyd`, install the user unit, check linger.
-  The generation directory makes upgrade the existing `retire` handshake: the old daemon drains,
-  the new one binds.
-- Transport: forward the remote `ptyd.sock` to a Mac-local `0700` path
-  (`streamlocal` forwarding), so the app's existing `PTYHost` client connects to a local path and
-  never learns it is remote.
+  `~/.local/lib/threading/<generation>/threading-ptyd`, install the templated user unit, enable
+  linger. Upgrade is the existing zero-session `retire` handshake followed by switching unit
+  instances — never `systemctl restart`, which kills agents. See the spike's decisions 4–6.
+- Transport: system OpenSSH forwards the remote `ptyd.sock` to a Mac-local path in a `0700`
+  directory (`streamlocal` forwarding), so the app's existing `PTYHost` client connects to a local
+  path and never learns it is remote. Measured in the spike: no protocol change needed.
 - Reconnect: an SSH drop is a connection close, which the daemon already treats as a detach
   without seeds; the next attach is a cut and the app re-derives its screen. Mac sleep is the same
   event.
@@ -141,6 +142,82 @@ requests. Slice 3's first release refuses them; each is then restored one surfac
 
 The first release asks the person to sign in to each CLI once from a remote shell session. Moving
 logins between machines is out of scope.
+
+## Remote-session spike, 2026-09-17
+
+A by-hand end-to-end run of the slice 2 path before building it: the static arm64 binary from
+slice 1 installed on a Debian 12 VM (Lima, Apple Virtualization, kernel 6.1), its socket forwarded
+to the Mac with system OpenSSH, and a throwaway client on `ThreadingPTYHostKit` driving it. The VM
+sits on the same Mac, so every latency below is the cost of ssh, the forward and the daemon, **not**
+of a real network — add the path's round-trip time. Nothing from the spike is in the repository;
+the client and scenario scripts were scratch.
+
+### What was measured
+
+| Question | Result |
+| --- | --- |
+| Does the unchanged protocol run over a forwarded socket? | Yes. `ssh -N -L <mac>.sock:<box>/ptyd.sock` with `StreamLocalBindUnlink=yes`, `ExitOnForwardFailure=yes`, `ServerAliveInterval=5`. The Mac-side socket is created `0600`. No frame, client or daemon change. |
+| Connect + `hello` | 2–6 ms warm, 37 ms first, against 0.6–6 ms on a local socket. |
+| Keystroke echo (one byte into `cat` on a pty, 300 samples, two runs) | Remote median 0.91 / 1.14 ms, p99 1.72 / 5.57 ms, max 18.6 ms. Local median 0.14 / 0.27 ms. |
+| Output throughput | 23.0 MiB/s over the forward (64 MiB). The macOS local daemon measured 9.3 MiB/s, limited by Darwin's small pty buffers. Neither is near an agent's output rate. |
+| `SIGWINCH` on resize | Delivered; the child reported the new size. |
+| Clean detach, tunnel down 5 s, reattach | `exact(fromOffset:)`: 1,702 replay bytes = the 1,698 missed plus the 4-byte seed. The replay began at the line after the last one the first watcher saw (L182 → L183), no gap, no duplicate. |
+| Tunnel killed while attached, reattach | `cut` with the whole ring tail, which contained every missed line. The daemon saw an ordinary close. |
+| ssh frozen (`SIGSTOP`) 25 s under maximum output | The daemon stopped queueing at its 4 MiB bound and closed that watcher (`backpressureClosed`); the child never blocked. Reattach after resume was a `cut`. |
+| Daemon memory | 35 MB RSS idle, almost all pages of the 57 MB static binary; flat after 200 MB through a detached session. |
+| A Mac-composed launch (`/bin/zsh -lc …`) | `spawnRefused(executableUnavailable)` on Debian. |
+| Agent `PATH` | A login `bash -lc` found `~/.local/bin/claude` (official installer) through Debian's `~/.profile`; a plain `bash -c` did not. The remote home was `/home/david.guest`, not the Mac's. |
+| Logout with linger off | The last session ending stopped `user@.service` and killed the daemon **and the agent under it**. The next daemon reported the session `lostSession / processGone`. |
+| Logout with linger on | Zero sessions, same daemon pid, agent still running and reattachable. `loginctl enable-linger` for oneself needed no sudo on Debian 12. |
+| `systemctl --user restart` with an agent running | **Killed the agent** — systemd ends the unit's whole control group — and the new daemon reported it lost. |
+| Retire, then a second generation started while the first still held a live agent | The new daemon's startup recovery read the shared `sessions.jsonl`, took the live agent for a crashed predecessor's orphan, and **`SIGKILL`ed its group** (`lostSessionStillRunning / groupKilled`). |
+| The daemon's generation on Linux | `? (?)`: it is read from `Info.plist`, which a Linux binary does not have. |
+
+Not covered: a real network path (Wi-Fi, cellular, a VPS region away), true Mac sleep, a Raspberry
+Pi's slower storage and CPU, `x86_64` hardware, and non-Debian login-shell layouts.
+
+### What it decides
+
+1. **System OpenSSH is the execution transport** for the first release, not an SSH library. It
+   forwards unix sockets both ways, reuses the person's keys, agent, `known_hosts` and
+   `~/.ssh/config` (jump hosts, `Include`, hardware keys), and needed no code here. The app owns
+   one `ssh -N` per host with the options above, a Mac-side socket in its own `0700` directory, and
+   `ExitOnForwardFailure` so a failed forward is a process exit it can report. This decouples the
+   SSH draft's library choice from execution: the library question stays open for SFTP and for a
+   later host-key UI, and the SSH draft's "never import `~/.ssh/config`" stance has to be
+   revisited for execution, where the person's config is the point.
+2. **Reconnect needs no new protocol.** A dropped tunnel is a close; a deliberate disconnect sends
+   `detach` with seeds first and gets an exact replay. The app must detect a dead tunnel from the
+   `ssh` process exiting or the socket reaching end of file, because the watcher's own writes
+   succeed into a local socket for a while after the far side is gone.
+3. **The launcher composes per host from host facts.** Before any launch the app asks the host,
+   over the same ssh: architecture (`uname -m`), `$HOME`, the login shell (`getent passwd`), and
+   which agent CLIs a login shell resolves. Launches are `<login shell> -lc <command>` with the
+   remote home and a remote checkout path. Nothing Mac-side — paths, `/bin/zsh`, account
+   directories — is sent.
+4. **Install requires linger.** The installer runs `loginctl enable-linger` for the user and
+   refuses to report the host ready without it, because the failure it prevents is an agent
+   killed at the moment its person logs out.
+5. **One systemd unit per generation, never a restart.** Install `threading-ptyd@.service` with
+   `ExecStart=%h/.local/lib/threading/%i/threading-ptyd --default-locations` and enable
+   `threading-ptyd@<generation>`. An upgrade follows the macOS policy in
+   [`pty-host.md`](../architecture/pty-host.md#retiring-a-daemon-the-last-bundle-left-behind)
+   exactly: retire only a daemon holding **zero** active sessions, wait for its confirmed exit,
+   then disable its instance and enable the new one. A busy host keeps its compatible older
+   daemon and upgrades after its last session ends.
+6. **Two daemon fixes before any remote install ships — both done, 2026-09-17**; the durable
+   decisions are in [`pty-host.md`](../architecture/pty-host.md#failure-model):
+   - **Generation.** The Linux build compiles the generation in: the lane defines
+     `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION` and `THREADING_SOURCE_REVISION` for the C shim
+     (defines rather than a generated source file, so the read-only source tree stays untouched),
+     and `hello` carries them. Whatever later embeds the Linux binaries in the app passes the same
+     three values it passes Xcode.
+   - **One daemon per state directory.** The daemon takes an exclusive `flock` on `ptyd.lock` in
+     its state directory before touching anything and exits 75 when another daemon holds it. This
+     hardening applies to macOS unchanged. Reproduced first: with the lock disabled, the new test's
+     second daemon killed the owner's agent exactly as the spike saw. Verified on macOS (125 hosted
+     PTY-host tests through Xcode, 31 through SwiftPM) and on Linux arm64 and x86_64 (77 kit, 32
+     package and 27 static-binary tests each, the static binary reporting `0.0.0 (0.0.0) @<rev>`).
 
 ## The autonomy question
 
@@ -194,8 +271,9 @@ the whole.
 
 ## Open decisions
 
-1. SSH dependency (the SSH draft's gate 1), or shelling out to the system `ssh` for the first
-   release.
+1. ~~SSH dependency or system `ssh`~~ — system OpenSSH for execution; see the spike. Still open:
+   how Threading presents host trust when it relies on the person's `known_hosts`, and whether
+   the SSH draft's refusal to read `~/.ssh/config` is lifted for execution hosts.
 2. Minimum kernel. Exit events use `pidfd_open` (5.3); older kernels fall back to polling, so
    the practical floor is whatever the Swift static runtime accepts. Decide whether to state one.
 3. Whether the first release ships `x86_64` or only `aarch64`.

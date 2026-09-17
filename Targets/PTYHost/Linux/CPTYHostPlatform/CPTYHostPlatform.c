@@ -35,4 +35,31 @@ long threading_clock_ticks_per_second(void) {
     return sysconf(_SC_CLK_TCK);
 }
 
+// Defined on the compiler command line by `scripts/test-ptyd-linux.sh`, never in a source file,
+// so the same sources build a binary that knows its generation and a development build that
+// honestly does not.
+const char *threading_build_short_version(void) {
+#ifdef THREADING_PTYD_SHORT_VERSION
+    return THREADING_PTYD_SHORT_VERSION;
+#else
+    return NULL;
+#endif
+}
+
+const char *threading_build_bundle_version(void) {
+#ifdef THREADING_PTYD_BUNDLE_VERSION
+    return THREADING_PTYD_BUNDLE_VERSION;
+#else
+    return NULL;
+#endif
+}
+
+const char *threading_build_source_revision(void) {
+#ifdef THREADING_PTYD_SOURCE_REVISION
+    return THREADING_PTYD_SOURCE_REVISION;
+#else
+    return NULL;
+#endif
+}
+
 #endif

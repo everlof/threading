@@ -49,7 +49,10 @@ reshuffling it is a line move.
   the person owns (a Pi, a VPS, a workstation) by running `threading-ptyd` there and reaching it
   over SSH, with the Mac still the authority for every surface. Slice 1 — the daemon building as a
   static Linux binary and passing its own suite there through `scripts/test-ptyd-linux.sh` — is
-  done on arm64 and x86_64; host profiles, the `ExecutionHost` model and hooks over a reverse forward follow.
+  done on arm64 and x86_64. A by-hand spike over system OpenSSH (2026-09-17) passed unchanged and
+  fixed slice 2's shape — system `ssh` forwarding, per-host launch facts, linger, one systemd unit
+  per generation — and named two daemon fixes to make first: a real Linux generation and a
+  state-directory lock.
 - [Universal Search](universal-search.md) — make `Command-F` a host-owned Search capability with
   visible View, Project and Everywhere scopes; reuse the real Browser, Git Review and SwiftTerm
   engines; add incremental FTS5 conversation history with exact bounded-window landing; and expose
