@@ -17,8 +17,10 @@ On Linux there is no system AppKit, so a module named `AppKit` is simply ours, a
 
 ## What it does
 
-`swift build` in a `swift:6.3.2-noble` container produces `Harness`, which renders PNGs into
-`out/`. `./build.sh` runs that build and ranks whatever did not resolve. `./sweep.sh` type-checks
+`swift build` in a `swift:6.3.2-noble` container produces `Harness`, which runs the layout
+correctness cases, prints the solver's scaling curve, and renders PNGs into `out/`.
+`./analyse.py` groups a sweep's missing symbols into subsystems and reports how many must close
+before a file compiles. `./build.sh` runs that build and ranks whatever did not resolve. `./sweep.sh` type-checks
 every file in `Sources/Threading/UI/Design/` against the shim alone and classifies each one.
 
 `./vendor.sh` copies real Threading sources in; `./vendor.sh --verify` proves they are
@@ -27,7 +29,7 @@ flattering one, and it is why the vendored file is copied rather than adapted.
 
 ## What is in the shim
 
-About 1,100 lines, all of it leaf work:
+About 1,870 lines:
 
 | File | What it answers |
 |---|---|
@@ -36,7 +38,11 @@ About 1,100 lines, all of it leaf work:
 | `NSColor.swift` | sRGB with straight alpha, `setFill`/`setStroke` naming the current context |
 | `NSBezierPath.swift` | Construction, flattening, and AppKit's independent per-axis corner clamp |
 | `NSGraphicsContext.swift` | The state stack, the CTM, clip masks, `current` |
-| `NSView.swift` | Frames, the subview list, `draw(_:)`, alpha, hit testing — **no Auto Layout** |
+| `NSView.swift` | Frames, the subview list, `draw(_:)`, alpha, hit testing, the layout hooks |
+| `Layout/NSLayoutConstraint.swift` | Constraints, priorities, the common-ancestor rule, `NSLayoutGuide` |
+| `Layout/NSLayoutAnchor.swift` | The anchor family, generic exactly where AppKit is |
+| `Layout/LayoutEngine.swift` | Constraints to a linear program, and frames back out |
+| `Layout/Simplex.swift` | Two-phase simplex — correct, and deliberately not incremental |
 | `Raster.swift` | Scanline fill, analytic horizontal coverage, 4× vertical supersampling |
 | `PNG.swift` | Stored-deflate PNG, so the container needs no system library |
 | `Stubs.swift` | `NSAnimationContext`, `NSEvent`, `NSFont`, `NSAppearance` — named, not implemented |
@@ -54,8 +60,9 @@ See `FINDINGS.md`.
 
 ## What this spike deliberately does not touch
 
-Text shaping, IME, accessibility, Auto Layout, layers, the window server, the event loop, and
-anything with a scaling contract. Each is a real item in the draft's platform-leaf list, and none
+Text shaping, IME, accessibility, layers, the window server, the event loop, and virtualization.
+Auto Layout is now present but its solver is not incremental and has a measured cubic cost — see
+FINDINGS section 8. Each is a real item in the draft's platform-leaf list, and none
 of them is made smaller by the shim compiling.
 
 ## Working on this branch
