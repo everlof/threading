@@ -1170,18 +1170,28 @@ enum AgentLauncher {
     ///
     /// A remote launch cannot ask this Mac whether the transcript exists — it lives on the host —
     /// so both are composed and the host's own shell picks one (`RemoteAgentLaunch`). What is
-    /// deliberately absent is everything Mac-side that `claudeCommand` adds: the per-session
-    /// `--settings` file and MCP flags name paths on this Mac, and account routing names this
-    /// Mac's config directories. Slice 4 of `remote-execution-hosts.md` brings hooks and MCP over a
-    /// reverse forward; until then a remote Claude runs with its host's own configuration.
+    /// deliberately absent is everything Mac-side that `claudeCommand` adds: account routing names
+    /// this Mac's config directories, and the settings and MCP files are written on the host by the
+    /// launch rather than on this Mac.
+    ///
+    /// `integration` is the host-side half of slice 4: the paths of the settings and MCP files the
+    /// launch writes on the host, and the tools it pre-approves (`RemoteAgentLaunch`).
     static func remoteClaudeCommands(
         for session: AgentSession,
-        prompt: String?
+        prompt: String?,
+        integration: RemoteAgentIntegrationFlags = RemoteAgentIntegrationFlags()
     ) -> (resume: ShellCommand, fresh: ShellCommand, transcriptID: TranscriptID) {
         var base = ShellCommand(word: AgentDefaults.claudeExecutable)
         appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &base)
         appendReasoningEffort(for: session, to: &base)
         appendPermissionMode(for: session, to: &base)
+        if let settingsPath = integration.settingsPath {
+            base.append(flag: "--settings", value: settingsPath)
+        }
+        if let mcpConfigPath = integration.mcpConfigPath, !integration.allowedTools.isEmpty {
+            base.append(flag: "--mcp-config", value: mcpConfigPath)
+            base.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsArgument(integration.allowedTools))
+        }
 
         let transcriptID = session.resumeState.transcriptID
             ?? TranscriptID(session.id.uuidString.lowercased())

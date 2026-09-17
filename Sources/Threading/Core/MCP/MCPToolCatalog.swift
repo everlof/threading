@@ -807,6 +807,12 @@ enum MCPToolCatalog {
   /// survive the provider's fixed launch-time filter even when they are initially hidden.
   /// `definitions(for:)` remains the live visibility policy and `admits(_:for:)` rechecks it on
   /// every call, so inclusion here grants no authority by itself.
+  /// The launch ceiling for a session on a remote execution host.
+  @MainActor
+  static var remoteProviderLaunchToolNames: [String] {
+    providerLaunchToolNames.filter(MCPRemoteSessionToolScope.reaches(toolNamed:))
+  }
+
   @MainActor
   static var providerLaunchToolNames: [String] {
     let enabled = enabledToolNames
@@ -825,9 +831,14 @@ enum MCPToolCatalog {
   /// A normal endpoint's catalogue is the global enabled set intersected with the session's
   /// current durable grant. External tools remain global; only the closed supervision family
   /// carries per-session operations.
+  ///
+  /// A session on a remote execution host is further limited to the tools that can answer it
+  /// from here (`MCPRemoteSessionToolScope`).
   @MainActor
   static func definitions(for sessionID: SessionID) -> [MCPToolDefinition] {
-    definitions(forOperations: ControlGrantStore.shared.effectiveOperations(for: sessionID))
+    let definitions = definitions(forOperations: ControlGrantStore.shared.effectiveOperations(for: sessionID))
+    guard MCPRemoteSessionToolScope.isRemote(sessionID) else { return definitions }
+    return definitions.filter { MCPRemoteSessionToolScope.reaches(toolNamed: $0.name) }
   }
 
   /// Pure authority projection used by admission tests and by the session lookup above.
@@ -865,9 +876,13 @@ enum MCPToolCatalog {
 
   @MainActor
   static func instructions(for sessionID: SessionID) -> String {
-    instructions(
+    let base = instructions(
       forDefinitions: definitions(for: sessionID)
     )
+    guard MCPRemoteSessionToolScope.isRemote(sessionID) else { return base }
+    return [base, MCPRemoteSessionToolScope.instructions]
+      .filter { !$0.isEmpty }
+      .joined(separator: "\n\n")
   }
 
   @MainActor

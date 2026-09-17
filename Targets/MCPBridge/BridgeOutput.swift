@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 
 // MARK: - Bridge Output
@@ -104,7 +110,7 @@ final class BridgeOutput: @unchecked Sendable {
             guard let base = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
+                let written = BridgePOSIX.write(descriptor, base + offset, raw.count - offset)
                 if written > 0 {
                     offset += written
                     continue

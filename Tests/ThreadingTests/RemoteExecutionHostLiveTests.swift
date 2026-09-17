@@ -29,6 +29,8 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         /// A first preparation uploads a ~57 MB binary.
         static let preparationTimeout: TimeInterval = 600
         static let childTimeout: TimeInterval = 20
+        /// A real `claude` starting on the host, loading its hooks and spawning its MCP servers.
+        static let agentTimeout: TimeInterval = 60
     }
 
     func testPreparesAHostAndRunsAChildThereThroughTheTunnel() throws {
@@ -165,12 +167,126 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         XCTAssertTrue(third.tunnelIsRunning(for: destination))
     }
 
+    /// Slice 4's path back: the same tunnel forwards the host's rendezvous to a socket on this Mac,
+    /// so a hook's `curl` on the host and the Linux bridge an agent spawns there both reach it. The
+    /// listener here stands in for Threading's MCP server and answers every request with a
+    /// handshake naming itself, which is what proves a reply made the whole round trip.
+    func testHooksAndTheBridgeOnTheHostReachThisMacThroughTheTunnel() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination], let binaries = environment[Key.binaries] else {
+            throw XCTSkip("set \(Key.destination) and \(Key.binaries) to run against a real host")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let sockets = URL(fileURLWithPath: "/tmp/threading-rh-\(getpid())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sockets) }
+        try FileManager.default.createDirectory(at: sockets, withIntermediateDirectories: true)
+        let app = try FakeAppListener(path: sockets.appendingPathComponent("app.sock").path)
+        defer { app.close() }
+
+        let hosts = RemoteExecutionHosts(localDirectory: sockets)
+        defer { hosts.closeAllTunnels() }
+        let context = try prepare(hosts, destination, binaries: URL(fileURLWithPath: binaries), appSocketPath: app.path)
+        let route = try XCTUnwrap(context.toolRoute, "no route back was prepared")
+        let bridge = try XCTUnwrap(route.bridgePath, "no bridge was installed; build it with scripts/test-ptyd-linux.sh")
+        XCTAssertNotNil(context.facts.curlPath, "the host has no curl, so its hooks cannot report")
+
+        let runner = SystemSSHCommandRunner()
+        let hook = try runner.run(
+            on: destination,
+            command: "curl -s --max-time 10 --unix-socket \(route.socketPath) -H 'Content-Type: application/json' "
+                + "--data-binary '{}' 'http://localhost/hooks/lifecycle/live-test?event=stop'",
+            input: .none,
+            extraOptions: [],
+            timeout: Fixture.childTimeout
+        )
+        XCTAssertTrue(hook.succeeded, hook.output)
+        XCTAssertTrue(hook.output.contains(FakeAppListener.serverName), "the hook's reply did not come back: \(hook.output)")
+        XCTAssertTrue(app.requestLines.contains { $0.hasPrefix("POST /hooks/lifecycle/live-test") }, "\(app.requestLines)")
+
+        let handshake = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#
+        let spoke = try runner.run(
+            on: destination,
+            command: "timeout 20 \(bridge) --socket \(route.socketPath) --token live-test --cache \(route.cacheDirectory)/live-test.json",
+            input: .data(Data((handshake + "\n").utf8)),
+            extraOptions: [],
+            timeout: Fixture.childTimeout + 10
+        )
+        XCTAssertTrue(spoke.output.contains(FakeAppListener.serverName), "the bridge did not relay this Mac's answer: \(spoke.output)")
+        XCTAssertTrue(app.requestLines.contains { $0.hasPrefix("POST /mcp/live-test") }, "\(app.requestLines)")
+    }
+
+    /// The whole of slice 4 with the real agent: the launch `RemoteAgentLaunch` composes, spawned
+    /// through the daemon, starts the host's `claude`, whose `SessionStart` hook and whose MCP
+    /// bridge both reach this Mac through the reverse forward, addressed by the session's token.
+    ///
+    /// Uses the host's signed-in Claude in `~/remote-test`, a folder it already trusts, and sends
+    /// no prompt, so it spends nothing.
+    @MainActor
+    func testARealRemoteClaudeReportsItsStartAndReachesThreadingsTools() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination], let binaries = environment[Key.binaries] else {
+            throw XCTSkip("set \(Key.destination) and \(Key.binaries) to run against a real host")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let sockets = URL(fileURLWithPath: "/tmp/threading-rh-\(getpid())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sockets) }
+        try FileManager.default.createDirectory(at: sockets, withIntermediateDirectories: true)
+        let app = try FakeAppListener(path: sockets.appendingPathComponent("app.sock").path)
+        defer { app.close() }
+
+        let hosts = RemoteExecutionHosts(localDirectory: sockets)
+        defer { hosts.closeAllTunnels() }
+        let context = try prepare(hosts, destination, binaries: URL(fileURLWithPath: binaries), appSocketPath: app.path)
+
+        let session = AgentSession(kind: .claude, title: "live hooks")
+        let host = ProjectExecutionHost(destination: alias, remoteDirectory: "\(context.facts.home)/remote-test")
+        let launch = try RemoteAgentLaunch.make(
+            for: session,
+            in: Project(name: "live", folderURL: URL(fileURLWithPath: "/tmp/live")),
+            host: host,
+            context: context,
+            initialPrompt: nil,
+            reportsLifecycle: true,
+            allowedTools: ["set_session_name"]
+        ).encode()
+        let token = MCPSessionRegistry.token(for: session.id)
+
+        let client = PTYHostClient(socketPath: context.localSocketPath, build: "remote-live-test",
+                                   events: PTYHostClient.Events())
+        defer { client.close() }
+        try client.connect()
+        let identity = PTYHostSessionIdentity.agentSession(session.id)
+        try client.spawn(PTYHostSpawnRequest(
+            id: identity,
+            channel: .pty(grid: PTYHostGrid(cols: 120, rows: 40, xpixel: 0, ypixel: 0)),
+            executable: launch.plan.executable,
+            arguments: launch.plan.arguments,
+            environment: launch.environment
+        ))
+        defer {
+            try? client.kill(PTYHostKill(id: identity, escalate: true))
+            _ = client.drainWrites(until: Date().addingTimeInterval(Fixture.childTimeout))
+        }
+
+        let started = "POST /lifecycle/\(token)?event=\(HookLifecycleEvent.sessionStarted.rawValue)"
+        let tools = "POST /mcp/\(token)"
+        let deadline = Date().addingTimeInterval(Fixture.agentTimeout)
+        while Date() < deadline {
+            let lines = app.requestLines
+            if lines.contains(where: { $0.hasPrefix(started) }), lines.contains(where: { $0.hasPrefix(tools) }) { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(app.requestLines.contains { $0.hasPrefix(started) }, "no SessionStart hook arrived: \(app.requestLines)")
+        XCTAssertTrue(app.requestLines.contains { $0.hasPrefix(tools) }, "the bridge never reached Threading: \(app.requestLines)")
+    }
+
     private func prepare(
         _ hosts: RemoteExecutionHosts,
         _ destination: RemoteHostDestination,
-        binaries: URL
+        binaries: URL,
+        appSocketPath: String? = nil
     ) throws -> RemoteHostLaunchContext {
-        _ = hosts.readiness(for: destination, binaryDirectory: binaries)
+        _ = hosts.readiness(for: destination, binaryDirectory: binaries, appSocketPath: appSocketPath)
         let deadline = Date().addingTimeInterval(Fixture.preparationTimeout)
         while Date() < deadline {
             switch hosts.phase(for: destination) {
@@ -201,5 +317,83 @@ private final class OutputCollector: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+/// A unix-socket HTTP listener standing in for Threading's MCP server: it records each request line
+/// and answers every request with one JSON-RPC handshake result naming itself.
+private final class FakeAppListener: @unchecked Sendable {
+    static let serverName = "threading-live-test-listener"
+
+    let path: String
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var requestLines: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return lines
+    }
+
+    init(path: String) throws {
+        self.path = path
+        unlink(path)
+        descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            for (index, byte) in bytes.enumerated() { raw[index] = byte }
+            raw[bytes.count] = 0
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard bound == 0, listen(descriptor, 16) == 0 else {
+            Darwin.close(descriptor)
+            throw POSIXError(.EADDRINUSE)
+        }
+        Thread.detachNewThread { [weak self] in self?.acceptLoop() }
+    }
+
+    func close() {
+        shutdown(descriptor, SHUT_RDWR)
+        Darwin.close(descriptor)
+        unlink(path)
+    }
+
+    private func acceptLoop() {
+        while true {
+            let connection = accept(descriptor, nil, nil)
+            guard connection >= 0 else { return }
+            Thread.detachNewThread { [weak self] in self?.serve(connection) }
+        }
+    }
+
+    private func serve(_ connection: Int32) {
+        defer { Darwin.close(connection) }
+        var request = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(connection, &buffer, buffer.count)
+            guard count > 0 else { return }
+            request.append(contentsOf: buffer[0..<count])
+            guard let end = request.range(of: Data("\r\n\r\n".utf8)) else { continue }
+            let head = String(decoding: request[..<end.lowerBound], as: UTF8.self)
+            let length = head.split(separator: "\r\n")
+                .first { $0.lowercased().hasPrefix("content-length:") }
+                .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+            if request.count - end.upperBound < length { continue }
+            lock.lock()
+            lines.append(String(head.split(separator: "\r\n").first ?? ""))
+            lock.unlock()
+            break
+        }
+        let body = #"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"\#(Self.serverName)","version":"0"}}}"#
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+        _ = response.withCString { write(connection, $0, strlen($0)) }
     }
 }

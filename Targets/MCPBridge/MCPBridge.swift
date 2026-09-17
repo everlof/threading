@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 
 // MARK: - MCP Bridge
@@ -102,7 +108,7 @@ final class MCPBridge: @unchecked Sendable {
 
         while true {
             let count = chunk.withUnsafeMutableBytes { raw -> Int in
-                Darwin.read(Self.standardInput, raw.baseAddress, raw.count)
+                BridgePOSIX.read(Self.standardInput, raw.baseAddress, raw.count)
             }
             if count < 0 {
                 if errno == EINTR { continue }

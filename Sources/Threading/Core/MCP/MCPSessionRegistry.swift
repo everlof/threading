@@ -281,12 +281,53 @@ enum MCPSessionRegistry {
         fastMode: Bool? = nil,
         statusLineOverride: String? = nil
     ) -> String? {
-        let needsListener = brokersPermissions || reportsLifecycle
-
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
-        if !needsListener, remoteControl == nil, fastMode == nil, statusLineOverride == nil {
+        guard let settings = hookSettings(
+            for: sessionID,
+            brokersPermissions: brokersPermissions,
+            reportsLifecycle: reportsLifecycle,
+            remoteControl: remoteControl,
+            fastMode: fastMode,
+            statusLineOverride: statusLineOverride
+        ) else {
             removeSettingsFile(for: sessionID)
+            return nil
+        }
+
+        let file = settingsFile(for: sessionID)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(withJSONObject: settings, options: [])
+            try data.write(to: file, options: .atomic)
+            return file.path
+        } catch {
+            ThreadingLogger.mcp.error(
+                "Failed to write hook settings for \(sessionID, privacy: .public): \(error, privacy: .private(mask: .hash))"
+            )
+            return nil
+        }
+    }
+
+    /// The settings `writeHookSettings` writes, or nil when there is nothing to state. Separate
+    /// so a launch on a remote execution host can carry the same object to a file written *there*:
+    /// the hook commands name no path on this Mac — both routes come from the launch environment —
+    /// so they read the same on either machine.
+    static func hookSettings(
+        for sessionID: SessionID,
+        brokersPermissions: Bool,
+        reportsLifecycle: Bool,
+        remoteControl: Bool? = nil,
+        fastMode: Bool? = nil,
+        statusLineOverride: String? = nil
+    ) -> [String: Any]? {
+        let needsListener = brokersPermissions || reportsLifecycle
+
+        if !needsListener, remoteControl == nil, fastMode == nil, statusLineOverride == nil {
             return nil
         }
 
@@ -319,23 +360,7 @@ enum MCPSessionRegistry {
                 ClaudeSettingsDefaults.commandKey: statusLineOverride
             ]
         }
-
-        let file = settingsFile(for: sessionID)
-
-        do {
-            try FileManager.default.createDirectory(
-                at: file.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONSerialization.data(withJSONObject: settings, options: [])
-            try data.write(to: file, options: .atomic)
-            return file.path
-        } catch {
-            ThreadingLogger.mcp.error(
-                "Failed to write hook settings for \(sessionID, privacy: .public): \(error, privacy: .private(mask: .hash))"
-            )
-            return nil
-        }
+        return settings
     }
 
     /// The `curl` entries themselves, split out so the settings file can still be written for a

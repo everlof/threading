@@ -121,6 +121,75 @@ final class RemoteExecutionHostSurfaceTests: HostedStoreTestCase {
         XCTAssertEqual(accessory.host, ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app"))
     }
 
+    // MARK: - Tools
+
+    /// A remote session is offered only the tools that can answer it from this Mac, and a call to
+    /// any other is refused even when named directly — a path on the host resolved against this
+    /// Mac's disk would read the wrong file or none.
+    func testARemoteSessionIsOfferedOnlyToolsThatNeedNoFileOnThisMac() throws {
+        let local = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: scratchFolder()))
+        let remote = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: scratchFolder()))
+        XCTAssertEqual(ProjectStore.shared.setExecutionHost(host, forProjectID: remote.id), .applied)
+        let localSession = try XCTUnwrap(ProjectStore.shared.addSession(to: local.id, kind: .claude))
+        let remoteSession = try XCTUnwrap(ProjectStore.shared.addSession(to: remote.id, kind: .claude))
+
+        let offered = Set(MCPToolCatalog.definitions(for: remoteSession.id).map(\.name))
+        XCTAssertFalse(offered.isEmpty)
+        XCTAssertTrue(offered.allSatisfy(MCPRemoteSessionToolScope.reaches(toolNamed:)), "\(offered)")
+        let localOffered = Set(MCPToolCatalog.definitions(for: localSession.id).map(\.name))
+        if localOffered.contains("display_image") {
+            XCTAssertFalse(offered.contains("display_image"))
+        }
+        if localOffered.contains("set_session_name") {
+            XCTAssertTrue(offered.contains("set_session_name"))
+        }
+
+        // Simulator annotations are this Mac's simulator; listing sessions needs nothing local.
+        let simulator = AgentCommand.simulatorAnnotations(EmptyToolArguments())
+        if MCPToolCatalog.admits(simulator, for: localSession.id) {
+            XCTAssertFalse(MCPToolCatalog.admits(simulator, for: remoteSession.id))
+        }
+        let sessions = AgentCommand.listSessions(EmptyToolArguments())
+        if MCPToolCatalog.admits(sessions, for: localSession.id) {
+            XCTAssertTrue(MCPToolCatalog.admits(sessions, for: remoteSession.id))
+        }
+        XCTAssertTrue(MCPToolCatalog.instructions(for: remoteSession.id)
+            .contains(MCPRemoteSessionToolScope.instructions))
+        XCTAssertFalse(MCPToolCatalog.instructions(for: localSession.id)
+            .contains(MCPRemoteSessionToolScope.instructions))
+        XCTAssertTrue(MCPToolCatalog.remoteProviderLaunchToolNames.allSatisfy(MCPRemoteSessionToolScope.reaches(toolNamed:)))
+        XCTAssertFalse(MCPRemoteSessionToolScope.reaches(toolNamed: "an_extension_tool"),
+                       "an extension's arguments are unknown, so none reaches a remote host")
+    }
+
+    // MARK: - Hook reports
+
+    /// A remote agent's hooks name paths on its host. Read here they would find nothing, or another
+    /// file at the same path, and a host working directory would read as the agent leaving its
+    /// checkout — so a remote session's reports arrive with those paths cleared.
+    func testARemoteSessionsHookReportKeepsItsEventButNotItsHostPaths() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: scratchFolder()))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .claude))
+        XCTAssertFalse(ProjectStore.shared.sessionRunsOnRemoteHost(session.id))
+        XCTAssertEqual(ProjectStore.shared.setExecutionHost(host, forProjectID: project.id), .applied)
+        XCTAssertTrue(ProjectStore.shared.sessionRunsOnRemoteHost(session.id))
+
+        let report = try XCTUnwrap(HookLifecycleReport(sessionID: session.id, event: .turnFinished, payload: [
+            "session_id": "abc",
+            "transcript_path": "/home/me/.claude/projects/-home-me-app/abc.jsonl",
+            "agent_transcript_path": "/home/me/.claude/projects/-home-me-app/child.jsonl",
+            "cwd": "/home/me/app",
+            "last_assistant_message": "done"
+        ]))
+        let stripped = report.withoutHostPaths()
+        XCTAssertNil(stripped.transcriptPath)
+        XCTAssertNil(stripped.subagentTranscriptPath)
+        XCTAssertNil(stripped.workingDirectory)
+        XCTAssertEqual(stripped.event, .turnFinished)
+        XCTAssertEqual(stripped.agentSessionID, report.agentSessionID)
+        XCTAssertEqual(stripped.lastAssistantMessage, "done")
+    }
+
     // MARK: - Images
 
     /// The marked rows, plain and selected, and the editor, light and dark.

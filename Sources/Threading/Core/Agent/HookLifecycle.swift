@@ -240,7 +240,7 @@ struct HookLifecycleReport {
     /// Provider-issued child identity and metadata on subagent events.
     let subagentID: String?
     let subagentType: String?
-    let subagentTranscriptPath: String?
+    private(set) var subagentTranscriptPath: String?
     let lastAssistantMessage: String?
     let turnID: String?
 
@@ -249,7 +249,7 @@ struct HookLifecycleReport {
     /// Separate from `subagentTranscriptPath`: Codex's missing interrupt boundary is recovered
     /// from this file, and Claude reports the live file even when a checkout move left a copy
     /// elsewhere. A child's path belongs only to its navigator row.
-    let transcriptPath: String?
+    private(set) var transcriptPath: String?
 
     /// The directory the agent says it is working in, as of this event.
     ///
@@ -263,7 +263,7 @@ struct HookLifecycleReport {
     /// Present on every event both hook-capable runtimes emit; nil for a runtime that reports
     /// no lifecycle at all, and nil while the user has lifecycle reporting turned off. Nil is
     /// "unknown", never "unchanged" — see `AgentCapabilities.lifecycleReportedWorkingDirectory`.
-    let workingDirectory: String?
+    private(set) var workingDirectory: String?
 
     /// The agent's own work still in flight as its turn ends, by the identifier it gave each.
     ///
@@ -297,6 +297,20 @@ struct HookLifecycleReport {
     /// listener stamps the value on the main actor before any checkout fence runs, and the
     /// tracker compares it afterwards. The Stop hook's report crosses exactly that fence.
     var capturedOwnershipEpoch: UInt64?
+
+    /// This report without the paths it names, for a session running on a remote execution host.
+    ///
+    /// Every one of them is a path on the *host*. Read on this Mac it would find nothing — or, at a
+    /// path both machines happen to have, somebody else's file — and a working directory under the
+    /// host's home would read as the agent having left its checkout. Nil is already "unknown" for
+    /// each, which is the truth here.
+    func withoutHostPaths() -> HookLifecycleReport {
+        var report = self
+        report.transcriptPath = nil
+        report.subagentTranscriptPath = nil
+        report.workingDirectory = nil
+        return report
+    }
 
     /// Builds a report from a hook's JSON payload, or nil if it names no event.
     init?(sessionID: SessionID, event: HookLifecycleEvent?, payload: [String: Any]) {

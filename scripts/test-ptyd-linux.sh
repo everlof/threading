@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build `threading-ptyd` for Linux and run its tests there, in a Linux container.
+# Build `threading-ptyd` and `threading-mcp-bridge` for Linux and run their tests there, in a
+# Linux container.
 #
 #   scripts/test-ptyd-linux.sh                 # this Mac's architecture
 #   scripts/test-ptyd-linux.sh --arch amd64    # x86_64, emulated
@@ -23,9 +24,10 @@
 # because a binary must not claim a commit it was not built from. The debug build names none and
 # is tested to report `? (?)`.
 #
-# The static binaries land in build/linux/<arch>/threading-ptyd. Build products and the SDK are
-# cached in Docker volumes, so a second run compiles only what changed. The container runs with
-# `--init` because the restart tests orphan a child on purpose and need something to reap it.
+# The static binaries land in build/linux/<arch>/threading-ptyd and threading-mcp-bridge. Build
+# products and the SDK are cached in Docker volumes, so a second run compiles only what changed.
+# The container runs with `--init` because the restart tests orphan a child on purpose and need
+# something to reap it.
 #
 # Tests run one case per process through scripts/linux/xctest-watchdog.sh, which works around an
 # open swift-corelibs-xctest deadlock on Linux and says so every time it does; read its header
@@ -177,6 +179,31 @@ run_architecture() {
           "${watchdog}" "${tests}" ThreadingPTYHostTests.PTYHostDaemonTests
         echo "--- generation ${GENERATION_SHORT_VERSION} (${GENERATION_BUNDLE_VERSION})${GENERATION_SOURCE_REVISION:+ @${GENERATION_SOURCE_REVISION}}, asserted by testHelloCarriesTheGenerationTheBuildWasGiven"
         ls -l /out/threading-ptyd
+
+        echo "--- threading-mcp-bridge static release build (${SDK_TRIPLE})"
+        bridge=/src/Targets/MCPBridge
+        bridge_static=(--package-path "${bridge}" --scratch-path /work/bridge-static
+          --swift-sdks-path /work/sdks --swift-sdk "${SDK_TRIPLE}" -c release -Xlinker -s)
+        swift build "${bridge_static[@]}" --product threading-mcp-bridge
+        install -m 0755 "$(swift build "${bridge_static[@]}" --show-bin-path)/threading-mcp-bridge" \
+          /out/threading-mcp-bridge
+        if ldd /out/threading-mcp-bridge >/dev/null 2>&1; then
+          echo "test-ptyd-linux: /out/threading-mcp-bridge links dynamically" >&2
+          exit 1
+        fi
+        # The behaviour of the bridge is held by MCPBridgeTests against the embedded macOS build. What
+        # only Linux can answer is that this binary runs: with no app behind the socket it must
+        # still answer the handshake, in its own words, and exit when stdin ends.
+        echo "--- threading-mcp-bridge answers a handshake with nothing behind its socket"
+        handshake="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+        answer="$(printf "%s\n" "${handshake}" \
+          | timeout 20 /out/threading-mcp-bridge --socket /tmp/no-threading.sock --token smoke \
+            --cache /tmp/bridge-smoke-cache.json)"
+        if ! grep -q "Threading is not running" <<<"${answer}"; then
+          echo "test-ptyd-linux: the bridge did not answer the handshake: ${answer}" >&2
+          exit 1
+        fi
+        ls -l /out/threading-mcp-bridge
       fi
     '
 }

@@ -1096,6 +1096,14 @@ final class AgentSessionViewController: NSViewController {
         var requestedPreparation = false
         /// What the prepared host's daemon holds, asked once per launch before anything spawns.
         var survey: RemoteHoldingsSurvey = .notAsked
+        /// The launch's settings and MCP configuration, encoded off the main actor once composed.
+        var encoding: RemoteLaunchEncoding = .notStarted
+    }
+
+    private enum RemoteLaunchEncoding {
+        case notStarted
+        case encoding
+        case encoded(RemoteAgentLaunch)
     }
 
     private enum RemoteHoldingsSurvey {
@@ -1129,7 +1137,8 @@ final class AgentSessionViewController: NSViewController {
             pendingRemoteLaunch?.requestedPreparation = true
             phase = hosts.readiness(
                 for: destination,
-                binaryDirectory: AppSettings.shared.developerRemoteHostBinaryDirectory
+                binaryDirectory: AppSettings.shared.developerRemoteHostBinaryDirectory,
+                appSocketPath: MCPServer.shared.socketPath
             )
         }
 
@@ -1186,15 +1195,34 @@ final class AgentSessionViewController: NSViewController {
                     knownCause: "remoteHost.sessionMissing"
                 ))
             }
+            switch remote.encoding {
+            case .encoded(let launch):
+                return .ready(launch, socketPath: context.localSocketPath)
+            case .encoding:
+                return .waiting
+            case .notStarted:
+                break
+            }
             do {
-                let launch = try RemoteAgentLaunch.make(
+                let unencoded = try RemoteAgentLaunch.make(
                     for: agentSession,
                     in: project,
                     host: remote.host,
                     context: context,
                     initialPrompt: remote.initialPrompt
                 )
-                return .ready(launch, socketPath: context.localSocketPath)
+                pendingRemoteLaunch?.encoding = .encoding
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let launch = unencoded.encode()
+                    DispatchQueue.main.async { [weak self] in
+                        MainActor.assumeIsolated {
+                            guard let self, self.pendingRemoteLaunch != nil else { return }
+                            self.pendingRemoteLaunch?.encoding = .encoded(launch)
+                            self.startIfTerminalIsSized()
+                        }
+                    }
+                }
+                return .waiting
             } catch let refusal as RemoteAgentLaunchError {
                 return .refused(SessionLaunchFailure(
                     origin: .preflight,

@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 
 // MARK: - Errors
@@ -131,7 +137,7 @@ final class UnixSocketConnection {
             guard let base = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
+                let written = BridgePOSIX.write(descriptor, base + offset, raw.count - offset)
                 if written > 0 {
                     offset += written
                     continue
@@ -192,12 +198,12 @@ final class UnixSocketConnection {
     /// this connection's until it closes itself.
     func shutdownReads() {
         guard descriptor >= 0 else { return }
-        _ = Darwin.shutdown(descriptor, SHUT_RDWR)
+        BridgePOSIX.shutdownBoth(descriptor)
     }
 
     func close() {
         guard descriptor >= 0 else { return }
-        _ = Darwin.close(descriptor)
+        BridgePOSIX.close(descriptor)
         descriptor = -1
     }
 
@@ -209,7 +215,7 @@ final class UnixSocketConnection {
     private func fill() throws -> Bool {
         var chunk = [UInt8](repeating: 0, count: BridgeDefaults.socketReadChunk)
         let count = chunk.withUnsafeMutableBytes { raw -> Int in
-            Darwin.read(descriptor, raw.baseAddress, raw.count)
+            BridgePOSIX.read(descriptor, raw.baseAddress, raw.count)
         }
         if count > 0 {
             buffer.append(contentsOf: chunk[0..<count])
@@ -249,8 +255,7 @@ final class UnixSocketConnection {
 
     private static func connectedDescriptor(to path: String, timeout: TimeInterval) throws -> Int32 {
         var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        BridgePOSIX.prepare(&address)
 
         let pathBytes = Array(path.utf8)
         let capacity = MemoryLayout.size(ofValue: address.sun_path)
@@ -264,24 +269,17 @@ final class UnixSocketConnection {
             }
         }
 
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        let descriptor = BridgePOSIX.unixStreamSocket()
         guard descriptor >= 0 else { throw UnixHTTPError.socketUnavailable(errno) }
 
         // Without this, writing to a socket the app has already closed raises SIGPIPE and kills
         // the bridge — which would look to the CLI exactly like the server crashing.
-        var suppressSignal: Int32 = 1
-        _ = setsockopt(
-            descriptor,
-            SOL_SOCKET,
-            SO_NOSIGPIPE,
-            &suppressSignal,
-            socklen_t(MemoryLayout<Int32>.size)
-        )
+        BridgePOSIX.suppressSignalOnWrite(descriptor)
 
         do {
             try connect(descriptor: descriptor, to: &address, timeout: timeout)
         } catch {
-            _ = Darwin.close(descriptor)
+            BridgePOSIX.close(descriptor)
             throw error
         }
         return descriptor
@@ -304,7 +302,7 @@ final class UnixSocketConnection {
 
         let started = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                Darwin.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
+                BridgePOSIX.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
 

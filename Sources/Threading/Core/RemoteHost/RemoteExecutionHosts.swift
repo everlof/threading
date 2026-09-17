@@ -15,6 +15,20 @@ struct RemoteHostLaunchContext: Equatable, Sendable {
     let facts: RemoteHostFacts
     /// The Mac-side end of the forwarded rendezvous.
     let localSocketPath: String
+    /// How an agent on the host reaches this Mac's MCP server, or nil when it cannot: this Mac's
+    /// rendezvous had not bound when the tunnel opened, or no bridge binary is configured.
+    var toolRoute: RemoteHostToolRoute?
+}
+
+/// The host end of the path back to Threading: the socket forwarded to this Mac's MCP rendezvous,
+/// and the bridge an agent spawns to speak through it. Both absolute, on the host.
+struct RemoteHostToolRoute: Equatable, Sendable {
+    /// The forwarded socket. Hooks `curl` it; the bridge connects to it.
+    let socketPath: String
+    /// The installed bridge, or nil when this Mac has none for the host's architecture — hooks
+    /// still report then, and the agent simply has no Threading tools.
+    let bridgePath: String?
+    let cacheDirectory: String
 }
 
 enum RemoteHostPhase: Equatable, Sendable {
@@ -46,21 +60,28 @@ final class RemoteHostTunnel: @unchecked Sendable {
     var isRunning: Bool { child.isRunning }
     var diagnosticText: String { diagnostics.text }
 
+    /// `reverse` forwards a socket on the host back to one on this Mac — the MCP rendezvous — in
+    /// the same connection, so the path to the daemon and the path back to Threading live and die
+    /// together.
     static func open(
         destination: RemoteHostDestination,
         localSocketPath: String,
         remoteSocketPath: String,
+        reverse: (remote: String, local: String)? = nil,
         onExit: @escaping @Sendable (Int32) -> Void
     ) throws -> RemoteHostTunnel {
         RemoteHostTunnelRecord.endStale(forSocketPath: localSocketPath)
+        // The file a previous tunnel bound, gone before this one starts, so its appearing means
+        // *this* `ssh` is up. `StreamLocalBindUnlink` would replace it too, but only once bound.
+        unlink(localSocketPath)
         let pipe = try ChildPipe()
-        let forward = "\(localSocketPath):\(remoteSocketPath)"
+        let forwards = arguments(localSocketPath: localSocketPath, remoteSocketPath: remoteSocketPath, reverse: reverse)
         let child: SpawnedChildProcess
         do {
             child = try ChildProcessSpawn.spawn(
                 executableURL: URL(fileURLWithPath: RemoteHostDefaults.sshExecutable),
                 arguments: destination.sshArguments(
-                    extraOptions: RemoteHostDefaults.tunnelOptions + ["-L", forward]
+                    extraOptions: RemoteHostDefaults.tunnelOptions + forwards
                 ),
                 environment: ProcessInfo.processInfo.environment,
                 workingDirectory: nil,
@@ -82,6 +103,17 @@ final class RemoteHostTunnel: @unchecked Sendable {
             onExit(status)
         }
         return RemoteHostTunnel(localSocketPath: localSocketPath, child: child, diagnostics: diagnostics)
+    }
+
+    /// The forward arguments, in order: the daemon's socket here, then the rendezvous back.
+    static func arguments(
+        localSocketPath: String,
+        remoteSocketPath: String,
+        reverse: (remote: String, local: String)?
+    ) -> [String] {
+        var forwards = ["-L", "\(localSocketPath):\(remoteSocketPath)"]
+        if let reverse { forwards += ["-R", "\(reverse.remote):\(reverse.local)"] }
+        return forwards
     }
 
     /// Ends the tunnel. Sessions on the host keep running; only this Mac's path to them closes.
@@ -231,9 +263,13 @@ final class RemoteExecutionHosts: @unchecked Sendable {
     ///
     /// A failed host is retried when a launch asks again, not on a timer: the failure is shown on
     /// the session that asked, and the person's next attempt is the retry.
+    ///
+    /// `appSocketPath` is the MCP rendezvous this Mac's server bound (`MCPServer.socketPath`),
+    /// forwarded back to the host so its agents reach Threading; nil forwards nothing.
     func readiness(
         for destination: RemoteHostDestination,
-        binaryDirectory: URL?
+        binaryDirectory: URL?,
+        appSocketPath: String? = nil
     ) -> RemoteHostPhase {
         lock.lock()
         let current = phases[destination] ?? .idle
@@ -259,7 +295,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         if startsPreparation {
             postChange()
             queue.async { [weak self] in
-                self?.prepare(destination, binaryDirectory: binaryDirectory)
+                self?.prepare(destination, binaryDirectory: binaryDirectory, appSocketPath: appSocketPath)
             }
         }
         return answer
@@ -296,10 +332,11 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
     // MARK: - Private Methods — preparation
 
-    private func prepare(_ destination: RemoteHostDestination, binaryDirectory: URL?) {
+    private func prepare(_ destination: RemoteHostDestination, binaryDirectory: URL?, appSocketPath: String?) {
         let outcome: RemoteHostPhase
         do {
-            outcome = .ready(try prepareOrThrow(destination, binaryDirectory: binaryDirectory))
+            outcome = .ready(try prepareOrThrow(destination, binaryDirectory: binaryDirectory,
+                                                appSocketPath: appSocketPath))
         } catch let failure as RemoteHostFailure {
             outcome = .failed(failure)
         } catch {
@@ -322,7 +359,8 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
     private func prepareOrThrow(
         _ destination: RemoteHostDestination,
-        binaryDirectory: URL?
+        binaryDirectory: URL?,
+        appSocketPath: String?
     ) throws -> RemoteHostLaunchContext {
         guard destination.isValid else {
             throw RemoteHostFailure(token: "invalidDestination", detail: destination.alias)
@@ -346,6 +384,12 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         let plan = RemoteHostInstallPlan.make(facts: facts, binary: binary)
 
         if plan.uploadsBinary { try upload(binary, to: destination) }
+        // The bridge is optional: without one a remote agent still runs, still reports its turns
+        // through hooks, and has no Threading tools. A missing file is that case, not a failure.
+        let bridge = try? RemoteHostBinary.load(.bridge, architecture: architecture, fromDirectory: binaryDirectory)
+        if let bridge, !facts.installedBridges.contains(bridge.installIdentifier) {
+            try upload(bridge, to: destination)
+        }
         try run(destination, RemoteHostInstallScripts.unitCommand,
                 input: .data(Data(RemoteHostInstallScripts.unitTemplate.utf8)), token: "unitWriteFailed")
         if plan.enablesLinger {
@@ -353,10 +397,30 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         }
 
         let localSocketPath = try localSocketPath(for: destination)
-        let tunnel = try openTunnel(destination, localSocketPath: localSocketPath, remoteSocketPath: facts.remoteSocketPath)
+        var toolRoute: RemoteHostToolRoute?
+        if let appSocketPath {
+            try runScript(destination, RemoteHostInstallScripts.prepareBridgeRendezvousScript,
+                          token: "bridgeRendezvousFailed")
+            toolRoute = RemoteHostToolRoute(
+                socketPath: "\(facts.home)/\(RemoteHostDefaults.remoteBridgeDirectory)/"
+                    + RemoteHostDefaults.remoteBridgeSocketFileName,
+                bridgePath: bridge.map { "\(facts.home)/\($0.remotePath)" },
+                cacheDirectory: "\(facts.home)/\(RemoteHostDefaults.remoteBridgeCacheDirectory)"
+            )
+        }
+        let tunnel = try openTunnel(
+            destination,
+            localSocketPath: localSocketPath,
+            remoteSocketPath: facts.remoteSocketPath,
+            reverse: toolRoute.flatMap { route in appSocketPath.map { (remote: route.socketPath, local: $0) } }
+        )
 
         var runsOwnInstance = plan.isRunning
         if !plan.isRunning {
+            // Probing before `ssh` has authenticated finds no local socket and reads as "nothing at
+            // this rendezvous", which once left an old daemon serving while this build's instance
+            // restarted against its lock every ten seconds (measured on the spike's VM).
+            try waitForTunnel(localSocketPath: localSocketPath, tunnel: tunnel)
             // Another build may own the state directory. It is retired only when it holds nothing;
             // otherwise it keeps serving — a compatible older host is still a durable one — and the
             // upgrade waits for a later preparation. An instance that does not answer at this
@@ -390,9 +454,10 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
         try waitUntilAnswering(localSocketPath: localSocketPath, tunnel: tunnel)
         ThreadingLogger.ptyHost.info(
-            "Remote host \(destination.identifier, privacy: .private(mask: .hash)) ready (own instance: \(runsOwnInstance, privacy: .public))"
+            "Remote host \(destination.identifier, privacy: .private(mask: .hash)) ready (own instance: \(runsOwnInstance, privacy: .public), tools: \(toolRoute?.bridgePath != nil, privacy: .public))"
         )
-        return RemoteHostLaunchContext(destination: destination, facts: facts, localSocketPath: localSocketPath)
+        return RemoteHostLaunchContext(destination: destination, facts: facts, localSocketPath: localSocketPath,
+                                       toolRoute: toolRoute)
     }
 
     private func readFacts(_ destination: RemoteHostDestination) throws -> RemoteHostFacts {
@@ -475,7 +540,8 @@ final class RemoteExecutionHosts: @unchecked Sendable {
     private func openTunnel(
         _ destination: RemoteHostDestination,
         localSocketPath: String,
-        remoteSocketPath: String
+        remoteSocketPath: String,
+        reverse: (remote: String, local: String)?
     ) throws -> RemoteHostTunnel {
         lock.lock()
         let previous = tunnels.removeValue(forKey: destination)
@@ -488,6 +554,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
                 destination: destination,
                 localSocketPath: localSocketPath,
                 remoteSocketPath: remoteSocketPath,
+                reverse: reverse,
                 onExit: { [weak self] status in self?.tunnelExited(destination, status: status) }
             )
         } catch {
@@ -514,6 +581,20 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             ])
             postChange()
         }
+    }
+
+    /// Until `ssh` has authenticated and bound this Mac's end of the forward. The socket exists
+    /// whether or not a daemon answers behind it, so this asks only that the tunnel is up.
+    private func waitForTunnel(localSocketPath: String, tunnel: RemoteHostTunnel) throws {
+        let deadline = Date().addingTimeInterval(RemoteHostDefaults.tunnelReadyTimeout)
+        while Date() < deadline {
+            guard tunnel.isRunning else {
+                throw RemoteHostFailure(token: "tunnelExited", detail: tunnel.diagnosticText)
+            }
+            if FileManager.default.fileExists(atPath: localSocketPath) { return }
+            Thread.sleep(forTimeInterval: RemoteHostDefaults.tunnelReadyPollInterval)
+        }
+        throw RemoteHostFailure(token: "tunnelNotReady", detail: tunnel.diagnosticText)
     }
 
     private func waitUntilAnswering(localSocketPath: String, tunnel: RemoteHostTunnel) throws {

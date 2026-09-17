@@ -2,10 +2,12 @@
 
 > Status: feature draft — slice 1 (a Linux build of `threading-ptyd`) builds and passes its
 > suite on Linux; its durable decisions are in [`pty-host.md`](../architecture/pty-host.md#linux).
-> A developer version of slices 2–3 runs Claude terminal sessions on a host behind a hidden setting
-> (see [The developer version](#the-developer-version-2026-09-17)).
+> A developer version of slices 2–4 runs Claude terminal sessions on a host chosen on the project,
+> in debug and internal builds, with hooks and Threading's tools reaching back to the Mac (see
+> [The developer version](#the-developer-version-2026-09-17) and
+> [Hooks and tools, as built](#hooks-and-tools-as-built-2026-09-17)).
 > The remote-session spike (below) ran on 2026-09-17 and settles slice 2's transport, install and
-> upgrade shape. Nothing else has started. This is the implementation plan for slice C of
+> upgrade shape. Slice 5 has not started. This is the implementation plan for slice C of
 > [SSH remote hosts and SFTP attachment sources](ssh-remote-hosts-and-sftp-attachments.md#c-remote-execution-host),
 > pulled forward and cut so its first slices do not wait on SFTP.
 
@@ -125,8 +127,9 @@ matters.
 - A Linux build of `threading-mcp-bridge` installed beside the daemon.
 - A reverse `streamlocal` forward of the bridge socket, exported to the remote child as
   `THREADING_MCP_SOCKET`. Tool routing by session token is unchanged.
-- Tools that execute on the Mac (browser, display, simulator) work as-is. Tools that pass a file
-  path need the bytes to cross first; they refuse until that exists.
+- Tools whose inputs are all in the call (browser, charts, HTML, session naming) work as-is. Tools
+  that pass a file path, or act on this Mac's checkout, simulator or accounts, are not offered;
+  see [Hooks and tools, as built](#hooks-and-tools-as-built-2026-09-17).
 - A hook fired while the Mac is unreachable fails exactly as it does after an app quit today, and
   the activity inference that already tolerates that stays the answer.
 
@@ -248,7 +251,65 @@ back into a command run there.
 a remote host. The Remote Host editor says so.
 
 **Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it),
-bundling the binaries in the app, hooks and MCP (slice 4).
+bundling the binaries in the app.
+
+## Hooks and tools, as built, 2026-09-17
+
+Slice 4 in the developer version. A remote Claude reports its own turns through the same lifecycle
+hooks a local one uses, and has the Threading tools that make sense from another machine.
+
+**One tunnel, both directions.** The `ssh` that forwards the daemon's socket to this Mac also
+forwards `~/.local/state/threading/bridge/mcp.sock` on the host *back* to this Mac's MCP rendezvous
+(`-R`), so the path to the agent and the path back to Threading live and die together, and a
+reconnect restores both. The host directory is `0700` and the socket `0600`. The host end is removed
+before each tunnel: `StreamLocalBindUnlink` is the server's setting for a remote forward, off by
+default, so a file a dropped tunnel left would refuse the bind and `ExitOnForwardFailure` would end
+the new tunnel. The forward is added only when this Mac's rendezvous has bound
+(`MCPServer.socketPath`).
+
+**The bridge runs on Linux.** `threading-mcp-bridge` links Foundation only, so it builds with the
+same static Swift SDK as the daemon (`Targets/MCPBridge/Package.swift`, `BridgePOSIX` for the few
+calls Darwin and Linux spell differently), in `scripts/test-ptyd-linux.sh`, which also checks that
+the static binary answers a handshake with nothing behind its socket. It installs content-named
+under `~/.local/lib/threading/bridge/<id>/`, apart from the daemon, because the two upgrade
+independently. A missing bridge binary is not a failure: the session runs with hooks and no tools.
+
+**The launch writes its own files on the host.** Local Claude reads `--settings` and
+`--mcp-config` from files on this Mac; a remote one cannot. Both files carry the session token, and
+an argument is readable in every user's `ps` on the host, while a process's environment is its
+owner's alone. So `RemoteAgentLaunch` passes the two JSON objects in environment variables, and the
+launch script writes them `0600` under `~/.local/state/threading/sessions/`, unsets the variables and
+starts Claude naming the files. The hook commands are byte-identical to a local launch's, because
+they already take their route from `THREADING_MCP_SOCKET`; the host's value is the forwarded socket,
+and there is no `THREADING_MCP_PORT`. A host without `curl` gets no lifecycle hooks and falls back to
+output inference. The JSON is encoded off the main actor (`RemoteAgentLaunch.Unencoded.encode()`).
+
+**Which tools reach a remote session** is `MCPRemoteSessionToolScope`, an exhaustive switch, so a new
+built-in does not compile until someone decides. Both `tools/list` and every call read it. Offered:
+charts, scenes and HTML; the browser (http and https only, and its `localhost` is the Mac's, which
+the server instructions tell the agent); panel tabs; naming, archiving and messaging sessions;
+settings, notifications, the clipboard and themes. Not offered: anything taking a path (image and
+file comparison, video frames, browser upload, download and trace), the simulator and device logs,
+checkouts and worktrees, supervision, storage, triggers, extension authoring, and every
+extension-provided tool, whose arguments are unknown.
+
+**A remote session's hook reports lose their paths.** `transcript_path`, `agent_transcript_path` and
+`cwd` name the host's disk; read here they would find nothing, or another file at the same path, and
+a host working directory would look like the agent leaving its checkout. `AgentRuntime` clears them
+for a session whose project has a host (`HookLifecycleReport.withoutHostPaths()`).
+
+**Measured on the spike's VM** by
+`RemoteExecutionHostLiveTests/testHooksAndTheBridgeOnTheHostReachThisMacThroughTheTunnel`: a
+listener on this Mac standing in for the MCP server; a hook-shaped `curl` on the host and the Linux
+bridge answering a handshake on the host both reached it through the reverse forward, and its reply
+came back. The same run found an older race: the upgrade probe ran before `ssh` had bound the local
+socket, read the old daemon as "not at this rendezvous" and started this build's instance against
+its lock. Preparation now waits for the tunnel (after removing the file a previous one left) before
+it probes.
+
+**Not yet.** A tunnel opened before this Mac's rendezvous bound carries no reverse forward until the
+host is prepared again. Two Macs using one host take the rendezvous from each other; the last to
+connect wins. Hooks that fire while no Mac is connected are lost, as they are after an app quit.
 
 ## Remote-session spike, 2026-09-17
 

@@ -13,13 +13,20 @@ struct RemoteHostBinary: Equatable, Sendable {
     let architecture: RemoteHostArchitecture
     /// The whole SHA-256, hex, for verifying an upload.
     let sha256: String
+    var kind: RemoteHostBinaryKind = .daemon
 
     var installIdentifier: String {
         String(sha256.prefix(RemoteHostDefaults.identifierHexLength))
     }
 
+    /// Where the binary lives on the host, relative to its home.
+    var remotePath: String {
+        "\(kind.remoteLibraryDirectory)/\(installIdentifier)/\(kind.executableName)"
+    }
+
     /// Hashes the file in chunks, off the main actor, bounded by the file's own size.
     static func load(
+        _ kind: RemoteHostBinaryKind = .daemon,
         architecture: RemoteHostArchitecture,
         fromDirectory directory: URL
     ) throws -> RemoteHostBinary {
@@ -28,7 +35,7 @@ struct RemoteHostBinary: Equatable, Sendable {
         }
         let url = directory
             .appendingPathComponent(subdirectory, isDirectory: true)
-            .appendingPathComponent(RemoteHostDefaults.daemonExecutableName, isDirectory: false)
+            .appendingPathComponent(kind.executableName, isDirectory: false)
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             throw RemoteHostInstallError.noBinary(architecture)
         }
@@ -39,7 +46,29 @@ struct RemoteHostBinary: Equatable, Sendable {
             hasher.update(data: chunk)
         }
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        return RemoteHostBinary(url: url, architecture: architecture, sha256: digest)
+        return RemoteHostBinary(url: url, architecture: architecture, sha256: digest, kind: kind)
+    }
+}
+
+/// The two static binaries a host is given.
+enum RemoteHostBinaryKind: Equatable, Sendable {
+    /// `threading-ptyd`, run by the host's systemd user unit.
+    case daemon
+    /// `threading-mcp-bridge`, spawned by each remote agent as its MCP server.
+    case bridge
+
+    var executableName: String {
+        switch self {
+        case .daemon: return RemoteHostDefaults.daemonExecutableName
+        case .bridge: return RemoteHostDefaults.bridgeExecutableName
+        }
+    }
+
+    var remoteLibraryDirectory: String {
+        switch self {
+        case .daemon: return RemoteHostDefaults.remoteLibraryDirectory
+        case .bridge: return RemoteHostDefaults.remoteBridgeLibraryDirectory
+        }
     }
 }
 
@@ -140,8 +169,8 @@ enum RemoteHostInstallScripts {
     /// hex and every path is relative to the login directory, so the command line needs no quoting
     /// in any shell `ssh` hands it to.
     static func uploadCommand(for binary: RemoteHostBinary) -> String {
-        let directory = "\(RemoteHostDefaults.remoteLibraryDirectory)/\(binary.installIdentifier)"
-        let target = "\(directory)/\(RemoteHostDefaults.daemonExecutableName)"
+        let directory = "\(binary.kind.remoteLibraryDirectory)/\(binary.installIdentifier)"
+        let target = binary.remotePath
         return "mkdir -p \(directory) && cat > \(target).partial && chmod 700 \(target).partial"
             + " && mv \(target).partial \(target) && sha256sum \(target)"
     }
@@ -182,6 +211,21 @@ enum RemoteHostInstallScripts {
     static func disableAtBootScript(identifier: String) -> String {
         "systemctl --user disable \(RemoteHostDefaults.remoteUnitPrefix)\(identifier)\(RemoteHostDefaults.remoteUnitSuffix)"
     }
+
+    /// Readies the host end of the socket forwarded back to this Mac: an owner-only directory, and
+    /// no file where the forward will bind.
+    ///
+    /// The removal is what lets a new tunnel bind at all. `StreamLocalBindUnlink` is the *server's*
+    /// setting for a remote forward and defaults to no, so a socket file a dropped tunnel left
+    /// behind would refuse the bind, and `ExitOnForwardFailure` would end the new tunnel with it. A
+    /// tunnel still bound to the old file keeps its unlinked socket and hands it no connections.
+    static let prepareBridgeRendezvousScript = """
+        set -e
+        umask 077
+        mkdir -p "$HOME/\(RemoteHostDefaults.remoteBridgeDirectory)"
+        chmod 700 "$HOME/\(RemoteHostDefaults.remoteBridgeDirectory)"
+        rm -f "$HOME/\(RemoteHostDefaults.remoteBridgeDirectory)/\(RemoteHostDefaults.remoteBridgeSocketFileName)"
+        """
 
     static func isActiveScript(identifier: String) -> String {
         "systemctl --user is-active --quiet \(RemoteHostDefaults.remoteUnitPrefix)\(identifier)\(RemoteHostDefaults.remoteUnitSuffix)"

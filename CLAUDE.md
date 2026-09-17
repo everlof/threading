@@ -34,7 +34,7 @@ scripts/test.sh          # fast: everything except the tests that put a window o
 scripts/test.sh all      # the whole ThreadingTests target
 scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa home
 scripts/test-connectivity.sh software  # focused Mac + iOS Simulator connectivity contracts
-scripts/test-ptyd-linux.sh             # threading-ptyd's static Linux build and its suite, in Docker (pty-host.md#linux)
+scripts/test-ptyd-linux.sh             # static Linux threading-ptyd (with its suite) and threading-mcp-bridge, in Docker (pty-host.md#linux)
 scripts/test-connectivity.sh hardware --device <name-or-UDID> --scenario automatic --non-interactive  # unattended device lifecycle lane
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)

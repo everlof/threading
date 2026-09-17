@@ -25,6 +25,7 @@
 		7C000003000000000000A006 /* JSONRPCLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B006 /* JSONRPCLine.swift */; };
 		7C000003000000000000A007 /* CatalogueCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B007 /* CatalogueCache.swift */; };
 		7C000003000000000000A008 /* MCPBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B008 /* MCPBridge.swift */; };
+		7C000003000000000000A010 /* BridgePOSIX.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B012 /* BridgePOSIX.swift */; };
 		7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B011 /* threading-mcp-bridge */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000005000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B001 /* main.swift */; };
 		7C000005000000000000A002 /* PTYHostDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B002 /* PTYHostDefaults.swift */; };
@@ -343,6 +344,7 @@
 		7C000003000000000000B006 /* JSONRPCLine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JSONRPCLine.swift; sourceTree = "<group>"; };
 		7C000003000000000000B007 /* CatalogueCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CatalogueCache.swift; sourceTree = "<group>"; };
 		7C000003000000000000B008 /* MCPBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MCPBridge.swift; sourceTree = "<group>"; };
+		7C000003000000000000B012 /* BridgePOSIX.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgePOSIX.swift; sourceTree = "<group>"; };
 		7C000003000000000000B009 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000003000000000000B010 /* threading-mcp-bridge.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-mcp-bridge.entitlements"; sourceTree = "<group>"; };
 		7C000003000000000000B011 /* threading-mcp-bridge */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-mcp-bridge"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -734,6 +736,7 @@
 				7C000003000000000000B006 /* JSONRPCLine.swift */,
 				7C000003000000000000B007 /* CatalogueCache.swift */,
 				7C000003000000000000B008 /* MCPBridge.swift */,
+				7C000003000000000000B012 /* BridgePOSIX.swift */,
 				7C000003000000000000B009 /* Info.plist */,
 				7C000003000000000000B010 /* threading-mcp-bridge.entitlements */,
 			);
@@ -1620,6 +1623,7 @@
 				7C000003000000000000A006 /* JSONRPCLine.swift in Sources */,
 				7C000003000000000000A007 /* CatalogueCache.swift in Sources */,
 				7C000003000000000000A008 /* MCPBridge.swift in Sources */,
+				7C000003000000000000A010 /* BridgePOSIX.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

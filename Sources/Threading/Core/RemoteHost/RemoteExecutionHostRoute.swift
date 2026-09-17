@@ -90,3 +90,12 @@ enum RemoteReconnectDefaults {
         delays[min(max(attempt, 0), delays.count - 1)]
     }
 }
+
+extension ProjectStore {
+    /// Whether a session runs on a remote execution host. Its project is the source of truth: a
+    /// launch is routed by the project's host, so a session is remote exactly when its project
+    /// names one. What a remote agent reports and asks for names the host's disk, not this Mac's.
+    func sessionRunsOnRemoteHost(_ sessionID: SessionID) -> Bool {
+        project(forSessionID: sessionID)?.executionHost != nil
+    }
+}

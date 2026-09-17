@@ -44,6 +44,10 @@ struct RemoteHostFacts: Equatable, Sendable {
     var enabledInstances: [String] = []
     /// Where a login shell resolves `claude`, or nil when it does not.
     let claudePath: String?
+    /// Bridge install directories under `~/.local/lib/threading/bridge` holding an executable.
+    var installedBridges: Set<String> = []
+    /// Where `curl` is, which every lifecycle hook runs. Nil means hooks cannot report.
+    var curlPath: String?
 
     var architecture: RemoteHostArchitecture? { RemoteHostArchitecture(unameMachine: machine) }
 
@@ -73,6 +77,8 @@ enum RemoteHostFactsDefaults {
         static let active = "active"
         static let enabled = "enabled"
         static let claude = "claude"
+        static let bridge = "bridge"
+        static let curl = "curl"
     }
 
     static let instanceNameCharacters = CharacterSet(
@@ -113,6 +119,9 @@ extension RemoteHostFacts {
         for binary in "$HOME"/\(RemoteHostDefaults.remoteLibraryDirectory)/*/\(RemoteHostDefaults.daemonExecutableName); do
           [ -x "$binary" ] && printf 'installed=%s\\n' "$(basename "$(dirname "$binary")")"
         done
+        for binary in "$HOME"/\(RemoteHostDefaults.remoteBridgeLibraryDirectory)/*/\(RemoteHostDefaults.bridgeExecutableName); do
+          [ -x "$binary" ] && printf 'bridge=%s\\n' "$(basename "$(dirname "$binary")")"
+        done
         for unit in "$HOME"/\(RemoteHostDefaults.remoteUnitDirectory)/default.target.wants/\(RemoteHostDefaults.remoteUnitPrefix)*\(RemoteHostDefaults.remoteUnitSuffix); do
           [ -e "$unit" ] && printf 'enabled=%s\\n' "$(basename "$unit")"
         done
@@ -121,6 +130,7 @@ extension RemoteHostFacts {
             | awk '{print "active=" $1}'
         fi
         printf 'claude=%s\\n' "$("$shell" -lc 'command -v claude' </dev/null 2>/dev/null | tail -n 1)"
+        printf 'curl=%s\\n' "$("$shell" -lc 'command -v curl' </dev/null 2>/dev/null | tail -n 1)"
         """
 
     /// Reads the probe's output. Lines that are not `key=value`, such as a login shell's greeting,
@@ -131,6 +141,7 @@ extension RemoteHostFacts {
         var installed = Set<String>()
         var active: [String] = []
         var enabled: [String] = []
+        var bridges = Set<String>()
 
         for line in output.split(whereSeparator: \.isNewline) {
             guard let separator = line.firstIndex(of: "=") else { continue }
@@ -143,7 +154,9 @@ extension RemoteHostFacts {
                 if let instance = instanceName(fromUnit: value) { active.append(instance) }
             case Key.enabled:
                 if let instance = instanceName(fromUnit: value) { enabled.append(instance) }
-            case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude:
+            case Key.bridge:
+                if !value.isEmpty { bridges.insert(value) }
+            case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude, Key.curl:
                 single[key] = value
             default:
                 continue
@@ -164,6 +177,7 @@ extension RemoteHostFacts {
         default: linger = nil
         }
         let claude = single[Key.claude].flatMap { $0.hasPrefix("/") ? $0 : nil }
+        let curl = single[Key.curl].flatMap { $0.hasPrefix("/") ? $0 : nil }
 
         return RemoteHostFacts(
             machine: try required(Key.machine),
@@ -175,7 +189,9 @@ extension RemoteHostFacts {
             installedBinaries: installed,
             activeInstances: active,
             enabledInstances: enabled,
-            claudePath: claude
+            claudePath: claude,
+            installedBridges: bridges,
+            curlPath: curl
         )
     }
 

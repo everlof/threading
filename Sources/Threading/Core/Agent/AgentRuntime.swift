@@ -685,6 +685,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// boundaries from the stream it is already reading — it sent the message and it sees the
     /// result — so a hook would tell it something it knows, one process later.
     func applyLifecycle(_ report: HookLifecycleReport) {
+        let report = ProjectStore.shared.sessionRunsOnRemoteHost(report.sessionID) ? report.withoutHostPaths() : report
         if report.event == .subagentStarted || report.event == .subagentStopped {
             applySubagentLifecycle(report)
             return

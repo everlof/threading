@@ -70,6 +70,20 @@ enum RemoteHostDefaults {
     static let remoteUnitSuffix = ".service"
     static let daemonExecutableName = "threading-ptyd"
 
+    // MARK: - Remote layout of the tool bridge (relative to the remote home)
+
+    /// Content-named like the daemon's, in its own directory, because the two upgrade apart: a
+    /// new bridge needs no daemon retired, and a new daemon strands no running bridge.
+    static let remoteBridgeLibraryDirectory = ".local/lib/threading/bridge"
+    static let bridgeExecutableName = "threading-mcp-bridge"
+    /// The `0700` directory holding the socket forwarded *back* to this Mac's MCP rendezvous.
+    static let remoteBridgeDirectory = ".local/state/threading/bridge"
+    static let remoteBridgeSocketFileName = "mcp.sock"
+    /// One catalogue cache per session, as `MCPSessionRegistry` names them on the Mac.
+    static let remoteBridgeCacheDirectory = ".local/state/threading/bridge/catalogues"
+    /// Per-session `--settings` and `--mcp-config` files, written by the launch itself, `0600`.
+    static let remoteSessionFilesDirectory = ".local/state/threading/sessions"
+
     // MARK: - Local layout
 
     /// The `0700` directory under `Application Support/Threading` holding one forwarded socket per
@@ -83,8 +97,8 @@ enum RemoteHostDefaults {
 
     // MARK: - Hidden settings
 
-    /// Where the developer setting says the Linux binaries are: `<dir>/arm64/threading-ptyd` and
-    /// `<dir>/amd64/threading-ptyd`, as `scripts/test-ptyd-linux.sh` writes them.
+    /// Where the developer setting says the Linux binaries are: `<dir>/arm64/threading-ptyd`,
+    /// `<dir>/amd64/threading-mcp-bridge` and so on, as `scripts/test-ptyd-linux.sh` writes them.
     static let binaryArchitectureDirectories: [RemoteHostArchitecture: String] = [
         .arm64: "arm64",
         .amd64: "amd64"
