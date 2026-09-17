@@ -1147,6 +1147,15 @@ about which CLI is at the other end.
   leaves a backgrounded fleet running, and teardown is reached for exactly when a fleet has run
   away. Closing stdin stays the first move on every transport that has one — Codex's app-server
   shuts down on end-of-input — so the group signal is the escalation, not the greeting.
+- **A child can receive what the group signal says.** `posix_spawn` hands the child the calling
+  thread's signal mask, and the callers are libdispatch workers, which block every signal; an
+  ignored disposition such as the app's `SIGPIPE` survives `exec` as well. So `ChildProcessSpawn`
+  sets `POSIX_SPAWN_SETSIGDEF` over every signal and `POSIX_SPAWN_SETSIGMASK` with an empty mask.
+  Until it did, `SIGTERM` reached nothing it spawned: measured on 2026-09-17, a remote host's
+  `ssh -N` tunnel survived `kill(-pid, SIGTERM)` indefinitely, and every bounded helper was ended
+  only by the `SIGKILL` that follows its grace. `ChildProcessSignalTests` spawns from a dispatch
+  worker and fails without the flags. `threading-ptyd` fixed the same inheritance for its own
+  children (`pty-host.md`).
 - **Parent-side stdin cannot signal the app.** `AgentChildProcess` owns the writable end of every
   native child stdin pipe, so it applies `F_SETNOSIGPIPE` to that descriptor before exposing a
   `FileHandle`. This is descriptor policy, not ACP/Codex/Claude policy: a child may exit before

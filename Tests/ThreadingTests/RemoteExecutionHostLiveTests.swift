@@ -86,6 +86,85 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         )
     }
 
+    /// The durable half: a session keeps running on the host while no Mac is connected, the next
+    /// preparation's survey finds it, and attaching hands back what it wrote meanwhile. Then a
+    /// tunnel a crashed app would have left is ended by the next coordinator that opens one.
+    func testASessionOutlivesEveryTunnelAndIsTakenBackAfterwards() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination], let binaries = environment[Key.binaries] else {
+            throw XCTSkip("set \(Key.destination) and \(Key.binaries) to run against a real host")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let sockets = URL(fileURLWithPath: "/tmp/threading-rh-\(getpid())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sockets) }
+        let binaryDirectory = URL(fileURLWithPath: binaries)
+
+        // Launch, then quit: every tunnel closes and nothing detaches.
+        let first = RemoteExecutionHosts(localDirectory: sockets)
+        defer { first.closeAllTunnels() }
+        let context = try prepare(first, destination, binaries: binaryDirectory)
+        let identity = PTYHostSessionIdentity.agentSession(SessionID())
+        let spawned = PTYHostLatch<PTYHostSpawned>()
+        let starter = PTYHostClient(
+            socketPath: context.localSocketPath,
+            build: "remote-live-test",
+            events: PTYHostClient.Events(frame: { frame in
+                if case .spawned(let answer) = frame { spawned.complete(answer) }
+            })
+        )
+        try starter.connect()
+        try starter.spawn(PTYHostSpawnRequest(
+            id: identity,
+            channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24, xpixel: 0, ypixel: 0)),
+            executable: context.facts.loginShell,
+            arguments: ["-l", "-c", "sleep 3; printf 'WROTE-WHILE-AWAY\\n'; sleep 60"],
+            environment: RemoteAgentLaunch.environment(for: context.facts)
+        ))
+        // The host's answer, not a local flush: a flush reaches only this Mac's end of the tunnel.
+        XCTAssertNotNil(spawned.wait(Fixture.childTimeout), "the host never answered the spawn")
+        starter.close()
+        first.closeAllTunnels()
+        Thread.sleep(forTimeInterval: 5)
+
+        // The next launch: prepared again, surveyed, and the session is still running there.
+        let second = RemoteExecutionHosts(localDirectory: sockets)
+        // Closed on every path out; the crash below is simulated by not closing it *before* `third`.
+        defer { second.closeAllTunnels() }
+        let later = try prepare(second, destination, binaries: binaryDirectory)
+        let held = try XCTUnwrap(RemoteHostDaemonAdmin.sessions(socketPath: later.localSocketPath, build: "remote-live-test"))
+        let running = try XCTUnwrap(held.first { $0.id == identity }, "the host no longer holds the session")
+        XCTAssertNil(running.exit)
+
+        let output = OutputCollector()
+        let watcher = PTYHostClient(
+            socketPath: later.localSocketPath,
+            build: "remote-live-test",
+            events: PTYHostClient.Events(output: { output.append($0) })
+        )
+        try watcher.connect()
+        try watcher.attach(PTYHostAttach(id: identity, replayBudget: PTYHostReplayDefaults.minimumBudgetBytes))
+        let deadline = Date().addingTimeInterval(Fixture.childTimeout)
+        while Date() < deadline, !output.text.contains("WROTE-WHILE-AWAY") {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertTrue(output.text.contains("WROTE-WHILE-AWAY"), "the replay lost what the session wrote: \(output.text)")
+        try watcher.kill(PTYHostKill(id: identity, escalate: true))
+        _ = watcher.drainWrites(until: Date().addingTimeInterval(Fixture.childTimeout))
+        watcher.close()
+
+        // A crash: `second` never closes its tunnel. The next coordinator must end it.
+        XCTAssertTrue(second.tunnelIsRunning(for: destination))
+        let third = RemoteExecutionHosts(localDirectory: sockets)
+        defer { third.closeAllTunnels() }
+        _ = try prepare(third, destination, binaries: binaryDirectory)
+        let ended = Date().addingTimeInterval(Fixture.childTimeout)
+        while Date() < ended, second.tunnelIsRunning(for: destination) {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertFalse(second.tunnelIsRunning(for: destination), "the stranded tunnel was left running")
+        XCTAssertTrue(third.tunnelIsRunning(for: destination))
+    }
+
     private func prepare(
         _ hosts: RemoteExecutionHosts,
         _ destination: RemoteHostDestination,

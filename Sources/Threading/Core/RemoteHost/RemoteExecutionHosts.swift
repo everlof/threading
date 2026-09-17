@@ -125,6 +125,7 @@ final class RemoteHostTunnel: @unchecked Sendable {
         remoteSocketPath: String,
         onExit: @escaping @Sendable (Int32) -> Void
     ) throws -> RemoteHostTunnel {
+        RemoteHostTunnelRecord.endStale(forSocketPath: localSocketPath)
         let pipe = try ChildPipe()
         let forward = "\(localSocketPath):\(remoteSocketPath)"
         let child: SpawnedChildProcess
@@ -147,14 +148,66 @@ final class RemoteHostTunnel: @unchecked Sendable {
             throw error
         }
         pipe.closeWriteEnd()
+        RemoteHostTunnelRecord.write(pid: child.processIdentifier, forSocketPath: localSocketPath)
         let diagnostics = RemoteHostDiagnosticsBuffer(handle: pipe.takeReadHandle())
-        child.observeExit(onExit)
+        child.observeExit { status in
+            RemoteHostTunnelRecord.remove(pid: child.processIdentifier, forSocketPath: localSocketPath)
+            onExit(status)
+        }
         return RemoteHostTunnel(localSocketPath: localSocketPath, child: child, diagnostics: diagnostics)
     }
 
     /// Ends the tunnel. Sessions on the host keep running; only this Mac's path to them closes.
     func close() {
         child.terminate()
+    }
+}
+
+/// Which `ssh` owns a forwarded socket, written beside it so a launch after a crash can end the
+/// tunnel the crashed app left.
+///
+/// Without it a crash strands an `ssh -N` that keeps its keep-alives answered forever, and every
+/// crash adds one. The record is a pid *and* its kernel start time, because a pid alone is a
+/// number macOS hands out again: only a process that is still the one recorded is signalled.
+enum RemoteHostTunnelRecord {
+
+    private struct Record: Codable {
+        let pid: Int32
+        let startTime: ProcessStartTime
+    }
+
+    static let fileSuffix = ".tunnel"
+
+    static func write(pid: pid_t, forSocketPath socketPath: String) {
+        guard let startTime = ProcessUtility.startTime(forPid: pid),
+              let data = try? JSONEncoder().encode(Record(pid: pid, startTime: startTime)) else { return }
+        try? data.write(to: url(forSocketPath: socketPath), options: .atomic)
+    }
+
+    static func remove(pid: pid_t, forSocketPath socketPath: String) {
+        let url = url(forSocketPath: socketPath)
+        guard let record = read(url), record.pid == pid else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Ends the recorded tunnel if it is still the process that was recorded.
+    static func endStale(forSocketPath socketPath: String) {
+        let url = url(forSocketPath: socketPath)
+        guard let record = read(url) else { return }
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard ProcessUtility.startTime(forPid: record.pid) == record.startTime else { return }
+        // The tunnel was spawned leading its own process group.
+        kill(-record.pid, SIGTERM)
+        EventLog.shared.record(.session, "Ended a remote host tunnel a previous launch left", [:])
+    }
+
+    private static func read(_ url: URL) -> Record? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Record.self, from: data)
+    }
+
+    private static func url(forSocketPath socketPath: String) -> URL {
+        URL(fileURLWithPath: socketPath + fileSuffix)
     }
 }
 
@@ -205,6 +258,13 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
     private let runner: RemoteHostCommandRunning
     private let queue = DispatchQueue(label: "codes.threading.remote-hosts", qos: .userInitiated)
+    /// Launch-time surveys, apart from preparation so a slow upload to one host never delays a
+    /// session on a host that is already prepared.
+    private let surveyQueue = DispatchQueue(
+        label: "codes.threading.remote-hosts.survey",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
     private let lock = NSLock()
     private var phases: [RemoteHostDestination: RemoteHostPhase] = [:]
     private var tunnels: [RemoteHostDestination: RemoteHostTunnel] = [:]
@@ -226,6 +286,13 @@ final class RemoteExecutionHosts: @unchecked Sendable {
     }
 
     // MARK: - Public Methods
+
+    /// Whether this coordinator's tunnel to a host is running. For tests and diagnostics.
+    func tunnelIsRunning(for destination: RemoteHostDestination) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return tunnels[destination]?.isRunning == true
+    }
 
     func phase(for destination: RemoteHostDestination) -> RemoteHostPhase {
         lock.lock()
@@ -269,6 +336,25 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             }
         }
         return answer
+    }
+
+    /// What a prepared host's daemon holds, asked off the main actor and answered on it — nil when
+    /// the daemon could not be asked.
+    ///
+    /// A launch asks this before spawning, because a session the daemon is still running is one to
+    /// reattach to: spawning would replace it, ending an agent that has been working since the app
+    /// last quit.
+    func holdings(
+        socketPath: String,
+        completion: @escaping @MainActor @Sendable ([PTYHostSessionSummary]?) -> Void
+    ) {
+        let build = self.build
+        surveyQueue.async {
+            let sessions = RemoteHostDaemonAdmin.sessions(socketPath: socketPath, build: build)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { completion(sessions) }
+            }
+        }
     }
 
     /// Closes every tunnel. At app termination; sessions on the hosts keep running.
@@ -581,6 +667,12 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 enum RemoteHostDaemonAdmin {
 
     static func activeSessionCount(socketPath: String, build: String) -> Int? {
+        sessions(socketPath: socketPath, build: build)?.filter { $0.exit == nil }.count
+    }
+
+    /// Everything the daemon at `socketPath` holds, or nil when it could not be asked.
+    /// **Blocking**; never on the main actor.
+    static func sessions(socketPath: String, build: String) -> [PTYHostSessionSummary]? {
         let answer = PTYHostLatch<[PTYHostSessionSummary]>()
         let client = PTYHostClient(
             socketPath: socketPath,
@@ -595,7 +687,7 @@ enum RemoteHostDaemonAdmin {
         )
         defer { client.close() }
         guard (try? client.connect()) != nil, (try? client.list()) != nil else { return nil }
-        return answer.wait(PTYHostDefaults.helloTimeout)?.filter { $0.exit == nil }.count
+        return answer.wait(PTYHostDefaults.helloTimeout)
     }
 
     static func retire(socketPath: String, build: String) -> Bool {

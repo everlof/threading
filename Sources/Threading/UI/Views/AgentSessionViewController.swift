@@ -643,6 +643,7 @@ final class AgentSessionViewController: NSViewController {
     func reattachToBackgroundHost(
         socketPath: String,
         grid: PTYHostGrid,
+        placement: PTYHostPlacement = .local,
         settings: AppSettings = .shared,
         bundle: Bundle = .main
     ) -> Bool {
@@ -659,7 +660,7 @@ final class AgentSessionViewController: NSViewController {
         clearPendingRemoteLaunch()
         externalResumePreflightID = nil
 
-        session.hostPlacement = .local
+        session.hostPlacement = placement
         session.hostTransportFactory = PTYHostPolicy.attachingTransportFactory(
             socketPath: socketPath,
             bundle: bundle
@@ -914,6 +915,23 @@ final class AgentSessionViewController: NSViewController {
                 plan = launch.plan
                 hostFactory = PTYHostPolicy.attachingTransportFactory(socketPath: socketPath)
                 placement = .remote(environment: launch.environment)
+            case .attach(let summary, let context):
+                // The host has been running this conversation since before this launch — across an
+                // app quit, a crash or a Mac restart. Taking it back is the durable answer;
+                // spawning would replace it and end a turn that may still be in flight.
+                if !reattachToBackgroundHost(
+                    socketPath: context.localSocketPath,
+                    grid: summary.grid,
+                    placement: .remote(environment: RemoteAgentLaunch.environment(for: context.facts))
+                ), !isRunning {
+                    recordLaunchRefusal(SessionLaunchFailure(
+                        origin: .preflight,
+                        summary: L10n.string("Couldn’t start this session on its remote host."),
+                        detail: [],
+                        knownCause: "remoteHost.attachFailed"
+                    ))
+                }
+                return
             }
         } else {
             placement = .local
@@ -998,12 +1016,23 @@ final class AgentSessionViewController: NSViewController {
         /// Whether this launch has already asked for the host to be prepared. A later retry only
         /// reads the phase, so a failed preparation is reported rather than started again.
         var requestedPreparation = false
+        /// What the prepared host's daemon holds, asked once per launch before anything spawns.
+        var survey: RemoteHoldingsSurvey = .notAsked
+    }
+
+    private enum RemoteHoldingsSurvey {
+        case notAsked
+        case asking
+        case answered([PTYHostSessionSummary])
+        case unanswered
     }
 
     private enum RemoteLaunchResolution {
         case waiting
         case refused(SessionLaunchFailure)
         case ready(RemoteAgentLaunch, socketPath: String)
+        /// The host is still running this session on a pseudo-terminal.
+        case attach(PTYHostSessionSummary, RemoteHostLaunchContext)
     }
 
     /// Where a remote launch stands. Never blocks: preparing a host is `ssh` work on
@@ -1034,6 +1063,32 @@ final class AgentSessionViewController: NSViewController {
                 knownCause: "remoteHost.\(failure.token)"
             ))
         case .ready(let context):
+            switch remote.survey {
+            case .notAsked:
+                pendingRemoteLaunch?.survey = .asking
+                observeRemoteHostChanges()
+                hosts.holdings(socketPath: context.localSocketPath) { [weak self] sessions in
+                    guard let self, self.pendingRemoteLaunch != nil else { return }
+                    self.pendingRemoteLaunch?.survey = sessions.map { .answered($0) } ?? .unanswered
+                    self.startIfTerminalIsSized()
+                }
+                return .waiting
+            case .asking:
+                return .waiting
+            case .unanswered:
+                return .refused(SessionLaunchFailure(
+                    origin: .preflight,
+                    summary: L10n.string("Couldn’t start this session on its remote host."),
+                    detail: [],
+                    knownCause: "remoteHost.surveyFailed"
+                ))
+            case .answered(let held):
+                if let running = held.first(where: {
+                    $0.sessionID == sessionID && $0.exit == nil && $0.resolvedChannel == .pty
+                }) {
+                    return .attach(running, context)
+                }
+            }
             guard let agentSession = projectStore.session(withID: sessionID),
                   let project = projectStore.project(forSessionID: sessionID) else {
                 return .refused(SessionLaunchFailure(

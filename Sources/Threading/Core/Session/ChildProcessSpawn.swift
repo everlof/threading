@@ -142,9 +142,27 @@ enum ChildProcessSpawn {
             ChildProcessSpawnDefaults.leadOwnGroup
         )
         guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
+        // Every signal back to its default disposition, and an empty mask. `posix_spawn` hands the
+        // child the *calling thread's* mask, and the callers here are libdispatch workers, which
+        // block every signal; an ignored disposition (the app ignores `SIGPIPE`) survives `exec`
+        // too. A child left with either never receives the `SIGTERM` that `terminate()` sends:
+        // measured, a supervised `ssh -N` tunnel survived `kill(-pid, SIGTERM)` indefinitely,
+        // and every bounded helper was only ever ended by the `SIGKILL` escalation after its
+        // grace. `threading-ptyd` fixed the same inheritance for its own children (`pty-host.md`).
+        var defaulted = sigset_t()
+        sigfillset(&defaulted)
+        result = posix_spawnattr_setsigdefault(&attributes, &defaulted)
+        guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
+        var unblocked = sigset_t()
+        sigemptyset(&unblocked)
+        result = posix_spawnattr_setsigmask(&attributes, &unblocked)
+        guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
         result = posix_spawnattr_setflags(
             &attributes,
-            Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP)
+            Int16(
+                POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP
+                    | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+            )
         )
         guard result == 0 else { throw ChildSpawnError.configurationFailed(code: result) }
 

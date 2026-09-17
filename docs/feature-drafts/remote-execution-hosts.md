@@ -196,9 +196,26 @@ config outside `~/.ssh/config`, such as `~/.lima/<vm>/ssh.config`. The checkout 
 on the host and `claude` must be signed in there. The first launch of a session in that project
 prepares the host (the upload is ~57 MB, ~22 MB compressed); later launches reuse it.
 
-**Not yet.** Reattaching remote sessions at relaunch (the local survey asks only the local socket,
-so a remote session relaunches with `--resume` instead), stale tunnels left by a crashed app,
-Mac-side sleep and network changes beyond `ServerAlive`, and bundling the binaries in the app.
+**Reattach.** A remote launch asks the prepared host's daemon what it holds before it spawns
+anything. A session still running there on a pseudo-terminal is taken back with a remote
+placement instead of being spawned again — spawning replaces the incarnation, which would end an
+agent that has been working since the app last quit. The same check covers the startup relaunch and
+a plain selection, so no path can replace a running remote agent. A held session that has *ended*
+is resumed from its transcript. Measured by
+`RemoteExecutionHostLiveTests/testASessionOutlivesEveryTunnelAndIsTakenBackAfterwards`: a session
+spawned, every tunnel closed, five seconds with no Mac connected, then a new preparation's survey
+still holding it and an attach replaying the line it wrote while nobody was connected.
+
+**Stranded tunnels.** Each tunnel writes its `ssh` pid and kernel start time beside its socket,
+and the next tunnel to that socket ends a recorded process that is still the one recorded, so a
+crashed app does not leave one `ssh -N` per crash. Measuring this found a wider bug: `SIGTERM`
+reached no child `ChildProcessSpawn` started, because children inherited a dispatch worker's
+blocked signal mask. Fixed at the spawn for every child; see
+[`sessions.md`](../architecture/sessions.md).
+
+**Not yet.** Mac-side sleep and network changes beyond `ServerAlive` (a dead tunnel is noticed when
+`ssh` exits; the running terminal is not yet told), bundling the binaries in the app, hooks and MCP
+(slice 4).
 
 ## Remote-session spike, 2026-09-17
 
