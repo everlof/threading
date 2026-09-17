@@ -250,8 +250,40 @@ back into a command run there.
 `NewChatOpeningMessage.compose(prompt:for:settings:)` sends only the chat's own task to a project on
 a remote host. The Remote Host editor says so.
 
-**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it),
-bundling the binaries in the app.
+## The components a host runs, 2026-09-17
+
+The developer version read its Linux binaries from a directory named by a hidden setting, so nobody
+but their author could set up a host. They are now published and fetched.
+
+**Measured, because it decides the shape.** A static Swift binary with Foundation is 56 MB; the same
+program without it is 6.4 MB (probed on the SDK this repository builds with). `-Osize`,
+`-function-sections` and `--gc-sections` together take 61 KB off the daemon — the weight is
+Foundation's own, not dead code, so no linker flag makes this small. That leaves three positions,
+and the numbers are here so the next person does not re-measure them: ship the two binaries as they
+are (22 MB each compressed, 114 MB on a host per generation); merge them into one program with two
+entry points, halving both; or make the Linux build Foundation-free, which is ~6 MB but means a
+hand-written wire codec in `ThreadingPTYHostKit` — shared with the Mac app — rather than `Codable`.
+The first ships today; the third is what "run it on a Pi" eventually wants.
+
+**Fetched, not bundled.** `scripts/publish_remote_components.sh` builds both architectures, hashes
+what it built, uploads the four assets to a release tagged by the commit their sources are at, and
+rewrites `RemoteHostComponentManifest.swift` with the digests it measured. The app carries those
+digests, so the download is safe by construction: it verifies the asset it received and the binary
+inside it, and only then moves the binary into a content-named cache under Application Support. A
+build that has published nothing says exactly that rather than failing as a download. The developer
+directory remains as an *override* — the loop it serves is real — and the Remote Hosts settings say
+when a host was set up from one, because a machine that works only because of a local directory must
+not look like one that works.
+
+**Old generations are removed.** Every build a host was ever given is a content-named directory of
+tens of megabytes, and nothing used to remove them: the machine least able to afford that is exactly
+the one this feature is for. Once this build's instance is serving, preparation deletes every install
+directory in the two roots that nothing runs, holding names to hex so a directory a person put there
+by hand stays.
+
+**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it), the
+first actual publication (the manifest is empty until `publish_remote_components.sh` runs), and the
+Remote Hosts settings page that this replaces the hidden setting with.
 
 ## Hooks and tools, as built, 2026-09-17
 

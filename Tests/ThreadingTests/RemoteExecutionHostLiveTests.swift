@@ -352,7 +352,11 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         binaries: URL,
         appSocketPath: String? = nil
     ) throws -> RemoteHostLaunchContext {
-        _ = hosts.readiness(for: destination, binaryDirectory: binaries, appSocketPath: appSocketPath)
+        _ = hosts.readiness(
+            for: destination,
+            components: RemoteHostDirectoryComponents(directory: binaries),
+            appSocketPath: appSocketPath
+        )
         let deadline = Date().addingTimeInterval(Fixture.preparationTimeout)
         while Date() < deadline {
             switch hosts.phase(for: destination) {

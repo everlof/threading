@@ -227,6 +227,36 @@ enum RemoteHostInstallScripts {
         rm -f "$HOME/\(RemoteHostDefaults.remoteBridgeDirectory)/\(RemoteHostDefaults.remoteBridgeSocketFileName)"
         """
 
+    /// Removes every install directory but the ones named, for both the daemon and the bridge.
+    ///
+    /// The names are hex identifiers this Mac computed, so the command needs no quoting; a directory
+    /// whose name is not one of them is a build nothing runs any more. `rm -rf` reaches only inside
+    /// the two install roots, and the `case` guard keeps a name that is not hex from being removed
+    /// at all — a directory a person put there by hand stays.
+    static func pruneScript(keeping identifiers: [String]) -> String {
+        let keep = identifiers.joined(separator: " ")
+        return """
+            set -e
+            keep="\(keep)"
+            for root in "$HOME/\(RemoteHostDefaults.remoteLibraryDirectory)" \
+              "$HOME/\(RemoteHostDefaults.remoteBridgeLibraryDirectory)"; do
+              [ -d "$root" ] || continue
+              for directory in "$root"/*; do
+                [ -d "$directory" ] || continue
+                name="$(basename "$directory")"
+                case "$name" in
+                  bridge) continue ;;
+                  *[!0-9a-f]*) continue ;;
+                esac
+                case " $keep " in
+                  *" $name "*) continue ;;
+                esac
+                rm -rf "$directory"
+              done
+            done
+            """
+    }
+
     static func isActiveScript(identifier: String) -> String {
         "systemctl --user is-active --quiet \(RemoteHostDefaults.remoteUnitPrefix)\(identifier)\(RemoteHostDefaults.remoteUnitSuffix)"
     }

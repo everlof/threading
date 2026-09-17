@@ -1137,7 +1137,7 @@ final class AgentSessionViewController: NSViewController {
             pendingRemoteLaunch?.requestedPreparation = true
             phase = hosts.readiness(
                 for: destination,
-                binaryDirectory: AppSettings.shared.developerRemoteHostBinaryDirectory,
+                components: RemoteHostComponentSource.current(),
                 appSocketPath: MCPServer.shared.socketPath
             )
         }

@@ -45034,6 +45034,28 @@
         }
       }
     },
+    "The Linux components could not be downloaded: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linux-komponenterna kunde inte laddas ned: %@"
+          }
+        }
+      }
+    },
+    "The Linux components could not be unpacked: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linux-komponenterna kunde inte packas upp: %@"
+          }
+        }
+      }
+    },
     "The PDF could not be decoded." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46450,6 +46472,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokumentet är större än de %@ som spelaren accepterar."
+          }
+        }
+      }
+    },
+    "The downloaded Linux components are not the ones this build expects." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De nedladdade Linux-komponenterna är inte de som den här versionen förväntar sig."
           }
         }
       }
@@ -50093,6 +50126,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här versionen innehåller inte verktyget ännu, så det finns inget att installera."
+          }
+        }
+      }
+    },
+    "This build has no Linux components for %@ hosts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här versionen har inga Linux-komponenter för %@-värdar."
           }
         }
       }

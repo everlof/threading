@@ -38,6 +38,13 @@ enum RemoteHostPhase: Equatable, Sendable {
     case failed(RemoteHostFailure)
 }
 
+/// What a preparing host is doing, for the surface watching it. Preparation is `ssh`, and a first
+/// setup also downloads a component, so "preparing" on its own is a minute of silence.
+enum RemoteHostStep: Equatable, Sendable {
+    /// Downloading this build's Linux components, as a fraction of the whole.
+    case fetchingComponents(Double)
+}
+
 // MARK: - Tunnel
 
 /// One `ssh -N -L <local>:<remote>` for one host, supervised.
@@ -226,6 +233,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
     )
     private let lock = NSLock()
     private var phases: [RemoteHostDestination: RemoteHostPhase] = [:]
+    private var steps: [RemoteHostDestination: RemoteHostStep] = [:]
     private var tunnels: [RemoteHostDestination: RemoteHostTunnel] = [:]
     private let build: String
     /// The `0700` directory holding the forwarded sockets. Injectable because a unix socket path is
@@ -268,7 +276,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
     /// forwarded back to the host so its agents reach Threading; nil forwards nothing.
     func readiness(
         for destination: RemoteHostDestination,
-        binaryDirectory: URL?,
+        components: RemoteHostComponentProviding?,
         appSocketPath: String? = nil
     ) -> RemoteHostPhase {
         lock.lock()
@@ -295,7 +303,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         if startsPreparation {
             postChange()
             queue.async { [weak self] in
-                self?.prepare(destination, binaryDirectory: binaryDirectory, appSocketPath: appSocketPath)
+                self?.prepare(destination, components: components, appSocketPath: appSocketPath)
             }
         }
         return answer
@@ -332,10 +340,14 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
     // MARK: - Private Methods — preparation
 
-    private func prepare(_ destination: RemoteHostDestination, binaryDirectory: URL?, appSocketPath: String?) {
+    private func prepare(
+        _ destination: RemoteHostDestination,
+        components: RemoteHostComponentProviding?,
+        appSocketPath: String?
+    ) {
         let outcome: RemoteHostPhase
         do {
-            outcome = .ready(try prepareOrThrow(destination, binaryDirectory: binaryDirectory,
+            outcome = .ready(try prepareOrThrow(destination, components: components,
                                                 appSocketPath: appSocketPath))
         } catch let failure as RemoteHostFailure {
             outcome = .failed(failure)
@@ -353,13 +365,14 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         }
         lock.lock()
         phases[destination] = outcome
+        steps[destination] = nil
         lock.unlock()
         postChange()
     }
 
     private func prepareOrThrow(
         _ destination: RemoteHostDestination,
-        binaryDirectory: URL?,
+        components: RemoteHostComponentProviding?,
         appSocketPath: String?
     ) throws -> RemoteHostLaunchContext {
         guard destination.isValid else {
@@ -372,21 +385,17 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         guard facts.hasSystemd else {
             throw RemoteHostFailure(token: "noSystemd", detail: "systemctl was not found")
         }
-        guard let binaryDirectory else {
-            throw RemoteHostFailure(token: "noBinaryDirectory", detail: "no binary directory is configured")
+        guard let components else {
+            throw RemoteHostFailure(token: "noComponents", detail: "no source of Linux components")
         }
-        let binary: RemoteHostBinary
-        do {
-            binary = try RemoteHostBinary.load(architecture: architecture, fromDirectory: binaryDirectory)
-        } catch {
-            throw RemoteHostFailure(token: "noBinary", detail: error.localizedDescription)
-        }
+        let binary = try component(.daemon, for: architecture, from: components, on: destination)
         let plan = RemoteHostInstallPlan.make(facts: facts, binary: binary)
 
         if plan.uploadsBinary { try upload(binary, to: destination) }
         // The bridge is optional: without one a remote agent still runs, still reports its turns
-        // through hooks, and has no Threading tools. A missing file is that case, not a failure.
-        let bridge = try? RemoteHostBinary.load(.bridge, architecture: architecture, fromDirectory: binaryDirectory)
+        // through hooks, and has no Threading tools. A component this build never published is that
+        // case, not a failure.
+        let bridge = try? component(.bridge, for: architecture, from: components, on: destination)
         if let bridge, !facts.installedBridges.contains(bridge.installIdentifier) {
             try upload(bridge, to: destination)
         }
@@ -452,12 +461,73 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             }
         }
 
+        if runsOwnInstance {
+            prune(on: destination, keeping: [binary.installIdentifier] + (bridge.map { [$0.installIdentifier] } ?? []))
+        }
+
         try waitUntilAnswering(localSocketPath: localSocketPath, tunnel: tunnel)
         ThreadingLogger.ptyHost.info(
             "Remote host \(destination.identifier, privacy: .private(mask: .hash)) ready (own instance: \(runsOwnInstance, privacy: .public), tools: \(toolRoute?.bridgePath != nil, privacy: .public))"
         )
         return RemoteHostLaunchContext(destination: destination, facts: facts, localSocketPath: localSocketPath,
                                        toolRoute: toolRoute)
+    }
+
+    /// One component, fetched if this Mac does not have it yet, with the download reported as the
+    /// host's own phase so a first setup is not a silent minute.
+    private func component(
+        _ kind: RemoteHostBinaryKind,
+        for architecture: RemoteHostArchitecture,
+        from components: RemoteHostComponentProviding,
+        on destination: RemoteHostDestination
+    ) throws -> RemoteHostBinary {
+        do {
+            return try components.binary(kind, for: architecture) { [weak self] fraction in
+                self?.report(.fetchingComponents(fraction), for: destination)
+            }
+        } catch let failure as RemoteHostComponentError {
+            throw RemoteHostFailure(token: failure.token, detail: failure.localizedDescription)
+        } catch {
+            throw RemoteHostFailure(token: "noBinary", detail: error.localizedDescription)
+        }
+    }
+
+    /// Removes install directories nothing runs any more.
+    ///
+    /// Every build a host has ever been given is a content-named directory of tens of megabytes, and
+    /// without this they accumulate one per build for the life of the machine — which is exactly the
+    /// machine least able to afford it, a Pi or the smallest VPS a person could buy. Best effort: a
+    /// host that refuses the removal is still a working host.
+    private func prune(on destination: RemoteHostDestination, keeping identifiers: [String]) {
+        do {
+            try runScript(destination, RemoteHostInstallScripts.pruneScript(keeping: identifiers),
+                          token: "pruneFailed")
+        } catch {
+            ThreadingLogger.ptyHost.info(
+                "Remote host \(destination.identifier, privacy: .private(mask: .hash)) kept its older installs"
+            )
+        }
+    }
+
+    /// Moves a preparing host through its steps, for the surface watching it.
+    private func report(_ step: RemoteHostStep, for destination: RemoteHostDestination) {
+        lock.lock()
+        guard case .preparing = phases[destination] else {
+            lock.unlock()
+            return
+        }
+        let unchanged = steps[destination] == step
+        steps[destination] = step
+        lock.unlock()
+        if !unchanged { postChange() }
+    }
+
+    /// What a preparing host is doing now, or nil when it is not preparing.
+    func step(for destination: RemoteHostDestination) -> RemoteHostStep? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard case .preparing = phases[destination] ?? .idle else { return nil }
+        return steps[destination]
     }
 
     private func readFacts(_ destination: RemoteHostDestination) throws -> RemoteHostFacts {
