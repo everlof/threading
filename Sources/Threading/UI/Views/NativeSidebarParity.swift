@@ -20,6 +20,9 @@ enum NativeSidebarHostDependency: String, CaseIterable, Sendable {
     case transientLoading
     case hoverContent
     case conductDetail
+    /// Which machine a row's sessions run on. A launch-destination decision the host owns, shown
+    /// so it can never be a silent setting; not a navigator fact.
+    case executionPlacement
     case clock
     case visibilityScope
     case transientExclusion
@@ -63,6 +66,7 @@ enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
 enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case rowLoading = "SessionRowView.configure.isLoading"
     case rowConduct = "SessionRowView.configure.conduct"
+    case rowExecutionHost = "SessionRowView.configure.executionHost"
     case rootVisibility = "SidebarTreeBuilder.rootNodes.visibility"
     case rootExclusions = "SidebarTreeBuilder.rootNodes.excludingSessionIDs"
     case rootClock = "SidebarTreeBuilder.rootNodes.date"
@@ -122,6 +126,7 @@ enum NativeSidebarParity {
     ] = [
         .rowLoading: .transientLoading,
         .rowConduct: .conductDetail,
+        .rowExecutionHost: .executionPlacement,
         .rootVisibility: .visibilityScope,
         .rootExclusions: .transientExclusion,
         .rootClock: .clock,

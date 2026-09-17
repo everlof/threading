@@ -67,7 +67,7 @@ struct RemoteAgentLaunch {
     static func make(
         for session: AgentSession,
         in project: Project,
-        assignment: RemoteExecutionHostAssignment,
+        host: ProjectExecutionHost,
         context: RemoteHostLaunchContext,
         initialPrompt: String?
     ) throws -> RemoteAgentLaunch {
@@ -86,11 +86,11 @@ struct RemoteAgentLaunch {
 
         let commands = AgentLauncher.remoteClaudeCommands(for: session, prompt: initialPrompt)
         let transcript = "\(facts.home)/\(RemoteAgentLaunchDefaults.claudeProjectsDirectory)/"
-            + "\(ClaudeTranscript.projectSlug(forPath: assignment.remoteDirectory))/"
+            + "\(ClaudeTranscript.projectSlug(forPath: host.remoteDirectory))/"
             + "\(commands.transcriptID.rawValue)\(RemoteAgentLaunchDefaults.transcriptExtension)"
 
         let script = [
-            "cd \(quoted(assignment.remoteDirectory)) || exit \(RemoteAgentLaunchDefaults.directoryFailureStatus)",
+            "cd \(quoted(host.remoteDirectory)) || exit \(RemoteAgentLaunchDefaults.directoryFailureStatus)",
             "if [ -f \(quoted(transcript)) ]; then exec \(commands.resume.source); fi",
             "exec \(commands.fresh.source)"
         ].joined(separator: "\n")

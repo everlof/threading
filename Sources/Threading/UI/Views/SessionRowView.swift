@@ -115,6 +115,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// and for the same reason: nearly every row carries no override, and absent content must
     /// not become part of mounting and scrolling. See `RowConductSummary`.
     private var conductIndicator: NSImageView?
+    private var executionHostIndicator: NSImageView?
     private let nativeIdentityContent = NSView()
     private lazy var afterTitleSlot = NSStackView()
     private lazy var identityContentContainer = ComponentContentContainer(
@@ -602,6 +603,51 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         managerIndicator = indicator
     }
 
+    /// Says which machine this row's sessions run on, whenever it is not this Mac.
+    ///
+    /// Always visible rather than a hover detail: a project that runs its agents somewhere else
+    /// must never look like one that runs them here. Materialized on first need and hidden on
+    /// reuse, exactly like the settings mark beside it.
+    private func setExecutionHostMark(_ destination: String?) {
+        guard let destination else {
+            executionHostIndicator?.isHidden = true
+            return
+        }
+        let label = RemoteExecutionHostMark.runsOn(destination)
+        if let executionHostIndicator {
+            executionHostIndicator.isHidden = false
+            executionHostIndicator.toolTip = label
+            executionHostIndicator.setAccessibilityLabel(label)
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.holdSymbol(RemoteExecutionHostMark.symbol, slot: Design.Size.inlineButtonGlyph)
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(label)
+        indicator.setAccessibilityIdentifier(RemoteExecutionHostMark.sessionMarkIdentifier)
+        indicator.toolTip = label
+        indicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+
+        // The settings mark's placement rule: after the title, never past the extension slot.
+        let insertionIndex = afterTitleSlotIsMaterialized
+            ? max(0, rowContentStack.arrangedSubviews.count - 1)
+            : rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        executionHostIndicator = indicator
+    }
+
     /// Adds the settings mark only once a row behaves differently, on the pin's terms exactly.
     ///
     /// Drawn in the secondary ink rather than the accent the pin uses: the pin is a decision the
@@ -971,6 +1017,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         activity: SessionActivity,
         isLoading: Bool = false,
         conduct: RowConductSummary? = nil,
+        executionHost: String? = nil,
         isScheduledStart: Bool = false
     ) {
         let hoverSession = NativeSidebarParity.host(.hoverContent, session)
@@ -986,6 +1033,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let rowWake = NativeSidebarParity.fact(.sessionWake, session.wake)
         let hasCustomConduct = NativeSidebarParity.fact(.sessionConduct, conduct != nil)
         let conductDetail = NativeSidebarParity.host(.conductDetail, conduct)
+        let rowExecutionHost = NativeSidebarParity.host(.executionPlacement, executionHost)
         let provider = NativeSidebarParity.fact(.sessionProvider, session.kind)
         let accountHandle = NativeSidebarParity.fact(.sessionAccount, session.accountHandle)
         let isSideChat = NativeSidebarParity.fact(.sessionParent, session.isSideChat)
@@ -1019,6 +1067,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         )
         setManager(isManager)
         setConductMark(hasCustomConduct ? conductDetail : nil)
+        setExecutionHostMark(rowExecutionHost)
         if let managerID = supervision.managedBy,
            let manager: AgentSession = NativeSidebarParity.fact(
                .sessionTitle,
@@ -1506,6 +1555,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             ? Design.Ink.selection.label
             : Design.Surface.accent
         managerIndicator?.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+        executionHostIndicator?.contentTintColor = backgroundStyle == .emphasized
             ? Design.Ink.selection.secondary
             : Design.Text.secondary
         attentionOverlayLabel?.textColor = backgroundStyle == .emphasized

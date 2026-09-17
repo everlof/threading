@@ -29,6 +29,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Says this checkout's chats behave differently unless they answered for themselves.
     /// Materialized only when one does; see `setConductMark`.
     private var conductIndicator: NSImageView?
+    private var executionHostIndicator: NSImageView?
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
     private let trailingSlot = NSView()
@@ -210,7 +211,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         with project: Project,
         style: Style = .standalone,
         collapsedSessionCount: Int = 0,
-        conduct: RowConductSummary? = nil
+        conduct: RowConductSummary? = nil,
+        executionHost: String? = nil
     ) {
         isHeading = false
 
@@ -257,8 +259,10 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         // mark. See `RowConductSummary`; this is the one case the old "a row acquires no badge
         // for carrying configuration" rule was too broad for.
         setConductMark(conduct)
+        setExecutionHostMark(executionHost)
         nativeToolTip = [
             project.folderPath,
+            executionHost.map(RemoteExecutionHostMark.runsOn),
             SoundOverrideAudit.toolTipLine(
                 for: .project(project.id),
                 overrides: project.soundOverrides
@@ -985,6 +989,47 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         conductIndicator = indicator
     }
 
+    /// Says which machine this row's sessions run on, whenever it is not this Mac.
+    ///
+    /// Always visible rather than a hover detail: a project that runs its agents somewhere else
+    /// must never look like one that runs them here. Materialized on first need and hidden on
+    /// reuse, exactly like the settings mark beside it.
+    private func setExecutionHostMark(_ destination: String?) {
+        guard let destination else {
+            executionHostIndicator?.isHidden = true
+            return
+        }
+        let label = RemoteExecutionHostMark.runsOn(destination)
+        if let executionHostIndicator {
+            executionHostIndicator.isHidden = false
+            executionHostIndicator.setAccessibilityLabel(label)
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.holdSymbol(RemoteExecutionHostMark.symbol, slot: Design.Size.inlineButtonGlyph)
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(label)
+        indicator.setAccessibilityIdentifier(RemoteExecutionHostMark.projectMarkIdentifier)
+        indicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+
+        let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
+            ?? rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        executionHostIndicator = indicator
+    }
+
     private func updateTrailingSlotVisibility() {
         trailingSlot.isHidden = !showsHoverControls && !hasCount
     }
@@ -1009,6 +1054,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
                 SidebarRowDefaults.secondaryTextAlpha
             )
             conductIndicator?.contentTintColor = Design.Ink.selection.secondary
+            executionHostIndicator?.contentTintColor = Design.Ink.selection.secondary
             iconView.contentTintColor = Design.Text.selected
             nativeIconTint = iconView.contentTintColor
             return
@@ -1016,6 +1062,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
         countLabel?.textColor = Design.Text.secondary
         conductIndicator?.contentTintColor = Design.Text.secondary
+        executionHostIndicator?.contentTintColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
         nativeIconTint = iconView.contentTintColor
     }

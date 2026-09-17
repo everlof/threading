@@ -160,24 +160,98 @@ final class RemoteExecutionHostTests: XCTestCase {
         XCTAssertNil(RemoteHostFacts.instanceName(fromUnit: "sshd.service"))
     }
 
-    // MARK: - Assignment
+    // MARK: - Project host
 
-    func testAssignmentsDropInvalidEntriesRatherThanGuess() {
-        let json = """
-            [
-              {"projectFolder": "/Users/me/app", "destination": "pi", "remoteDirectory": "/home/me/app"},
-              {"projectFolder": "/Users/me/other", "destination": "-oProxyCommand=x", "remoteDirectory": "/home/me/o"},
-              {"projectFolder": "/Users/me/rel", "destination": "pi", "remoteDirectory": "relative"}
-            ]
-            """
-        let decoded = RemoteExecutionHostAssignment.decodeList(json)
-        XCTAssertEqual(decoded.assignments.map(\.projectFolder), ["/Users/me/app"])
-        XCTAssertEqual(decoded.rejected, 2)
-        XCTAssertEqual(RemoteExecutionHostAssignment.decodeList("not json").assignments, [])
-        XCTAssertEqual(RemoteExecutionHostAssignment.decodeList("").rejected, 0)
-        XCTAssertNotNil(RemoteExecutionHostAssignment.assignment(
-            forProjectFolder: "/Users/me/app/", in: decoded.assignments
-        ))
+    func testAHostThatSSHWouldMisreadIsAProblemNamedForThePerson() {
+        let valid = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app")
+        XCTAssertNil(valid.problem)
+        XCTAssertEqual(
+            ProjectExecutionHost(destination: "  ", remoteDirectory: "/home/me/app").problem,
+            .missingDestination
+        )
+        XCTAssertEqual(
+            ProjectExecutionHost(destination: "-oProxyCommand=x", remoteDirectory: "/a").problem,
+            .unsafeDestination
+        )
+        XCTAssertEqual(
+            ProjectExecutionHost(destination: "pi", sshConfigFile: "cfg", remoteDirectory: "/a").problem,
+            .relativeConfigFile
+        )
+        XCTAssertEqual(
+            ProjectExecutionHost(destination: "pi", remoteDirectory: "app").problem,
+            .relativeRemoteDirectory
+        )
+        XCTAssertEqual(
+            ProjectExecutionHost.typed(destination: " pi ", sshConfigFile: "  ", remoteDirectory: "/a "),
+            ProjectExecutionHost(destination: "pi", sshConfigFile: nil, remoteDirectory: "/a")
+        )
+    }
+
+    /// The three answers, and above all the third: a host this build cannot honour refuses the
+    /// launch instead of letting it run on this Mac.
+    func testARouteIsLocalRemoteOrARefusalAndNeverASilentFallback() {
+        let host = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app")
+        XCTAssertEqual(RemoteExecutionHostRoute.resolve(nil, buildSupportsRemoteHosts: true), .local)
+        XCTAssertEqual(RemoteExecutionHostRoute.resolve(nil, buildSupportsRemoteHosts: false), .local)
+        XCTAssertEqual(RemoteExecutionHostRoute.resolve(host, buildSupportsRemoteHosts: true), .remote(host))
+        XCTAssertEqual(
+            RemoteExecutionHostRoute.resolve(host, buildSupportsRemoteHosts: false),
+            .refused(.unsupportedBuild)
+        )
+        let invalid = ProjectExecutionHost(destination: "pi", remoteDirectory: "relative")
+        XCTAssertEqual(
+            RemoteExecutionHostRoute.resolve(invalid, buildSupportsRemoteHosts: true),
+            .refused(.invalid(.relativeRemoteDirectory))
+        )
+    }
+
+    func testAProjectKeepsItsHostThroughPersistenceAndABrokenHostCostsOnlyTheHost() throws {
+        var project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/project"))
+        let plain = try JSONEncoder().encode(project)
+        XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("executionHost"),
+                       "no host writes no key")
+
+        project.executionHost = ProjectExecutionHost(
+            destination: "pi", sshConfigFile: "/Users/me/.lima/x/ssh.config", remoteDirectory: "/home/me/app"
+        )
+        let decoded = try JSONDecoder().decode(Project.self, from: try JSONEncoder().encode(project))
+        XCTAssertEqual(decoded.executionHost, project.executionHost)
+
+        // A host with a field missing still decodes — as an invalid host, refused at launch —
+        // rather than reading as "no host" and running locally.
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: try JSONEncoder().encode(project)) as? [String: Any])
+        object["executionHost"] = ["destination": "pi"]
+        let partial = try JSONDecoder().decode(Project.self, from: try JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(partial.executionHost?.problem, .relativeRemoteDirectory)
+        XCTAssertEqual(partial.name, "p")
+
+        object["executionHost"] = "not an object"
+        let broken = try JSONDecoder().decode(Project.self, from: try JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(broken.name, "p", "the checkout survives a host it cannot read")
+    }
+
+    func testTheStoreRefusesAnInvalidHostAndKeepsAValidOneAcrossReopening() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remote-host-store-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = ProjectStore(stateManager: StateManager(appSupportDirectory: directory), refusesWrites: false)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let host = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app")
+
+        XCTAssertEqual(
+            store.setExecutionHost(ProjectExecutionHost(destination: "pi", remoteDirectory: "rel"), forProjectID: project.id),
+            .unsupportedValue
+        )
+        XCTAssertEqual(store.setExecutionHost(host, forProjectID: project.id), .applied)
+        XCTAssertEqual(store.setExecutionHost(host, forProjectID: project.id), .unchanged)
+
+        let reopened = ProjectStore(stateManager: StateManager(appSupportDirectory: directory), refusesWrites: false)
+        XCTAssertEqual(reopened.project(withID: project.id)?.executionHost, host)
+
+        XCTAssertEqual(reopened.setExecutionHost(nil, forProjectID: project.id), .applied)
+        XCTAssertNil(reopened.project(withID: project.id)?.executionHost)
     }
 
     // MARK: - Launch
@@ -195,24 +269,20 @@ final class RemoteExecutionHostTests: XCTestCase {
 
     func testOnlyClaudeTerminalSessionsLaunchRemotely() {
         let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/project"))
-        let assignment = RemoteExecutionHostAssignment(
-            projectFolder: "/tmp/project",
-            destination: RemoteHostDestination(alias: "pi", configFile: nil),
-            remoteDirectory: "/home/me/project"
-        )
+        let host = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/project")
         let codex = AgentSession(kind: .codex, title: "c")
         XCTAssertThrowsError(try RemoteAgentLaunch.make(
-            for: codex, in: project, assignment: assignment, context: context(home: "/home/me"), initialPrompt: nil
+            for: codex, in: project, host: host, context: context(home: "/home/me"), initialPrompt: nil
         )) { XCTAssertEqual($0 as? RemoteAgentLaunchError, .unsupportedAgent(.codex)) }
 
         let claude = AgentSession(kind: .claude, title: "c")
         XCTAssertThrowsError(try RemoteAgentLaunch.make(
-            for: claude, in: project, assignment: assignment,
+            for: claude, in: project, host: host,
             context: context(shell: "/usr/bin/fish", home: "/home/me"), initialPrompt: nil
         )) { XCTAssertEqual($0 as? RemoteAgentLaunchError, .unsupportedLoginShell("/usr/bin/fish")) }
 
         XCTAssertThrowsError(try RemoteAgentLaunch.make(
-            for: claude, in: project, assignment: assignment,
+            for: claude, in: project, host: host,
             context: context(home: "/home/me", claude: nil), initialPrompt: nil
         )) { XCTAssertEqual($0 as? RemoteAgentLaunchError, .agentNotInstalled(.claude)) }
     }
@@ -221,11 +291,7 @@ final class RemoteExecutionHostTests: XCTestCase {
         let launch = try RemoteAgentLaunch.make(
             for: AgentSession(kind: .claude, title: "c"),
             in: Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/project")),
-            assignment: RemoteExecutionHostAssignment(
-                projectFolder: "/tmp/project",
-                destination: RemoteHostDestination(alias: "pi", configFile: nil),
-                remoteDirectory: "/home/me/project"
-            ),
+            host: ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/project"),
             context: context(shell: "/bin/bash", home: "/home/me"),
             initialPrompt: nil
         )
@@ -258,16 +324,12 @@ final class RemoteExecutionHostTests: XCTestCase {
 
         var session = AgentSession(kind: .claude, title: "c")
         session.hasLaunched = true
-        let assignment = RemoteExecutionHostAssignment(
-            projectFolder: "/tmp/project",
-            destination: RemoteHostDestination(alias: "pi", configFile: nil),
-            remoteDirectory: checkout.path
-        )
+        let host = ProjectExecutionHost(destination: "pi", remoteDirectory: checkout.path)
         let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/project"))
 
         func run() throws -> [String] {
             let launch = try RemoteAgentLaunch.make(
-                for: session, in: project, assignment: assignment,
+                for: session, in: project, host: host,
                 context: context(home: home.path), initialPrompt: nil
             )
             let process = Process()

@@ -1334,6 +1334,28 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Sets or clears the Linux host a project's agent sessions run on.
+    ///
+    /// An invalid host is refused rather than stored, so a record on disk is either absent or one
+    /// a launch can use. Sessions already running keep running where they are; the host applies
+    /// from their next launch.
+    @discardableResult
+    func setExecutionHost(
+        _ host: ProjectExecutionHost?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        if let host, !host.isValid { return .unsupportedValue }
+        guard projects[index].executionHost != host else { return .unchanged }
+        projects[index].executionHost = host
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
+        return .applied
+    }
+
     /// The same for a whole checkout, which its chats follow unless they answered for themselves.
     @discardableResult
     func setLimitRecoveryPolicy(

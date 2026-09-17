@@ -2905,6 +2905,17 @@
         }
       }
     },
+    "/home/you/project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/home/du/projekt"
+          }
+        }
+      }
+    },
     "0.9 GiB" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11489,6 +11500,17 @@
         }
       }
     },
+    "Claude Code terminal sessions in this project run over ssh on the host below, in its folder. The folder must already exist there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code-terminalsessioner i det här projektet körs via ssh på värden nedan, i dess mapp. Mappen måste redan finnas där."
+          }
+        }
+      }
+    },
     "Claude Hooks" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18292,6 +18314,17 @@
         }
       }
     },
+    "Enter the ssh host, as you would type it after ssh." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange ssh-värden så som du skulle skriva den efter ssh."
+          }
+        }
+      }
+    },
     "Enter this code on GitHub to approve the connection." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20395,6 +20428,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mapp i ett zip-arkiv (.zip)"
+          }
+        }
+      }
+    },
+    "Folder on host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mapp på värden"
           }
         }
       }
@@ -31151,6 +31195,17 @@
         }
       }
     },
+    "Optional" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valfritt"
+          }
+        }
+      }
+    },
     "Opus · 1M" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35444,6 +35499,28 @@
         }
       }
     },
+    "Remote Host: %@…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärrvärd: %@…"
+          }
+        }
+      }
+    },
+    "Remote Host…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärrvärd…"
+          }
+        }
+      }
+    },
     "Remote credentials" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35484,6 +35561,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort alla…"
+          }
+        }
+      }
+    },
+    "Remove Host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort värd"
           }
         }
       }
@@ -37640,6 +37728,28 @@
         }
       }
     },
+    "Run “%@” on This Mac?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Köra ”%@” på den här Macen?"
+          }
+        }
+      }
+    },
+    "Run “%@” on a Remote Host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör ”%@” på en fjärrvärd"
+          }
+        }
+      }
+    },
     "Run “%@”?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37739,6 +37849,17 @@
         }
       }
     },
+    "Runs on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs på %@"
+          }
+        }
+      }
+    },
     "Runs on the days below, for the accounts you allow." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37801,6 +37922,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SHA-256 %@"
+          }
+        }
+      }
+    },
+    "SSH config" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH-konfiguration"
+          }
+        }
+      }
+    },
+    "SSH host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH-värd"
           }
         }
       }
@@ -46608,6 +46751,17 @@
         }
       }
     },
+    "The folder on the host must be a full path, starting with /." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mappen på värden måste vara en fullständig sökväg som börjar med /."
+          }
+        }
+      }
+    },
     "The footer's mirror at the top of a pane: the same band height, the same align-by-ink margin, hairline below instead of above. Shown over a footer so the two bands can be checked against each other — the height is one measure, and a pane wearing both should read as a matched pair." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48381,6 +48535,28 @@
         }
       }
     },
+    "The ssh config file must be a full path, starting with /." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh-konfigurationsfilen måste vara en fullständig sökväg som börjar med /."
+          }
+        }
+      }
+    },
+    "The ssh host can’t start with a dash or contain spaces." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh-värden kan inte börja med ett bindestreck eller innehålla mellanslag."
+          }
+        }
+      }
+    },
     "The stored baseline image no longer matches its approved revision." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49811,6 +49987,17 @@
         }
       }
     },
+    "This build of Threading can’t run sessions on remote hosts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här versionen av Threading kan inte köra sessioner på fjärrvärdar."
+          }
+        }
+      }
+    },
     "This can change data outside Threading using the browser's signed-in session.%@\n\nApprove only if this is part of the task you gave the agent." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50330,6 +50517,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detta projekt finns inte inom en git-lagringsplats."
+          }
+        }
+      }
+    },
+    "This project is set to run on a remote host, which this build of Threading doesn’t support. Remove the host from the project to run it on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här projektet är inställt på att köras på en fjärrvärd, vilket den här versionen av Threading inte stöder. Ta bort värden från projektet för att köra det på den här Macen."
           }
         }
       }
@@ -53924,6 +54122,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använder valet Konversationshastighet i inställningarna under Allmänt."
+          }
+        }
+      }
+    },
+    "Uses your ssh keys and config. Leave the config file empty for ~/.ssh/config." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder dina ssh-nycklar och din konfiguration. Lämna konfigurationsfilen tom för ~/.ssh/config."
           }
         }
       }
@@ -57755,6 +57964,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "hålls tillbaka från %@"
+          }
+        }
+      }
+    },
+    "hetzner or user@host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hetzner eller användare@värd"
           }
         }
       }

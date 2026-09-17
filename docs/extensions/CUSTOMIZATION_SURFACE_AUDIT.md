@@ -80,6 +80,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
 | Update channel picker | — | host-only | which builds the updater accepts, the default a build resolves to, the feed override, the versions Sparkle compares | Host-only |
 | Hosted-service environment picker (Developer Settings) | — | host-only | selected control-plane identity, public Release's production lock, credential and push-registration isolation, live Hosted Direct replacement | Host-only |
+| Project remote host (project menu editor, row marks, session hover line) | — | host-only | which machine a project's agents run on, host validation, the public-build refusal, the always-visible mark and its accessibility, launch routing | Host-only |
 
 The background-sessions surfaces remain host-only because each of the three is a **decision about
 somebody's running work**, not a presentation of it. The quit choice ends processes or does not;
@@ -90,6 +91,14 @@ are already published where an extension can reach them honestly — a session's
 runtime — and what is missing for an extension that wants to *act* is a typed background-session
 entity with the daemon's identity in it, not the box the rows are in. The launch band is a
 `PaneNoticeView`, which is host chrome for the same reason every other band is.
+
+The project remote host is host-only for the same kind of reason: it decides **which machine a
+project's agents run on**. The editor validates what `ssh` would misread before anything is saved,
+a public build refuses to launch such a project rather than running it here, and the row marks and
+hover line exist so the setting can never be invisible. A replaceable presentation could hide the
+mark or name a different host than the one a launch will use. The marks sit outside
+`contentContainer` and the extension `after-title` slot, beside the conduct mark, and the host is
+not published to navigators as a fact.
 
 The Trigger center remains host-only because its rows and sheets are authority receipts rather
 than replaceable decoration. Threading owns the source credential, exact immutable revision,

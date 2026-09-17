@@ -4033,7 +4033,8 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 collapsedSessionCount: hiddenItems,
                 // Summarised here, from *this* sidebar's store: a row must not reach for the
                 // singleton to answer a question about the records it was handed.
-                conduct: RowConductSummary.forProject(project)
+                conduct: RowConductSummary.forProject(project),
+                executionHost: project.executionHost?.destination
             )
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)
@@ -4120,6 +4121,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 activity: AgentRuntime.shared.activity(sessionID: sessionNode.sessionID),
                 isLoading: loadingState.isLoading(sessionNode.sessionID),
                 conduct: RowConductSummary.forSession(session, in: projectStore),
+                executionHost: projectStore.project(forSessionID: session.id)?.executionHost?.destination,
                 isScheduledStart: scheduledStart != nil
             )
             cell.onAction = { [weak self] sessionID, anchor in
@@ -4491,6 +4493,9 @@ extension ProjectSidebarViewController {
             if let curfew = projectCurfewEntry(for: projectID, row: row) {
                 entries.append(curfew)
             }
+            if let remoteHost = projectRemoteHostEntry(for: projectID) {
+                entries.append(remoteHost)
+            }
         }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reclaim Disk Space…"),
@@ -4595,6 +4600,27 @@ extension ProjectSidebarViewController {
                 ? L10n.string("Unmute Notifications")
                 : L10n.string("Mute Notifications"),
             onChoose: pinnedAction(row) { $0.toggleProjectMuteClicked() }
+        ))
+    }
+
+    /// Where this checkout's sessions run. Offered in builds that can run remote sessions, and in
+    /// any other build only while a host is set, so it can be removed there too. The title names
+    /// the host, so the menu states the setting before anyone opens it.
+    private func projectRemoteHostEntry(for projectID: ProjectID) -> ThemedMenuEntry? {
+        let host = projectStore.project(withID: projectID)?.executionHost
+        guard RemoteExecutionHostRoute.buildSupportsRemoteHosts || host != nil else { return nil }
+        return .item(ThemedMenuItem(
+            title: host.map { L10n.format("Remote Host: %@…", $0.destination) }
+                ?? L10n.string("Remote Host…"),
+            image: ThemedMenuIcon.symbol(RemoteExecutionHostMark.symbol),
+            representedValue: AppCommands.ID.projectRemoteHost,
+            onChoose: { [weak self] in
+                guard let self else { return }
+                if let failure = ProjectExecutionHostEditor.edit(projectID: projectID, store: projectStore) {
+                    presentProjectNotice(failure)
+                }
+                reload()
+            }
         ))
     }
 

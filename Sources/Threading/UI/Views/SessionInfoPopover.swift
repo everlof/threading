@@ -50,6 +50,8 @@ final class SessionInfoPopoverViewController: NSViewController {
         /// carry a mark for this, and this line is what the mark means: a silhouette can say
         /// "configured" and nothing else, so the card is where it is spelled out.
         let conductLine: String?
+        /// The Linux host this session's project runs on, when it is not this Mac.
+        let executionHost: String?
         let stateText: String
         let stateSymbol: String
 
@@ -126,6 +128,7 @@ final class SessionInfoPopoverViewController: NSViewController {
             }
 
             let project = ProjectStore.shared.executionProject(forSessionID: session.id)
+            executionHost = ProjectStore.shared.project(forSessionID: session.id)?.executionHost?.destination
             let folderPath = project?.folderPath
             path = folderPath ?? ""
             // The session's own record first: a dormant session belongs to the branch it
@@ -274,6 +277,17 @@ final class SessionInfoPopoverViewController: NSViewController {
                 symbol: "person.3",
                 classicGlyph: .status,
                 text: roleLine
+            ))
+        }
+
+        // First among the location lines: every path below is this Mac's record of the project,
+        // and this is the one line that says the agent is not running here at all.
+        if let executionHost = info.executionHost {
+            rows.append(row(
+                symbol: RemoteExecutionHostMark.symbol,
+                classicGlyph: .workspace,
+                text: RemoteExecutionHostMark.runsOn(executionHost),
+                emphasis: .secondary
             ))
         }
 

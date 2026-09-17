@@ -1033,10 +1033,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             let identity = TerminalInstanceIdentity.agentSession(sessionID)
             // A project on a remote execution host runs its sessions there or not at all, and a
             // native conversation cannot yet: its transports read transcripts on this Mac.
-            if RemoteExecutionHostAssignment.assignment(
-                forProjectFolder: project.folderPath,
-                in: AppSettings.shared.developerRemoteExecutionHosts
-            ) != nil {
+            if project.executionHost != nil {
                 throw RemoteAgentLaunchError.nativeConversation
             }
             switch PTYHostPolicy.launchRoute(

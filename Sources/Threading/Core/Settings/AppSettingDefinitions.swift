@@ -52,7 +52,6 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
     case ptyHostEnabled
-    case developerRemoteExecutionHosts
     case developerRemoteHostBinaryDirectory
     case prependsCommandLineToolsToPATH
     case workspaceNavigatorSelection
@@ -1054,22 +1053,10 @@ enum AppSettingDefinitions {
             ["PTY", "daemon", "background", "durable", "keep running", "threading-ptyd"]
         )]
     )
-    /// Which project folders run their agent sessions on a Linux host, as a JSON array of
-    /// `{"projectFolder", "destination", "sshConfigFile"?, "remoteDirectory"}`.
-    ///
-    /// A developer setting for the first slice of `docs/feature-drafts/remote-execution-hosts.md`:
-    /// hidden (no `presentations`, so `.hidden` remotely too) and read only at launch. Host
-    /// profiles and a persisted per-project host replace it. Its shape is
-    /// `RemoteExecutionHostAssignment`.
-    static let developerRemoteExecutionHosts = AppSettingDescriptor<String>(
-        identity: .developerRemoteExecutionHosts,
-        persistenceKey: "developerRemoteExecutionHosts",
-        absence: .emptyString,
-        validation: .maximumBytes(16_384)
-    )
     /// The directory holding `arm64/threading-ptyd` and `amd64/threading-ptyd`, as
-    /// `scripts/test-ptyd-linux.sh` writes them under `build/linux`. Hidden, like the assignments
-    /// it serves; bundling the binaries in the app replaces it.
+    /// `scripts/test-ptyd-linux.sh` writes them under `build/linux`. Hidden, and only ever able to
+    /// make preparing a remote host *fail* when wrong: which project runs where is
+    /// `Project.executionHost`, shown in the sidebar. Bundling the binaries in the app replaces it.
     static let developerRemoteHostBinaryDirectory = AppSettingDescriptor<String>(
         identity: .developerRemoteHostBinaryDirectory,
         persistenceKey: "developerRemoteHostBinaryDirectory",
@@ -1500,7 +1487,7 @@ enum AppSettingDefinitions {
         .init(sessionCheckoutAuthorityPolicy),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
         .init(usesMCPStdioBridge), .init(ptyHostEnabled),
-        .init(developerRemoteExecutionHosts), .init(developerRemoteHostBinaryDirectory),
+        .init(developerRemoteHostBinaryDirectory),
         .init(prependsCommandLineToolsToPATH),
         .init(workspaceNavigatorSelection), .init(sourceControlProviderConnections),
         .init(reportsClaudeLifecycleEvents),

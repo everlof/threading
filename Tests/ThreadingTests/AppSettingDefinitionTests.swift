@@ -231,10 +231,6 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "ptyHostEnabled",
                 valueType: .boolean
             ),
-            .developerRemoteExecutionHosts: .init(
-                key: "developerRemoteExecutionHosts",
-                valueType: .string
-            ),
             .developerRemoteHostBinaryDirectory: .init(
                 key: "developerRemoteHostBinaryDirectory",
                 valueType: .string

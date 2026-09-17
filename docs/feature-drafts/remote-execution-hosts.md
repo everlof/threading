@@ -181,19 +181,30 @@ in place. Two findings changed the code:
   directory and holds no lock this build needs; it is left running rather than stopped, because it
   may hold agents.
 
-**Trying it.** Build the Linux binaries (`scripts/test-ptyd-linux.sh --arch all`), then:
+**Where a project runs is on the project, and visible.** The first version read project-to-host
+assignments from a hidden `defaults` key. That was replaced the same day, because a setting that
+decides which machine an agent runs on must not be one a person can forget is set: it is now
+`Project.executionHost`, saved with the project and edited from the project row's **Remote Host…**
+item (also a command, `project.remoteHost`, in the View menu and the palette). The editor keeps an
+unusable host — a destination `ssh` would read as an option, a relative path — from being saved.
+Wherever the project shows, it says so: a server mark on the project row and on each of its session
+rows, "Runs on <host>" in the session hover card and the row tooltip, and one journal line naming
+the host on every launch or reattach it routes. `RemoteExecutionHostRoute` is the single decision:
+local, remote, or **refused** — a public build, or an invalid record, stops the launch with a reason
+and never runs the agent on this Mac instead. A public build still offers the menu item while a host
+is set, so the host can be removed there. Only the binary directory remains a hidden developer key,
+and a wrong value can only make preparation fail.
+
+**Trying it.** Build the Linux binaries (`scripts/test-ptyd-linux.sh --arch all`), point the
+developer key at them, then choose **Remote Host…** on a project:
 
 ```bash
 defaults write codes.threading developerRemoteHostBinaryDirectory -string "$PWD/build/linux"
-defaults write codes.threading developerRemoteExecutionHosts -string '[
-  {"projectFolder": "/Users/me/src/app", "destination": "hetzner",
-   "remoteDirectory": "/home/me/src/app"}
-]'
 ```
 
-`destination` is anything `ssh` accepts non-interactively (`BatchMode`); add `"sshConfigFile"` for a
-config outside `~/.ssh/config`, such as `~/.lima/<vm>/ssh.config`. The checkout must already exist
-on the host and `claude` must be signed in there. The first launch of a session in that project
+The SSH host is anything `ssh` accepts non-interactively (`BatchMode`); the SSH config field takes a
+config outside `~/.ssh/config`, such as `~/.lima/<vm>/ssh.config`. The folder must already exist on
+the host and `claude` must be signed in there. The first launch of a session in that project
 prepares the host (the upload is ~57 MB, ~22 MB compressed); later launches reuse it.
 
 **Reattach.** A remote launch asks the prepared host's daemon what it holds before it spawns

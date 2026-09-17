@@ -159,6 +159,11 @@ struct Project: Codable, Identifiable {
   /// being disposable. Optional and absent-when-false, exactly like `isScratchpad`.
   var isAdoptedForCheckoutMove: Bool?
 
+  /// The Linux machine this checkout's agent sessions run on, or nil for this Mac. Honoured only
+  /// by builds that can run remote sessions; any other build refuses the launch rather than
+  /// running it here. See `ProjectExecutionHost` and `RemoteExecutionHostRoute`.
+  var executionHost: ProjectExecutionHost?
+
   init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
     self.id = id
     self.name = name
@@ -175,6 +180,7 @@ struct Project: Codable, Identifiable {
     self.curfewRule = nil
     self.isScratchpad = nil
     self.isAdoptedForCheckoutMove = nil
+    self.executionHost = nil
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -182,6 +188,7 @@ struct Project: Codable, Identifiable {
     case isHidden
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
     case curfewRule, isAdoptedForCheckoutMove
+    case executionHost
   }
 
   init(from decoder: Decoder) throws {
@@ -244,6 +251,10 @@ struct Project: Codable, Identifiable {
       Bool.self,
       forKey: .isAdoptedForCheckoutMove
     ) == true ? true : nil
+    // Leniently, like the rules above: a host this build cannot read costs the host, never the
+    // checkout. `ProjectExecutionHost` itself decodes any object, so only a value of the wrong
+    // shape entirely lands here.
+    executionHost = try? container.decodeIfPresent(ProjectExecutionHost.self, forKey: .executionHost)
   }
 
   func encode(to encoder: Encoder) throws {
@@ -264,6 +275,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(isScratchpad, forKey: .isScratchpad)
     try container.encodeIfPresent(isAdoptedForCheckoutMove, forKey: .isAdoptedForCheckoutMove)
+    try container.encodeIfPresent(executionHost, forKey: .executionHost)
   }
 
   var folderURL: URL {

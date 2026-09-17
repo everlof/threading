@@ -474,6 +474,24 @@ final class AgentSessionViewController: NSViewController {
             return
         }
 
+        // Where this project's sessions run, before anything is planned: a host this build cannot
+        // honour refuses here, rather than letting the launch below run the agent on this Mac.
+        let remoteHost: ProjectExecutionHost?
+        switch RemoteExecutionHostRoute.resolve(project.executionHost) {
+        case .local:
+            remoteHost = nil
+        case .remote(let host):
+            remoteHost = host
+        case .refused(let refusal):
+            recordLaunchRefusal(SessionLaunchFailure(
+                origin: .preflight,
+                summary: L10n.string("Couldn’t start this session on its remote host."),
+                detail: [refusal.message],
+                knownCause: "remoteHost.\(refusal.token)"
+            ))
+            return
+        }
+
         // Asked before a plan exists, because the answer is that no plan should be built: the
         // conversation this row names cannot be reopened, and every command line that could be
         // built from here either fails the same way or quietly opens a different conversation.
@@ -512,10 +530,7 @@ final class AgentSessionViewController: NSViewController {
             return
         }
         pendingLaunchPlan = plan
-        pendingRemoteLaunch = RemoteExecutionHostAssignment.assignment(
-            forProjectFolder: project.folderPath,
-            in: AppSettings.shared.developerRemoteExecutionHosts
-        ).map { PendingRemoteLaunch(assignment: $0, initialPrompt: initialPrompt) }
+        pendingRemoteLaunch = remoteHost.map { PendingRemoteLaunch(host: $0, initialPrompt: initialPrompt) }
         // Opening an existing prompt is presentation, even when this is the selected session.
         // A restart can select it and then switch away before boot output goes quiet. Apply
         // the same grace as background restoration when this launch submits no new work.
@@ -911,11 +926,21 @@ final class AgentSessionViewController: NSViewController {
                 recordLaunchRefusal(failure)
                 return
             case .ready(let launch, let socketPath):
+                EventLog.shared.record(.session, "Launching session on remote host", [
+                    "session": sessionID.uuidString,
+                    "host": remote.host.sshDestination.identifier,
+                    "reason": "projectExecutionHost"
+                ])
                 clearPendingRemoteLaunch()
                 plan = launch.plan
                 hostFactory = PTYHostPolicy.attachingTransportFactory(socketPath: socketPath)
                 placement = .remote(environment: launch.environment)
             case .attach(let summary, let context):
+                EventLog.shared.record(.session, "Taking session back from remote host", [
+                    "session": sessionID.uuidString,
+                    "host": remote.host.sshDestination.identifier,
+                    "reason": "projectExecutionHost"
+                ])
                 // The host has been running this conversation since before this launch — across an
                 // app quit, a crash or a Mac restart. Taking it back is the durable answer;
                 // spawning would replace it and end a turn that may still be in flight.
@@ -1011,7 +1036,7 @@ final class AgentSessionViewController: NSViewController {
     // MARK: - Private Methods — remote execution hosts
 
     private struct PendingRemoteLaunch {
-        let assignment: RemoteExecutionHostAssignment
+        let host: ProjectExecutionHost
         let initialPrompt: String?
         /// Whether this launch has already asked for the host to be prepared. A later retry only
         /// reads the phase, so a failed preparation is reported rather than started again.
@@ -1039,7 +1064,7 @@ final class AgentSessionViewController: NSViewController {
     /// `RemoteExecutionHosts`' own queue, and this waits for its change notification.
     private func resolveRemoteLaunch(_ remote: PendingRemoteLaunch) -> RemoteLaunchResolution {
         let hosts = RemoteExecutionHosts.shared
-        let destination = remote.assignment.destination
+        let destination = remote.host.sshDestination
         let phase: RemoteHostPhase
         if remote.requestedPreparation {
             phase = hosts.phase(for: destination)
@@ -1102,7 +1127,7 @@ final class AgentSessionViewController: NSViewController {
                 let launch = try RemoteAgentLaunch.make(
                     for: agentSession,
                     in: project,
-                    assignment: remote.assignment,
+                    host: remote.host,
                     context: context,
                     initialPrompt: remote.initialPrompt
                 )
