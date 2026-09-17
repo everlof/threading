@@ -140,6 +140,7 @@ enum SettingsPages {
 
     static let generalID = ExtensionHostSettingsPage.general.rawValue
     static let remoteAccessID = "remote-access"
+    static let remoteHostsID = "remote-hosts"
     static let privacyID = "privacy"
     static let githubID = "github"
     static let accountsID = ExtensionHostSettingsPage.accounts.rawValue
@@ -328,6 +329,21 @@ enum SettingsPages {
             // The pairing card's headings are runtime state, and the paired-device rows are
             // dynamic; the standing switches are what a search can promise.
         ) { RemoteAccessPreferencesViewController() },
+        // The machines a project's sessions can run on. Records, live state and the setup a
+        // person watches — see `docs/feature-drafts/remote-execution-hosts.md`. Contributes no
+        // extension rows: a host is credentials and a machine, and an extension has no business
+        // adding a field to it.
+        Page(
+            id: remoteHostsID,
+            hostPage: nil,
+            title: L10n.string("Remote Hosts"),
+            symbol: "server.rack",
+            group: accessGroup,
+            searchTerms: terms(
+                "ssh", "linux", "host", "remote", "machine", "vps", "raspberry pi",
+                "hetzner", "server", "run elsewhere"
+            ),
+        ) { RemoteHostsPreferencesViewController() },
         Page(
             id: githubID,
             hostPage: nil,

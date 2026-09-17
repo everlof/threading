@@ -1356,6 +1356,50 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Brings every project's copy of its host in line with the record it names.
+    ///
+    /// The record is what a person edits and the project keeps a copy, so this is what makes the
+    /// copy true: a renamed destination reaches every project on that machine, and a host that was
+    /// removed clears the projects that ran on it rather than leaving them pointed at a machine
+    /// this app no longer knows. A project set up before hosts were records has no id yet; it is
+    /// adopted into the list here, once, keeping the machine it already named.
+    @discardableResult
+    func refreshExecutionHosts(from store: RemoteHostStore = .shared) -> Int {
+        var changed = 0
+        for index in projects.indices {
+            guard let host = projects[index].executionHost else { continue }
+            if let id = host.hostID {
+                guard let record = store.host(withID: id) else {
+                    projects[index].executionHost = nil
+                    EventLog.shared.record(.session, "A project's remote host was removed", [
+                        "project": projects[index].id.uuidString
+                    ])
+                    changed += saveProjectRecord(at: index) ? 1 : 0
+                    continue
+                }
+                guard !host.matches(record) else { continue }
+                projects[index].executionHost = .on(record, remoteDirectory: host.remoteDirectory)
+                changed += saveProjectRecord(at: index) ? 1 : 0
+                continue
+            }
+            guard let record = store.adopt(
+                destination: host.destination,
+                sshConfigFile: host.sshConfigFile
+            ) else { continue }
+            projects[index].executionHost = .on(record, remoteDirectory: host.remoteDirectory)
+            changed += saveProjectRecord(at: index) ? 1 : 0
+        }
+        if changed > 0 {
+            notifyChanged(sidebarImpact: .structure)
+        }
+        return changed
+    }
+
+    /// Every project running on one host, for the sentence that says what removing it would cost.
+    func projects(onHost id: RemoteHostID) -> [Project] {
+        projects.filter { $0.executionHost?.hostID == id }
+    }
+
     /// The same for a whole checkout, which its chats follow unless they answered for themselves.
     @discardableResult
     func setLimitRecoveryPolicy(

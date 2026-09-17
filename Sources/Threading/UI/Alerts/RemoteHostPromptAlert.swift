@@ -2,13 +2,17 @@ import AppKit
 
 // MARK: - Remote Host Prompt
 
-/// The editor for a project's execution host: the ssh host, an optional ssh config file, and the
-/// folder on the host.
+/// The editor for a project's execution host: which machine, and the folder on it.
 ///
-/// A validated dialog on `IntegerPromptAlert`'s terms: a host that `ssh` would misread or a
-/// relative path keeps the dialog open with the exact correction on its helper line, rather than
-/// closing and saving something a launch would refuse. Remove is offered only when there is a
-/// host to remove.
+/// **A machine is chosen, not retyped.** Hosts are records configured once in Settings
+/// (`RemoteHostStore`), so this dialog picks one of them and asks only for what is the project's
+/// own — its folder there. Add Host… in the same menu opens the machine editor, because being sent
+/// to Settings mid-thought to add the machine you are already describing is worse than one more
+/// dialog.
+///
+/// A validated dialog on `IntegerPromptAlert`'s terms: a relative folder keeps the dialog open with
+/// the exact correction on its helper line, rather than closing and saving something a launch would
+/// refuse. Remove is offered only when there is a host to remove.
 @MainActor
 enum RemoteHostPromptAlert {
 
@@ -51,7 +55,7 @@ enum RemoteHostPromptAlert {
         alert.alertStyle = .informational
         alert.messageText = L10n.format("Run “%@” on a Remote Host", projectName)
         alert.informativeText = L10n.string(
-            "Claude Code terminal sessions in this project run over ssh on the host below, in its folder. The folder must already exist there."
+            "Claude Code terminal sessions in this project run on the machine you choose here, in the folder you name on it."
         )
         alert.accessoryView = accessory
         alert.initialFirstResponder = accessory.firstField
@@ -82,33 +86,46 @@ enum RemoteHostPromptDefaults {
 @MainActor
 final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
 
-    let destinationField = ThemedTextField()
-    let configFileField = ThemedTextField()
+    let hostPopUp = ThemedPopUp()
     let remoteDirectoryField = ThemedTextField()
     let helperLabel = NSTextField(wrappingLabelWithString: "")
     private var hasValidationError = false
+    /// The records the menu offers, in its order. The last menu item is Add Host…, which is why
+    /// this is read by index rather than by title.
+    private(set) var records: [RemoteHostRecord]
+    private let store: RemoteHostStore
 
-    var firstField: ThemedTextField { destinationField }
+    var firstField: ThemedTextField { remoteDirectoryField }
+
+    /// The chosen machine, or nil while Add Host… is selected.
+    var selectedRecord: RemoteHostRecord? {
+        let index = hostPopUp.indexOfSelectedItem
+        return records.indices.contains(index) ? records[index] : nil
+    }
 
     var host: ProjectExecutionHost {
-        ProjectExecutionHost.typed(
-            destination: destinationField.stringValue,
-            sshConfigFile: configFileField.stringValue,
-            remoteDirectory: remoteDirectoryField.stringValue
-        )
+        guard let record = selectedRecord else {
+            return ProjectExecutionHost.typed(
+                destination: "",
+                sshConfigFile: "",
+                remoteDirectory: remoteDirectoryField.stringValue
+            )
+        }
+        return .on(record, remoteDirectory: remoteDirectoryField.stringValue)
     }
 
     private static var helperText: String {
-        L10n.string("Uses your ssh keys and config; leave the config file empty for ~/.ssh/config. Threading’s tools and the new-chat openings from Settings don’t reach remote sessions yet.")
+        L10n.string("The folder must already exist on the host. Machines are added and checked in Settings ▸ Remote Hosts; the new-chat openings from Settings aren’t sent to remote sessions.")
     }
 
-    init(current: ProjectExecutionHost?) {
+    init(current: ProjectExecutionHost?, store: RemoteHostStore = .shared) {
+        self.store = store
+        self.records = store.ordered
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        destinationField.stringValue = current?.destination ?? ""
-        configFileField.stringValue = current?.sshConfigFile ?? ""
         remoteDirectoryField.stringValue = current?.remoteDirectory ?? ""
         setup()
+        selectHost(current)
     }
 
     @available(*, unavailable)
@@ -122,19 +139,14 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
         helperLabel.preferredMaxLayoutWidth = RemoteHostPromptDefaults.width
         helperLabel.setAccessibilityIdentifier(RemoteHostPromptDefaults.helperIdentifier)
 
+        hostPopUp.target = self
+        hostPopUp.action = #selector(hostChosen)
+        hostPopUp.setAccessibilityLabel(L10n.string("Host"))
+        hostPopUp.setAccessibilityIdentifier(RemoteHostPromptDefaults.destinationIdentifier)
+        reloadHosts()
+
         let rows = [
-            row(
-                title: L10n.string("SSH host"),
-                field: destinationField,
-                placeholder: L10n.string("hetzner or user@host"),
-                identifier: RemoteHostPromptDefaults.destinationIdentifier
-            ),
-            row(
-                title: L10n.string("SSH config"),
-                field: configFileField,
-                placeholder: L10n.string("Optional"),
-                identifier: RemoteHostPromptDefaults.configFileIdentifier
-            ),
+            popUpRow(title: L10n.string("Host"), control: hostPopUp),
             row(
                 title: L10n.string("Folder on host"),
                 field: remoteDirectoryField,
@@ -188,6 +200,66 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
         return row
     }
 
+    /// Rebuilds the menu from the list, keeping the machine that was chosen if it is still there.
+    func reloadHosts() {
+        let chosen = selectedRecord?.id
+        records = store.ordered
+        hostPopUp.removeAllItems()
+        for record in records {
+            hostPopUp.addItem(withTitle: record.displayName)
+        }
+        hostPopUp.addItem(withTitle: L10n.string("Add Host…"))
+        if let chosen, let index = records.firstIndex(where: { $0.id == chosen }) {
+            hostPopUp.selectItem(at: index)
+        } else if !records.isEmpty {
+            hostPopUp.selectItem(at: 0)
+        } else {
+            hostPopUp.selectItem(at: 0)
+        }
+    }
+
+    /// Selects the machine a project already names, adopting it into the list if it was set up
+    /// before hosts were records.
+    private func selectHost(_ current: ProjectExecutionHost?) {
+        guard let current, !current.destination.isEmpty else { return }
+        let record = current.hostID.flatMap { store.host(withID: $0) }
+            ?? store.adopt(destination: current.destination, sshConfigFile: current.sshConfigFile)
+        guard let record else { return }
+        reloadHosts()
+        if let index = records.firstIndex(where: { $0.id == record.id }) {
+            hostPopUp.selectItem(at: index)
+        }
+    }
+
+    /// Add Host… is the last item: it opens the machine editor and comes back with it chosen.
+    @objc private func hostChosen() {
+        guard hostPopUp.indexOfSelectedItem == records.count else { return }
+        guard let record = RemoteHostRecordPromptAlert.ask(editing: nil),
+              store.add(record) == .applied else {
+            reloadHosts()
+            return
+        }
+        records = store.ordered
+        reloadHosts()
+        if let index = records.firstIndex(where: { $0.id == record.id }) {
+            hostPopUp.selectItem(at: index)
+        }
+    }
+
+    private func popUpRow(title: String, control: ThemedPopUp) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.applyFont(.body)
+        label.textColor = Design.Text.secondary
+        label.setContentHuggingPriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.small
+        label.widthAnchor.constraint(equalToConstant: RemoteHostPromptDefaults.labelWidth).isActive = true
+        return row
+    }
+
     /// Checks what was typed, and on a problem keeps the dialog open with the correction on the
     /// helper line and the keyboard in the field it names.
     @discardableResult
@@ -202,12 +274,9 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
         helperLabel.stringValue = problem.message
         helperLabel.textColor = Design.Status.negative
 
-        let field: ThemedTextField
-        switch problem {
-        case .missingDestination, .unsafeDestination: field = destinationField
-        case .relativeConfigFile: field = configFileField
-        case .relativeRemoteDirectory: field = remoteDirectoryField
-        }
+        // Every problem but the folder belongs to the machine, which is chosen rather than typed;
+        // the keyboard goes to the only field this dialog owns.
+        let field = remoteDirectoryField
         field.window?.makeFirstResponder(field)
         field.selectText(nil)
         if announcing {

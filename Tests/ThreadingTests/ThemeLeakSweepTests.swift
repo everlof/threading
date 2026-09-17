@@ -452,6 +452,18 @@ final class ThemeLeakSweepTests: XCTestCase {
                 self.refreshAndWait(controller)
                 return controller.view
             },
+            Screen(name: "remote hosts settings", size: NSSize(width: 720, height: 420)) {
+                let directory = self.root.appendingPathComponent("hosts", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let store = RemoteHostStore(directory: directory)
+                _ = store.add(RemoteHostRecord.typed(label: "Pi", destination: "pi", sshConfigFile: ""))
+                let controller = RemoteHostsPreferencesViewController(store: store)
+                controller.loadView()
+                controller.viewDidLoad()
+                controller.viewWillAppear()
+                controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 420)
+                return controller.view
+            },
             Screen(name: "themes settings", size: NSSize(width: 720, height: 560)) {
                 let controller = ThemePreferencesViewController()
                 controller.view.frame = NSRect(x: 0, y: 0, width: 720, height: 560)

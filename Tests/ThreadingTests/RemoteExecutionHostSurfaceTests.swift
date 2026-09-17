@@ -105,11 +105,18 @@ final class RemoteExecutionHostSurfaceTests: HostedStoreTestCase {
         XCTAssertTrue(buttonTitles(set.makeContentView()).contains(L10n.string("Remove Host")))
     }
 
-    /// An unusable host keeps the dialog open with the correction in view, so a typo cannot be
-    /// saved and then refused at the next launch.
-    func testTheEditorRefusesToSaveAHostALaunchWouldRefuse() throws {
-        let accessory = RemoteHostPromptAccessory(current: nil)
-        accessory.destinationField.stringValue = "pi"
+    /// A folder a launch would refuse keeps the dialog open with the correction in view. The
+    /// machine itself is chosen from the list, so it cannot be mistyped here at all.
+    func testTheEditorRefusesAFolderALaunchWouldRefuse() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hosts-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = RemoteHostStore(directory: directory)
+        let record = RemoteHostRecord.typed(label: "Pi", destination: "pi", sshConfigFile: "")
+        XCTAssertEqual(store.add(record), .applied)
+
+        let accessory = RemoteHostPromptAccessory(current: nil, store: store)
         accessory.remoteDirectoryField.stringValue = "relative/path"
 
         XCTAssertFalse(accessory.validate(announcing: false))
@@ -118,7 +125,7 @@ final class RemoteExecutionHostSurfaceTests: HostedStoreTestCase {
 
         accessory.remoteDirectoryField.stringValue = "/home/me/app"
         XCTAssertTrue(accessory.validate(announcing: false))
-        XCTAssertEqual(accessory.host, ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app"))
+        XCTAssertEqual(accessory.host, .on(record, remoteDirectory: "/home/me/app"))
     }
 
     // MARK: - Tools

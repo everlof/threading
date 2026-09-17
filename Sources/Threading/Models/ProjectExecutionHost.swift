@@ -13,20 +13,36 @@ import Foundation
 /// and is refused at launch as invalid — it must never read as "no host" and quietly run locally.
 struct ProjectExecutionHost: Equatable, Codable, Sendable {
 
+    /// The host record this names, once hosts became records people configure once
+    /// (`RemoteHostStore`). Nil for a project set up before that, which is adopted into the list
+    /// the first time it is read.
+    var hostID: RemoteHostID?
     /// What `ssh` connects to: an alias from the person's ssh config, or `user@host`.
+    ///
+    /// A *copy* of the record's, kept here so every surface that shows or routes a project reads
+    /// one field rather than resolving a record, and refreshed whenever the record changes
+    /// (`ProjectStore.refreshExecutionHosts`). The record is what a person edits; this is what the
+    /// project remembers it said.
     var destination: String
     /// An ssh config file other than `~/.ssh/config`, such as a Lima VM's. Nil for the default.
     var sshConfigFile: String?
     /// The checkout on the host that sessions run in. Absolute.
     var remoteDirectory: String
 
-    init(destination: String, sshConfigFile: String? = nil, remoteDirectory: String) {
+    init(
+        hostID: RemoteHostID? = nil,
+        destination: String,
+        sshConfigFile: String? = nil,
+        remoteDirectory: String
+    ) {
+        self.hostID = hostID
         self.destination = destination
         self.sshConfigFile = sshConfigFile
         self.remoteDirectory = remoteDirectory
     }
 
     private enum CodingKeys: String, CodingKey {
+        case hostID
         case destination
         case sshConfigFile
         case remoteDirectory
@@ -34,6 +50,7 @@ struct ProjectExecutionHost: Equatable, Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        hostID = (try? container.decodeIfPresent(RemoteHostID.self, forKey: .hostID)) ?? nil
         destination = (try? container.decodeIfPresent(String.self, forKey: .destination)) ?? ""
         sshConfigFile = (try? container.decodeIfPresent(String.self, forKey: .sshConfigFile)) ?? nil
         remoteDirectory = (try? container.decodeIfPresent(String.self, forKey: .remoteDirectory)) ?? ""
@@ -41,6 +58,7 @@ struct ProjectExecutionHost: Equatable, Codable, Sendable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(hostID, forKey: .hostID)
         try container.encode(destination, forKey: .destination)
         try container.encodeIfPresent(sshConfigFile, forKey: .sshConfigFile)
         try container.encode(remoteDirectory, forKey: .remoteDirectory)
@@ -102,13 +120,32 @@ struct ProjectExecutionHost: Equatable, Codable, Sendable {
     static func typed(
         destination: String,
         sshConfigFile: String,
-        remoteDirectory: String
+        remoteDirectory: String,
+        hostID: RemoteHostID? = nil
     ) -> ProjectExecutionHost {
         let config = sshConfigFile.trimmingCharacters(in: .whitespacesAndNewlines)
         return ProjectExecutionHost(
+            hostID: hostID,
             destination: destination.trimmingCharacters(in: .whitespacesAndNewlines),
             sshConfigFile: config.isEmpty ? nil : config,
             remoteDirectory: remoteDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+}
+
+extension ProjectExecutionHost {
+    /// This host as a record's machine plus this project's folder.
+    static func on(_ record: RemoteHostRecord, remoteDirectory: String) -> ProjectExecutionHost {
+        ProjectExecutionHost(
+            hostID: record.id,
+            destination: record.destination,
+            sshConfigFile: record.sshConfigFile,
+            remoteDirectory: remoteDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    /// Whether this project still names the machine the record describes.
+    func matches(_ record: RemoteHostRecord) -> Bool {
+        destination == record.destination && sshConfigFile == record.sshConfigFile
     }
 }

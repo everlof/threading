@@ -92,6 +92,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     /// Spends one provider-issued credit. The capacity may return, but the credit cannot.
     case consumeBankedUsageReset
     case removeSourceControlConnection
+    case removeRemoteHost
 
     // MARK: Security grants
 
@@ -231,6 +232,11 @@ enum ConfirmationPrompt: String, CaseIterable {
             ))
 
         case .removeProject,
+             // Removing a machine takes its projects off it: they run on this Mac again, and
+             // agents already running there keep running where Threading can no longer reach
+             // them. The way back — adding the host and choosing it on each project again — is a
+             // different action, which is the line this list draws.
+             .removeRemoteHost,
              // Not "irreversible" because the person is gone forever — it is that the way back
              // is a *different* action the owner has to know to take. Their invitation was
              // single-use, so the link they hold is spent: letting them back in means sharing

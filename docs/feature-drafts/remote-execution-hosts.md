@@ -281,9 +281,42 @@ the one this feature is for. Once this build's instance is serving, preparation 
 directory in the two roots that nothing runs, holding names to hex so a directory a person put there
 by hand stays.
 
-**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it), the
-first actual publication (the manifest is empty until `publish_remote_components.sh` runs), and the
-Remote Hosts settings page that this replaces the hidden setting with.
+## Hosts are records, and Settings is where they live, 2026-09-17
+
+A host used to be a destination typed into each project: the same machine configured again for
+every checkout on it, and nowhere to say whether it was reachable.
+
+**The record.** `RemoteHostRecord` is a machine — a name, what `ssh` connects to, and the config
+file that defines it — in `RemoteHostStore`, a quarantined JSON list (`.userAuthored`, so a file
+this build cannot read is set aside rather than discarded). What is deliberately *not* in it is
+state: preparing, downloading, ready or refusing is a fact about this run of the app and lives in
+`RemoteExecutionHosts`, because a record that remembered "ready" would be wrong the moment the
+machine was switched off.
+
+**A project names a record and adds its folder.** `ProjectExecutionHost` keeps `hostID` plus a copy
+of the destination, so every surface that shows or routes a project still reads one field;
+`ProjectStore.refreshExecutionHosts` is what keeps the copy true. Editing a machine reaches every
+project on it. Removing one clears them — they run on this Mac again, which the confirmation says
+by name, rather than leaving a project pointed at a machine the app no longer knows. A project set
+up before records is adopted into the list the first time it is read, keeping the machine it
+already named.
+
+**The page** (Settings ▸ Remote Hosts, in the Access run) lists the machines with what each is
+doing, and the three things a person does to one: Check, Edit, Remove. Check is what makes setup
+visible — it prepares the host now, including the component download, so a person finds out whether
+a machine works without starting a session on it.
+
+**A refusal says what to do.** The important one is host-key verification: `ssh` runs in
+`BatchMode`, so a machine the person has never connected to simply refuses, and "unreachable" would
+send them to look at their network. Threading deliberately does not answer that prompt for them —
+accepting a host key is their decision and their `known_hosts` — so the row says so and tells them
+to connect once in a terminal. `Permission denied` and a missing systemd session get the same
+treatment; anything else is reported in the host's own words rather than replaced by ours.
+
+**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it),
+the first actual publication (the manifest is empty until `publish_remote_components.sh` runs), a
+host's own folder defaults (each project still names its checkout by hand), and sign-in to the
+agent CLI on the box.
 
 ## Hooks and tools, as built, 2026-09-17
 

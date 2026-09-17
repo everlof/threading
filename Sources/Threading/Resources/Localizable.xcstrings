@@ -1222,6 +1222,17 @@
         }
       }
     },
+    "%@ will run on this Mac again. Sessions already running on the machine keep running there, and Threading will no longer reach them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kommer att köras på den här Macen igen. Sessioner som redan körs på maskinen fortsätter där, och Threading når dem inte längre."
+          }
+        }
+      }
+    },
     "%@ working" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2168,6 +2179,17 @@
         }
       }
     },
+    "%lld hosts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld värdar"
+          }
+        }
+      }
+    },
     "%lld images" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2494,6 +2516,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld väntande"
+          }
+        }
+      }
+    },
+    "%lld projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld projekt"
           }
         }
       }
@@ -3048,6 +3081,17 @@
         }
       }
     },
+    "1 host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 värd"
+          }
+        }
+      }
+    },
     "1 image" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3132,6 +3176,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 äldre konversation"
+          }
+        }
+      }
+    },
+    "1 project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 projekt"
           }
         }
       }
@@ -3715,6 +3770,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En 1Password-referens anger ett valv och ett objekt, som op://Private/staging-admin. Ta inte med något fält."
+          }
+        }
+      }
+    },
+    "A Linux machine you can reach with ssh. Threading installs its own background host there the first time a project runs on it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En Linux-maskin du kan nå med ssh. Threading installerar sin egen bakgrundsvärd där första gången ett projekt körs på den."
           }
         }
       }
@@ -5415,6 +5481,28 @@
         }
       }
     },
+    "Add Host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till värd"
+          }
+        }
+      }
+    },
+    "Add Host…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till värd…"
+          }
+        }
+      }
+    },
     "Add Limit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5477,6 +5565,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till fönster"
+          }
+        }
+      }
+    },
+    "Add a Remote Host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till en fjärrvärd"
           }
         }
       }
@@ -7178,6 +7277,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En annan instans av Threading är öppen och äger konversationernas tillstånd. Om två körs samtidigt kan de skriva över varandras projekt utan varning, så den här instansen avslutas."
+          }
+        }
+      }
+    },
+    "Another host already connects to %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En annan värd ansluter redan till %@."
           }
         }
       }
@@ -10613,6 +10723,17 @@
         }
       }
     },
+    "Check" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollera"
+          }
+        }
+      }
+    },
     "Check for Updates…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11522,13 +11643,13 @@
         }
       }
     },
-    "Claude Code terminal sessions in this project run over ssh on the host below, in its folder. The folder must already exist there." : {
+    "Claude Code terminal sessions in this project run on the machine you choose here, in the folder you name on it." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Claude Code-terminalsessioner i det här projektet körs via ssh på värden nedan, i dess mapp. Mappen måste redan finnas där."
+            "value" : "Claude Code-terminalsessioner i det här projektet körs på maskinen du väljer här, i mappen du anger på den."
           }
         }
       }
@@ -17378,6 +17499,17 @@
         }
       }
     },
+    "Downloading %lld%%" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laddar ned %lld %%"
+          }
+        }
+      }
+    },
     "Downloading Update…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17840,6 +17972,17 @@
         }
       }
     },
+    "Edit “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera ”%@”"
+          }
+        }
+      }
+    },
     "Editable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17902,6 +18045,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redigerar filer utan att fråga. Kommandon frågar fortfarande."
+          }
+        }
+      }
+    },
+    "Edit…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera…"
           }
         }
       }
@@ -22145,6 +22299,17 @@
         }
       }
     },
+    "Host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värd"
+          }
+        }
+      }
+    },
     "Hosted Direct" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25726,6 +25891,17 @@
         }
       }
     },
+    "Machines your projects can run Claude Code terminal sessions on, over ssh. A project picks one and names its folder there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maskiner där dina projekt kan köra Claude Code-terminalsessioner, över ssh. Ett projekt väljer en och anger sin mapp där."
+          }
+        }
+      }
+    },
     "Magenta" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28406,6 +28582,17 @@
         }
       }
     },
+    "No hosts yet. Add a Linux machine you can reach with ssh, then choose it on a project." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga värdar än. Lägg till en Linux-maskin du kan nå med ssh och välj den sedan på ett projekt."
+          }
+        }
+      }
+    },
     "No icon was found for this project." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29099,6 +29286,17 @@
         }
       }
     },
+    "Not checked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte kontrollerad"
+          }
+        }
+      }
+    },
     "Not checked yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29336,6 +29534,17 @@
         }
       }
     },
+    "Not usable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte användbar"
+          }
+        }
+      }
+    },
     "Nothing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29431,6 +29640,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget observerat för den här sessionen än."
+          }
+        }
+      }
+    },
+    "Nothing on this Mac runs on it. Sessions already running on the machine keep running there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget på den här Macen körs på den. Sessioner som redan körs på maskinen fortsätter där."
           }
         }
       }
@@ -35576,6 +35796,17 @@
         }
       }
     },
+    "Remote Hosts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärrvärdar"
+          }
+        }
+      }
+    },
     "Remote Host…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40453,6 +40684,17 @@
         }
       }
     },
+    "Setting up…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ställer in…"
+          }
+        }
+      }
+    },
     "Settings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45034,6 +45276,17 @@
         }
       }
     },
+    "The Linux components are downloaded once and shared by every host of the same kind." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linux-komponenterna laddas ned en gång och delas av alla värdar av samma slag."
+          }
+        }
+      }
+    },
     "The Linux components could not be downloaded: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46883,6 +47136,17 @@
         }
       }
     },
+    "The folder must already exist on the host. Machines are added and checked in Settings ▸ Remote Hosts; the new-chat openings from Settings aren’t sent to remote sessions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mappen måste redan finnas på värden. Maskiner läggs till och kontrolleras i Inställningar ▸ Fjärrvärdar; de inledande meddelandena från Inställningar skickas inte till fjärrsessioner."
+          }
+        }
+      }
+    },
     "The folder on the host must be a full path, starting with /." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46978,6 +47242,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Värden kunde inte nå %@: %@"
+          }
+        }
+      }
+    },
+    "The host refused your key. Check that your ssh key is on it and that your agent is unlocked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värden nekade din nyckel. Kontrollera att din ssh-nyckel finns där och att din agent är upplåst."
+          }
+        }
+      }
+    },
+    "The host wasn’t saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värden sparades inte"
           }
         }
       }
@@ -47132,6 +47418,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det senaste avslutet lämnade ingen notering om vad som kördes."
+          }
+        }
+      }
+    },
+    "The list of hosts couldn’t be written, so the change was not kept." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listan med värdar kunde inte skrivas, så ändringen behölls inte."
           }
         }
       }
@@ -50141,6 +50438,17 @@
         }
       }
     },
+    "This build has no Linux components, so it can’t set up a host yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här versionen har inga Linux-komponenter och kan därför inte ställa in en värd än."
+          }
+        }
+      }
+    },
     "This build of Threading can’t run sessions on remote hosts." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50500,6 +50808,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här gränsen skapades i en nyare version av Threading."
+          }
+        }
+      }
+    },
+    "This machine has no systemd user session, which Threading needs to keep a host running there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här maskinen har ingen systemd-användarsession, vilket Threading behöver för att hålla en värd igång där."
+          }
+        }
+      }
+    },
+    "This machine isn’t in your known_hosts, and Threading never answers that question for you. Connect once in a terminal with ssh, accept the fingerprint, then check again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här maskinen finns inte i din known_hosts, och Threading svarar aldrig på den frågan åt dig. Anslut en gång i en terminal med ssh, godkänn fingeravtrycket och kontrollera sedan igen."
           }
         }
       }
@@ -51368,6 +51698,17 @@
         }
       }
     },
+    "Threading couldn’t reach this machine with ssh." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte nå den här maskinen med ssh."
+          }
+        }
+      }
+    },
     "Threading created this folder to hold chats that are not about any project. It is an ordinary git repository, so nothing you write here is lost — and nothing outside it belongs to Threading. You can move it, or point Threading somewhere else, in Settings." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51452,6 +51793,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading har ingen GitHub-inloggning, så formuläret för pull requests öppnas i webbläsaren."
+          }
+        }
+      }
+    },
+    "Threading has no Linux components for this machine (%@)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading har inga Linux-komponenter för den här maskinen (%@)."
           }
         }
       }
@@ -53294,6 +53646,17 @@
         }
       }
     },
+    "Unreachable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan inte nås"
+          }
+        }
+      }
+    },
     "Unschedule this message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54280,13 +54643,13 @@
         }
       }
     },
-    "Uses your ssh keys and config; leave the config file empty for ~/.ssh/config. Threading’s tools and the new-chat openings from Settings don’t reach remote sessions yet." : {
+    "Uses your own ssh keys, agent and known_hosts; leave the config file empty for ~/.ssh/config." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Använder dina ssh-nycklar och din konfiguration; lämna konfigurationsfilen tom för ~/.ssh/config. Threadings verktyg och inledningarna för nya chattar i Inställningar når inte fjärrsessioner ännu."
+            "value" : "Använder dina egna ssh-nycklar, agent och known_hosts; lämna konfigurationsfilen tom för ~/.ssh/config."
           }
         }
       }
@@ -54309,6 +54672,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använder sparad återställning…"
+          }
+        }
+      }
+    },
+    "Using the Linux components from your developer directory instead of the published ones." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder Linux-komponenterna från din utvecklarkatalog i stället för de publicerade."
           }
         }
       }
@@ -58133,6 +58507,17 @@
         }
       }
     },
+    "hetzner" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hetzner"
+          }
+        }
+      }
+    },
     "hetzner or user@host" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58151,6 +58536,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "dold och i vänteläge"
+          }
+        }
+      }
+    },
+    "host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "värd"
           }
         }
       }
@@ -58540,6 +58936,17 @@
         }
       }
     },
+    "linux" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "linux"
+          }
+        }
+      }
+    },
     "local commits are not published" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58657,6 +59064,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "macOS frågar härnäst, och dess dialog säger Threading i stället för %@: ett program som Threading startar godkänns mot Threadings egen behörighet. Ingenting beviljas genom att fortsätta – systemet frågar separat, och du kan neka även där."
+          }
+        }
+      }
+    },
+    "machine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "maskin"
           }
         }
       }
@@ -59559,6 +59977,17 @@
         }
       }
     },
+    "raspberry pi" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "raspberry pi"
+          }
+        }
+      }
+    },
     "rate limit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59983,6 +60412,17 @@
         }
       }
     },
+    "run elsewhere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kör någon annanstans"
+          }
+        }
+      }
+    },
     "running" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60126,6 +60566,17 @@
         }
       }
     },
+    "server" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "server"
+          }
+        }
+      }
+    },
     "service tier" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60265,6 +60716,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "bruka"
+          }
+        }
+      }
+    },
+    "ssh" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh"
+          }
+        }
+      }
+    },
+    "ssh %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh %@"
           }
         }
       }
@@ -60925,6 +61398,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "synlig och animeras"
+          }
+        }
+      }
+    },
+    "vps" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vps"
           }
         }
       }

@@ -64,6 +64,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "endOrphanedAgentProcesses",
             "consumeBankedUsageReset",
             "removeSourceControlConnection",
+            "removeRemoteHost",
             "grantBrowserOriginAccess",
             "approveSensitiveBrowserAction",
             "approveToolPermission",
