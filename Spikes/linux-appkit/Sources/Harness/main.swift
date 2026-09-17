@@ -18,5 +18,8 @@ func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: St
 }
 
 let output = ProcessInfo.processInfo.environment["SPIKE_OUT"] ?? "."
+let layoutPassed = LayoutTests.run()
+LayoutBenchmark.run()
 try Smoke.run(into: output)
 try Specimen.run(into: output)
+try ConstraintSpecimen.run(into: output)

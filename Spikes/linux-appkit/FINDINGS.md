@@ -97,3 +97,105 @@ actually motivates it.
 
 Runtime behaviour beyond one frame, layout correctness, scrolling, any scaling contract, text
 shaping quality, IME, accessibility trees, and anything at all outside `UI/Design`.
+
+---
+
+# Round two: Auto Layout
+
+Measured 2026-09-17, same image and machine. `Sources/AppKit/Layout/` adds `NSLayoutConstraint`,
+the generic anchor family, `NSLayoutGuide`, intrinsic content size with hugging and compression
+resistance, and a solver. The shim went from 1,048 lines to 1,871.
+
+## 7. It is expressible, and it is correct
+
+`NSLayoutConstraint` was the top of the gap list — 75 of 153 files — and it is now gone from that
+list entirely. `LayoutTests` checks nine hand-computed layouts and all nine pass: the
+flipped/unflipped origin pair, centring, multipliers, a low-priority width yielding to a required
+trailing edge, compression resistance beating hugging, three siblings sharing a row at 58.66pt
+each, a layout guide positioning a sibling, and an unsatisfiable pair being *reported* rather than
+silently laid out at zero.
+
+`out/constraints.png` is a sidebar with no frame set anywhere — every rectangle in it is the
+solver's answer, and the label widths come from the real `PlatinumBitmapFont.advance(of:)`.
+
+**The picture lied once, and the lie is instructive.** The long fourth row's label appeared to
+overrun its chip, which looks exactly like a constraint engine getting an inequality wrong. It was
+not: the solver had compressed that label from its intrinsic 245pt to 222pt, correctly, and the
+*drawing* simply was not clipping to the view's bounds. A rendered-state test would have filed
+that as a layout bug. Worth remembering when the render evidence for this eventually gets written.
+
+## 8. The solver is the wrong solver, and now there is a number for it
+
+One full re-solve of a constraint-driven list, release build:
+
+| rows | items | constraints | LP rows | variables | median |
+|---:|---:|---:|---:|---:|---:|
+| 5 | 21 | 85 | 89 | 136 | 1.6 ms |
+| 10 | 41 | 170 | 174 | 266 | 10.2 ms |
+| 20 | 81 | 340 | 344 | 526 | 96.6 ms |
+| 40 | 161 | 680 | 684 | 1046 | 682 ms |
+| 80 | 321 | 1360 | 1364 | 2086 | 5272 ms |
+
+Roughly 8× per doubling — cubic, which is what a dense two-phase simplex re-solved from scratch
+costs. Eighty sidebar rows take five seconds. This repository's Scaling Gate would refuse it on
+sight, and it should.
+
+That is the finding, not a defect to apologise for. The draft says "a Cassowary-family solver is a
+candidate, not a decision", and this says *why* Cassowary rather than "some linear solver":
+Cassowary's contribution is not solving the system, it is editing a live tableau — incremental
+add/remove and dual simplex on change. The correctness half of layout is a weekend. The part that
+makes it a layout engine rather than a demo is the invalidation contract, exactly as the draft's
+phrase "own the solver **and its invalidation contract**" implies. An incremental solver plus a
+per-container solve (rather than one solve for the whole window) is the shape that would need
+measuring next.
+
+## 9. The gap list is a conjunction, not a queue
+
+Closing the single largest blocker in the whole list moved **three files**: `AnnotationSendBar`,
+`PaneFooter`, `PaneHeader`. Verdicts went from 127/24/2 to 124/27/2.
+
+That is not a disappointing result, it is the most useful thing measured so far, and it is only
+visible because the sweep was re-run rather than reasoned about. `./analyse.py` groups the
+remaining 116 missing symbols into subsystems and asks how many have to close before a file
+compiles:
+
+| Blocked by | Files |
+|---|---:|
+| 1 subsystem | 23 |
+| 2 subsystems | 18 |
+| 3 subsystems | 27 |
+| 4 or more | 56 |
+
+Greedily closing whole subsystems, best-first:
+
+| After closing | Gap files clear |
+|---|---:|
+| text | 5 / 124 |
+| + accessibility | 8 |
+| + stack views | 18 |
+| + the rest of `NSView` | 33 |
+| + input/events | 40 |
+| + window/app | 47 |
+| + images | 65 |
+| + layers/CG | 71 |
+| + controls | 82 |
+| + the rest of `NSColor` | 94 |
+
+So a ranked list of missing symbols reads like a queue and is nothing of the kind: a file compiles
+when its *last* blocker goes, not its first. Nine subsystems have to be finished before two thirds
+of `UI/Design` will build. The "about one strong engineer-year" estimate in the draft looks, if
+anything, better supported after this than before it — and the order to do the work in is not the
+order the frequency table suggests.
+
+## 10. Liberties taken in the layout layer, recorded
+
+- **No baselines.** With no text stack, `firstBaseline` is the top edge and `lastBaseline` the
+  bottom. Every baseline-aligned row in the app is therefore wrong here by the font's ascender.
+  That is a text problem wearing a layout problem's clothes, and it will not resolve until the
+  text bucket does.
+- **Ambiguity resolves, but not where AppKit resolves it.** An under-determined system has many
+  feasible vertices; the engine adds a 1e-4 preference for the smallest, topmost, leftmost, far
+  below any real priority. Ambiguity resolving *somewhere* is not the same as resolving where
+  AppKit would, and a real port needs the comparison, not the assurance.
+- **One solve per subtree, from scratch.** No incremental edit, no per-container scoping, no
+  `updateConstraints` pass. See section 8.
