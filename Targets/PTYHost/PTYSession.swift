@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Dispatch
 import Foundation
 import ThreadingPTYHostKit
@@ -105,7 +111,8 @@ final class PTYSession: @unchecked Sendable {
     /// exactly the bytes it most wanted.
     var openReaders = 0
 
-    var processSource: DispatchSourceProcess?
+    /// Fires once the child has exited: a process source on Darwin, a pidfd read source on Linux.
+    var processSource: DispatchSourceProtocol?
     var foregroundTimer: DispatchSourceTimer?
     /// Armed only after an explicit idle handoff. Attaching cancels it; a connection that merely
     /// disappears never invents an expiry for work whose state the daemon cannot know.

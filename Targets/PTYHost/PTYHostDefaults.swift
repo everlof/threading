@@ -137,6 +137,10 @@ enum PTYHostDefaults {
     static let reapRetryInterval: TimeInterval = 0.005
     static let reapAttempts = 20
 
+    /// How often a child is polled for its exit when no exit event could be armed for it. Slow
+    /// enough to cost nothing, quick enough that an ending is still reported within a moment.
+    static let exitPollInterval: TimeInterval = 0.25
+
     // MARK: - The state file
 
     /// The append-only record of every lifecycle edge, and the whole of what a restarted daemon
@@ -205,4 +209,19 @@ enum PTYHostDefaults {
     /// `posix_spawnattr_setpgroup`'s "lead your own group" value, so `kill(-pid, …)` reaches the
     /// CLI and everything it started rather than only the CLI.
     static let leadOwnGroup: pid_t = 0
+
+    // MARK: - Linux process identity
+
+    /// `/proc/<pid>/stat` field 22 is the start time, in clock ticks since boot (`proc(5)`).
+    static let procStartTimeField = 22
+    /// Fields are counted from after the parenthesised command name, which is field 2.
+    static let procFirstFieldAfterName = 3
+    /// The `/proc/stat` line holding the boot time in seconds since the epoch.
+    static let procBootTimeKey = "btime "
+    /// One `read(2)` of a `/proc` file.
+    static let procReadChunkBytes = 4096
+    /// A ceiling on how much of a `/proc` file is read. `btime` comes after the per-CPU lines
+    /// and the `intr` line, which has a count for every interrupt number and reaches tens of
+    /// kilobytes on a large machine; a mebibyte clears that with room and still bounds the read.
+    static let procReadLimitBytes = 1024 * 1024
 }

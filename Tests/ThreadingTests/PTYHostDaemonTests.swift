@@ -1,14 +1,26 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+#if !SWIFT_PACKAGE
 @testable import Threading
+#endif
 
 /// `threading-ptyd`, exercised as the process it ships as.
 ///
 /// Every test here runs the real daemon out of `Contents/Helpers` against a scratch socket and a
-/// scratch state directory, and speaks the real codec to it over a real unix socket. Nothing is
+/// scratch state directory, and speaks the real codec to it over a real unix socket.
+///
+/// **The same file is the Linux daemon's test suite.** `Targets/PTYHost/Package.swift` compiles
+/// it through a symlink, where `SWIFT_PACKAGE` is defined: the daemon is the SwiftPM-built binary
+/// beside the test bundle, the one test that needs the app's restart path is left out, and the
+/// cleanup below speaks the protocol itself because there is no app client to borrow.
+/// `scripts/test-ptyd-linux.sh` runs it in a Linux container. Nothing is
 /// stubbed on either side, because the two things worth getting wrong are both mechanism: what a
 /// `forkpty` child actually observes, and what a byte stream actually does across a detach.
 ///
@@ -36,6 +48,8 @@ final class PTYHostDaemonTests: XCTestCase {
         static let stubbornChildIterations = 600
 
         static let helperName = "threading-ptyd"
+        /// The package build's way to name the daemon under test. Unused by the hosted target.
+        static let helperOverrideKey = "THREADING_PTYD_EXECUTABLE"
         static let shell = "/bin/sh"
 
         /// Larger than the daemon's 512 KiB ring, so the replay has to be a cut.
@@ -50,8 +64,9 @@ final class PTYHostDaemonTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        // `sockaddr_un.sun_path` holds 104 bytes and the system temporary directory is already
-        // about half of that, so the fixture's own names stay to a handful of characters.
+        // `sockaddr_un.sun_path` holds 104 bytes (108 on Linux) and the system temporary directory
+        // is already about half of that, so the fixture's own names stay to a handful of
+        // characters.
         directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("ptyd-\(UInt32.random(in: 0..<0xFFFF_FFFF))", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -392,6 +407,7 @@ final class PTYHostDaemonTests: XCTestCase {
     /// A checkout move stops one incarnation and immediately starts the next with the same
     /// logical identity. The daemon serializes that handoff: no refusal can push the replacement
     /// back into Threading's process, and the two children never overlap.
+    #if !SWIFT_PACKAGE
     func testRestartStopReachesAHostedChildWithoutAnAppRuntime() throws {
         let daemon = try startDaemon()
         let originalClient = try connect(to: daemon)
@@ -415,6 +431,7 @@ final class PTYHostDaemonTests: XCTestCase {
         XCTAssertNotEqual(spawned.pid, original.pid)
         try replacement.waitForOutput(containing: "RESUMED", timeout: Fixture.childTimeout)
     }
+    #endif
 
     func testAKilledSessionIsAtomicallyReplacedUnderTheSameIdentity() throws {
         let daemon = try startDaemon()
@@ -729,7 +746,7 @@ final class PTYHostDaemonTests: XCTestCase {
         XCTAssertEqual(repeated.detectedAt, lost.detectedAt)
 
         try waitUntil(timeout: Fixture.exitTimeout, "the orphaned child is reclaimed") {
-            Darwin.kill(spawned.pid, 0) != 0 && errno == ESRCH
+            DaemonTestPOSIX.kill(spawned.pid, 0) != 0 && errno == ESRCH
         }
     }
 
@@ -760,7 +777,7 @@ final class PTYHostDaemonTests: XCTestCase {
         _ = try nextHello(on: rejoined)
         XCTAssertEqual(try nextLost(on: rejoined).ids, [id])
         try waitUntil(timeout: Fixture.exitTimeout, "the orphaned replacement is reclaimed") {
-            Darwin.kill(running.pid, 0) != 0 && errno == ESRCH
+            DaemonTestPOSIX.kill(running.pid, 0) != 0 && errno == ESRCH
         }
     }
 
@@ -807,6 +824,29 @@ final class PTYHostDaemonTests: XCTestCase {
     }
 
     private func helperURL() throws -> URL {
+        #if SWIFT_PACKAGE
+        // A named binary first, so the Linux lane can run this suite against the static release
+        // artifact it is about to hand out rather than only against the debug build.
+        if let named = ProcessInfo.processInfo.environment[Fixture.helperOverrideKey] {
+            let url = URL(fileURLWithPath: named)
+            guard FileManager.default.isExecutableFile(atPath: url.path) else {
+                throw PTYHostTestFailure("\(Fixture.helperOverrideKey) names \(named), which is not executable")
+            }
+            return url
+        }
+        // Otherwise SwiftPM's product beside the test bundle: the bundle *is* that directory on
+        // Linux, and sits inside it as `….xctest` on macOS.
+        let bundle = Bundle(for: PTYHostDaemonTests.self).bundleURL
+        let candidates = [bundle, bundle.deletingLastPathComponent()].map {
+            $0.appendingPathComponent(Fixture.helperName, isDirectory: false)
+        }
+        guard let url = candidates.first(where: {
+            FileManager.default.isExecutableFile(atPath: $0.path)
+        }) else {
+            throw XCTSkip("no \(Fixture.helperName) beside the test bundle — `swift build` first")
+        }
+        return url
+        #else
         let url = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers", isDirectory: true)
             .appendingPathComponent(Fixture.helperName, isDirectory: false)
@@ -816,6 +856,7 @@ final class PTYHostDaemonTests: XCTestCase {
                 + "it through the Embed Extension Helpers phase, and run the hosted test target"
         )
         return url
+        #endif
     }
 
     @discardableResult
@@ -1141,7 +1182,7 @@ private final class DaemonProcess: @unchecked Sendable {
     /// What a crash looks like: no chance to write anything down, no chance to say goodbye.
     func crash() {
         guard process.isRunning else { return }
-        Darwin.kill(process.processIdentifier, SIGKILL)
+        DaemonTestPOSIX.kill(process.processIdentifier, SIGKILL)
     }
 
     /// Drains the endpoint through the shipping protocol. If the daemon already crashed before
@@ -1218,11 +1259,13 @@ private final class PTYHostTestClient: @unchecked Sendable {
     // MARK: - Initialization
 
     init(socketPath: String) throws {
-        descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        descriptor = socket(AF_UNIX, DaemonTestPOSIX.streamSocketType, 0)
         guard descriptor >= 0 else { throw PTYHostTestFailure("socket() failed") }
 
         // Without this a write to a socket the daemon has already closed would raise `SIGPIPE`
-        // in the *test host*, which is a crash rather than a failure.
+        // in the *test host*, which is a crash rather than a failure. Linux has no such socket
+        // option; there every write says `MSG_NOSIGNAL` instead (`DaemonTestPOSIX.send`).
+        #if canImport(Darwin)
         var suppress: Int32 = 1
         _ = setsockopt(
             descriptor,
@@ -1231,10 +1274,13 @@ private final class PTYHostTestClient: @unchecked Sendable {
             &suppress,
             socklen_t(MemoryLayout<Int32>.size)
         )
+        #endif
 
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
+        #if canImport(Darwin)
         address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
         let bytes = Array(socketPath.utf8)
         let capacity = MemoryLayout.size(ofValue: address.sun_path)
         guard bytes.count < capacity else {
@@ -1250,11 +1296,11 @@ private final class PTYHostTestClient: @unchecked Sendable {
         }
         let connected = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                Darwin.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
+                DaemonTestPOSIX.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
         guard connected == 0 else {
-            Darwin.close(descriptor)
+            DaemonTestPOSIX.close(descriptor)
             throw PTYHostTestFailure("connect() failed: \(String(cString: strerror(errno)))")
         }
 
@@ -1299,7 +1345,7 @@ private final class PTYHostTestClient: @unchecked Sendable {
         condition.broadcast()
         condition.unlock()
         guard !alreadyClosed else { return }
-        _ = shutdown(descriptor, SHUT_RDWR)
+        DaemonTestPOSIX.shutdownReadWrite(descriptor)
     }
 
     var isClosed: Bool {
@@ -1398,14 +1444,14 @@ private final class PTYHostTestClient: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         while true {
             let count = buffer.withUnsafeMutableBytes {
-                Darwin.read(descriptor, $0.baseAddress, $0.count)
+                DaemonTestPOSIX.read(descriptor, $0.baseAddress, $0.count)
             }
             guard count > 0 else {
                 condition.lock()
                 closed = true
                 condition.broadcast()
                 condition.unlock()
-                Darwin.close(descriptor)
+                DaemonTestPOSIX.close(descriptor)
                 return
             }
             let incoming = Data(buffer[0..<count])
@@ -1444,7 +1490,7 @@ private final class PTYHostTestClient: @unchecked Sendable {
             guard let base = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
+                let written = DaemonTestPOSIX.send(descriptor, base + offset, raw.count - offset)
                 if written > 0 {
                     offset += written
                     continue
@@ -1455,3 +1501,163 @@ private final class PTYHostTestClient: @unchecked Sendable {
         }
     }
 }
+
+// MARK: - POSIX spellings
+
+/// The few calls Darwin and Linux spell differently, qualified because `PTYHostTestClient` has
+/// `read` and `write` methods of its own.
+private enum DaemonTestPOSIX {
+
+    @discardableResult
+    static func kill(_ pid: pid_t, _ signal: Int32) -> Int32 {
+        #if canImport(Darwin)
+        return Darwin.kill(pid, signal)
+        #else
+        return Glibc.kill(pid, signal)
+        #endif
+    }
+
+    static func close(_ descriptor: Int32) {
+        #if canImport(Darwin)
+        _ = Darwin.close(descriptor)
+        #else
+        _ = Glibc.close(descriptor)
+        #endif
+    }
+
+    static func read(_ descriptor: Int32, _ buffer: UnsafeMutableRawPointer?, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        return Darwin.read(descriptor, buffer, count)
+        #else
+        return Glibc.read(descriptor, buffer, count)
+        #endif
+    }
+
+    static func connect(
+        _ descriptor: Int32,
+        _ address: UnsafePointer<sockaddr>,
+        _ length: socklen_t
+    ) -> Int32 {
+        #if canImport(Darwin)
+        return Darwin.connect(descriptor, address, length)
+        #else
+        return Glibc.connect(descriptor, address, length)
+        #endif
+    }
+
+    /// A write that cannot raise `SIGPIPE`: the socket option covers it on Darwin, and on Linux
+    /// the flag has to be named on every call.
+    static func send(_ descriptor: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        return Darwin.write(descriptor, buffer, count)
+        #else
+        return Glibc.send(descriptor, buffer, count, Int32(MSG_NOSIGNAL))
+        #endif
+    }
+
+    /// `shutdown(SHUT_RDWR)`. Glibc imports the constant as `Int`.
+    static func shutdownReadWrite(_ descriptor: Int32) {
+        #if canImport(Darwin)
+        _ = shutdown(descriptor, SHUT_RDWR)
+        #else
+        _ = shutdown(descriptor, Int32(SHUT_RDWR))
+        #endif
+    }
+
+    static var streamSocketType: Int32 {
+        #if canImport(Darwin)
+        return SOCK_STREAM
+        #else
+        return Int32(SOCK_STREAM.rawValue)
+        #endif
+    }
+}
+
+#if SWIFT_PACKAGE
+// MARK: - Cleanup without the app
+
+/// The package build's `PTYHostTestProcessCleanup`.
+///
+/// The hosted target's version drives the app's `PTYHostClient`, which a package cannot link. This
+/// is the same drain — end every live detached session with the shipping attach-then-kill, then
+/// retire — spoken with this file's own client, so a scratch daemon never strands a process group
+/// on the machine running the tests.
+private enum PTYHostTestProcessCleanup {
+    static let childTimeout: TimeInterval = 8
+    static let replyTimeout: TimeInterval = 3
+
+    static func daemonIsReady(socketPath: String) -> Bool {
+        guard let client = greeted(socketPath: socketPath) else { return false }
+        client.hangUp()
+        return true
+    }
+
+    @discardableResult
+    static func stopSessionsAndRetire(
+        socketPath: String,
+        timeout: TimeInterval = childTimeout
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var drained = false
+
+        while Date() < deadline {
+            guard let held = sessions(socketPath: socketPath) else {
+                drained = !daemonIsReady(socketPath: socketPath)
+                break
+            }
+            let live = held.filter { $0.exit == nil }
+            if live.isEmpty {
+                drained = true
+                break
+            }
+            var attemptedStop = false
+            for session in live where !session.isAttached {
+                attemptedStop = true
+                stop(session.id, socketPath: socketPath)
+            }
+            if !attemptedStop { Thread.sleep(forTimeInterval: 0.05) }
+        }
+
+        guard let client = greeted(socketPath: socketPath) else { return drained }
+        client.send(.retire)
+        client.hangUp()
+        return drained
+    }
+
+    private static func greeted(socketPath: String) -> PTYHostTestClient? {
+        guard let client = try? PTYHostTestClient(socketPath: socketPath) else { return nil }
+        client.send(.hello(PTYHostHello(build: "test-cleanup", pid: getpid())))
+        let answered = try? client.nextControl(timeout: replyTimeout) {
+            if case .hello = $0 { return true }
+            return false
+        }
+        guard answered != nil else {
+            client.hangUp()
+            return nil
+        }
+        return client
+    }
+
+    private static func sessions(socketPath: String) -> [PTYHostSessionSummary]? {
+        guard let client = greeted(socketPath: socketPath) else { return nil }
+        defer { client.hangUp() }
+        client.send(.list)
+        guard let frame = try? client.nextControl(timeout: replyTimeout, matching: {
+            if case .sessions = $0 { return true }
+            return false
+        }), case .sessions(let held) = frame else { return nil }
+        return held
+    }
+
+    private static func stop(_ id: PTYHostSessionIdentity, socketPath: String) {
+        guard let client = greeted(socketPath: socketPath) else { return }
+        defer { client.hangUp() }
+        client.send(.attach(PTYHostAttach(id: id, replayBudget: PTYHostReplayDefaults.minimumBudgetBytes)))
+        client.send(.kill(PTYHostKill(id: id, escalate: true)))
+        _ = try? client.nextControl(timeout: childTimeout) {
+            if case .exited(let ending) = $0 { return ending.id == id }
+            return false
+        }
+    }
+}
+#endif

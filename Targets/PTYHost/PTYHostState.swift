@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 import ThreadingPTYHostKit
 
@@ -140,20 +146,7 @@ final class PTYHostState: @unchecked Sendable {
 
         var line = data
         line.append(0x0A)
-        return line.withUnsafeBytes { raw -> Bool in
-            guard let base = raw.baseAddress else { return false }
-            var offset = 0
-            while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
-                if written > 0 {
-                    offset += written
-                    continue
-                }
-                if written < 0 && errno == EINTR { continue }
-                return false
-            }
-            return true
-        }
+        return PTYHostPOSIX.writeAll(descriptor, line)
     }
 
     /// What the file says is still running, and how many lines could not be read.

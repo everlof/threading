@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Dispatch
 import Foundation
 import ThreadingPTYHostKit
@@ -102,9 +108,10 @@ enum ThreadingPTYHost {
 
     static func main() -> Never {
         // The daemon writes to sockets whose peer may already be gone, and a `SIGPIPE` there
-        // would kill a process holding every hosted agent on the machine. `SO_NOSIGPIPE` covers
-        // each socket as well; both are here because either one alone is a line's edit away from
-        // being removed by somebody who saw only the other.
+        // would kill a process holding every hosted agent on the machine. On Darwin `SO_NOSIGPIPE`
+        // covers each socket as well; both are here because either one alone is a line's edit away
+        // from being removed by somebody who saw only the other. **Linux has no per-socket option,
+        // so there this line is the only guard.**
         signal(SIGPIPE, SIG_IGN)
 
         let command = Array(CommandLine.arguments.dropFirst())

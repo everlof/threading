@@ -45,6 +45,11 @@ reshuffling it is a line move.
   Claude half (B5) can ship ahead of the rest.
 ### Next — researched and ready, waiting for a slot
 
+- [Remote execution hosts](remote-execution-hosts.md) — run a session's agent on a Linux machine
+  the person owns (a Pi, a VPS, a workstation) by running `threading-ptyd` there and reaching it
+  over SSH, with the Mac still the authority for every surface. Slice 1 — the daemon building as a
+  static Linux binary and passing its own suite there through `scripts/test-ptyd-linux.sh` — is
+  done on arm64 and x86_64; host profiles, the `ExecutionHost` model and hooks over a reverse forward follow.
 - [Universal Search](universal-search.md) — make `Command-F` a host-owned Search capability with
   visible View, Project and Everywhere scopes; reuse the real Browser, Git Review and SwiftTerm
   engines; add incremental FTS5 conversation history with exact bounded-window landing; and expose

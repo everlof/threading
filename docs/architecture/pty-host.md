@@ -280,7 +280,8 @@ settings, the SQLite store, the app's journal, or any terminal emulation, and **
 terminal is `tcgetpgrp`, which has no bytes in it.
 
 `scripts/check_architecture_boundaries.sh` enforces both halves: files under `Targets/PTYHost` may
-import only `Foundation`, `Darwin`, `Dispatch` and `ThreadingPTYHostKit`, and may not name
+import only `Foundation`, `Darwin` (on Linux `Glibc` or `Musl`, and the `CPTYHostPlatform` shim —
+see [Linux](#linux)), `Dispatch` and `ThreadingPTYHostKit`, and may not name
 `SwiftTerm`, `AppKit`, `ProjectStore`, `AppSettings`, `TerminalTheme` or `EventLog` outside a
 comment. It is a lint rather than a paragraph because "the daemon should just log where the app
 logs" is a one-line change that reads as an improvement, and this repository has already paid for
@@ -516,7 +517,8 @@ than one that ended. It is R4 in the design's risk register, answered.
   connection. The process never exits on input, because `KeepAlive` plus a poisoned frame is a
   restart storm, and the other sessions are somebody's working agents.
 - **`SIGPIPE` is ignored process-wide** and `SO_NOSIGPIPE` is set on every socket. Either alone is
-  one edit away from being removed by somebody who saw only the other.
+  one edit away from being removed by somebody who saw only the other. Linux has no
+  `SO_NOSIGPIPE`, so on Linux the process-wide ignore is the only guard.
 - **The daemon unlinks a stale socket, not the app.** It is the only process that may be listening
   there, so it is the only one that can tell a leftover file from a live listener without a race.
 - **The state directory is created `0700` and set `0700` again**, because it may already exist from
@@ -526,6 +528,62 @@ than one that ended. It is R4 in the design's risk register, answered.
   read by the app only as a bounded tail through `journalTail`. The app's journal prunes any
   `.jsonl` it finds in its own directory, and two processes appending to one file has damaged a
   journal here before.
+
+### Linux
+
+The same sources build for Linux, so a session's agent can run on a machine the person owns and be
+reached over SSH — the plan is [`remote-execution-hosts.md`](../feature-drafts/remote-execution-hosts.md).
+Nothing registers or starts a Linux daemon yet; what exists is the build and the evidence.
+
+- **One program, one shim.** Every call whose *spelling* differs is in `PTYHostPlatform.swift`
+  (`PTYHostPOSIX`), and the calls Swift cannot make portably on Linux — `forkpty`, the
+  `TIOCSWINSZ` ioctl, `pipe2`, `pidfd_open`, `sysconf(_SC_CLK_TCK)` — are one-line C forwards in
+  `Linux/CPTYHostPlatform`. A difference that is *behaviour* is stated where it applies:
+- **Exit events** are a read source on a pidfd, which is readable from the child's exit until it is
+  closed. Where no pidfd can be opened (a kernel before 5.3, or no descriptors left) the daemon
+  polls `waitpid` every `exitPollInterval` and journals `exitPolled`, rather than holding a session
+  whose ending nobody would notice.
+- **Start time** is `/proc/<pid>/stat` field 22 plus `/proc/stat` `btime`, at clock-tick
+  resolution. `btime` follows the wall clock, so a clock step between spawn and a restart's probe
+  reads as "a different process": the session is reported lost and nothing is signalled. That is
+  the safe direction; the other would kill a stranger holding a reused pid.
+- **Close-on-exec is made at creation.** Linux has no `POSIX_SPAWN_CLOEXEC_DEFAULT`, so pipes are
+  `pipe2(O_CLOEXEC)` and every other descriptor was already `FD_CLOEXEC` before the fork that could
+  leak it, on the one serial queue that forks.
+- **`SIGPIPE`**: no `SO_NOSIGPIPE`, so the process-wide ignore is the only guard.
+- **No registration.** `status` says so on Linux instead of asking `launchctl`.
+
+**The build.** `Targets/PTYHost/Package.swift` is a SwiftPM manifest over the same directory, used
+only for Linux and for running the Linux half's tests on a Mac without a container. The Xcode
+project stays the build of the app and the macOS daemon. The shipping artifact is a **static musl
+binary** from the Swift Static Linux SDK, stripped at link: 57 MB on arm64 (22 MB gzipped) and
+59 MB on x86_64, almost
+all of it Foundation and its ICU data. It runs on any Linux of its architecture with nothing
+installed. Shrinking it means moving the daemon to `FoundationEssentials`, which costs the
+`DateFormatter`s in the journal and the CLI; not done.
+
+**The tests are the same tests.** `Targets/PTYHost/Tests/ThreadingPTYHostTests/PTYHostDaemonTests.swift`
+is a symlink to the hosted target's file, which compiles under `SWIFT_PACKAGE` without the app:
+the one case that needs the app's restart path is left out, the cleanup speaks the protocol with
+the fixture's own client, and `THREADING_PTYD_EXECUTABLE` names the binary under test.
+`PTYHostProcStatTests` covers the `/proc` parsing on every platform and the live read on Linux.
+
+`scripts/test-ptyd-linux.sh [--arch arm64|amd64|all]` runs, in a `swift:6.3.2-noble` container
+(the Swift the repository's Xcode ships): the `ThreadingPTYHostKit` tests, the debug daemon suite,
+then the static release build, a check that it links nothing dynamically, and the daemon suite
+again against that exact binary. Measured 2026-09-17 on Docker Desktop (kernel 6.12), on linux/arm64
+natively and linux/amd64 emulated: 77 kit tests, 30 package tests and 25 static-binary tests on
+each, all passing, none skipped.
+
+**Every Linux XCTest runs through `scripts/linux/xctest-watchdog.sh`**, one case per process.
+swift-corelibs-xctest wraps each `setUp`/`tearDown` in `awaitUsingExpectation`, and on Linux that
+wait intermittently never returns
+([swift-corelibs-xctest#504](https://github.com/swiftlang/swift-corelibs-xctest/issues/504), open):
+one hang in 24 runs of an empty test here, so a 77-case bundle in one process almost never
+finishes. The watchdog backtraces a case still running after ten seconds and retries it only when
+the main thread is inside `awaitUsingExpectation` — the harness wrapper, never a test body — and
+prints every retry. Anything else still running at 180 seconds fails with its backtrace, and a skip
+is reported as a skip, not a pass. Delete the runner when the pinned toolchain has the fix.
 
 ## Availability and launch ownership
 

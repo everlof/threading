@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 
 // MARK: - Events
@@ -36,6 +42,8 @@ enum PTYHostJournalEvent: String {
     case killRequested
     case killEscalated
     case exited
+    /// No exit event could be armed for a child, so its ending is being polled.
+    case exitPolled
     case released
     case ringShrunk
     case ringBudgetOverridden
@@ -209,19 +217,7 @@ final class PTYHostJournalFile: @unchecked Sendable {
         }
         guard descriptor >= 0 else { return }
 
-        line.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            var offset = 0
-            while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
-                if written > 0 {
-                    offset += written
-                    continue
-                }
-                if written < 0 && errno == EINTR { continue }
-                return
-            }
-        }
+        PTYHostPOSIX.writeAll(descriptor, line)
     }
 
     private func mirror(_ event: PTYHostJournalEvent, _ object: [String: String]) {

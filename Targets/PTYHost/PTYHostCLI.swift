@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 import ThreadingPTYHostKit
 
@@ -168,7 +174,7 @@ enum PTYHostCLI {
 
         Verbs, spoken to the background host that is already running:
           status              whether a socket is there, whether a daemon answers, what it holds,
-                              and whether launchd has the login item
+                              and on macOS whether launchd has the login item
           sessions [--json]   one row per held session
           journal [N]         the last N journal lines (default \
         \(PTYHostCLIDefaults.defaultJournalLines)), bounded by the daemon's own cap
@@ -423,6 +429,12 @@ enum PTYHostCLI {
             rows.append(["daemon", "nothing is listening"])
         }
 
+        #if os(Linux)
+        // A Linux host is installed and started over SSH by the Mac that uses it, not registered
+        // by a bundle, so there is no login item to report. See
+        // `docs/feature-drafts/remote-execution-hosts.md`, slice 2.
+        rows.append(["service", "not registered by this binary on Linux"])
+        #else
         if let plist = launchAgentPlistURL {
             let present = FileManager.default.fileExists(atPath: plist.path)
             rows.append(["plist", plist.path + (present ? " (present)" : " (absent)")])
@@ -433,6 +445,7 @@ enum PTYHostCLI {
             "launchd",
             PTYHostCLIDefaults.launchAgentLabel + " " + registration().sentence
         ])
+        #endif
         rows.append(["journal", locations.journalPath])
 
         for line in PTYHostCLIFormatting.table(rows) {
@@ -728,7 +741,7 @@ enum PTYHostCLI {
             var poller = pollfd(fd: reader, events: Int16(POLLIN), revents: 0)
             guard poll(&poller, 1, Int32(remaining * 1000)) > 0 else { break }
             let count = buffer.withUnsafeMutableBytes {
-                Darwin.read(reader, $0.baseAddress, $0.count)
+                PTYHostPOSIX.read(reader, $0.baseAddress, $0.count)
             }
             guard count > 0 else { break }
             collected.append(contentsOf: buffer[0..<count])

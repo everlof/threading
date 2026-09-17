@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 import ThreadingPTYHostKit
 
@@ -80,14 +86,14 @@ enum PTYSpawn {
             if let directory { free(directory) }
         }
 
-        var size = winsize(
+        let size = winsize(
             ws_row: UInt16(clamping: grid.rows),
             ws_col: UInt16(clamping: grid.cols),
             ws_xpixel: UInt16(clamping: grid.xpixel),
             ws_ypixel: UInt16(clamping: grid.ypixel)
         )
         var master: Int32 = -1
-        let pid = forkpty(&master, nil, nil, &size)
+        let pid = PTYHostPOSIX.forkpty(master: &master, size: size)
         if pid < 0 { return .failure(.forkFailed(errno)) }
 
         if pid == 0 {
@@ -135,18 +141,10 @@ enum PTYSpawn {
     /// The kernel start time of a pid, to the microsecond.
     ///
     /// A minimal copy of the application's `ProcessUtility.startTime(forPid:)`: the daemon must
-    /// not link the app, and this is two fields of one `proc_pidinfo` call. Seconds alone would
-    /// not do — two processes started in the same second are ordinary at launch.
+    /// not link the app. Seconds alone would not do — two processes started in the same second are
+    /// ordinary at launch. How each kernel answers is `PTYHostPOSIX.startTime(of:)`.
     static func startTime(of pid: pid_t) -> PTYHostProcessStartTime? {
-        guard pid > 0 else { return nil }
-        var info = proc_bsdinfo()
-        let size = MemoryLayout<proc_bsdinfo>.size
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == Int32(size),
-              info.pbi_start_tvsec > 0 else { return nil }
-        return PTYHostProcessStartTime(
-            seconds: UInt64(info.pbi_start_tvsec),
-            microseconds: UInt64(info.pbi_start_tvusec)
-        )
+        PTYHostPOSIX.startTime(of: pid)
     }
 
     /// Whether a pid exists at all, asked with a *different* mechanism from the start-time read.
@@ -156,7 +154,7 @@ enum PTYSpawn {
     /// ours to signal.
     static func exists(_ pid: pid_t) -> Bool {
         guard pid > 0 else { return false }
-        if Darwin.kill(pid, 0) == 0 { return true }
+        if PTYHostPOSIX.kill(pid, 0) == 0 { return true }
         return errno == EPERM
     }
 
@@ -169,7 +167,7 @@ enum PTYSpawn {
     /// alone leaves them running, which is the orphan class the app's sweep exists to clean up.
     static func signalGroup(_ pid: pid_t, _ number: Int32) {
         guard pid > 0 else { return }
-        _ = Darwin.kill(-pid, number)
+        PTYHostPOSIX.kill(-pid, number)
     }
 
     // MARK: - The terminal
@@ -177,9 +175,10 @@ enum PTYSpawn {
     /// Applies a window size and raises `SIGWINCH` on the foreground group, answering the grid
     /// the terminal actually took — or nil when it took none.
     ///
-    /// Darwin's `TIOCSWINSZ` signals the foreground process group itself, and the explicit signal
-    /// is the belt to that braces: a program that changed the foreground group between the two
-    /// calls still learns. Both are cheap and neither is conditional on the other succeeding.
+    /// `TIOCSWINSZ` signals the foreground process group itself on both Darwin and Linux, and the
+    /// explicit signal is the belt to that braces: a program that changed the foreground group
+    /// between the two calls still learns. Both are cheap and neither is conditional on the other
+    /// succeeding.
     ///
     /// The answer is the *applied* grid rather than a `Bool` because the four numbers are
     /// clamped on the way into a `winsize`, and the app reconciles its own window size against
@@ -187,15 +186,15 @@ enum PTYSpawn {
     /// would be exactly the divergence the acknowledgement exists to close.
     static func applyWindowSize(_ grid: PTYHostGrid, to master: Int32) -> PTYHostGrid? {
         guard master >= 0 else { return nil }
-        var size = winsize(
+        let size = winsize(
             ws_row: UInt16(clamping: grid.rows),
             ws_col: UInt16(clamping: grid.cols),
             ws_xpixel: UInt16(clamping: grid.xpixel),
             ws_ypixel: UInt16(clamping: grid.ypixel)
         )
-        guard ioctl(master, TIOCSWINSZ, &size) == 0 else { return nil }
+        guard PTYHostPOSIX.setWindowSize(size, on: master) else { return nil }
         let foreground = tcgetpgrp(master)
-        if foreground > 0 { _ = Darwin.kill(-foreground, SIGWINCH) }
+        if foreground > 0 { PTYHostPOSIX.kill(-foreground, SIGWINCH) }
         return PTYHostGrid(
             cols: Int(size.ws_col),
             rows: Int(size.ws_row),
@@ -319,7 +318,13 @@ extension PTYSpawn {
             envp.deallocate()
         }
 
+        // An opaque pointer on Darwin and a struct on Linux; the calls below take its address
+        // either way.
+        #if canImport(Darwin)
         var actions: posix_spawn_file_actions_t?
+        #else
+        var actions = posix_spawn_file_actions_t()
+        #endif
         guard posix_spawn_file_actions_init(&actions) == 0 else {
             [input, output, errors].forEach { $0.closeBoth() }
             return .failure(.forkFailed(errno))
@@ -329,7 +334,7 @@ extension PTYSpawn {
         if let workingDirectory {
             // The `_np` spelling deliberately: the unsuffixed one arrived in macOS 26 and this
             // daemon deploys to 13, so the deprecation is the price of the only form that exists
-            // on the deployment target.
+            // on the deployment target. glibc (2.29) and musl (1.1.24) spell it the same way.
             guard posix_spawn_file_actions_addchdir_np(&actions, workingDirectory) == 0 else {
                 [input, output, errors].forEach { $0.closeBoth() }
                 return .failure(.forkFailed(errno))
@@ -347,7 +352,11 @@ extension PTYSpawn {
             }
         }
 
+        #if canImport(Darwin)
         var attributes: posix_spawnattr_t?
+        #else
+        var attributes = posix_spawnattr_t()
+        #endif
         guard posix_spawnattr_init(&attributes) == 0 else {
             [input, output, errors].forEach { $0.closeBoth() }
             return .failure(.forkFailed(errno))
@@ -364,17 +373,13 @@ extension PTYSpawn {
         sigemptyset(&unblocked)
         _ = posix_spawnattr_setsigmask(&attributes, &unblocked)
         // A pgid of zero means "lead your own group", so the child's group id is its pid and
-        // `kill(-pid, …)` reaches it and every grandchild it starts. `CLOEXEC_DEFAULT` means it
-        // inherits exactly the three descriptors named above and nothing else the daemon
-        // happened to have open — including the socket its own app is talking to.
+        // `kill(-pid, …)` reaches it and every grandchild it starts. The child inherits exactly
+        // the three descriptors named above and nothing else the daemon happened to have open —
+        // including the socket its own app is talking to. Darwin says so with
+        // `CLOEXEC_DEFAULT`; Linux has no such flag, so there every daemon descriptor is
+        // close-on-exec from creation. `PTYHostPOSIX.pipeSpawnFlags` holds the difference.
         guard posix_spawnattr_setpgroup(&attributes, PTYHostDefaults.leadOwnGroup) == 0,
-              posix_spawnattr_setflags(
-                  &attributes,
-                  Int16(
-                      POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP
-                          | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-                  )
-              ) == 0 else {
+              posix_spawnattr_setflags(&attributes, PTYHostPOSIX.pipeSpawnFlags) == 0 else {
             [input, output, errors].forEach { $0.closeBoth() }
             return .failure(.forkFailed(errno))
         }
@@ -419,21 +424,20 @@ private final class DescriptorPair {
     private(set) var writeEnd: Int32
 
     init?() {
-        var descriptors: [Int32] = [-1, -1]
-        guard pipe(&descriptors) == 0 else { return nil }
-        readEnd = descriptors[0]
-        writeEnd = descriptors[1]
+        guard let descriptors = PTYHostPOSIX.makePipe() else { return nil }
+        readEnd = descriptors.read
+        writeEnd = descriptors.write
     }
 
     func closeReadEnd() {
         guard readEnd >= 0 else { return }
-        close(readEnd)
+        PTYHostPOSIX.close(readEnd)
         readEnd = -1
     }
 
     func closeWriteEnd() {
         guard writeEnd >= 0 else { return }
-        close(writeEnd)
+        PTYHostPOSIX.close(writeEnd)
         writeEnd = -1
     }
 

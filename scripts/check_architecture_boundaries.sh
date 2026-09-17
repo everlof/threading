@@ -619,11 +619,19 @@ fi
 # So the import list is the boundary, and the identifier list names the specific temptations. It
 # is a lint rather than a note in a document because "the daemon should just log to the same place
 # as the app" is a one-line change that reads as an improvement.
-if rg -n --pcre2 '^\s*(?:@[A-Za-z_]+\s+)?import\s+(?!(?:Foundation|Darwin|Dispatch|ThreadingPTYHostKit)\s*$)' \
+#
+# The Linux build of the same daemon adds the Linux C library (`Glibc`, or `Musl` for the static
+# binary) and `CPTYHostPlatform`, its small C shim; those are the platform's spelling of
+# `Darwin`, not a new dependency. Its SwiftPM manifest and test target are the build, not the
+# daemon, and are not held to the list.
+if rg -n --pcre2 '^\s*(?:@[A-Za-z_]+\s+)?import\s+(?!(?:Foundation|Darwin|Glibc|Musl|CPTYHostPlatform|Dispatch|ThreadingPTYHostKit)\s*$)' \
   "${repository_directory}/Targets/PTYHost" \
-  --glob '*.swift'; then
-  echo "architecture-boundary: threading-ptyd may import only Foundation, Darwin, Dispatch and" >&2
-  echo "  ThreadingPTYHostKit — the wire contract is the only thing it shares with the app" >&2
+  --glob '*.swift' \
+  --glob '!Package.swift' \
+  --glob '!**/Tests/**'; then
+  echo "architecture-boundary: threading-ptyd may import only Foundation, Darwin (or Glibc, Musl" >&2
+  echo "  and CPTYHostPlatform on Linux), Dispatch and ThreadingPTYHostKit — the wire contract is" >&2
+  echo "  the only thing it shares with the app" >&2
   failed=1
 fi
 

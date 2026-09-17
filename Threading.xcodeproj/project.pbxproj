@@ -37,6 +37,7 @@
 		7C000008000000000000A001 /* PTYHostCLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B001 /* PTYHostCLI.swift */; };
 		7C000008000000000000A002 /* PTYHostCLIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B002 /* PTYHostCLIClient.swift */; };
 		7C000008000000000000A003 /* PTYHostCLIFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B003 /* PTYHostCLIFormatting.swift */; };
+		7C000008000000000000A004 /* PTYHostPlatform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B004 /* PTYHostPlatform.swift */; };
 		7C000005000000000000A009 /* threading-ptyd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B011 /* threading-ptyd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000005000000000000A010 /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000005000000000000C010 /* ThreadingPTYHostKit */; };
 		7C000007000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B001 /* main.swift */; };
@@ -356,6 +357,7 @@
 		7C000008000000000000B001 /* PTYHostCLI.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PTYHostCLI.swift; sourceTree = "<group>"; };
 		7C000008000000000000B002 /* PTYHostCLIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PTYHostCLIClient.swift; sourceTree = "<group>"; };
 		7C000008000000000000B003 /* PTYHostCLIFormatting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PTYHostCLIFormatting.swift; sourceTree = "<group>"; };
+		7C000008000000000000B004 /* PTYHostPlatform.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PTYHostPlatform.swift; sourceTree = "<group>"; };
 		7C000005000000000000B009 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000005000000000000B010 /* threading-ptyd.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-ptyd.entitlements"; sourceTree = "<group>"; };
 		7C000006000000000000B001 /* codes.threading.ptyd.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = codes.threading.ptyd.plist; sourceTree = "<group>"; };
@@ -753,6 +755,7 @@
 				7C000008000000000000B001 /* PTYHostCLI.swift */,
 				7C000008000000000000B002 /* PTYHostCLIClient.swift */,
 				7C000008000000000000B003 /* PTYHostCLIFormatting.swift */,
+				7C000008000000000000B004 /* PTYHostPlatform.swift */,
 				7C000005000000000000B009 /* Info.plist */,
 				7C000005000000000000B010 /* threading-ptyd.entitlements */,
 				7C000006000000000000B001 /* codes.threading.ptyd.plist */,
@@ -1635,6 +1638,7 @@
 				7C000008000000000000A001 /* PTYHostCLI.swift in Sources */,
 				7C000008000000000000A002 /* PTYHostCLIClient.swift in Sources */,
 				7C000008000000000000A003 /* PTYHostCLIFormatting.swift in Sources */,
+				7C000008000000000000A004 /* PTYHostPlatform.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

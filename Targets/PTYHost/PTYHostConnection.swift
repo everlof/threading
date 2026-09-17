@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Dispatch
 import Foundation
 import ThreadingPTYHostKit
@@ -65,20 +71,13 @@ final class PTYHostConnection: @unchecked Sendable {
         // Without this a write to a socket the client has already closed raises `SIGPIPE`. The
         // process-wide ignore covers it too; both are here because either one alone is a
         // one-line change away from being removed by somebody who saw only the other.
-        var suppress: Int32 = 1
-        _ = setsockopt(
-            descriptor,
-            SOL_SOCKET,
-            SO_NOSIGPIPE,
-            &suppress,
-            socklen_t(MemoryLayout<Int32>.size)
-        )
+        PTYHostPOSIX.suppressBrokenPipeSignal(on: descriptor)
 
         io = DispatchIO(
             type: .stream,
             fileDescriptor: descriptor,
             queue: queue,
-            cleanupHandler: { _ in Darwin.close(descriptor) }
+            cleanupHandler: { _ in PTYHostPOSIX.close(descriptor) }
         )
         // Deliver whatever has arrived rather than waiting for a buffer to fill: a control frame
         // is a few dozen bytes and the answer to it is what the client is waiting for.
@@ -145,7 +144,7 @@ final class PTYHostConnection: @unchecked Sendable {
         isClosed = true
         if discardingQueuedWrites {
             io.close(flags: .stop)
-            _ = shutdown(descriptor, SHUT_RDWR)
+            PTYHostPOSIX.shutdown(descriptor, .readWrite)
         } else {
             io.close(flags: [])
             // Ends *our* reading, not the peer's: the channel closes only once its outstanding
@@ -155,7 +154,7 @@ final class PTYHostConnection: @unchecked Sendable {
             // the frame explaining the close would be the last thing the client never learned
             // it had received. The write side stays open, so what is queued still goes out
             // before the channel's cleanup releases the descriptor.
-            _ = shutdown(descriptor, SHUT_RD)
+            PTYHostPOSIX.shutdown(descriptor, .read)
             endWhenDrained()
         }
         onClosed?()
@@ -177,7 +176,7 @@ final class PTYHostConnection: @unchecked Sendable {
         io.write(offset: 0, data: payload, queue: queue) { [weak self] done, _, _ in
             guard done, let self else { return }
             pendingWriteBytes = max(0, pendingWriteBytes - submitted)
-            if isClosed, pendingWriteBytes == 0 { _ = shutdown(descriptor, SHUT_RDWR) }
+            if isClosed, pendingWriteBytes == 0 { PTYHostPOSIX.shutdown(descriptor, .readWrite) }
         }
     }
 
@@ -187,14 +186,14 @@ final class PTYHostConnection: @unchecked Sendable {
     /// draining the last frame it will ever be sent, so the wait ends either way.
     private func endWhenDrained() {
         if pendingWriteBytes <= 0 {
-            _ = shutdown(descriptor, SHUT_RDWR)
+            PTYHostPOSIX.shutdown(descriptor, .readWrite)
             return
         }
         guard !isDrainingClose else { return }
         isDrainingClose = true
         queue.asyncAfter(deadline: .now() + PTYHostDefaults.closeFlushTimeout) { [weak self] in
             guard let self else { return }
-            _ = shutdown(descriptor, SHUT_RDWR)
+            PTYHostPOSIX.shutdown(descriptor, .readWrite)
         }
     }
 

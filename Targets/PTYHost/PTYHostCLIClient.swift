@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 import ThreadingPTYHostKit
 
@@ -131,63 +137,37 @@ final class PTYHostCLIClient: @unchecked Sendable {
             throw PTYHostCLIError.socketMissing(path: socketPath)
         }
 
-        let handle = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard let address = PTYHostPOSIX.unixAddress(path: socketPath) else {
+            throw PTYHostCLIError.socketPathTooLong(bytes: socketPath.utf8.count)
+        }
+
+        let handle = socket(AF_UNIX, PTYHostPOSIX.streamSocketType, 0)
         guard handle >= 0 else {
             throw PTYHostCLIError.connectFailed(path: socketPath, code: errno)
         }
-
-        var suppress: Int32 = 1
-        _ = setsockopt(
-            handle,
-            SOL_SOCKET,
-            SO_NOSIGPIPE,
-            &suppress,
-            socklen_t(MemoryLayout<Int32>.size)
-        )
-
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
-        let bytes = Array(socketPath.utf8)
-        let capacity = MemoryLayout.size(ofValue: address.sun_path)
-        guard bytes.count < capacity else {
-            Darwin.close(handle)
-            throw PTYHostCLIError.socketPathTooLong(bytes: bytes.count)
-        }
-        withUnsafeMutablePointer(to: &address.sun_path) { tuple in
-            tuple.withMemoryRebound(to: CChar.self, capacity: capacity) { destination in
-                for (index, byte) in bytes.enumerated() {
-                    destination[index] = CChar(bitPattern: byte)
-                }
-                destination[bytes.count] = 0
-            }
-        }
+        PTYHostPOSIX.suppressBrokenPipeSignal(on: handle)
 
         let flags = fcntl(handle, F_GETFL, 0)
         _ = fcntl(handle, F_SETFL, flags | O_NONBLOCK)
 
-        let started = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                Darwin.connect(handle, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
+        let started = PTYHostPOSIX.connect(handle, address)
         if started != 0 {
             guard errno == EINPROGRESS else {
                 let code = errno
-                Darwin.close(handle)
+                PTYHostPOSIX.close(handle)
                 throw PTYHostCLIError.connectFailed(path: socketPath, code: code)
             }
             var poller = pollfd(fd: handle, events: Int16(POLLOUT), revents: 0)
             let milliseconds = Int32(max(timeout, 0) * 1000)
             guard poll(&poller, 1, milliseconds) > 0 else {
-                Darwin.close(handle)
+                PTYHostPOSIX.close(handle)
                 throw PTYHostCLIError.connectFailed(path: socketPath, code: ETIMEDOUT)
             }
             var pending: Int32 = 0
             var size = socklen_t(MemoryLayout<Int32>.size)
             _ = getsockopt(handle, SOL_SOCKET, SO_ERROR, &pending, &size)
             guard pending == 0 else {
-                Darwin.close(handle)
+                PTYHostPOSIX.close(handle)
                 throw PTYHostCLIError.connectFailed(path: socketPath, code: pending)
             }
         }
@@ -325,7 +305,7 @@ final class PTYHostCLIClient: @unchecked Sendable {
         condition.broadcast()
         condition.unlock()
         guard !alreadyClosed else { return }
-        _ = shutdown(descriptor, SHUT_RDWR)
+        PTYHostPOSIX.shutdown(descriptor, .readWrite)
     }
 
     // MARK: - Private Methods
@@ -364,14 +344,14 @@ final class PTYHostCLIClient: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: PTYHostCLIDefaults.readBufferBytes)
         while true {
             let count = buffer.withUnsafeMutableBytes {
-                Darwin.read(descriptor, $0.baseAddress, $0.count)
+                PTYHostPOSIX.read(descriptor, $0.baseAddress, $0.count)
             }
             guard count > 0 else {
                 condition.lock()
                 closed = true
                 condition.broadcast()
                 condition.unlock()
-                Darwin.close(descriptor)
+                PTYHostPOSIX.close(descriptor)
                 return
             }
             let incoming = Data(buffer[0..<count])
@@ -395,18 +375,6 @@ final class PTYHostCLIClient: @unchecked Sendable {
     }
 
     private func write(_ data: Data) {
-        data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            var offset = 0
-            while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
-                if written > 0 {
-                    offset += written
-                    continue
-                }
-                if written < 0 && errno == EINTR { continue }
-                return
-            }
-        }
+        PTYHostPOSIX.writeAll(descriptor, data)
     }
 }

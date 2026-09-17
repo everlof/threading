@@ -1,4 +1,10 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Dispatch
 import Foundation
 import ThreadingPTYHostKit
@@ -214,46 +220,20 @@ final class PTYHostServer: @unchecked Sendable {
     /// listening there, so it is the only one that can tell a leftover file from a live listener
     /// without a race.
     private func bindListener() -> Bool {
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
-
-        let pathBytes = Array(socketPath.utf8)
-        let capacity = MemoryLayout.size(ofValue: address.sun_path)
-        guard pathBytes.count < capacity else {
-            let message = "threading-ptyd: socket path is \(pathBytes.count) bytes, over the "
-                + "\(capacity - 1)-byte limit\n"
+        guard let address = PTYHostPOSIX.unixAddress(path: socketPath) else {
+            let message = "threading-ptyd: socket path is \(socketPath.utf8.count) bytes, over the "
+                + "\(PTYHostPOSIX.unixPathCapacity - 1)-byte limit\n"
             FileHandle.standardError.write(Data(message.utf8))
             return false
         }
-        withUnsafeMutablePointer(to: &address.sun_path) { tuple in
-            tuple.withMemoryRebound(to: CChar.self, capacity: capacity) { destination in
-                for (index, byte) in pathBytes.enumerated() {
-                    destination[index] = CChar(bitPattern: byte)
-                }
-                destination[pathBytes.count] = 0
-            }
-        }
 
         unlink(socketPath)
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        let descriptor = socket(AF_UNIX, PTYHostPOSIX.streamSocketType, 0)
         guard descriptor >= 0 else { return false }
         _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
+        PTYHostPOSIX.suppressBrokenPipeSignal(on: descriptor)
 
-        var suppress: Int32 = 1
-        _ = setsockopt(
-            descriptor,
-            SOL_SOCKET,
-            SO_NOSIGPIPE,
-            &suppress,
-            socklen_t(MemoryLayout<Int32>.size)
-        )
-
-        let bound = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                Darwin.bind(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
+        let bound = PTYHostPOSIX.bind(descriptor, address)
         guard bound == 0, listen(descriptor, PTYHostDefaults.socketBacklog) == 0 else {
             FileHandle.standardError.write(
                 Data("threading-ptyd: cannot bind \(socketPath): \(String(cString: strerror(errno)))\n".utf8)
@@ -1076,19 +1056,47 @@ final class PTYHostServer: @unchecked Sendable {
     // MARK: - Private Methods — endings
 
     private func watchForExit(_ session: PTYSession) {
-        let source = DispatchSource.makeProcessSource(
-            identifier: session.pid,
-            eventMask: .exit,
-            queue: queue
-        )
         // The handler is installed before the source is activated: `NOTE_EXIT` is delivered at
-        // most once, and a child that has already exited fires it during `activate()`.
-        source.setEventHandler { [weak self, weak session] in
-            guard let self, let session else { return }
-            reap(session, attempt: 0)
+        // most once, and a child that has already exited fires it during `activate()`. A Linux
+        // pidfd is level-triggered instead — readable from the exit until it is closed — which
+        // `reap` tolerates because it does nothing once the exit is recorded.
+        guard let source = PTYHostPOSIX.makeExitSource(
+            for: session.pid,
+            queue: queue,
+            handler: { [weak self, weak session] in
+                guard let self, let session else { return }
+                reap(session, attempt: 0)
+            }
+        ) else {
+            pollForExit(session)
+            return
         }
         session.processSource = source
         source.activate()
+    }
+
+    /// The fallback when no exit event could be armed — on Linux, a `pidfd_open` refused because
+    /// the daemon is out of descriptors, or made on a kernel older than 5.3 that has no pidfds.
+    ///
+    /// A session whose ending nobody notices is a session that is never released and an app that
+    /// waits forever, so the exit is polled instead. Each tick is one non-blocking `waitpid`,
+    /// asked as the last reap attempt so a still-running child schedules no retries of its own.
+    private func pollForExit(_ session: PTYSession) {
+        journal.record(.exitPolled, [
+            Field.session: session.id.description,
+            Field.pid: String(session.pid)
+        ])
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + PTYHostDefaults.exitPollInterval,
+            repeating: PTYHostDefaults.exitPollInterval
+        )
+        timer.setEventHandler { [weak self, weak session] in
+            guard let self, let session else { return }
+            reap(session, attempt: PTYHostDefaults.reapAttempts)
+        }
+        session.processSource = timer
+        timer.activate()
     }
 
     private func reap(_ session: PTYSession, attempt: Int) {
