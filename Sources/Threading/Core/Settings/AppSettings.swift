@@ -1036,6 +1036,24 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Remote Execution Hosts
+
+    /// The developer setting's project-to-host assignments, decoded. Invalid entries are dropped
+    /// rather than guessed at. See `AppSettingDefinitions.developerRemoteExecutionHosts`.
+    ///
+    /// `defaults write codes.threading developerRemoteExecutionHosts -string '[…]'`.
+    var developerRemoteExecutionHosts: [RemoteExecutionHostAssignment] {
+        let json = AppSettingDefinitions.developerRemoteExecutionHosts.read(from: defaults) ?? ""
+        return RemoteExecutionHostAssignment.decodeList(json).assignments
+    }
+
+    /// Where the Linux `threading-ptyd` binaries are, or nil when none is configured.
+    var developerRemoteHostBinaryDirectory: URL? {
+        let path = AppSettingDefinitions.developerRemoteHostBinaryDirectory.read(from: defaults) ?? ""
+        guard path.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
     // MARK: - Command Line Tools
 
     /// Whether every shell and agent Threading launches gets its command-line tools on `PATH`.

@@ -65,6 +65,12 @@ final class AgentSessionViewController: NSViewController {
     /// Set when the terminal is not yet large enough to start the process, so the launch
     /// can be retried from the size-change callback.
     private var pendingLaunchPlan: AgentLaunchPlan?
+    /// Set beside `pendingLaunchPlan` when the session's project runs on a remote execution host.
+    /// The local plan is then only a placeholder: the command line is composed from the host's
+    /// facts once the host is prepared, which may take a while the first time.
+    private var pendingRemoteLaunch: PendingRemoteLaunch?
+    /// Retries a remote launch when its host's preparation settles. Registered only while one waits.
+    private var remoteHostObserver: NSObjectProtocol?
     /// While the off-main process-table preflight decides whether another CLI owns this resume
     /// identifier. It is also the duplicate-launch guard for clicks arriving before that answer.
     private var externalResumePreflightID: UUID?
@@ -506,6 +512,10 @@ final class AgentSessionViewController: NSViewController {
             return
         }
         pendingLaunchPlan = plan
+        pendingRemoteLaunch = RemoteExecutionHostAssignment.assignment(
+            forProjectFolder: project.folderPath,
+            in: AppSettings.shared.developerRemoteExecutionHosts
+        ).map { PendingRemoteLaunch(assignment: $0, initialPrompt: initialPrompt) }
         // Opening an existing prompt is presentation, even when this is the selected session.
         // A restart can select it and then switch away before boot output goes quiet. Apply
         // the same grace as background restoration when this launch submits no new work.
@@ -586,6 +596,7 @@ final class AgentSessionViewController: NSViewController {
     /// Terminates the agent, leaving the terminal view in place showing its final output.
     func terminate() {
         pendingLaunchPlan = nil
+        clearPendingRemoteLaunch()
         externalResumePreflightID = nil
         guard isRunning else {
             session.terminate()
@@ -645,8 +656,10 @@ final class AgentSessionViewController: NSViewController {
         // the host survey is in flight. The daemon owns the child named by this attach attempt,
         // so that local launch must stay cancelled even if attaching the surface fails.
         pendingLaunchPlan = nil
+        clearPendingRemoteLaunch()
         externalResumePreflightID = nil
 
+        session.hostPlacement = .local
         session.hostTransportFactory = PTYHostPolicy.attachingTransportFactory(
             socketPath: socketPath,
             bundle: bundle
@@ -872,7 +885,7 @@ final class AgentSessionViewController: NSViewController {
     // MARK: - Private Methods
 
     private func startIfTerminalIsSized() {
-        guard let plan = pendingLaunchPlan,
+        guard var plan = pendingLaunchPlan,
               !SessionTerminalRestart.shared.contains(sessionID) else { return }
 
         let dimensions = session.terminalView.terminalDimensions
@@ -884,23 +897,44 @@ final class AgentSessionViewController: NSViewController {
         // either handed to the background host or remains stopped with an actionable failure;
         // it is never silently converted into an app-owned process.
         let hostFactory: PTYHostTransportFactory?
-        switch PTYHostPolicy.launchRoute(
-            for: session.identity,
-            session: self.projectStore.session(withID: sessionID)
-        ) {
-        case .local:
-            hostFactory = nil
-        case .hosted(let factory):
-            hostFactory = factory
-        case .unavailable(let failure):
-            pendingLaunchPlan = nil
-            recordLaunchRefusal(SessionLaunchFailure(
-                origin: .preflight,
-                summary: L10n.string("Couldn’t start this background session."),
-                detail: [failure.localizedDescription],
-                knownCause: "ptyHost.\(failure.cause)"
-            ))
-            return
+        let placement: PTYHostPlacement
+        if let remote = pendingRemoteLaunch {
+            // A project on a remote host is hosted there or not at all: running its agent on this
+            // Mac instead would put the work in a checkout the person did not choose.
+            switch resolveRemoteLaunch(remote) {
+            case .waiting:
+                return
+            case .refused(let failure):
+                pendingLaunchPlan = nil
+                clearPendingRemoteLaunch()
+                recordLaunchRefusal(failure)
+                return
+            case .ready(let launch, let socketPath):
+                clearPendingRemoteLaunch()
+                plan = launch.plan
+                hostFactory = PTYHostPolicy.attachingTransportFactory(socketPath: socketPath)
+                placement = .remote(environment: launch.environment)
+            }
+        } else {
+            placement = .local
+            switch PTYHostPolicy.launchRoute(
+                for: session.identity,
+                session: self.projectStore.session(withID: sessionID)
+            ) {
+            case .local:
+                hostFactory = nil
+            case .hosted(let factory):
+                hostFactory = factory
+            case .unavailable(let failure):
+                pendingLaunchPlan = nil
+                recordLaunchRefusal(SessionLaunchFailure(
+                    origin: .preflight,
+                    summary: L10n.string("Couldn’t start this background session."),
+                    detail: [failure.localizedDescription],
+                    knownCause: "ptyHost.\(failure.cause)"
+                ))
+                return
+            }
         }
 
         // Whatever the launch decided about this session stops being the reason it is dormant the
@@ -949,10 +983,112 @@ final class AgentSessionViewController: NSViewController {
 
         // The route was resolved before the launch record above so an unavailable requested host
         // remains a refusal rather than a launch that never happened.
+        session.hostPlacement = placement
         session.hostTransportFactory = hostFactory
         session.start(plan: plan)
         guard isRunning else { return }
         finishRecordedLaunch(plan: plan)
+    }
+
+    // MARK: - Private Methods — remote execution hosts
+
+    private struct PendingRemoteLaunch {
+        let assignment: RemoteExecutionHostAssignment
+        let initialPrompt: String?
+        /// Whether this launch has already asked for the host to be prepared. A later retry only
+        /// reads the phase, so a failed preparation is reported rather than started again.
+        var requestedPreparation = false
+    }
+
+    private enum RemoteLaunchResolution {
+        case waiting
+        case refused(SessionLaunchFailure)
+        case ready(RemoteAgentLaunch, socketPath: String)
+    }
+
+    /// Where a remote launch stands. Never blocks: preparing a host is `ssh` work on
+    /// `RemoteExecutionHosts`' own queue, and this waits for its change notification.
+    private func resolveRemoteLaunch(_ remote: PendingRemoteLaunch) -> RemoteLaunchResolution {
+        let hosts = RemoteExecutionHosts.shared
+        let destination = remote.assignment.destination
+        let phase: RemoteHostPhase
+        if remote.requestedPreparation {
+            phase = hosts.phase(for: destination)
+        } else {
+            pendingRemoteLaunch?.requestedPreparation = true
+            phase = hosts.readiness(
+                for: destination,
+                binaryDirectory: AppSettings.shared.developerRemoteHostBinaryDirectory
+            )
+        }
+
+        switch phase {
+        case .idle, .preparing:
+            observeRemoteHostChanges()
+            return .waiting
+        case .failed(let failure):
+            return .refused(SessionLaunchFailure(
+                origin: .preflight,
+                summary: L10n.string("Couldn’t start this session on its remote host."),
+                detail: [failure.detail],
+                knownCause: "remoteHost.\(failure.token)"
+            ))
+        case .ready(let context):
+            guard let agentSession = projectStore.session(withID: sessionID),
+                  let project = projectStore.project(forSessionID: sessionID) else {
+                return .refused(SessionLaunchFailure(
+                    origin: .preflight,
+                    summary: L10n.string("Couldn’t start this session on its remote host."),
+                    detail: [],
+                    knownCause: "remoteHost.sessionMissing"
+                ))
+            }
+            do {
+                let launch = try RemoteAgentLaunch.make(
+                    for: agentSession,
+                    in: project,
+                    assignment: remote.assignment,
+                    context: context,
+                    initialPrompt: remote.initialPrompt
+                )
+                return .ready(launch, socketPath: context.localSocketPath)
+            } catch let refusal as RemoteAgentLaunchError {
+                return .refused(SessionLaunchFailure(
+                    origin: .preflight,
+                    summary: L10n.string("Couldn’t start this session on its remote host."),
+                    detail: [refusal.localizedDescription],
+                    knownCause: "remoteHost.\(refusal.token)"
+                ))
+            } catch {
+                return .refused(SessionLaunchFailure(
+                    origin: .preflight,
+                    summary: L10n.string("Couldn’t start this session on its remote host."),
+                    detail: [error.localizedDescription],
+                    knownCause: "remoteHost.unexpected"
+                ))
+            }
+        }
+    }
+
+    private func observeRemoteHostChanges() {
+        guard remoteHostObserver == nil else { return }
+        remoteHostObserver = NotificationCenter.default.addObserver(
+            forName: RemoteExecutionHosts.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.startIfTerminalIsSized()
+            }
+        }
+    }
+
+    private func clearPendingRemoteLaunch() {
+        pendingRemoteLaunch = nil
+        if let remoteHostObserver {
+            NotificationCenter.default.removeObserver(remoteHostObserver)
+            self.remoteHostObserver = nil
+        }
     }
 
     /// Starts discovery and repaint work after the process launch record has already committed.
@@ -1708,7 +1844,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         if isRunning {
             SessionExecutionProcessObserver.shared.noteOutput(
                 sessionID: sessionID,
-                rootPID: session.shellPid
+                rootPID: session.localShellPid
             )
         }
         if let acceptedByteCount = activityTracker.recordOutput(byteCount: byteCount) {
@@ -1849,7 +1985,7 @@ extension AgentSessionViewController: AgentTerminalRuntimeSurface {
     }
 
     var terminalRootProcessIdentifier: pid_t? {
-        session.shellPid > 0 ? session.shellPid : nil
+        session.localShellPid > 0 ? session.localShellPid : nil
     }
 
     func pasteTerminalText(_ text: String) {

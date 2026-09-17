@@ -1063,6 +1063,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
         // spawned for remote access outlives the app.
         RemoteAccessCoordinator.shared.stop()
+        // After the hosted sessions above have detached: agents on a remote execution host keep
+        // running, and only this Mac's `ssh` tunnels to them end with the app.
+        RemoteExecutionHosts.shared.closeAllTunnels()
         ExtensionHostService.shared.stop()
         MCPServer.shared.stop()
 

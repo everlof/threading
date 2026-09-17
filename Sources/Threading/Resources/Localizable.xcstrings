@@ -837,6 +837,17 @@
         }
       }
     },
+    "%@ isn’t installed on the host, or its login shell can’t find it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ är inte installerat på värden, eller så hittar dess inloggningsskal det inte."
+          }
+        }
+      }
+    },
     "%@ list-price estimate" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1097,6 +1108,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ återställd"
+          }
+        }
+      }
+    },
+    "%@ sessions can’t run on a remote host yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@-sessioner kan inte köras på en fjärrvärd ännu."
           }
         }
       }
@@ -10525,6 +10547,17 @@
         }
       }
     },
+    "Chats can’t run on a remote host yet. Use a terminal session." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chattar kan inte köras på en fjärrvärd ännu. Använd en terminalsession."
+          }
+        }
+      }
+    },
     "Chats that are about no project live here. The folder is made the first time you start a scratchpad, and it is an ordinary git repository, so Git Review works on it and nothing you write is lost. It sits outside Threading's own storage on purpose — Reset Everything does not touch it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15317,6 +15350,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte starta den här bakgrundssessionen."
+          }
+        }
+      }
+    },
+    "Couldn’t start this session on its remote host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att starta den här sessionen på dess fjärrvärd."
           }
         }
       }
@@ -25777,6 +25821,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den hanterade arbetsytan behöver ses över"
+          }
+        }
+      }
+    },
+    "Managed workspaces can’t run on a remote host yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanterade arbetsytor kan inte köras på en fjärrvärd ännu."
           }
         }
       }
@@ -41464,6 +41519,17 @@
         }
       }
     },
+    "Side chats can’t start on a remote host yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidochattar kan inte startas på en fjärrvärd ännu."
+          }
+        }
+      }
+    },
     "Sidebar" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46637,6 +46703,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det värdägda sökfältet, den virtualiserade resultatramen, realiserade semantiska rader, radåtgärder, överskottsmeddelandet och svaret utan träffar som används av fokuserade tilläggssidofält."
+          }
+        }
+      }
+    },
+    "The host’s login shell (%@) isn’t supported yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens inloggningsskal (%@) stöds inte ännu."
           }
         }
       }

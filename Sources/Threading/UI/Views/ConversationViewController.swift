@@ -1031,6 +1031,14 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // because a daemon started by launchd is somewhere else entirely.
         let hostPlan = { () throws -> PTYHostChildPlan? in
             let identity = TerminalInstanceIdentity.agentSession(sessionID)
+            // A project on a remote execution host runs its sessions there or not at all, and a
+            // native conversation cannot yet: its transports read transcripts on this Mac.
+            if RemoteExecutionHostAssignment.assignment(
+                forProjectFolder: project.folderPath,
+                in: AppSettings.shared.developerRemoteExecutionHosts
+            ) != nil {
+                throw RemoteAgentLaunchError.nativeConversation
+            }
             switch PTYHostPolicy.launchRoute(
                 for: identity,
                 session: currentSessionProjection.session(for: sessionID)

@@ -900,7 +900,7 @@ final class SessionInfoViewController: NSViewController {
     /// A terminal controller that exists but has not yet captured its child reads as pid 0, so
     /// that is treated as absent rather than passed on as a root.
     private var agentRootPid: pid_t? {
-        if let terminal = AgentRuntime.shared.controller(for: sessionID)?.session.shellPid, terminal > 0 {
+        if let terminal = AgentRuntime.shared.controller(for: sessionID)?.session.localShellPid, terminal > 0 {
             return terminal
         }
         return AgentRuntime.shared.conversation(for: sessionID)?.stream.rootProcessIdentifier

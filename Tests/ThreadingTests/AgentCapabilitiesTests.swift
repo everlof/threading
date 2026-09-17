@@ -56,7 +56,9 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("lifecycleReportedTranscriptPath", .lifecycleReportedTranscriptPath),
             ("lifecycleReportedWorkingDirectory", .lifecycleReportedWorkingDirectory),
             ("detectableExternalResume", .detectableExternalResume),
-            ("selectableTerminalRenderer", .selectableTerminalRenderer)
+            ("selectableTerminalRenderer", .selectableTerminalRenderer),
+            ("bankedUsageReset", .bankedUsageReset),
+            ("remoteExecutionHostLaunch", .remoteExecutionHostLaunch)
         ]
 
         var seen: [Int: String] = [:]

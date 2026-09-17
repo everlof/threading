@@ -2,6 +2,8 @@
 
 > Status: feature draft — slice 1 (a Linux build of `threading-ptyd`) builds and passes its
 > suite on Linux; its durable decisions are in [`pty-host.md`](../architecture/pty-host.md#linux).
+> A developer version of slices 2–3 runs Claude terminal sessions on a host behind a hidden setting
+> (see [The developer version](#the-developer-version-2026-09-17)).
 > The remote-session spike (below) ran on 2026-09-17 and settles slice 2's transport, install and
 > upgrade shape. Nothing else has started. This is the implementation plan for slice C of
 > [SSH remote hosts and SFTP attachment sources](ssh-remote-hosts-and-sftp-attachments.md#c-remote-execution-host),
@@ -142,6 +144,61 @@ requests. Slice 3's first release refuses them; each is then restored one surfac
 
 The first release asks the person to sign in to each CLI once from a remote shell session. Moving
 logins between machines is out of scope.
+
+## The developer version, 2026-09-17
+
+Slices 2 and 3 as a hidden developer setting, before host profiles or any UI: a project folder is
+assigned to an `ssh` destination, and its Claude terminal sessions run there.
+
+**What it does.** `RemoteExecutionHosts` (`Sources/Threading/Core/RemoteHost/`) prepares a host off
+the main actor, one serial job per host: read its facts over `ssh` (`sh -s`, never a quoted
+argument), upload the static daemon into a content-named directory and verify its SHA-256, write the
+templated unit, enable lingering, retire another build only when it answers at this rendezvous with
+zero sessions, start this build's instance, open a dedicated `ssh -N -L` tunnel and wait for
+`hello`. A launch never blocks on it: `AgentSessionViewController` waits for
+`RemoteExecutionHosts.didChangeNotification` and retries. `RemoteAgentLaunch` composes the command
+from the host's facts — its login shell, its home, the remote checkout — and the host's own shell
+decides `--resume` or `--session-id` by testing the transcript file. `TerminalSession.hostPlacement`
+carries the host's environment and turns off every lookup that would ask this Mac's kernel about a
+host pid.
+
+**What it refuses, by name.** Every agent without `remoteExecutionHostLaunch` (all but Claude);
+native chats; side-chat forks; managed workspaces; a login shell `-l -c` cannot hand POSIX syntax
+to; a host whose login shell does not find `claude`; a host without systemd. No hooks or MCP yet
+(slice 4), so activity comes from terminal output inference.
+
+**Measured on the spike's Lima VM** (Debian 12, arm64) by `RemoteExecutionHostLiveTests`: facts,
+upload, unit, linger, tunnel and `hello`, then a child spawned through the tunnel reporting
+`HOST=Linux` and the host's home with exit status 7, then a second preparation finding everything
+in place. Two findings changed the code:
+
+- **A multiplexed `ssh` is not a tunnel.** Lima's `ssh.config` sets `ControlMaster`/`ControlPersist`;
+  with it, `ssh -N -L` handed the forward to the master and exited 0 immediately, which read as a
+  dead tunnel. The tunnel now runs with `ControlMaster=no` and `ControlPath=none`. Bounded commands
+  still use the person's multiplexing, which is what makes them fast.
+- **An old instance on other paths is not in the way.** The spike's own daemon was still running
+  with `--default-locations`. Nothing answered for it at this rendezvous, so it shares no state
+  directory and holds no lock this build needs; it is left running rather than stopped, because it
+  may hold agents.
+
+**Trying it.** Build the Linux binaries (`scripts/test-ptyd-linux.sh --arch all`), then:
+
+```bash
+defaults write codes.threading developerRemoteHostBinaryDirectory -string "$PWD/build/linux"
+defaults write codes.threading developerRemoteExecutionHosts -string '[
+  {"projectFolder": "/Users/me/src/app", "destination": "hetzner",
+   "remoteDirectory": "/home/me/src/app"}
+]'
+```
+
+`destination` is anything `ssh` accepts non-interactively (`BatchMode`); add `"sshConfigFile"` for a
+config outside `~/.ssh/config`, such as `~/.lima/<vm>/ssh.config`. The checkout must already exist
+on the host and `claude` must be signed in there. The first launch of a session in that project
+prepares the host (the upload is ~57 MB, ~22 MB compressed); later launches reuse it.
+
+**Not yet.** Reattaching remote sessions at relaunch (the local survey asks only the local socket,
+so a remote session relaunches with `--resume` instead), stale tunnels left by a crashed app,
+Mac-side sleep and network changes beyond `ServerAlive`, and bundling the binaries in the app.
 
 ## Remote-session spike, 2026-09-17
 

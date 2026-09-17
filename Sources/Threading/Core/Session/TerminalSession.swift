@@ -160,6 +160,18 @@ final class TerminalSession: NSObject {
     /// `PTYHostPolicy.launchRoute(for:session:…)`, which is the whole decision as one call.
     var hostTransportFactory: PTYHostTransportFactory?
 
+    /// Where a host-backed child runs, set beside `hostTransportFactory` before a launch.
+    ///
+    /// A remote host's pids are not this Mac's: every pid the daemon reports names a process on
+    /// the host, and asking this Mac's kernel about it would read an unrelated local process. So a
+    /// remote placement turns off each pid-based lookup rather than letting it answer wrongly, and
+    /// carries the environment composed from the host's facts in place of `buildEnvironment()`.
+    var hostPlacement: PTYHostPlacement = .local
+
+    /// `shellPid` when it names a process on this Mac, and 0 when the child is on a remote host.
+    /// Every consumer that asks this Mac's kernel about the session's process tree reads this.
+    var localShellPid: pid_t { hostPlacement.isRemote ? 0 : shellPid }
+
     /// The live link, while this session's child lives in the background host.
     private var hostLink: PTYHostTerminalLink?
 
@@ -628,7 +640,7 @@ final class TerminalSession: NSObject {
                 executable: plan.executable,
                 arguments: plan.arguments,
                 execName: (plan.executable as NSString).lastPathComponent,
-                environment: buildEnvironment(),
+                environment: hostSpawnEnvironment(),
                 cwd: nil,
                 // A persistent session launch is authoritative for its durable identity. The
                 // daemon serializes any old incarnation out before spawning this one, including
@@ -991,6 +1003,17 @@ final class TerminalSession: NSObject {
     ///
     /// Not `private`: `TerminalColorQueryTests` reads it back, because what this hands a child is
     /// the whole of what the child knows about the palette before it draws anything.
+    /// The environment a host-backed spawn is handed: this Mac's composition for a local daemon,
+    /// the host's own plus this session's palette hint for a remote one.
+    private func hostSpawnEnvironment() -> [String] {
+        switch hostPlacement {
+        case .local:
+            return buildEnvironment()
+        case .remote(let environment):
+            return environment + ["\(EnvironmentKeys.colorFGBG)=\(profile.theme.colorFGBG)"]
+        }
+    }
+
     func buildEnvironment() -> [String] {
         var env = ProcessInfo.processInfo.environment
 
@@ -1076,8 +1099,8 @@ final class TerminalSession: NSObject {
             return currentDirectory
         }
 
-        // Otherwise, query the shell process directly
-        guard shellPid > 0 else { return nil }
+        // Otherwise, query the shell process directly — which a remote child is not.
+        guard shellPid > 0, !hostPlacement.isRemote else { return nil }
         return ProcessUtility.workingDirectory(forPid: shellPid)
     }
 
@@ -1208,7 +1231,9 @@ final class TerminalSession: NSObject {
             // `processName` copies the kernel's argument area for the process, which is far
             // more than a once-a-second poll should repeat — so it is read only when the group
             // actually changes, and the name is held until it changes again.
-            let name = group.flatMap { ProcessUtility.processName(forPid: $0) }
+            let name = hostPlacement.isRemote
+                ? nil
+                : group.flatMap { ProcessUtility.processName(forPid: $0) }
             if name != foregroundProcessName {
                 foregroundProcessName = name
                 changed = true

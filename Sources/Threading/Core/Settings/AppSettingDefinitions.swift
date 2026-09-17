@@ -52,6 +52,8 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
     case ptyHostEnabled
+    case developerRemoteExecutionHosts
+    case developerRemoteHostBinaryDirectory
     case prependsCommandLineToolsToPATH
     case workspaceNavigatorSelection
     case sourceControlProviderConnections
@@ -1052,6 +1054,28 @@ enum AppSettingDefinitions {
             ["PTY", "daemon", "background", "durable", "keep running", "threading-ptyd"]
         )]
     )
+    /// Which project folders run their agent sessions on a Linux host, as a JSON array of
+    /// `{"projectFolder", "destination", "sshConfigFile"?, "remoteDirectory"}`.
+    ///
+    /// A developer setting for the first slice of `docs/feature-drafts/remote-execution-hosts.md`:
+    /// hidden (no `presentations`, so `.hidden` remotely too) and read only at launch. Host
+    /// profiles and a persisted per-project host replace it. Its shape is
+    /// `RemoteExecutionHostAssignment`.
+    static let developerRemoteExecutionHosts = AppSettingDescriptor<String>(
+        identity: .developerRemoteExecutionHosts,
+        persistenceKey: "developerRemoteExecutionHosts",
+        absence: .emptyString,
+        validation: .maximumBytes(16_384)
+    )
+    /// The directory holding `arm64/threading-ptyd` and `amd64/threading-ptyd`, as
+    /// `scripts/test-ptyd-linux.sh` writes them under `build/linux`. Hidden, like the assignments
+    /// it serves; bundling the binaries in the app replaces it.
+    static let developerRemoteHostBinaryDirectory = AppSettingDescriptor<String>(
+        identity: .developerRemoteHostBinaryDirectory,
+        persistenceKey: "developerRemoteHostBinaryDirectory",
+        absence: .emptyString,
+        validation: .maximumBytes(4_096)
+    )
     /// Whether every shell and agent Threading launches gets its command-line tools on `PATH`.
     ///
     /// Off by default, because it changes the `PATH` of every child the app starts and that is
@@ -1476,6 +1500,7 @@ enum AppSettingDefinitions {
         .init(sessionCheckoutAuthorityPolicy),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
         .init(usesMCPStdioBridge), .init(ptyHostEnabled),
+        .init(developerRemoteExecutionHosts), .init(developerRemoteHostBinaryDirectory),
         .init(prependsCommandLineToolsToPATH),
         .init(workspaceNavigatorSelection), .init(sourceControlProviderConnections),
         .init(reportsClaudeLifecycleEvents),

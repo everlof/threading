@@ -1166,6 +1166,37 @@ enum AgentLauncher {
         return (command, .resumable(mintedID))
     }
 
+    /// The two Claude command lines a remote execution host chooses between, before any routing.
+    ///
+    /// A remote launch cannot ask this Mac whether the transcript exists — it lives on the host —
+    /// so both are composed and the host's own shell picks one (`RemoteAgentLaunch`). What is
+    /// deliberately absent is everything Mac-side that `claudeCommand` adds: the per-session
+    /// `--settings` file and MCP flags name paths on this Mac, and account routing names this
+    /// Mac's config directories. Slice 4 of `remote-execution-hosts.md` brings hooks and MCP over a
+    /// reverse forward; until then a remote Claude runs with its host's own configuration.
+    static func remoteClaudeCommands(
+        for session: AgentSession,
+        prompt: String?
+    ) -> (resume: ShellCommand, fresh: ShellCommand, transcriptID: TranscriptID) {
+        var base = ShellCommand(word: AgentDefaults.claudeExecutable)
+        appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &base)
+        appendReasoningEffort(for: session, to: &base)
+        appendPermissionMode(for: session, to: &base)
+
+        let transcriptID = session.resumeState.transcriptID
+            ?? TranscriptID(session.id.uuidString.lowercased())
+
+        var resume = base
+        resume.append(flag: "--resume", value: transcriptID.rawValue)
+
+        var fresh = base
+        fresh.append(flag: "--session-id", value: transcriptID.rawValue)
+        appendLaunchName(for: session, to: &fresh)
+        appendPrompt(prompt, to: &fresh)
+
+        return (resume, fresh, transcriptID)
+    }
+
     /// The launch that makes a **side chat**: resume the *parent's* conversation, but write
     /// the turns somewhere new.
     ///

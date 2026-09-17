@@ -367,6 +367,14 @@ struct AgentCapabilities: OptionSet {
   /// through its supported control protocol. Codex only: app-server publishes the inventory,
   /// consumes one credit, and returns an authoritative post-reset rate-limit snapshot.
   static let bankedUsageReset = Self(rawValue: 1 << 38)
+
+  /// The runtime's terminal session can be launched on a remote execution host with nothing read
+  /// from this Mac. Claude only: its identifier is minted before launch (`presetSessionID`), and
+  /// whether to resume is a file test the host's own shell can make under
+  /// `~/.claude/projects/<slug>/`. Codex, Grok and OpenCode learn their identifier after launch by
+  /// reading this Mac's files or running their CLI here, which a remote child is not visible to.
+  /// See `docs/feature-drafts/remote-execution-hosts.md`.
+  static let remoteExecutionHostLaunch = Self(rawValue: 1 << 39)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -459,7 +467,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
-        .modelAliasResolution, .selectableTerminalRenderer
+        .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch
       ]
     case .codex:
       return [
