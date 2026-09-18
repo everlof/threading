@@ -12,6 +12,7 @@ infra/*.tfplan
 infra/.threading.tfplan
 infra/terraform.tfvars
 infra/backend.hcl
+infra/state-credentials.env
 infra/development/.terraform/
 infra/development/*.tfstate
 infra/development/*.tfstate.*
