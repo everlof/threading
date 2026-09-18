@@ -85,7 +85,15 @@ if (( upload )); then
     echo "publish_remote_components: ${tag} already exists; its assets are immutable" >&2
     exit 65
   fi
+  # The tag is created on the remote, so the commit it names must already be there: publish after
+  # the push, never before. `--target` pins it to that commit rather than to whatever the default
+  # branch's head happens to be when GitHub creates it.
+  if ! git -C "${repository_directory}" branch -r --contains "${revision}" | grep -q .; then
+    echo "publish_remote_components: ${revision:0:12} is not on any remote branch; push it first" >&2
+    exit 65
+  fi
   gh release create "${tag}" --repo everlof/threading \
+    --target "${revision}" \
     --title "Remote host components ${revision:0:12}" \
     --notes "Linux components for remote execution hosts, built from ${revision}." \
     "${output}"/threading-*-*.gz
