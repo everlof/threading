@@ -1,0 +1,11 @@
+// `import SQLite3` works on Apple platforms because the SDK ships a module for it. On Linux the
+// library is there — libsqlite3, the same library — but nothing declares a module, so the import
+// fails. This is the whole of that gap: eleven lines, and the header the distribution already has.
+//
+// Worth noticing because `SQLiteDatabase.swift`'s own doc comment says the dependency story is
+// "import SQLite3 costs nothing". On Linux it costs a module map, and then it is true again.
+module SQLite3 [system] {
+    header "shim.h"
+    link "sqlite3"
+    export *
+}
