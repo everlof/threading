@@ -371,3 +371,132 @@ And one real finding fell out of the noise: on Linux, **`URLSession` and friends
 Foundation** — swift-corelibs-foundation splits them into `FoundationNetworking`. Those files are
 not blocked, but each needs a `#if canImport(FoundationNetworking)` import, so it is a genuine
 porting chore with its own bucket rather than a footnote.
+
+---
+
+# Round four: linking a real core slice
+
+Measured 2026-09-18. `sweep-core.sh` asked "would this file type-check alone". This asks the two
+questions it structurally cannot: do the files compile **together**, and does the code then
+**work**. `coreslice.sh` builds one vertical slice — open a database, hold a project graph, encode
+it — from files vendored verbatim, and `close.py` grows the slice by repeatedly compiling, reading
+the unresolved names out of the errors, and vendoring whatever declares them.
+
+## 16. It does not run yet, and stopped somewhere precise
+
+**Not achieved: the slice does not execute.** It reached 21 vendored application files plus three
+of our own packages and stalled on a specific, one-line problem, described below. The intended
+third rung — compile-alone, compile-together, *run* — is still the second rung.
+
+What it took to get that far:
+
+| | |
+|---:|---|
+| 21 | application files, vendored byte-identical |
+| 3 | of our packages, built from source unmodified: `ThreadingDomain`, `ThreadingRemoteKit`, `ThreadingExtensionKit` |
+| 2 | file splits (below) |
+| 11 | lines of SQLite module map |
+| ~120 | lines of OSLog shim, standing under 760 unchanged call sites |
+
+`ThreadingDomain` and `ThreadingRemoteKit` **build on Linux unmodified** — the first direct
+evidence that the kernel packages' Foundation-only claim holds on a platform they have never been
+compiled for.
+
+## 17. Where it stalls: one missing import in one of our packages
+
+```
+ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionHostClient.swift:548
+  error: type 'URLSession' (aka 'AnyObject') has no member 'shared'
+```
+
+That file imports Foundation and uses `URLSession.shared` and `HTTPURLResponse.localizedString`.
+On Linux those names exist as placeholder `AnyObject` typealiases until `FoundationNetworking` is
+imported, so the failure is not "missing API" — it is the type resolving to something useless while
+looking present. The fix is three lines at the top of the file:
+
+```swift
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+```
+
+Left unmade deliberately: `Packages/` is app code, and by this branch's own rule that change
+belongs on master as ordinary work, not here.
+
+## 18. The two splits, and why they are the real story
+
+The slice needed exactly two files split, and both were a few lines in the wrong place:
+
+- **`Models/TerminalTheme.swift`.** `Project` persists a `TerminalThemeID` — a Foundation-only
+  string wrapper. It is declared in a file whose first two lines are `import AppKit` and
+  `import SwiftTerm`, because the same file holds the theme's colours and its
+  `asSwiftTermColors()` bridge. Persisting a project therefore reaches a terminal emulator.
+  `application-structure.md` already says where this belongs: *"ThreadingDomain owns typed project,
+  session, terminal, transcript, and account identities."*
+- **`Core/Settings/SettingsEvents.swift`.** 31 lines. The last four declare `ProfileDidChange`,
+  whose payload is an AppKit-bearing `TerminalProfile`. Everything above is Foundation-only. Four
+  lines at the bottom of one file put AppKit in the transitive closure of saving a project.
+
+## 19. Swift's unit for imports is the file, and nothing checks that
+
+`check_module_boundaries.py` enforces dependency direction between **modules**, and most of
+Threading is still one app target. Inside that target the real granularity is the file: one
+framework-bearing declaration makes the whole file framework-bearing for everyone who needs
+anything else in it. Nothing measures this, so `./split-candidates.py` now does:
+
+**113 files import a framework with no Linux story. 72 of them also declare types that appear to
+need none — 366 types.**
+
+| Framework | Files with candidates |
+|---|---:|
+| AppKit | 43 |
+| Security | 19 |
+| ImageIO | 9 |
+| CoreGraphics | 8 |
+| AVFoundation, ServiceManagement, IOKit, CoreText, UserNotifications | 8 |
+
+The largest single case is `Core/MCP/MCPTools.swift`: **135 candidate types behind one
+`CoreGraphics` import**. Every MCP argument struct in that file is a plain `Codable`, and the lot
+of them are unportable because something in there wants a `CGRect`.
+
+This reframes section 12's "about thirty files of real platform decisions". That number stands for
+*decisions*; it undercounts the work and overstates its difficulty at the same time, because most
+of the remaining blocked set is not a decision at all — it is types sitting in the wrong file.
+Slice 2 can be planned as a worklist of splits rather than discovered one compile error at a time,
+and **every one of those splits is worth doing on master whether or not Linux ever happens**,
+because it tightens the dependency direction the architecture document already asks for.
+
+`split-candidates.py` is a heuristic and says so in its header: it cannot see through a typealias
+or an extension in another file, so its output is a worklist to confirm, never a patch to apply.
+
+## 20. What the closure size actually said
+
+The loop was expected to converge at a dozen files and did not stop growing until it ran out of
+things to vendor. Saving a project graph reaches account preferences, agent model names, managed
+workspaces, pending checkout moves and account discovery — because `AgentSession` is a wide record
+and `ProjectDatabase` needs all of it to encode a row.
+
+That is a less comfortable finding than the splits. The splits are cheap and unambiguously worth
+doing. This one says the **record types themselves are broad**, so "extract the persistence layer"
+is not only a matter of moving files out of AppKit's way: `AgentSession` comes too, and it carries
+curfew rules, launch failures, workspaces and checkout moves with it. Slice 2 should expect to take
+a position on that before it starts, rather than discover it halfway.
+
+## 21. Three measurement notes
+
+- **`os` → swift-log is not the swap the import scan implied.** Threading makes 760 `privacy:`
+  interpolations, and that vocabulary is OSLog's string-interpolation machinery, which swift-log
+  has no equivalent for. A straight swap would rewrite every call site *and* delete a policy —
+  `Logger.swift` requires each interpolation to choose `privacy:` explicitly, enforced by
+  `scripts/check_logging_boundaries.py`. Keeping the vocabulary and putting something under it cost
+  about 120 lines, and the shim **honours** redaction rather than ignoring it: a Linux build that
+  quietly logged everything in the clear would pass every test and violate the contract those call
+  sites were written to.
+- **Swift 6 language mode was removed from the experiment.** Compiling the slice in Swift 6 mode
+  produced concurrency diagnostics on `TerminalThemeID`'s static members. Those belong to the
+  Swift 6 migration the app has not finished — tracked separately in the shipping contract — not to
+  Linux. The slice is pinned to Swift 5 mode so the variable under test stays the platform.
+- **A bug in `close.py` hid a file for two rounds.** Two files here are called `Identifiers.swift`
+  (one in `Models`, one in `ThreadingDomain`) and copying by basename overwrote the first with the
+  second. It surfaced much later as a *missing module*, which is the kind of misdirection worth
+  paying for once. Collisions now get their parent directory prefixed.
