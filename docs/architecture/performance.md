@@ -1000,6 +1000,17 @@ local half: a navigation-width storm leaves SwiftTerm on one grid, a coordinator
 commits only its last width, and 10,000 keyboard presentation frames retain one terminal, report
 no intermediate grid, and report exactly one final grid at the stable keyboard state.
 
+A 2026-09-16 keyboard-repaint experiment was rejected after a real socket/PTY recording with
+2,400 generated history lines. Holding the pre-resize viewport until an identified host
+`terminalReady` hid intermediate repaints, but a shorter keyboard-open snapshot left a blank
+upper band when the keyboard closed. Capturing after the final local reflow removed that band
+but held an approximate screen (including old prompt rows) until the host's authoritative screen
+replaced it, producing another visible jump. Generation checks and 10,000-frame tests passed;
+neither proved the motion. Do not repeat this as a snapshot-only fix. The next implementation
+must coordinate the authoritative resized screen with the local grid/viewport commit and preserve
+the reading anchor and scrollback, with a matched real-wire keyboard recording as its acceptance
+boundary. No keyboard presentation change from that experiment was retained.
+
 The return-to-live-end control shares that frequency boundary. Every accepted UIKit offset can
 re-evaluate it, so the check reads only `contentOffset`, the cached cell size/reachable maximum,
 and the emulator's current mouse/alternate-buffer mode: O(1), one retained button, no buffer-row
