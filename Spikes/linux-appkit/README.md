@@ -37,21 +37,21 @@ resolve, and select `Harness` independently of the core slice. Both refuse faile
 `coreslice.sh` verifies the vendored sources before starting Docker, saves complete build/run
 logs under `out/`, and runs the already-built executable only after a successful build. It requests
 `linux/arm64` explicitly and prints the actual architecture. Without arguments it builds the full
-project-graph slice and runs five on-disk contracts: save/close/reopen (including Unicode, order,
-selection and a remote execution record), incremental session updates, stale graph writer refusal,
-participant receipt persistence/cascade, and corrupt graph refusal without deleting rows. The
-27 production files are byte-identical to their sources. Runtime helpers remain in the app;
-the slice includes neither RemoteKit nor live account discovery. See FINDINGS section 31.
-The debug harness uses `@testable import CoreSlice` without widening the production APIs.
-Three additional recovery contracts verify refused-commit rollback (including receipt cascades and
-writer generation), refused-probe retry, and the required model reload after a successful SQLite
-probe. These use the production commit-preflight injection seam, not a full host disk. See FINDINGS
-section 32; StateManager's recovery policy is still outside this executable.
-Three migration contracts additionally build a schema-4 fixture, refuse and retry its upgrade,
-verify retained authority history and new receipt storage, then check active-tenure uniqueness
-and deletion cascades. See FINDINGS section 33. Two downgrade contracts also exercise the project-store constructor against checkpointed and
-live-WAL future schemas, preserving unknown data and the newer writer. See FINDINGS section 34.
-The full executable now runs thirteen contracts.
+project-graph slice and runs fifteen on-disk contracts:
+
+| Group | Checks | FINDINGS section |
+|---|---:|---:|
+| Graph reopen, incremental updates, stale writers, receipts and corrupt rows | 5 | 31 |
+| Commit rollback, probe retry and required model reload | 3 | 32 |
+| Historical authority migration, rollback and constraints | 3 | 33 |
+| Future-schema refusal for checkpointed and live-WAL stores | 2 | 34 |
+| Pinned-WAL move refusal and relocation of healthy/damaged project stores | 2 | 35 |
+
+The 27 production files are byte-identical to their sources. Runtime helpers remain in the app;
+the slice includes neither RemoteKit nor live account discovery. The debug harness uses
+`@testable import CoreSlice` without widening the production APIs. Commit-refusal fixtures use
+the existing preflight injection seam; no test fills the host disk. StateManager's quarantine and
+recovery policy remain outside this executable.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound

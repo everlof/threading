@@ -134,7 +134,9 @@ new receipt storage and post-upgrade uniqueness/cascades; [FINDINGS section 33](
 records the synthetic fixture's scope. Two more contracts verify downgrade refusal through the project-store constructor for
 checkpointed and live-WAL future schemas, including unchanged persisted bytes and continued
 newer-writer operation; [FINDINGS section 34](../../Spikes/linux-appkit/FINDINGS.md#34-downgrades-refuse-future-project-schemas-including-live-wal)
-records their scope. The project executable now passes thirteen contracts.
+records their scope. Two further contracts exercise pinned-WAL refusal and single-file relocation for healthy and
+damaged project stores, preserving recent records and corrupt-row evidence; [FINDINGS section 35](../../Spikes/linux-appkit/FINDINGS.md#35-project-stores-move-safely-after-pinned-readers-release-wal)
+records the boundary. The project executable now passes fifteen contracts.
 
 ## The boundary to build
 
