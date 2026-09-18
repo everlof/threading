@@ -165,3 +165,16 @@ public final class ProfileStorage {
         }
     }
 }
+
+// MARK: - Change Event
+
+/// Posted when the terminal profile changes.
+///
+/// Declared here rather than beside the other settings events because its payload is a
+/// `TerminalProfile`, and this file imports AppKit. In `SettingsEvents.swift` it made that whole
+/// file AppKit-bearing, which put AppKit in the closure of everything posting an ordinary settings
+/// change — including the persisted `LimitRecoveryPolicy` on `Project`.
+public struct ProfileDidChange: AppEvent {
+    public static let name = Notification.Name("profileDidChange")
+    public let profile: TerminalProfile
+}
