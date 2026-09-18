@@ -6,3 +6,5 @@ import ThreadingDomain
 /// already owns the rule. A module-scope alias is what lets a symlinked file keep saying
 /// `StoredPathComponent` without an import line the application does not need.
 public typealias StoredPathComponent = ThreadingDomain.StoredPathComponent
+public typealias TerminalThemeID = ThreadingDomain.TerminalThemeID
+public typealias TerminalThemeNames = ThreadingDomain.TerminalThemeNames
