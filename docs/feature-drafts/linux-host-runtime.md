@@ -5,8 +5,10 @@
 > accessibility, and virtual-list behavior in a bounded spike. No Linux backend or toolkit is
 > selected.
 >
-> Measurement snapshot: 2026-08-30. Re-run the repository health and source-shape measurements
-> before implementation; the counts below describe that checkout, not a permanent baseline.
+> Measurement snapshot: 2026-08-30, with a measured addendum on 2026-09-18 — see
+> [What the spike measured](#what-the-spike-measured). Re-run the repository health and
+> source-shape measurements before implementation; the counts below describe that checkout, not a
+> permanent baseline.
 
 Related current guidance: [`application-structure.md`](../architecture/application-structure.md),
 [`design-system.md`](../architecture/design-system.md),
@@ -56,6 +58,60 @@ Text fields stand on TextKit and the field editor; table/outline behavior carrie
 accessibility is also the UI-test identity layer; and the browser, terminal renderer, IME, and
 three AppKit-oriented visual dependencies each need a real platform story.
 
+## What the spike measured
+
+`Spikes/linux-appkit/` is a bounded, wired-to-nothing experiment run on 2026-09-17 and 2026-09-18
+against `swift:6.3.2-noble` — the same image and Swift as `scripts/test-ptyd-linux.sh`. It is
+evidence for this document, not an implementation of it: no Xcode target references it and no gate
+runs it. Its full write-up is `Spikes/linux-appkit/FINDINGS.md`; the numbers below are the parts
+that should change how this draft is read.
+
+**The UI side is a conjunction, not a queue.** Type-checking all 153 files of `UI/Design` against a
+1,048-line drawing shim left 127 with a gap, and 116 distinct missing `NS`/`CA`/`CG`/`CT` symbols.
+Adding Auto Layout — the single largest blocker, wanted by 75 of 153 files — moved **three files**
+to compiling. A file compiles when its *last* blocker goes, not its first: 23 files are blocked by
+one subsystem, 56 by four or more, and closing whole subsystems best-first needs **nine** of them
+finished before 82 of 124 build. The order suggested by a frequency table is not the order the work
+should be done in.
+
+**The drawing layer is nearly free; everything expensive is structure, text and accessibility.**
+About 1,050 lines bought `NSColor`, `NSBezierPath`, `NSGraphicsContext` with a real state stack and
+clip masks, and an `NSView` tree — enough that `PlatinumBitmapFont.swift`, vendored byte-identical,
+renders its own glyphs with its own metrics. What remained was `NSAccessibility` in 56 files,
+`NSTextField` and text drawing in 52, `NSStackView` in 46, `NSImage` in 36.
+
+**The headless core is two-thirds of the way there already.** Type-checking all 636 files of
+`Core`, `Models` and `Application` on Linux against Foundation alone: **66% have nothing
+platform-specific in the way** (an import-only scan predicted 69%, so the cheap scan is a usable
+proxy between sweeps). Of the 211 blocked, 72 are `AppKit`, and most of the rest have known
+equivalents — `Darwin` → Glibc, `os`/`OSLog` → swift-log, `CryptoKit` → swift-crypto with the same
+API, FSEvents → inotify. **The genuinely hard tail is about twenty files, twelve of them
+`Security`.**
+
+Three things the spike found that reasoning would not have:
+
+- `RelativeDateTimeFormatter`, `ListFormatter`, `ProcessInfo.beginActivity` and
+  `volumeAvailableCapacityForImportantUsage` are **Foundation APIs swift-corelibs-foundation does
+  not have**. No import scan can find these.
+- `URLSession` and friends are not in Foundation on Linux; they live in `FoundationNetworking`, so
+  every file using them needs a `#if canImport(FoundationNetworking)` import.
+- swift-corelibs-foundation *does* already implement `NSPoint`, `NSSize`, `NSRect`, `NSEdgeInsets`
+  and `NSCoder` with the real geometry methods — which are among the most-referenced symbols in
+  `UI/Design` and cost a shim nothing but a re-export.
+
+**What this does to the estimate: nothing.** The dated figures — two to three months for a
+headless Linux-capable core, roughly 1.5 to 3 person-years for a native UI, about one strong
+engineer-year for a narrower AppKit-shaped layer — are if anything better supported now, because
+nothing in the spike touched a sparse constraint solver, a text and IME stack, or AT-SPI. What it
+does change is **ordering confidence**: slice 2 is roughly thirty files of genuine platform
+decisions against the UI's nine-subsystem conjunction, which is why this document puts it first and
+says it is worth doing even if Linux stops there.
+
+`Security` at twelve files is the one item in slice 2 that is a product decision rather than a
+port: where an agent account's credentials live when there is no Keychain is a question about what
+Threading promises, not about which library to link. It should be answered before the slice starts,
+not during it.
+
 ## The boundary to build
 
 “Drop AppKit” is three different propositions:
@@ -84,7 +140,11 @@ The structural seam should cover three mechanisms rather than copying an operati
 
 - **Layout:** preserve a constraint-shaped semantic API where that avoids rewriting thousands of
   stable call sites, but own the solver and its invalidation contract. A Cassowary-family solver is
-  a candidate, not a decision.
+  a candidate, not a decision. The spike built one end of this and measured the other: expressing
+  and *correctly* solving our constraints is a small job, while a dense from-scratch re-solve costs
+  47 seconds for 160 sidebar rows, and warm-starting it only helps when the active set does not
+  change. Read "own the solver and its invalidation contract" as **sparse, scoped, then
+  incremental**, in that order.
 - **View tree and lifecycle:** introduce narrowly named `Component`/`Screen`-shaped abstractions
   that wrap AppKit today and a Linux implementation later. Architecture checks ratchet down new
   direct `NSView`/`NSViewController` ownership outside the adapter boundary.
@@ -94,6 +154,16 @@ The structural seam should cover three mechanisms rather than copying an operati
 Do not name a compatibility module `AppKit`: the macOS build must be able to compile the portable
 surface beside real AppKit, exercise both paths against the same fixtures, and use the real product
 as the reference implementation.
+
+That rule stands, but its basis is now narrower than it was when written. The trick was tried —
+on Linux there is no system AppKit, so a module of that name is simply ours and every
+`import AppKit` in the repository resolves to it with no edit to any file — and it works. The
+objection is therefore not that the technique is fragile; it is that naming the seam `AppKit`
+forfeits the dual-render laboratory, because the two cannot coexist in one process and the
+compiler stops being able to say which call sites are already portable. A plausible resolution is
+to give the real seam a name of ours and keep an `AppKit`-named typealias layer as a Linux-only
+compatibility shim that only vendored third-party code imports — SwiftTerm being the case that
+motivates it.
 
 ## Toolkit judgement
 
@@ -149,13 +219,20 @@ The structural layer must not turn the current virtual surfaces into eagerly bui
    committed script, and establish macOS launch/layout/profile baselines.
 2. **Make the product layers compilable.** Continue the current Domain -> Persistence -> Runtime ->
    Application extraction until a meaningful local-session operation builds and tests without a
-   UI framework. This is useful even if Linux stops here.
+   UI framework. This is useful even if Linux stops here — and the spike measured the starting
+   position at 66% of those files already free of anything platform-specific, with about twenty
+   files of real decisions left, so this slice is a sequence of substitutions rather than a
+   rewrite. Settle the `Security`/Keychain question before starting.
 3. **Add structural ratchets on macOS.** Prevent growth in direct controller subclasses,
    constraints owned outside the structural seam, and backend-specific drawing. Migrate ordinary
    product work through the seam instead of pausing feature delivery for a rewrite.
 4. **Build a dual-render laboratory.** Run the same semantic fixtures through real AppKit and the
    candidate portable path on macOS. Prove layout geometry, theme switching, text truncation,
-   pointer/focus behavior, and bounded list mounting before starting a Linux shell.
+   pointer/focus behavior, and bounded list mounting before starting a Linux shell. Two cautions
+   the spike paid for: a layout engine that passes a dozen arithmetic cases can still be *visibly*
+   wrong, so keep rendered-state evidence beside the assertions — and a picture can accuse layout
+   of a bug the drawing has, which is what a label overrunning a correctly compressed frame turned
+   out to be.
 5. **Prove the Linux platform leaves.** Window/event loop, text shaping plus IME, AT-SPI,
    clipboard/file interaction, terminal drawing, and an out-of-process or embedded WebKitGTK/CDP
    browser path each need an explicit capability and refusal state.
@@ -193,6 +270,11 @@ Open decisions before implementation:
 
 - Which Linux distribution, compositor, packaging, and update floor is supported?
 - Which text/IME/accessibility stack passes the spike, and who owns its long-term maintenance?
+  Still open, and still the largest single risk: the spike deliberately did not touch it, because
+  a shimmed `NSTextField` would have moved fifty files while proving nothing about shaping or IME.
+- **Where do agent-account credentials live without a Keychain?** Twelve files in the core reach
+  `Security`, and this is the only slice-2 blocker that is a promise rather than a port. It gates
+  the headless core, so it is due first.
 - Is browser automation embedded through WebKitGTK, delegated to CDP Chromium, or unavailable in
   the first slice?
 - Which surfaces constitute a useful first release, and which are explicit capability refusals?
