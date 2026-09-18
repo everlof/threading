@@ -13,28 +13,76 @@ enum LayoutBenchmark {
 
     static func run() {
         print("")
-        print("layout solve cost — one full re-solve of a constraint-driven list")
-        print("  rows   items   constraints    rows(LP)   vars      median ms")
-        for count in [5, 10, 20, 40, 80] {
-            var samples: [Double] = []
-            var diagnosis: LayoutEngine.Diagnosis?
-            for _ in 0..<5 {
+        print("layout solve cost — cold (first solve) vs warm (a constant moved, tableau reused)")
+        print("                                                              warm, no active-set  warm, crossing")
+        print("  rows   items   constraints   LP rows    vars      cold ms   change ms  pivots    ms      pivots")
+        for count in [5, 10, 20, 40, 80, 160] {
+            // Cold: a brand-new tree each time, so nothing is retained.
+            var cold: [Double] = []
+            var shape: LayoutEngine.Diagnosis?
+            for _ in 0..<3 {
                 let root = makeList(rowCount: count)
                 let result = LayoutEngine.layout(root)
-                diagnosis = result
-                samples.append(result.seconds * 1000)
+                shape = result
+                cold.append(result.seconds * 1000)
+                LayoutEngine.forget(root)
             }
-            samples.sort()
-            guard let diagnosis else { continue }
-            let median = samples[samples.count / 2]
+
+            // Warm, narrow sweep: a drag that never changes *which* constraints are active. The
+            // easy case, and the one a benchmark will report by accident if nobody checks the
+            // pivot count — with zero pivots this measures the B⁻¹ · b multiply and nothing else.
+            let narrow = warmSweep(rowCount: count, widths: [260, 280, 300])
+            // Warm, threshold-crossing: wide enough that each row's label stops being clipped by
+            // its chip and its soft 400pt width starts being satisfiable. The active set changes,
+            // so the dual simplex actually has to pivot. This is the number to quote.
+            let crossing = warmSweep(rowCount: count, widths: [200, 700, 240, 900, 300, 460])
+
+            cold.sort()
+            guard let shape, narrow.solved, crossing.solved else { continue }
             print(String(
-                format: "  %4d   %5d   %11d   %8d   %5d   %10.1f",
-                count, diagnosis.itemCount, diagnosis.constraintCount,
-                diagnosis.rowCount, diagnosis.variableCount, median
+                format: "  %4d   %5d   %11d   %7d   %5d   %10.1f %10.2f %7d %10.2f %7d",
+                count, shape.itemCount, shape.constraintCount,
+                shape.rowCount, shape.variableCount,
+                cold[cold.count / 2],
+                narrow.median, narrow.pivots,
+                crossing.median, crossing.pivots
             ))
-            if !diagnosis.solved { print("     (did not solve)") }
         }
         print("")
+    }
+
+    private struct Sweep {
+        var median: Double
+        var pivots: Int
+        var solved: Bool
+    }
+
+    /// Build one tree, solve it once, then walk it through `widths` several times over, reusing
+    /// the retained tableau. Reports the median re-solve and the median pivot count — the second
+    /// of which is what says whether the warm path was actually exercised.
+    private static func warmSweep(rowCount: Int, widths: [CGFloat]) -> Sweep {
+        let root = makeList(rowCount: rowCount)
+        guard LayoutEngine.layout(root).solved else {
+            LayoutEngine.forget(root)
+            return Sweep(median: 0, pivots: 0, solved: false)
+        }
+        var times: [Double] = []
+        var pivots: [Int] = []
+        var solved = true
+        for pass in 0..<3 {
+            for width in widths {
+                _ = pass
+                root.frame = NSRect(x: 0, y: 0, width: width, height: root.frame.height)
+                let result = LayoutEngine.layout(root)
+                times.append(result.seconds * 1000)
+                pivots.append(result.pivots)
+                if !result.solved || !result.incremental { solved = false }
+            }
+        }
+        LayoutEngine.forget(root)
+        times.sort()
+        pivots.sort()
+        return Sweep(median: times[times.count / 2], pivots: pivots[pivots.count / 2], solved: solved)
     }
 
     /// A sidebar's shape: a scrolling column of rows, each row holding a dot, a label box and a

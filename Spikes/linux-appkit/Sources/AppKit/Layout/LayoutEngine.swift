@@ -7,6 +7,11 @@ import Foundation
 /// need conversions inside the solve; and `topAnchor` means the visual top regardless of whether a
 /// view is flipped, which is a statement about the layout space, not about the drawing one. The
 /// flip is applied once, on the way out, when each frame is written into its superview's space.
+///
+/// The program is rebuilt every pass — that is cheap, linear in the constraints — but the *solve*
+/// is not. When the rebuilt program differs from the last one only in its constants, the retained
+/// tableau is warm-started instead, which is the difference between a resize costing seconds and
+/// costing a frame. See `Simplex`.
 @MainActor
 public enum LayoutEngine {
 
@@ -27,7 +32,68 @@ public enum LayoutEngine {
         /// a layout of zeros is how an unsatisfiable constraint becomes an invisible view.
         public var solved: Bool
         public var seconds: Double
+        /// True when the retained tableau was reused because only constants had moved.
+        public var incremental: Bool = false
+        /// Dual-simplex pivots taken on the incremental path. A number near the row count means
+        /// the warm start degenerated into a cold solve and is no longer buying anything.
+        public var pivots: Int = 0
     }
+
+    // MARK: - The retained program
+
+    private final class Cache {
+        var itemKeys: [ObjectIdentifier]
+        var rows: [Simplex.Row]
+        var objective: [Int: Double]
+        var variableCount: Int
+        var solution: Simplex.Solution
+
+        init(
+            itemKeys: [ObjectIdentifier],
+            rows: [Simplex.Row],
+            objective: [Int: Double],
+            variableCount: Int,
+            solution: Simplex.Solution
+        ) {
+            self.itemKeys = itemKeys
+            self.rows = rows
+            self.objective = objective
+            self.variableCount = variableCount
+            self.solution = solution
+        }
+
+        /// Whether a freshly built program is the same program with different numbers on the
+        /// right. Compared rather than hashed: a false positive here silently lays the window out
+        /// against the wrong constraints, and the comparison is linear in a program we just built.
+        func matchesStructure(
+            itemKeys: [ObjectIdentifier],
+            rows: [Simplex.Row],
+            objective: [Int: Double],
+            variableCount: Int
+        ) -> Bool {
+            guard self.variableCount == variableCount,
+                  self.itemKeys == itemKeys,
+                  self.rows.count == rows.count,
+                  self.objective == objective else { return false }
+            for (mine, theirs) in zip(self.rows, rows) {
+                if mine.relation != theirs.relation { return false }
+                if mine.coefficients != theirs.coefficients { return false }
+            }
+            return true
+        }
+    }
+
+    private static var caches: [ObjectIdentifier: Cache] = [:]
+
+    /// Drop a root's retained tableau. Called when a tree is torn down; also the escape hatch if a
+    /// caller wants to prove a cold number.
+    public static func forget(_ root: NSView) {
+        caches.removeValue(forKey: ObjectIdentifier(root))
+    }
+
+    public static func forgetAll() { caches.removeAll() }
+
+    // MARK: - Laying out
 
     @discardableResult
     public static func layout(_ root: NSView) -> Diagnosis {
@@ -197,30 +263,53 @@ public enum LayoutEngine {
             }
         }
 
-        let solution = Simplex.minimize(
-            objective: objective,
-            rows: rows,
-            variableCount: nextError
-        )
-
         var diagnosis = Diagnosis(
             itemCount: items.count,
             constraintCount: constraints.count,
             rowCount: rows.count,
             variableCount: nextError,
-            solved: solution != nil,
+            solved: false,
             seconds: 0
         )
 
+        let key = ObjectIdentifier(root)
+        let itemKeys = items.map { ObjectIdentifier($0) }
+        var solution: Simplex.Solution?
+
+        if let cache = caches[key],
+           cache.matchesStructure(itemKeys: itemKeys, rows: rows, objective: objective, variableCount: nextError),
+           cache.solution.update(constants: rows.map(\.constant)) {
+            solution = cache.solution
+            cache.rows = rows
+            diagnosis.incremental = true
+            diagnosis.pivots = cache.solution.lastPivotCount
+        } else {
+            solution = Simplex.solve(objective: objective, rows: rows, variableCount: nextError)
+            if let solution {
+                caches[key] = Cache(
+                    itemKeys: itemKeys,
+                    rows: rows,
+                    objective: objective,
+                    variableCount: nextError,
+                    solution: solution
+                )
+            } else {
+                caches.removeValue(forKey: key)
+            }
+        }
+
+        diagnosis.solved = solution != nil
+
         if let solution {
+            let values = solution.values
             var absolute: [ObjectIdentifier: NSRect] = [:]
             for (index, item) in items.enumerated() {
                 let base = index * Column.stride
                 absolute[ObjectIdentifier(item)] = NSRect(
-                    x: CGFloat(solution[base] - solution[base + 1]),
-                    y: CGFloat(solution[base + 2] - solution[base + 3]),
-                    width: CGFloat(solution[base + 4]),
-                    height: CGFloat(solution[base + 5])
+                    x: CGFloat(values[base] - values[base + 1]),
+                    y: CGFloat(values[base + 2] - values[base + 3]),
+                    width: CGFloat(values[base + 4]),
+                    height: CGFloat(values[base + 5])
                 )
             }
             for item in items where !(item === root) {

@@ -25,6 +25,9 @@ enum LayoutTests {
         chainedSiblings()
         unsatisfiableIsReported()
         guideDividesAColumn()
+        warmStartAgreesWithColdSolve()
+        warmStartSurvivesAnInfeasibleEdit()
+        warmStartDoesNotDriftOverALongDrag()
 
         if failures.isEmpty {
             print("layout: all cases pass")
@@ -210,6 +213,140 @@ enum LayoutTests {
         ])
         root.layoutSubtreeIfNeeded()
         expect("guide positions a sibling", box.frame, NSRect(x: 4, y: 76, width: 30, height: 10))
+    }
+
+    /// The one that matters most about the incremental path: a warm-started re-solve must land on
+    /// the same geometry a cold solve would. A fast layout that is quietly a *different* layout is
+    /// worse than a slow one, and it would show up as a drift of a point or two that no assertion
+    /// about the first frame could ever catch.
+    private static func warmStartAgreesWithColdSolve() {
+        func build() -> (NSView, [NSView], NSLayoutConstraint) {
+            let root = FlippedBox(frame: NSRect(x: 0, y: 0, width: 240, height: 200))
+            var boxes: [NSView] = []
+            var previous: NSView?
+            var inset: NSLayoutConstraint!
+            for index in 0..<5 {
+                let box = IntrinsicBox(frame: .zero, intrinsic: NSSize(width: 60 + CGFloat(index) * 7, height: 18))
+                root.addSubview(box)
+                box.translatesAutoresizingMaskIntoConstraints = false
+                let leading = box.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10)
+                if index == 0 { inset = leading }
+                var constraints: [NSLayoutConstraint] = [
+                    leading,
+                    box.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -10),
+                    box.heightAnchor.constraint(equalToConstant: 20)
+                ]
+                let wide = box.widthAnchor.constraint(equalToConstant: 400)
+                wide.priority = .defaultLow
+                constraints.append(wide)
+                if let previous {
+                    constraints.append(box.topAnchor.constraint(equalTo: previous.bottomAnchor, constant: 6))
+                } else {
+                    constraints.append(box.topAnchor.constraint(equalTo: root.topAnchor, constant: 12))
+                }
+                NSLayoutConstraint.activate(constraints)
+                boxes.append(box)
+                previous = box
+            }
+            return (root, boxes, inset)
+        }
+
+        // Warm: solve, move a constant, solve again on the retained tableau.
+        let (warmRoot, warmBoxes, warmInset) = build()
+        var diagnosis = LayoutEngine.layout(warmRoot)
+        if diagnosis.incremental { failures.append("first solve claimed to be incremental") }
+        warmInset.constant = 34
+        warmRoot.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        diagnosis = LayoutEngine.layout(warmRoot)
+        if !diagnosis.incremental {
+            failures.append("a constant-only change did not warm start")
+        }
+
+        // Cold: the same tree, the same final numbers, no retained tableau.
+        let (coldRoot, coldBoxes, coldInset) = build()
+        coldInset.constant = 34
+        coldRoot.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        LayoutEngine.forget(coldRoot)
+        LayoutEngine.layout(coldRoot)
+
+        for (index, pair) in zip(warmBoxes, coldBoxes).enumerated() {
+            expect("warm start matches cold solve, box \(index)", pair.0.frame, pair.1.frame)
+        }
+    }
+
+    /// An edit can make a satisfiable program unsatisfiable. The warm path has to notice, rather
+    /// than returning the stale geometry it happens to be holding.
+    private static func warmStartSurvivesAnInfeasibleEdit() {
+        let root = FlippedBox(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        let box = Box(frame: .zero)
+        root.addSubview(box)
+        box.translatesAutoresizingMaskIntoConstraints = false
+        let width = box.widthAnchor.constraint(equalToConstant: 50)
+        NSLayoutConstraint.activate([
+            box.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
+            box.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -10),
+            box.topAnchor.constraint(equalTo: root.topAnchor),
+            box.heightAnchor.constraint(equalToConstant: 10),
+            width
+        ])
+        if LayoutEngine.layout(root).solved != true {
+            failures.append("the satisfiable starting layout did not solve")
+        }
+        // 400 wide, pinned 10 from the leading edge, inside 200: impossible.
+        width.constant = 400
+        let after = LayoutEngine.layout(root)
+        if after.solved {
+            failures.append("an infeasible edit was reported as solved")
+        }
+    }
+
+    /// A window drag is not one edit, it is hundreds. Each one pivots the retained tableau again,
+    /// and every pivot is floating-point arithmetic on a matrix that is never rebuilt — so the
+    /// question is not whether one warm solve is right but whether the two-hundredth still is.
+    /// This is the failure a warm-start cache is most likely to ship with, because it looks
+    /// perfect on the first frame and drifts somewhere no assertion is watching.
+    private static func warmStartDoesNotDriftOverALongDrag() {
+        let root = FlippedBox(frame: NSRect(x: 0, y: 0, width: 300, height: 120))
+        var boxes: [NSView] = []
+        var previous: NSView?
+        for index in 0..<4 {
+            let box = IntrinsicBox(frame: .zero, intrinsic: NSSize(width: 50 + CGFloat(index) * 11, height: 18))
+            root.addSubview(box)
+            box.translatesAutoresizingMaskIntoConstraints = false
+            var constraints: [NSLayoutConstraint] = [
+                box.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+                box.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+                box.heightAnchor.constraint(equalToConstant: 20)
+            ]
+            let wide = box.widthAnchor.constraint(equalToConstant: 500)
+            wide.priority = .defaultLow
+            constraints.append(wide)
+            if let previous {
+                constraints.append(box.topAnchor.constraint(equalTo: previous.bottomAnchor, constant: 5))
+            } else {
+                constraints.append(box.topAnchor.constraint(equalTo: root.topAnchor, constant: 10))
+            }
+            NSLayoutConstraint.activate(constraints)
+            boxes.append(box)
+            previous = box
+        }
+
+        LayoutEngine.layout(root)
+        // Two hundred resizes on the retained tableau, ending where a cold solve can be compared.
+        for step in 1...200 {
+            let width = 200 + CGFloat(step % 97)
+            root.frame = NSRect(x: 0, y: 0, width: width, height: 120)
+            let result = LayoutEngine.layout(root)
+            if !result.incremental { failures.append("drag step \(step) fell back to a cold solve") ; break }
+            if !result.solved { failures.append("drag step \(step) failed to solve") ; break }
+        }
+        let drifted = boxes.map(\.frame)
+
+        LayoutEngine.forget(root)
+        LayoutEngine.layout(root)
+        for (index, box) in boxes.enumerated() {
+            expect("no drift after 200 warm solves, box \(index)", drifted[index], box.frame)
+        }
     }
 
     // MARK: - Fixtures
