@@ -1,7 +1,3 @@
-// EXTRACTED, NOT WRITTEN. Lines 1-27 of Sources/Threading/Core/Settings/SettingsEvents.swift,
-// verbatim — everything except ProfileDidChange, whose TerminalProfile payload is the only
-// thing in the file that needs AppKit. Regenerate with ./standins.sh.
-
 import Foundation
 
 public struct AppSettingsDidChange: AppEvent {
@@ -28,4 +24,3 @@ public struct AppSettingsDidChange: AppEvent {
 public struct AccountPreferencesDidChange: AppEvent {
     public static let name = Notification.Name("accountPreferencesDidChange")
 }
-

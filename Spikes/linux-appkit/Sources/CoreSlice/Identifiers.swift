@@ -11,6 +11,11 @@ typealias TerminalID = ThreadingDomain.TerminalID
 typealias TerminalInstanceIdentity = ThreadingDomain.TerminalInstanceIdentity
 typealias TranscriptID = ThreadingDomain.TranscriptID
 typealias AccountHandle = ThreadingDomain.AccountHandle
+// Public, unlike the aliases above, because both types were public when the app declared them
+// and `ThemeResolution` still names `TerminalThemeID` in its public API. An alias narrower than the
+// type it replaces would change that API rather than merely relocate the declaration.
+public typealias TerminalThemeID = ThreadingDomain.TerminalThemeID
+public typealias TerminalThemeNames = ThreadingDomain.TerminalThemeNames
 
 /// A provider-qualified account identity.
 struct AccountID: Hashable, Sendable, Codable, CustomStringConvertible {
