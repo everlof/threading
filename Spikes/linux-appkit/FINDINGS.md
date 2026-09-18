@@ -627,3 +627,81 @@ Verification: seven runner regression tests passed using substituted Docker/Swif
 shell syntax checks passed, and all 23 core copies matched their originals. A real Linux UI build
 attempt timed out after 45 seconds while Docker's independent info probe also failed to respond.
 No new compiler frontier, sweep counts, or runtime evidence is claimed by this increment.
+
+
+## 28. The storage engine runs unchanged; the project graph still reaches TLS
+
+After restarting Docker and rebasing onto rewritten master `c89fb6521`, the full core slice was
+rebuilt. It still fails at `RemoteHostPinning.swift:1`, `no such module 'CryptoKit'`.
+Tracing the dependency makes the next step more specific:
+
+```
+CoreSlice → AccountPreferencesStore → AccountAppearancePreferences
+         → ThreadingRemoteKit (whole module) → RemoteHostPinning
+         → CryptoKit + Security + Apple server-trust challenge APIs
+```
+
+The earlier suggestion that adding swift-crypto would clear this frontier was incomplete.
+`RemoteHostPinning.swift` also imports `Security`, uses `SecTrust` and `SecCertificate`, and
+implements `URLSession` server-trust handling. SHA-256 support alone cannot make that file
+portable. The first boundary candidate is the Foundation-only account appearance contract; local
+preference storage should not require a TLS implementation just to encode appearance values.
+This round does not change the shipping package boundary or substitute a fake pinning module.
+
+The independent SQLite layer does not need any of that. `SQLiteHarness` compiles the existing,
+verified `SQLiteDatabase.swift` and `ThreadingLogger.swift` through relative symlinks, alongside
+this spike's existing OSLog adapter. `./coreslice.sh --sqlite` verifies both source identity and
+those links' contents before starting the container. There is no second edited wrapper.
+
+All nine contracts passed with Swift 6.3.2 in Swift 5 language mode and SQLite 3.45.1 on native
+arm64 Linux:
+
+- Unicode TEXT, raw TEXT bytes, BLOB, 64-bit integers, floating-point values and NULL survive
+  closing and reopening an on-disk database.
+- Reset clears old bindings; scope exit and repeated explicit finalization release statements.
+- A constraint refusal rolls back earlier writes in its transaction and permits later valid work.
+- An injected pre-commit failure leaves no committed row after reopen.
+- Foreign keys refuse orphans and cascade parent deletion.
+- Failed migration rolls back both DDL and `user_version`; successful steps run once in order.
+- Opening a future schema refuses without changing file bytes or creating WAL/SHM sidecars.
+- A pinned WAL refuses a file move; releasing the reader permits checkpoint, move and complete readback.
+- A bounded `max_page_count` fixture produces typed `SQLITE_FULL`, retains committed rows and
+  accepts a new write after lifting the page limit.
+
+The first run also passed on amd64 under emulation: Docker selected a locally cached image of that
+architecture and warned about the mismatch. The runner now requests `linux/arm64` and prints
+`uname -m` so the platform cannot silently vary. Ten Python runner checks pass, including selecting
+the SQLite product, separate logs, and rejecting a modified wrapper before Docker starts.
+
+This is behavioral evidence for the production SQLite wrapper, not a completed project-graph
+port. `ProjectDatabase`, its models, application recovery, and the real Linux TLS/credential
+adapters remain unverified here. No performance conclusion is drawn from these fixed-size cases.
+
+## 29. Account appearance no longer imports the TLS stack
+
+The three account appearance types moved byte-for-byte from `ThreadingRemoteKit` into
+`ThreadingDomain`. The wire kit now depends on Domain and exposes public aliases under the old
+names; `AccountPreferencesStore` imports Domain directly. The spike's manifest no longer has a
+RemoteKit dependency, and its account-store copy is re-vendored from the changed production file.
+This is a shared-code extraction prepared on this branch for independent review/landing on master,
+not an Apple-framework stub or a change to the remote trust policy.
+
+The storage format is unchanged: the new tests decode an existing-shaped JSON fixture and compare
+its re-encoded object, including explicit false, absent inheritance and an unknown surface key.
+They also pin surface identifiers, normalization and alias type identity across the two modules.
+The original definitions and their new Domain file compare byte-identical.
+
+Rebuilding the full Linux core slice clears `RemoteHostPinning` and stops at
+`AgentAccountDiscovery.swift:2`, `no such module 'os'`. This is `OSAllocatedUnfairLock` in its
+short-lived account-discovery cache, not logging. The model reaches it through
+`ConversationHandoff.continuing` → `AgentSession.handoffModelSnapshot` → live account/model
+lookup. Those are runtime operations declared beside the persisted session record. Moving their
+ownership out of the record is the next boundary candidate; replacing a lock would leave the
+record coupled to account scans and preferences.
+
+Verification for this extraction: all 15 Domain tests pass on macOS and arm64 Linux; all 215
+RemoteKit tests pass on macOS, including the public-alias contract. The shipping macOS app builds
+with its repository gates and passes all 11 hosted `AccountAppearanceTests`. These validate the
+shared-code move; they do not establish that the full Linux project slice compiles.
+The shipping `ThreadingMobile` Debug build also succeeds for a generic iOS Simulator destination;
+this is compilation/link verification, not an iPhone runtime test.

@@ -35,15 +35,20 @@ class RunnerTests(unittest.TestCase):
     def command(self, name, body):
         self.write(self.bin / name, body)
 
-    def run_script(self, name):
+    def run_script(self, name, *arguments):
         return subprocess.run(
-            ["bash", str(self.spike / name)], env=self.env,
+            ["bash", str(self.spike / name), *arguments], env=self.env,
             capture_output=True, text=True, timeout=10,
         )
 
     def container_shell(self):
         # Exercise the actual heredoc, with substituted external commands.
-        self.command("docker", 'printf "%s\\n" "$@" > docker-args; bash -s')
+        self.command("docker", '''printf "%s\\n" "$@" > docker-args
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == -e ]]; then shift; export "$1"; fi
+    shift
+done
+bash -s''')
 
     def test_build_propagates_container_failure(self):
         self.command("docker", 'echo "daemon unavailable" >&2; exit 42')
@@ -107,3 +112,34 @@ exit 23''')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing AppKit module", result.stderr)
         self.assertFalse((self.spike / "out/sweep.tsv").exists())
+
+    def sqlite_sources(self):
+        for directory in ("CoreSlice", "SQLiteHarness"):
+            target = self.spike / "Sources" / directory
+            target.mkdir(parents=True)
+            for name in ("SQLiteDatabase", "ThreadingLogger"):
+                (target / (name + ".swift")).write_text("verified source\n")
+
+    def test_sqlite_selects_product_architecture_and_separate_logs(self):
+        self.sqlite_sources()
+        self.container_shell()
+        self.command("swift", 'echo "$*" >> swift-calls')
+        result = self.run_script("coreslice.sh", "--sqlite")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.spike / "swift-calls").read_text().splitlines(),
+                         ["build --product SQLiteHarness", "run --skip-build SQLiteHarness"])
+        self.assertTrue((self.spike / "out/sqlite-run.log").exists())
+        self.assertFalse((self.spike / "out/coreslice-run.log").exists())
+        self.assertIn("--platform\nlinux/arm64\n", (self.spike / "docker-args").read_text())
+
+    def test_sqlite_refuses_modified_wrapper_before_docker(self):
+        self.sqlite_sources()
+        (self.spike / "Sources/SQLiteHarness/SQLiteDatabase.swift").write_text("modified")
+        self.command("docker", "touch docker-started")
+        result = self.run_script("coreslice.sh", "--sqlite")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.spike / "docker-started").exists())
+
+    def test_core_refuses_unknown_arguments(self):
+        result = self.run_script("coreslice.sh", "--unknown")
+        self.assertEqual(result.returncode, 64)

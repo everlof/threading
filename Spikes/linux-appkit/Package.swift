@@ -9,8 +9,7 @@ let package = Package(
         // The real package, unmodified. Its manifest says it has no dependencies and its boundary
         // check keeps it Foundation-only, so building it here is the cheapest available test of
         // that claim on a platform it has never been compiled for.
-        .package(path: "../../Packages/ThreadingDomain"),
-        .package(path: "../../Packages/ThreadingRemoteKit")
+        .package(path: "../../Packages/ThreadingDomain")
     ],
     targets: [
         .target(name: "AppKit"),
@@ -25,7 +24,7 @@ let package = Package(
         .target(name: "OSLog"),
         .target(
             name: "CoreSlice",
-            dependencies: ["SQLite3", "OSLog", .product(name: "ThreadingDomain", package: "ThreadingDomain"), .product(name: "ThreadingRemoteKit", package: "ThreadingRemoteKit")],
+            dependencies: ["SQLite3", "OSLog", .product(name: "ThreadingDomain", package: "ThreadingDomain")],
             // Swift 5 language mode on purpose. The app target is not in Swift 6 mode yet — see
             // the shipping contract in reliability-and-type-safety.md — and compiling this slice
             // in Swift 6 surfaced that migration's diagnostics rather than anything about Linux.
@@ -33,6 +32,13 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(name: "CoreSliceHarness", dependencies: ["CoreSlice"]),
+        // Symlinks to the verified CoreSlice copies keep the production wrapper and logger exact.
+        // This measures SQLite behavior independently of the project graph's remote-kit dependency.
+        .executableTarget(
+            name: "SQLiteHarness",
+            dependencies: ["SQLite3", "OSLog"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(name: "Harness", dependencies: ["AppKit", "CoreText"])
     ]
 )
