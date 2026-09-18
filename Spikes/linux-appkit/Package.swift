@@ -17,6 +17,9 @@ let package = Package(
         .target(name: "CoreText"),
         // The system library, declared as a module the way Apple's SDK already does.
         .systemLibrary(name: "SQLite3", path: "Sources/SQLite3"),
+        .systemLibrary(name: "CZlib", path: "Sources/CZlib"),
+        // Apple's Compression framework, reduced to the two symbols GzipWriter uses. See its header.
+        .target(name: "Compression", dependencies: ["CZlib"]),
         // Real Threading persistence, vendored byte-identical. No AppKit anywhere near it.
         // OSLog's privacy interpolation, kept so 760 real call sites need no edit. See its header.
         .target(name: "OSLog"),
