@@ -788,3 +788,28 @@ run passes **109 tests**, with one existing legacy-import test skipped because t
 `projects.json` fixture. The run covers ProjectDatabase, read receipts, launch environment,
 remote host components/store, handoff runtime and StateManager. All ten spike runner tests pass;
 all 27 vendored files verify and `git diff --check` is clean. No UI appearance changed.
+
+
+## 32. Recovery primitives preserve the graph across refusal and retry
+
+One bounded slice extends `CoreSliceHarness` with three recovery contracts, using the existing
+`ProjectDatabase.transactionCommitPreflight` injection seam. Production files and the vendored
+dependency set are unchanged. All eight project contracts (five persistence, three recovery) pass
+on arm64 Linux with Swift 6.3.2 and SQLite 3.45.1; all ten runner tests pass.
+
+- Refusing a whole-graph deletion at commit rolls back projects, sessions, selection and cascading
+  receipt deletion. An independent connection sees the retained state. Retrying on the original
+  writer without reloading succeeds, proving its observed generation did not advance on refusal.
+- A refused recovery probe propagates failure and leaves no temporary probe row. A subsequent probe
+  succeeds, leaves no row, and does not invalidate an existing reader's graph generation. The graph
+  and receipt survive close/reopen.
+- SQLite-valid pages containing invalid session JSON pass the integrity/write probe but fail the
+  authoritative model load with the exact corrupt row identity. The row and receipt remain intact.
+  This pins why the documented recovery sequence includes both the probe and the complete reload.
+
+The fixtures use disposable directories, deterministic commit refusal, and the real SQLite store.
+They do not fill the host disk or claim to reproduce an OS I/O failure. The independent wrapper
+suite already exercises real `SQLITE_FULL` through SQLite page limits. This slice does not port
+StateManager, quarantine, recovery presentation or the complete app's in-process resume policy.
+No shipping source changed, so the previous macOS shipping validation remains applicable; the
+new executable code was built and run through `coreslice.sh`. Logs are `out/coreslice-*.log`.
