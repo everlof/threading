@@ -492,9 +492,9 @@ final class RemoteAppModel: ObservableObject {
     /// The host whose dashboard recovery is scheduled but has not run yet. Set beside
     /// `themeEventsRecoveryTask`, cleared when that recovery runs or the socket's owner ends it.
     private var themeEventsRecoveryHostID: String?
-    /// Which settled path change the event socket last answered or failed, so a ping's error
-    /// callback and its deadline cannot both tear the socket down.
-    private var themeEventsPathProbeAnswered = 0
+    /// Decides each path-change probe of the event socket exactly once: by its pong, its error,
+    /// or its deadline, whichever comes first.
+    private var themeEventsPathProbe = MobileEventSocketPathProbe()
     private var networkPathMonitor: NWPathMonitor?
     private let networkPathQueue = DispatchQueue(
         label: "threading.mobile.model.network-path",
@@ -2659,16 +2659,21 @@ final class RemoteAppModel: ObservableObject {
             task.sendPing { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.themeEventsGeneration == generation,
-                          self.themeEventsTask === task, error != nil else { return }
-                    self.recoverThemeEventsAfterPathChange(for: hostID, probe: probe)
+                          self.themeEventsTask === task,
+                          self.themeEventsPathProbe.pingReturned(
+                              probe: probe,
+                              failed: error != nil
+                          ) == .recover else { return }
+                    self.recoverThemeEventsAfterPathChange(for: hostID)
                 }
             }
             Task { [weak self, deadline = RemoteMobileConnectionDefaults.resumeLivenessDeadline] in
                 try? await Task.sleep(for: deadline)
                 guard let self, self.themeEventsGeneration == generation,
                       self.themeEventsTask === task, self.networkPathGeneration == probe,
-                      self.themeEventsPathProbeAnswered != probe else { return }
-                self.recoverThemeEventsAfterPathChange(for: hostID, probe: probe)
+                      self.themeEventsPathProbe.deadlinePassed(probe: probe) == .recover
+                else { return }
+                self.recoverThemeEventsAfterPathChange(for: hostID)
             }
             return
         }
@@ -2683,9 +2688,7 @@ final class RemoteAppModel: ObservableObject {
 
     /// The event socket did not answer the ping the path change sent. It is torn down as a
     /// loss and recovered at once.
-    private func recoverThemeEventsAfterPathChange(for hostID: String, probe: Int) {
-        guard themeEventsPathProbeAnswered != probe else { return }
-        themeEventsPathProbeAnswered = probe
+    private func recoverThemeEventsAfterPathChange(for hostID: String) {
         guard themeEventsHostID == hostID, themeEventsTask != nil else { return }
         MobileDiagnostics.recordConnectivity(
             .socketFailed,

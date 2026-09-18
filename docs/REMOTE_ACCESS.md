@@ -378,6 +378,15 @@ the route the same change is re-resolving. `testOnlyANetworkOrInterfaceKindChang
 and `testAPathChangeDuringBackoffAsksTheModelAtOnce` are the boundaries; the ping on a live
 socket has no automated test, since it needs a connected socket against a server that answers.
 
+That untested ping was wrong for its whole life. A pong was never recorded as the answer, so the
+one-second deadline always found the probe unanswered and tore down a socket that had just
+proved it was alive. It did not show until 2026-09-18, when a phone whose path reported a
+material change every six seconds journalled a `liveness.pathChanged` loss each time, every one
+followed by a recovery on the same route in 30–60 ms, and each one leaving the next chat opening
+to join a refresh. The pong, the error and the deadline now race through
+`MobileEventSocketPathProbe`, which decides each probe exactly once; its tests are the boundary
+the live ping still lacks.
+
 **An address that keeps refusing is rested.** The same audit counted 758 attempts against two of
 one Mac's three Tailscale origins — its IPv4 address and its MagicDNS name — every one `url.-1200`
 inside 30 ms while the third origin and the LAN address answered, because a race retried both on
@@ -947,8 +956,8 @@ A view-only terminal has no viewport lease and receives an untagged boundary aft
 
 PTY applications expose SIGWINCH but no portable "repaint finished" acknowledgement, so the host
 uses bounded local timing: 200 ms quiet after the first resize output, one second if the application
-does not repaint, and three seconds for continuous output, always followed by a fresh authoritative
-screen seed. The phone keeps a four-second failure escape. Compatibility remains additive: an
+does not repaint, 400 ms after its first output for an application that never goes quiet, and three
+seconds whatever happens, always followed by a fresh authoritative screen seed. The phone keeps a four-second failure escape. Compatibility remains additive: an
 older phone ignores the feature and marker; a current phone connected to an older host retains its
 one-second input-silence fallback.
 

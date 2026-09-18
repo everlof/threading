@@ -259,6 +259,42 @@ enum MobileNetworkPathChangePolicy {
     }
 }
 
+/// Which outcome of one path-change liveness probe on the dashboard's event socket decides it.
+///
+/// A settled path change pings the socket and gives it `resumeLivenessDeadline` to answer. The
+/// answer and the deadline race, and exactly one of them may act. Until 2026-09-18 a pong was
+/// never recorded as the answer, so the deadline always won: every path change tore down a
+/// socket that had just proved it was alive, and the journal showed a `liveness.pathChanged`
+/// loss every six seconds while the same route answered each recovery in 30–60 ms.
+struct MobileEventSocketPathProbe: Equatable {
+    enum Verdict: Equatable {
+        /// The socket answered; keep it.
+        case keep
+        /// The socket failed or said nothing in time; recover it.
+        case recover
+        /// This probe was already decided.
+        case ignore
+    }
+
+    private var decidedProbe = 0
+
+    /// The ping came back, with or without an error.
+    mutating func pingReturned(probe: Int, failed: Bool) -> Verdict {
+        decide(probe, as: failed ? .recover : .keep)
+    }
+
+    /// The deadline passed. Only an unanswered probe is recovered.
+    mutating func deadlinePassed(probe: Int) -> Verdict {
+        decide(probe, as: .recover)
+    }
+
+    private mutating func decide(_ probe: Int, as verdict: Verdict) -> Verdict {
+        guard decidedProbe != probe else { return .ignore }
+        decidedProbe = probe
+        return verdict
+    }
+}
+
 /// Watches the network path for as long as a connection panel is on screen.
 ///
 /// One `NWPathMonitor`, started when the panel appears and cancelled when it goes, and the

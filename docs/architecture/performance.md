@@ -1289,6 +1289,20 @@ reveal. Frame-by-frame inspection at 500 ms intervals again shows only the loade
 complete terminal. The measured artifacts are
 `/tmp/threading-profiles/20260821T131423Z-ios-terminal-wire-lab`.
 
+**Codex stopped going quiet, 2026-09-18.** The August numbers above were a Codex that went quiet
+after its resize repaint. The one in use by September animates without pause: the new
+`terminalHydrationEnded` records showed 35–36 output bursts in three seconds from an idle Codex
+(about twelve a second, each gap shorter than the 200 ms quiet window) and 341 from a working one.
+So every Codex chat sat out the whole three-second ceiling — `sessionOpenEnded` measured 3,126 ms
+and 3,089 ms tap-to-usable against a 15 ms and 44 ms hello — while Claude settled on `quiet` in
+287–624 ms. The quiet guard itself is unchanged, for the reason above: shortening it risks the
+partial reveal. What changed is continuous output: once the first post-resize output has arrived,
+the hold ends `outputSettleDelay` (400 ms) later whether or not it went quiet. The August trace put
+the resize repair on the phone about 235 ms after the viewport, so 400 ms still leaves the whole
+first repaint time to land, and the hold ends with the authoritative seed with live output behind
+it. The ceiling stays as the outer bound. Expected after: about 0.45 s for Codex, measured by the
+same two records; `RemoteTerminalHydrationDiagnosticsTests` is the regression boundary.
+
 Starting a session socket from the row tap rather than the detail's task is not useful: the real
 view is created 9–12 ms after connection start, so it can recover only that small scheduling
 slice. Preconnecting dashboard rows would violate the catalogue scaling contract above by adding

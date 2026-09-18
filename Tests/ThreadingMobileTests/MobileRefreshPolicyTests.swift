@@ -395,3 +395,36 @@ final class MobileRefreshPolicyTests: XCTestCase {
         )
     }
 }
+
+/// One path-change probe of the dashboard's event socket is decided exactly once, and a socket
+/// that answers is kept. The deadline used to win after every pong, so each path change tore
+/// down a live socket (2026-09-18: a `liveness.pathChanged` loss every six seconds).
+final class MobileEventSocketPathProbeTests: XCTestCase {
+    func testASocketThatAnswersIsKeptWhenTheDeadlineLaterPasses() {
+        var probe = MobileEventSocketPathProbe()
+        XCTAssertEqual(probe.pingReturned(probe: 1, failed: false), .keep)
+        XCTAssertEqual(probe.deadlinePassed(probe: 1), .ignore)
+    }
+
+    func testASocketThatSaysNothingIsRecoveredAtTheDeadline() {
+        var probe = MobileEventSocketPathProbe()
+        XCTAssertEqual(probe.deadlinePassed(probe: 1), .recover)
+        XCTAssertEqual(
+            probe.pingReturned(probe: 1, failed: false),
+            .ignore,
+            "a pong after the deadline cannot undo a recovery already under way"
+        )
+    }
+
+    func testAFailedPingRecoversOnceEvenWhenTheDeadlineFollows() {
+        var probe = MobileEventSocketPathProbe()
+        XCTAssertEqual(probe.pingReturned(probe: 1, failed: true), .recover)
+        XCTAssertEqual(probe.deadlinePassed(probe: 1), .ignore)
+    }
+
+    func testEachPathChangeIsDecidedOnItsOwn() {
+        var probe = MobileEventSocketPathProbe()
+        XCTAssertEqual(probe.pingReturned(probe: 1, failed: false), .keep)
+        XCTAssertEqual(probe.deadlinePassed(probe: 2), .recover)
+    }
+}

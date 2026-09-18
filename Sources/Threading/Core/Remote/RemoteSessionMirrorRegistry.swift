@@ -13,7 +13,14 @@ private enum RemoteTerminalHydrationDefaults {
     /// A foreground program may choose not to repaint after SIGWINCH. Do not leave that terminal
     /// hidden indefinitely when the host can already synthesize its authoritative screen.
     static let firstOutputMaximumDelay: Duration = .seconds(1)
-    /// Continuous output still gets one bounded final seed and a visible terminal.
+    /// How long output that never goes quiet is waited on once it has started. A program that
+    /// animates without pause — Codex redraws about twelve times a second even at rest — never
+    /// meets the quiet window, and every Codex chat sat out the full ceiling: 3.0 s of a 3.1 s
+    /// open on 2026-09-18, against 0.3–0.6 s for Claude. Waiting longer buys nothing, because the
+    /// hold ends with an authoritative screen seed and the live output continues behind it; this
+    /// only leaves the resize's first repaint time to land.
+    static let outputSettleDelay: Duration = .milliseconds(400)
+    /// The outer bound, whatever the output does.
     static let maximumDelay: Duration = .seconds(3)
 }
 
@@ -25,7 +32,10 @@ enum RemoteTerminalHydrationEnd: String, Sendable {
     case quiet
     /// Nothing was drawn after the resize within `firstOutputMaximumDelay`.
     case firstOutputTimeout
-    /// Output never went quiet and `maximumDelay` ended the hold.
+    /// Output kept coming, and `outputSettleDelay` after the first of it ended the hold.
+    case continuousOutput
+    /// `maximumDelay` ended the hold. With the settle window shorter than it, only a delay
+    /// configured the other way round reaches this.
     case ceiling
     /// The grid did not change, so there was no repaint to wait for.
     case noResize
@@ -104,6 +114,7 @@ final class RemoteSessionMirrorRegistry {
 
     private let terminalHydrationOutputQuietDelay: Duration
     private let terminalHydrationFirstOutputMaximumDelay: Duration
+    private let terminalHydrationOutputSettleDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
     private let sessionStartupMaximumWait: Duration
     /// Read at every release rather than cached, so a `defaults write` takes effect without a
@@ -129,6 +140,8 @@ final class RemoteSessionMirrorRegistry {
             RemoteTerminalHydrationDefaults.outputQuietDelay,
         terminalHydrationFirstOutputMaximumDelay: Duration =
             RemoteTerminalHydrationDefaults.firstOutputMaximumDelay,
+        terminalHydrationOutputSettleDelay: Duration =
+            RemoteTerminalHydrationDefaults.outputSettleDelay,
         terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay,
         sessionStartupMaximumWait: Duration = RemoteSessionStartupDefaults.maximumWait,
         viewportLeaseGrace: @escaping @MainActor () -> Duration = {
@@ -145,6 +158,7 @@ final class RemoteSessionMirrorRegistry {
         self.terminalHydrationOutputQuietDelay = terminalHydrationOutputQuietDelay
         self.terminalHydrationFirstOutputMaximumDelay =
             terminalHydrationFirstOutputMaximumDelay
+        self.terminalHydrationOutputSettleDelay = terminalHydrationOutputSettleDelay
         self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         self.sessionStartupMaximumWait = sessionStartupMaximumWait
         self.viewportLeaseGrace = viewportLeaseGrace
@@ -399,6 +413,7 @@ final class RemoteSessionMirrorRegistry {
         var outputBursts = 0
         var quietTask: Task<Void, Never>?
         var firstOutputTask: Task<Void, Never>?
+        var settleTask: Task<Void, Never>?
         var maximumTask: Task<Void, Never>?
 
         init(requestID: String, sessionID: SessionID, connection: RemoteConnection) {
@@ -410,6 +425,7 @@ final class RemoteSessionMirrorRegistry {
         func cancel() {
             quietTask?.cancel()
             firstOutputTask?.cancel()
+            settleTask?.cancel()
             maximumTask?.cancel()
         }
     }
@@ -3561,6 +3577,18 @@ final class RemoteSessionMirrorRegistry {
         transaction.firstOutputTask = nil
         transaction.quietTask?.cancel()
         let requestID = transaction.requestID
+        if transaction.settleTask == nil {
+            let settleDelay = terminalHydrationOutputSettleDelay
+            transaction.settleTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: settleDelay)
+                guard !Task.isCancelled else { return }
+                self?.completeTerminalHydration(
+                    for: key,
+                    requestID: requestID,
+                    reason: .continuousOutput
+                )
+            }
+        }
         let quietDelay = terminalHydrationOutputQuietDelay
         transaction.quietTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: quietDelay)

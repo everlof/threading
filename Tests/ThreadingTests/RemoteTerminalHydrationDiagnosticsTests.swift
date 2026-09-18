@@ -62,16 +62,48 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
         await wait { fixture.ends.values == [.quiet] }
     }
 
-    /// The Codex shape: output that never pauses long enough to count as quiet.
-    func testOutputThatNeverGoesQuietEndsAtTheCeiling() async throws {
+    /// The Codex shape: output that never pauses long enough to count as quiet. It is revealed
+    /// once the settle window after its first output ends, not at the ceiling.
+    func testOutputThatNeverGoesQuietEndsWhenTheSettleWindowCloses() async throws {
         let fixture = try makeFixture()
         let phone = try attachedPhone(to: fixture)
+        let requestedAt = ContinuousClock.now
         fixture.registry.requestViewport(
             from: phone,
             sessionID: fixture.sessionID,
             cols: 60,
             rows: 20,
             hydrationRequestID: "animated"
+        )
+
+        let drawing = Task { @MainActor in
+            while !Task.isCancelled {
+                fixture.capability.emit(Data("frame".utf8), to: fixture.sessionID)
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        defer { drawing.cancel() }
+
+        await wait { !fixture.ends.values.isEmpty }
+        XCTAssertEqual(fixture.ends.values, [.continuousOutput])
+        XCTAssertLessThan(
+            ContinuousClock.now - requestedAt,
+            Fixture.ceiling,
+            "an animating program must not sit out the ceiling"
+        )
+    }
+
+    /// The ceiling still bounds everything: with a settle window configured longer than it, the
+    /// ceiling is what ends the hold.
+    func testOutputThatNeverGoesQuietEndsAtTheCeilingWhenThatComesFirst() async throws {
+        let fixture = try makeFixture(settle: .seconds(2))
+        let phone = try attachedPhone(to: fixture)
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 60,
+            rows: 20,
+            hydrationRequestID: "animated-past-settle"
         )
 
         let drawing = Task { @MainActor in
@@ -108,6 +140,8 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
     }
 
     private struct Fixture {
+        static let ceiling: Duration = .milliseconds(250)
+
         let capability: HydrationCapability
         let registry: RemoteSessionMirrorRegistry
         let sessionID: SessionID
@@ -120,9 +154,9 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
         scope: .allSessions
     )
 
-    /// Short, well-separated delays: quiet 40 ms, first output 80 ms, ceiling 250 ms. The
-    /// animated case emits every 10 ms, well inside the quiet window.
-    private func makeFixture() throws -> Fixture {
+    /// Short, well-separated delays: quiet 40 ms, first output 80 ms, settle 120 ms, ceiling
+    /// 250 ms. The animated cases emit every 10 ms, well inside the quiet window.
+    private func makeFixture(settle: Duration = .milliseconds(120)) throws -> Fixture {
         let store = ProjectStore.shared
         let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
@@ -135,7 +169,8 @@ final class RemoteTerminalHydrationDiagnosticsTests: HostedStoreTestCase {
             terminalApplication: capability,
             terminalHydrationOutputQuietDelay: .milliseconds(40),
             terminalHydrationFirstOutputMaximumDelay: .milliseconds(80),
-            terminalHydrationMaximumDelay: .milliseconds(250),
+            terminalHydrationOutputSettleDelay: settle,
+            terminalHydrationMaximumDelay: Fixture.ceiling,
             terminalHydrationDidEnd: { ends.values.append($0) }
         )
         registry.setInputControlFromOwner(.collaborative, sessionID: session.id)
