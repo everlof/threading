@@ -88,6 +88,9 @@ struct LaunchRecoveryWorkspace {
         case repairedFileOutsideWorkspace
         case repairedFileStillUnusable(reason: String)
         case swapFailed(underlying: String)
+        /// The file is a mirror of a transcript that lives on a remote host. Repairing the copy
+        /// would change nothing the agent reads, and the next refresh would overwrite it.
+        case remoteTranscript
 
         var errorDescription: String? {
             switch self {
@@ -103,6 +106,10 @@ struct LaunchRecoveryWorkspace {
                 )
             case .repairedFileStillUnusable(let reason):
                 return reason
+            case .remoteTranscript:
+                return L10n.string(
+                    "This conversation’s file is on its remote host, so it can’t be repaired from this Mac."
+                )
             case .swapFailed(let underlying):
                 return L10n.format("The repaired file could not be put back: %@", underlying)
             }
@@ -206,6 +213,7 @@ struct LaunchRecoveryWorkspace {
         replacing original: URL,
         for sessionID: SessionID
     ) throws -> URL {
+        guard !RemoteTranscriptMirror.shared.contains(original) else { throw Failure.remoteTranscript }
         let backup = directory(for: sessionID)
             .appendingPathComponent(
                 LaunchRecoveryDefaults.backupPrefix + original.lastPathComponent

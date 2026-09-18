@@ -59,6 +59,15 @@ enum SessionTranscript {
         guard account.provider == session.kind, account.handle == session.accountHandle else { return nil }
         switch session.kind {
         case .claude:
+            // A session on a remote host keeps its transcript there; every reader on this Mac
+            // reads the mirror of it instead (`RemoteTranscriptMirror`). The local account's
+            // directory is not a fallback: a file there is this Mac's, from before the project had
+            // a host, and reading it would describe a different conversation.
+            if let mirror = RemoteTranscriptMirror.shared.mirrorURL(
+                for: session, transcriptID: sessionID, in: project
+            ) {
+                return .file(mirror)
+            }
             let observed = sessionID == session.resumeState.transcriptID
                 ? locations.url(for: session, account: account) : nil
             guard let url = observed ?? ClaudeTranscript.storageURL(

@@ -50724,6 +50724,17 @@
         }
       }
     },
+    "This conversation’s file is on its remote host, so it can’t be repaired from this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konversationens fil finns på dess fjärrvärd och kan därför inte repareras från den här Macen."
+          }
+        }
+      }
+    },
     "This copy of Threading does not include the background host." : {
       "extractionState" : "manual",
       "localizations" : {

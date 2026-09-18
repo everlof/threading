@@ -685,7 +685,27 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// boundaries from the stream it is already reading — it sent the message and it sees the
     /// result — so a hook would tell it something it knows, one process later.
     func applyLifecycle(_ report: HookLifecycleReport) {
-        let report = ProjectStore.shared.sessionRunsOnRemoteHost(report.sessionID) ? report.withoutHostPaths() : report
+        guard ProjectStore.shared.sessionRunsOnRemoteHost(report.sessionID) else {
+            applyReport(report)
+            return
+        }
+        let report = report.withoutHostPaths()
+        // A remote turn's ending is applied after its transcript has arrived. Everything that
+        // runs at a turn end — the title, the work log, refusal and interruption detection, run
+        // progress — reads the mirror, and applied first they would read the turn before. The wait
+        // is bounded (`RemoteTranscriptMirrorDefaults.turnEndWait`): a host that stops answering
+        // delays a session's state by seconds, never holds it.
+        switch report.event {
+        case .turnFinished, .awaitingUser:
+            RemoteTranscriptMirror.shared.refresh(sessionID: report.sessionID) { [weak self] in
+                self?.applyReport(report)
+            }
+        default:
+            applyReport(report)
+        }
+    }
+
+    private func applyReport(_ report: HookLifecycleReport) {
         if report.event == .subagentStarted || report.event == .subagentStopped {
             applySubagentLifecycle(report)
             return

@@ -756,6 +756,12 @@ final class AgentSessionViewController: NSViewController {
                 "session": sessionID.uuidString
             ])
         }
+        if placement.isRemote {
+            // The agent may have been working the whole time nobody was connected; its transcript
+            // grew on the host. Catch the mirror up now, so the first reader after taking it back
+            // does not describe the conversation as it was when this Mac last saw it.
+            RemoteTranscriptMirror.shared.refresh(sessionID: sessionID) {}
+        }
         delegate?.agentSessionDidChangeState(self)
         return true
     }

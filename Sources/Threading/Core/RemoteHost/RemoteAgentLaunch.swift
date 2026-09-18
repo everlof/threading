@@ -134,9 +134,11 @@ struct RemoteAgentLaunch: Sendable {
             prompt: initialPrompt,
             integration: integration.flags
         )
-        let transcript = "\(facts.home)/\(RemoteAgentLaunchDefaults.claudeProjectsDirectory)/"
-            + "\(ClaudeTranscript.projectSlug(forPath: host.remoteDirectory))/"
-            + "\(commands.transcriptID.rawValue)\(RemoteAgentLaunchDefaults.transcriptExtension)"
+        let transcript = remoteTranscriptPath(
+            home: facts.home,
+            remoteDirectory: host.remoteDirectory,
+            transcriptID: commands.transcriptID
+        )
 
         let script = (integration.scriptLines + [
             "cd \(quoted(host.remoteDirectory)) || exit \(RemoteAgentLaunchDefaults.directoryFailureStatus)",
@@ -154,6 +156,15 @@ struct RemoteAgentLaunch: Sendable {
             environment: environment(for: facts) + integration.environment,
             payloads: integration.payloads
         )
+    }
+
+    /// Where Claude keeps a conversation's transcript on the host: the host's home, Claude's
+    /// default config directory, and the project slug of the *remote* checkout. One function, so
+    /// the launch's resume test and the transcript mirror can never disagree about the file.
+    static func remoteTranscriptPath(home: String, remoteDirectory: String, transcriptID: TranscriptID) -> String {
+        "\(home)/\(RemoteAgentLaunchDefaults.claudeProjectsDirectory)/"
+            + "\(ClaudeTranscript.projectSlug(forPath: remoteDirectory))/"
+            + "\(transcriptID.rawValue)\(RemoteAgentLaunchDefaults.transcriptExtension)"
     }
 
     /// The environment a remote child starts with. A login shell rebuilds `PATH` from the host's

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
@@ -387,6 +388,54 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         let daemon = try XCTUnwrap(RemoteHostComponentManifest.component(.daemon, for: architecture))
         XCTAssertNotNil(components.cachedURL(for: daemon), "the published daemon was not downloaded and kept")
         XCTAssertEqual(PTYHostClient.probe(socketPath: ready.localSocketPath, build: "remote-live-test"), .ready)
+    }
+
+    /// A real transcript on the host, mirrored here over `ssh` in deliberately small rounds, comes
+    /// out byte for byte what the host holds — the property every reader on this Mac relies on.
+    func testARealTranscriptIsMirroredByteForByte() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination] else {
+            throw XCTSkip("set \(Key.destination) to run against a real host")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let runner = SystemSSHCommandRunner()
+        let newest = try runner.run(
+            on: destination,
+            command: "ls -t ~/.claude/projects/*/*.jsonl 2>/dev/null | head -n 1",
+            input: .none, extraOptions: [], timeout: Fixture.childTimeout
+        )
+        let remotePath = newest.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard remotePath.hasSuffix(".jsonl") else { throw XCTSkip("the host holds no Claude transcript") }
+
+        let root = URL(fileURLWithPath: "/tmp/threading-mirror-live-\(getpid())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Small rounds, so a transcript of a few hundred kilobytes takes several and the offsets
+        // between them are exercised against real bytes.
+        let mirror = RemoteTranscriptMirror(root: root, chunkBytes: 32 * 1024, maximumRounds: 64)
+        let location = RemoteTranscriptLocation(
+            destination: destination,
+            remotePath: remotePath,
+            localURL: mirror.localURL(destination: destination, transcriptID: TranscriptID("live"))
+        )
+        guard case .advanced = mirror.synchronize(location) else { return XCTFail("nothing was mirrored") }
+        XCTAssertEqual(mirror.synchronize(location), .unchanged)
+
+        let digest = try runner.run(
+            on: destination,
+            command: "sha256sum \(ShellCommand(word: remotePath).source) | cut -d' ' -f1",
+            input: .none, extraOptions: [], timeout: Fixture.childTimeout
+        ).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let local = try Data(contentsOf: location.localURL)
+        let remoteSize = try runner.run(
+            on: destination,
+            command: "wc -c < \(ShellCommand(word: remotePath).source)",
+            input: .none, extraOptions: [], timeout: Fixture.childTimeout
+        ).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Sizes first: a mirror that stops short (it once did, at a line longer than a read) says
+        // so plainly rather than as two unequal digests.
+        XCTAssertEqual(String(local.count), remoteSize, "the mirror stopped short of the host's file")
+        let localDigest = SHA256.hash(data: local).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(localDigest, digest, "the mirror is not the host's file")
     }
 
     private func prepare(

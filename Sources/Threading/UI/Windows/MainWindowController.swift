@@ -5575,21 +5575,31 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             // scan is off-main and warm files resolve through the usage cache.
             SessionUsageService.shared.refresh(sessionID, forceIndex: true)
 
-            // The hook-less half of observed-work capture. A reporting session already caught up
-            // on its `turnFinished` hook; this edge is inferred from output, so it is later and
-            // vaguer, but it is the only "something happened" a session without lifecycle hooks
-            // has. The pass costs a file-size comparison when nothing was written.
-            AgentWorkHydration.hydrate(sessionID: sessionID)
+            // The two readers of the transcript at this edge. On a remote host that transcript is a
+            // mirror, brought level first — for a session without hooks this edge is the only
+            // turn end there is, and read before the refresh they would describe the previous turn.
+            // A local session, or a remote one already refreshed by its hook, runs them at once.
+            let readTranscript: @MainActor () -> Void = {
+                // The hook-less half of observed-work capture. A reporting session already caught
+                // up on its `turnFinished` hook; this edge is inferred from output, so it is later
+                // and vaguer, but it is the only "something happened" a session without lifecycle
+                // hooks has. The pass costs a file-size comparison when nothing was written.
+                AgentWorkHydration.hydrate(sessionID: sessionID)
+                // So does the agent's name for the conversation, which lives in the transcript.
+                // This is the only way a *native* session's title arrives — no PTY, no OSC.
+                SessionNaming.refreshAgentTitle(forSessionID: sessionID)
+            }
+            if environment.projectStore.sessionRunsOnRemoteHost(sessionID) {
+                RemoteTranscriptMirror.shared.refresh(sessionID: sessionID, then: readTranscript)
+            } else {
+                readTranscript()
+            }
 
             sidebarViewController.refreshProjectRow(forSessionID: sessionID)
 
             // The session's own branch record follows the same moment; a change regroups
             // the sidebar through the store's change notification.
             environment.projectStore.refreshBranch(forSessionID: sessionID)
-
-            // So does the agent's name for the conversation, which lives in the transcript.
-            // This is the only way a *native* session's title arrives — no PTY, no OSC.
-            SessionNaming.refreshAgentTitle(forSessionID: sessionID)
 
             // And the project's code count: a session that just stopped working is a project
             // whose code most likely just changed.

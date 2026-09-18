@@ -336,6 +336,54 @@ spike's VM from the download alone — fetched through the app's own code, verif
 build directory anywhere. A release is **never deleted or rewritten**: every build carrying its
 manifest resolves its download from it.
 
+## Transcripts: one mirror instead of twenty remote readers, 2026-09-18
+
+Slice 5's first surface, and the keystone. Some twenty readers on this Mac read a Claude transcript
+as a file: the agent's title, the observed-work log, refusal and interruption detection, run
+progress, attachment detection, the model card, limit recovery, permission mode, the continuation
+snapshot, search, "copy transcript path". For a remote session every one of them silently resolved
+to this Mac's Claude directory and read nothing — or, for a project that once ran locally, a stale
+file describing a different conversation.
+
+**Measured first.** A fresh `ssh` read costs 120–170 ms against the spike's VM, and ~40 ms on a
+multiplexed connection. Transcripts on a working Mac are large: of 624 over 1 MB the median was
+2.7 MB and the largest 88 MB. So nothing re-reads a whole transcript; the mirror moves only what is
+new.
+
+**The design.** `RemoteTranscriptMirror` keeps a local copy of each remote conversation's
+transcript, and `SessionTranscript.readRequest` — the resolver every per-session reader goes through
+— returns it for a session whose project has a host. The local account's directory is deliberately
+*not* a fallback. A refresh is one `ssh` command that states the host file's size and streams at
+most one chunk from the mirror's length (`head -c` bounds it on the host). Only whole lines are
+appended, so a line the agent is still writing is never half-copied. A host file shorter than the
+mirror was rewritten, and the copy starts again. Rounds are bounded (8 MB × 8 per refresh), so an
+88 MB first copy catches up across refreshes rather than in one transfer. One refresh per mirror
+runs at a time, and a caller arriving mid-refresh is answered by the next, so it reads a copy at
+least as new as the moment it asked.
+
+**Outside every Claude directory.** Usage scans, import, onboarding's global scan and account
+discovery all walk `~/.claude*/projects` without a resolver. A mirror there would be counted as a
+second conversation, offered as an outside session to import, or win "newest transcript" for the
+account. It lives under Application Support.
+
+**When it refreshes.** A remote turn's end is applied after its transcript arrives: `AgentRuntime`
+holds a remote `turnFinished`/`awaitingUser` report for the refresh, bounded at five seconds so an
+unresponsive host delays a session's state and never holds it. A session without hooks gets the
+same at its inferred turn end, where the title and work-log reads run after the refresh rather than
+before. Taking a remote session back also refreshes, since it may have worked the whole time nobody
+was connected.
+
+**Writers refuse it.** Three places write transcripts on this Mac. Launch repair rewrites the file
+it is handed; it now refuses a mirror, because repairing a copy changes nothing the agent reads and
+the next refresh would put the host's bytes back. Account migration refuses a remote conversation,
+which uses the host's own login. Checkout moves refuse a remote chat, whose checkout is a folder on
+the host.
+
+**Not yet.** Usage: a mirror outside `~/.claude*` is invisible to the usage scan, so a remote
+session's tokens do not reach the dashboard or its receipt — the next surface for slice 5. Subagent
+transcripts, whose paths the hooks report on the host, are not mirrored. Mid-turn readers (run
+progress, live attachment detection) see the transcript as of the last refresh.
+
 **Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it).
 
 ## Hooks and tools, as built, 2026-09-17

@@ -387,6 +387,8 @@ enum SessionMigration {
     struct MoveError: LocalizedError {
         enum Code: String, Sendable {
             case missingSession
+            /// The conversation lives on a remote host, where it uses the host's own login.
+            case remoteHost
             case providerMismatch
             case missingTranscript
             case invalidSourceLocation
@@ -421,7 +423,10 @@ enum SessionMigration {
     /// Whether the session can be moved: it resumes by id, has a transcript on disk, and there
     /// is somewhere to move it to.
     static func canMigrate(_ session: AgentSession, in project: Project) -> Bool {
-        session.kind.supportsResume
+        // A remote conversation is signed in on its host, not with an account on this Mac, and its
+        // transcript here is a mirror; moving that between this Mac's accounts would move nothing.
+        RemoteTranscriptMirror.host(for: session, in: project) == nil
+            && session.kind.supportsResume
             && !destinations(for: session).isEmpty
             && sourceTranscript(for: session, in: project) != nil
     }
@@ -455,6 +460,16 @@ enum SessionMigration {
                 "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=missing_session"
             )
             return .failure(MoveError(code: .missingSession, message: "The session no longer exists."))
+        }
+
+        guard RemoteTranscriptMirror.host(for: session, in: project) == nil else {
+            ThreadingLogger.agent.notice(
+                "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=remote_host"
+            )
+            return .failure(MoveError(
+                code: .remoteHost,
+                message: "This conversation runs on a remote host and uses that host's own Claude login."
+            ))
         }
 
         guard session.kind == account.provider else {

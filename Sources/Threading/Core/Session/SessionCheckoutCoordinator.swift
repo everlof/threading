@@ -65,6 +65,9 @@ enum SessionCheckoutValidationFailure: Error, Equatable, LocalizedError {
     case detachedHead
     case differentRepository
     case managedWorkspace
+    /// The chat runs on a remote host: its checkout is a folder there, and its transcript here is
+    /// a mirror, so moving it between this Mac's checkouts would move neither.
+    case remoteHost
     case checkoutChanged
 
     var errorDescription: String? {
@@ -79,6 +82,7 @@ enum SessionCheckoutValidationFailure: Error, Equatable, LocalizedError {
         case .detachedHead: return "A detached checkout cannot own a chat."
         case .differentRepository: return "A chat can move only between checkouts of one repository."
         case .managedWorkspace: return "Threading-managed temporary workspaces cannot own moved chats."
+        case .remoteHost: return "A chat on a remote host keeps the folder its project names there."
         case .checkoutChanged: return "The target checkout changed after the move was requested."
         }
     }
@@ -153,6 +157,7 @@ final class SessionCheckoutCoordinator {
             return .failure(.sessionUnavailable)
         }
         guard session.managedWorkspace == nil else { return .failure(.managedWorkspace) }
+        guard sourceProject.executionHost == nil else { return .failure(.remoteHost) }
         let canonicalSourcePath = URL(fileURLWithPath: sourceProject.folderPath, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath().path
         guard let source = GitInfo.worktreeLocation(for: canonicalSourcePath) else {
