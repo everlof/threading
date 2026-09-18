@@ -17,6 +17,22 @@ private enum RemoteTerminalHydrationDefaults {
     static let maximumDelay: Duration = .seconds(3)
 }
 
+/// Why one terminal hydration ended, as `terminalHydrationEnded` spells it. The reason is the
+/// tuning question: a program that repaints without pause meets `ceiling`, one that does not
+/// repaint after `SIGWINCH` meets `firstOutputTimeout`, and each has a different fix.
+enum RemoteTerminalHydrationEnd: String, Sendable {
+    /// Output after the resize went quiet for `outputQuietDelay`.
+    case quiet
+    /// Nothing was drawn after the resize within `firstOutputMaximumDelay`.
+    case firstOutputTimeout
+    /// Output never went quiet and `maximumDelay` ended the hold.
+    case ceiling
+    /// The grid did not change, so there was no repaint to wait for.
+    case noResize
+    /// The socket went away or a newer request replaced this one before it was ready.
+    case cancelled
+}
+
 private enum RemoteSessionStartupDefaults {
     /// A provider can spend several seconds loading history before its surface becomes live. The
     /// wait is host-owned and bounded; no client catalogue size participates in this deadline.
@@ -97,6 +113,9 @@ final class RemoteSessionMirrorRegistry {
     private let catalogueCacheLifetime: Duration
     private let catalogueCacheNow: @MainActor () -> ContinuousClock.Instant
     private let allSessionsCatalogueDidBuild: @MainActor () -> Void
+    /// Told why each terminal hydration ended, after it is journaled. A test seam; the app
+    /// passes nothing.
+    private let terminalHydrationDidEnd: @MainActor (RemoteTerminalHydrationEnd) -> Void
     /// The Mac terminal selected in the local pane. It does not displace a phone that is still
     /// actively rendering, but it makes a departed phone's reconnect hold ineligible.
     private var locallyVisibleSessionID: SessionID?
@@ -119,7 +138,8 @@ final class RemoteSessionMirrorRegistry {
         catalogueCacheNow: @escaping @MainActor () -> ContinuousClock.Instant = {
             ContinuousClock.now
         },
-        allSessionsCatalogueDidBuild: @escaping @MainActor () -> Void = {}
+        allSessionsCatalogueDidBuild: @escaping @MainActor () -> Void = {},
+        terminalHydrationDidEnd: @escaping @MainActor (RemoteTerminalHydrationEnd) -> Void = { _ in }
     ) {
         self.terminalApplication = terminalApplication
         self.terminalHydrationOutputQuietDelay = terminalHydrationOutputQuietDelay
@@ -130,6 +150,7 @@ final class RemoteSessionMirrorRegistry {
         self.viewportLeaseGrace = viewportLeaseGrace
         self.catalogueCacheLifetime = catalogueCacheLifetime
         self.catalogueCacheNow = catalogueCacheNow
+        self.terminalHydrationDidEnd = terminalHydrationDidEnd
         self.allSessionsCatalogueDidBuild = allSessionsCatalogueDidBuild
         // A remote surface is a view of this app, so theme changes are live state rather than a
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
@@ -372,6 +393,10 @@ final class RemoteSessionMirrorRegistry {
         let requestID: String
         let sessionID: SessionID
         let connection: RemoteConnection
+        let startedAt = DispatchTime.now()
+        /// Output deliveries seen during the hold; a large count beside `ceiling` is a program
+        /// that never stopped drawing.
+        var outputBursts = 0
         var quietTask: Task<Void, Never>?
         var firstOutputTask: Task<Void, Never>?
         var maximumTask: Task<Void, Never>?
@@ -3494,7 +3519,7 @@ final class RemoteSessionMirrorRegistry {
         expectsResizeOutput: Bool
     ) {
         let key = ObjectIdentifier(connection)
-        terminalHydrations.removeValue(forKey: key)?.cancel()
+        cancelTerminalHydration(for: key)
         let transaction = TerminalHydrationTransaction(
             requestID: requestID,
             sessionID: sessionID,
@@ -3503,7 +3528,7 @@ final class RemoteSessionMirrorRegistry {
         terminalHydrations[key] = transaction
 
         guard expectsResizeOutput else {
-            completeTerminalHydration(for: key, requestID: requestID)
+            completeTerminalHydration(for: key, requestID: requestID, reason: .noResize)
             return
         }
 
@@ -3511,13 +3536,17 @@ final class RemoteSessionMirrorRegistry {
         transaction.firstOutputTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: firstOutputDelay)
             guard !Task.isCancelled else { return }
-            self?.completeTerminalHydration(for: key, requestID: requestID)
+            self?.completeTerminalHydration(
+                for: key,
+                requestID: requestID,
+                reason: .firstOutputTimeout
+            )
         }
         let maximumDelay = terminalHydrationMaximumDelay
         transaction.maximumTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: maximumDelay)
             guard !Task.isCancelled else { return }
-            self?.completeTerminalHydration(for: key, requestID: requestID)
+            self?.completeTerminalHydration(for: key, requestID: requestID, reason: .ceiling)
         }
     }
 
@@ -3527,6 +3556,7 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard let transaction = terminalHydrations[key],
               transaction.sessionID == sessionID else { return }
+        transaction.outputBursts += 1
         transaction.firstOutputTask?.cancel()
         transaction.firstOutputTask = nil
         transaction.quietTask?.cancel()
@@ -3535,18 +3565,23 @@ final class RemoteSessionMirrorRegistry {
         transaction.quietTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: quietDelay)
             guard !Task.isCancelled else { return }
-            self?.completeTerminalHydration(for: key, requestID: requestID)
+            self?.completeTerminalHydration(for: key, requestID: requestID, reason: .quiet)
         }
     }
 
     /// Sends a final screen seed and then the text boundary on the same connection queue. Wire
     /// ordering makes the ready frame proof that every earlier binary frame is available to the
     /// client parser; packet timing on Wi-Fi no longer participates in reveal timing.
-    private func completeTerminalHydration(for key: ObjectIdentifier, requestID: String) {
+    private func completeTerminalHydration(
+        for key: ObjectIdentifier,
+        requestID: String,
+        reason: RemoteTerminalHydrationEnd
+    ) {
         guard let transaction = terminalHydrations[key],
               transaction.requestID == requestID else { return }
         terminalHydrations[key] = nil
         transaction.cancel()
+        recordHydrationEnded(transaction, reason: reason)
 
         if case let .captured(snapshot) = terminalApplication?.currentSnapshot(
             for: transaction.sessionID
@@ -3558,7 +3593,40 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func cancelTerminalHydration(for key: ObjectIdentifier) {
-        terminalHydrations.removeValue(forKey: key)?.cancel()
+        guard let transaction = terminalHydrations.removeValue(forKey: key) else { return }
+        transaction.cancel()
+        recordHydrationEnded(transaction, reason: .cancelled)
+    }
+
+    /// How long one phone's terminal was held behind its hydration boundary, and why the hold
+    /// ended. The phone's hello measures the wire and `terminalAttachEnded` the admission; this
+    /// is the third wait an opening chat can spend, and the one that depends on what the agent
+    /// is drawing. On 2026-09-18 a Codex chat connected in 301 ms and still felt slow to open,
+    /// and nothing recorded whether it had sat out the full three-second ceiling.
+    private func recordHydrationEnded(
+        _ transaction: TerminalHydrationTransaction,
+        reason: RemoteTerminalHydrationEnd
+    ) {
+        let elapsed = DispatchTime.now().uptimeNanoseconds
+            - transaction.startedAt.uptimeNanoseconds
+        var fields: [RemoteDiagnosticField: String] = [
+            .kind: RemoteAttachDiagnostics.sessionKind,
+            .session: MacRemoteDiagnostics.pseudonym(
+                transaction.sessionID.uuidString,
+                prefix: "session"
+            ),
+            .durationMS: String(elapsed / RemoteAttachDiagnostics.nanosecondsPerMillisecond),
+            .reason: reason.rawValue,
+            .total: String(transaction.outputBursts),
+        ]
+        if let agent = ProjectStore.shared.session(withID: transaction.sessionID)?.kind {
+            fields[.detail] = agent.rawValue
+        }
+        if let device = transaction.connection.authenticatedPeer?.deviceID {
+            fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
+        }
+        MacRemoteDiagnostics.recordInteraction(.terminalHydrationEnded, fields: fields)
+        terminalHydrationDidEnd(reason)
     }
 
     // MARK: - Viewport leases

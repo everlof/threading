@@ -903,7 +903,11 @@ struct SessionDetailView: View {
                 return
             }
         #endif
+        // The whole wait the person sees, from here to a usable surface. The connection ends it
+        // once it has one; every path out of this function before that ends it here.
+        let span = MobileSessionOpenSpan(session: session)
         guard let hostID = model.activeHostID else {
+            span.failed(code: "open.noHost")
             launchError = RemoteClientError.invalidResponse.localizedDescription
             return
         }
@@ -913,6 +917,7 @@ struct SessionDetailView: View {
             // the newest authoritative catalogue row rather than the immutable navigation value.
             // A cold-launch route may have been built from the presentation-only cache.
             let latest = try await model.liveSessionForOpening(id: session.id)
+            span.reached(.catalogue)
             // Even a previously authenticated warm socket must wait for that catalogue check:
             // an offline launch can restore the same id after its membership or row was revoked.
             //
@@ -928,6 +933,8 @@ struct SessionDetailView: View {
             let needsWaking = openingStrategy == .resumeIfNeeded && !latest.isAvailable
             if needsWaking {
                 try await model.makeSessionReady(latest)
+                span.path = .woken
+                span.reached(.wake)
             }
             let pool = MobileSessionConnectionPool.shared
             pool.discardEntries(exceptHostID: hostID)
@@ -939,6 +946,9 @@ struct SessionDetailView: View {
                 warmed.onSessionVisited = { [weak model] visit in
                     model?.acceptSessionVisit(visit, from: hostID)
                 }
+                span.path = .pooled
+                span.reached(.socket)
+                warmed.openSpan = span
                 connection = warmed
                 return
             }
@@ -959,11 +969,14 @@ struct SessionDetailView: View {
             made.onSessionVisited = { [weak model] visit in
                 model?.acceptSessionVisit(visit, from: hostID)
             }
+            made.openSpan = span
             connection = made
             made.connect()
         } catch is CancellationError {
+            span.abandoned()
             return
         } catch {
+            span.failed(code: MobileDiagnostics.errorCode(error))
             MobileDiagnostics.logDegraded(.sessionAction, error: error)
             launchError = error.localizedDescription
         }

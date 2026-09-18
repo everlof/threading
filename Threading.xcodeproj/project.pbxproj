@@ -134,6 +134,7 @@
 		A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */; };
 		A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71900010000000000000002 /* MobileScrubSurfaceTests.swift */; };
 		A78100010000000000000001 /* MobileDormantChatReportingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78100010000000000000002 /* MobileDormantChatReportingTests.swift */; };
+		A78200010000000000000001 /* MobileSessionOpenSpanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78200010000000000000002 /* MobileSessionOpenSpanTests.swift */; };
 		A72000010000000000000001 /* StatusIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72000010000000000000002 /* StatusIntegrityTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
@@ -441,6 +442,7 @@
 		A71800010000000000000002 /* MobileRouteHealthLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileRouteHealthLedgerTests.swift; sourceTree = "<group>"; };
 		A71900010000000000000002 /* MobileScrubSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileScrubSurfaceTests.swift; sourceTree = "<group>"; };
 		A78100010000000000000002 /* MobileDormantChatReportingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDormantChatReportingTests.swift; sourceTree = "<group>"; };
+		A78200010000000000000002 /* MobileSessionOpenSpanTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionOpenSpanTests.swift; sourceTree = "<group>"; };
 		A72000010000000000000002 /* StatusIntegrityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatusIntegrityTests.swift; sourceTree = "<group>"; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
@@ -502,6 +504,7 @@
 				ThreadingMobile/MobileScrubSurface.swift,
 				ThreadingMobile/MobileSessionConnectionPool.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
+				ThreadingMobile/MobileSessionOpenSpan.swift,
 				ThreadingMobile/MobileSessionSettingsView.swift,
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileSettingsView.swift,
@@ -864,6 +867,7 @@
 				A71900010000000000000002 /* MobileScrubSurfaceTests.swift */,
 				A72000010000000000000002 /* StatusIntegrityTests.swift */,
 				A78100010000000000000002 /* MobileDormantChatReportingTests.swift */,
+				A78200010000000000000002 /* MobileSessionOpenSpanTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1741,6 +1745,7 @@
 				A71800010000000000000001 /* MobileRouteHealthLedgerTests.swift in Sources */,
 				A71900010000000000000001 /* MobileScrubSurfaceTests.swift in Sources */,
 				A78100010000000000000001 /* MobileDormantChatReportingTests.swift in Sources */,
+				A78200010000000000000001 /* MobileSessionOpenSpanTests.swift in Sources */,
 				A72000010000000000000001 /* StatusIntegrityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

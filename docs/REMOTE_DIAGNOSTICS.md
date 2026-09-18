@@ -122,6 +122,19 @@ Every record has:
 - `terminalAttachEnded` is the host's own timing for attaching one socket to a session or
   terminal — admission to the hello and bounded replay being handed to the connection — with
   `kind`, `session`, `peer` and `durationMS`; the phone's hello duration minus this is the wire.
+- `terminalHydrationEnded` is the host's hold between a phone's first grid and the ordered
+  `terminalReady` behind its repaint: `durationMS`, `reason` (`quiet`, `firstOutputTimeout`,
+  `ceiling`, `noResize`, `cancelled`), `total` output bursts seen during it, and the agent runtime
+  in `detail`. A program that never stops drawing meets `ceiling`; one that does not repaint after
+  a resize meets `firstOutputTimeout`. These are the knobs in `RemoteTerminalHydrationDefaults`.
+- `sessionOpenStarted`, `sessionOpenProgress` and `sessionOpenEnded` are the phone's one span per
+  chat opening, from the tap to a usable surface. Progress names a fixed stage (`catalogue`,
+  `wake`, `socket`, `retry`, `hello`) with its cumulative `durationMS`; the end carries the total,
+  the `reason` path (`pooled`, `fresh`, `woken`), the `result` (`succeeded`, `failed`,
+  `abandoned`, `superseded`) and, in `phase`, what revealed the surface (`hello`, `boundary`,
+  `quiet`, `ceiling`). `detail` is the runtime from a closed set, `other` for one this build does
+  not know. Subtracting the stages attributes a slow opening to host recovery, a wake, the wire
+  or the hydration hold without stitching traces together.
 - The phone's capture carries `connectionPoolMetrics`, the warm session-connection pool's
   counters as closed `key.value` tokens (`reused`, `misses`, `hitpct`, `peak`, the eviction
   reasons), so an audit reads the hit rate from the Mac's copy.

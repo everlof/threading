@@ -50,6 +50,11 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
     /// handed to the connection. durationMS is the host-side attach cost; kind is session or
     /// terminal.
     case terminalAttachEnded
+    /// The host ended one session terminal's resize hydration: the hold between a phone's first
+    /// grid and its terminalReady boundary. durationMS is the hold, reason is quiet,
+    /// firstOutputTimeout, ceiling, noResize or cancelled, total counts the output bursts seen
+    /// during it, and detail names the agent runtime.
+    case terminalHydrationEnded
     case socketEnded
     case socketFailed
     /// A failed live socket scheduled one bounded exponential retry.
@@ -59,6 +64,15 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
     /// A parked session reattach reached a terminal result with its own duration, separate from
     /// socket age.
     case sessionResumeEnded
+    /// A person opened one chat. trace joins its progress and result; detail names the agent
+    /// runtime.
+    case sessionOpenStarted
+    /// One fixed stage of a chat opening (catalogue, wake, socket, hello) was reached. durationMS
+    /// is cumulative from the tap.
+    case sessionOpenProgress
+    /// A chat opening became usable, failed or was abandoned. durationMS is tap to usable; reason
+    /// says whether it was pooled, fresh or woken; phase names how the surface was revealed.
+    case sessionOpenEnded
     /// A content-free prompt or atomic terminal submission began.
     case promptSubmissionStarted
     /// A prompt or atomic terminal submission reached an acknowledgement or terminal failure.
@@ -107,17 +121,17 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
         .hostRefreshFailed, .hostRouteStarted, .hostRouteProgress, .hostRouteEnded,
         .hostDiscoveryFound, .hostDiscoveryMatched, .hostDiscoveryIgnored, .socketConnecting,
         .socketConnected, .socketEnded, .socketFailed, .socketReconnectScheduled,
-        .sessionResumeStarted, .sessionResumeEnded, .promptSubmissionStarted,
-        .promptSubmissionEnded, .terminalInputProbeStarted, .terminalInputProbeEnded,
-        .permissionDecisionSent, .notificationAuthorization, .apnsRegistrationSucceeded,
-        .apnsRegistrationFailed, .notificationRegistrationStarted,
-        .notificationRegistrationSucceeded, .notificationRegistrationFailed,
-        .notificationReceived, .notificationSuppressed, .notificationPresented,
-        .notificationOpened, .notificationRetractionReceived, .notificationLocallyCleared,
-        .issueReportOpened, .issueReportExported, .issueReportSubmissionStarted,
-        .issueReportSubmissionSucceeded, .issueReportSubmissionDeferred,
-        .issueReportSubmissionFailed, .attachmentPreviewFailed, .diagnosticSharingStarted,
-        .diagnosticSharingStopped
+        .sessionResumeStarted, .sessionResumeEnded, .sessionOpenStarted, .sessionOpenProgress,
+        .sessionOpenEnded, .promptSubmissionStarted, .promptSubmissionEnded,
+        .terminalInputProbeStarted, .terminalInputProbeEnded, .permissionDecisionSent,
+        .notificationAuthorization, .apnsRegistrationSucceeded, .apnsRegistrationFailed,
+        .notificationRegistrationStarted, .notificationRegistrationSucceeded,
+        .notificationRegistrationFailed, .notificationReceived, .notificationSuppressed,
+        .notificationPresented, .notificationOpened, .notificationRetractionReceived,
+        .notificationLocallyCleared, .issueReportOpened, .issueReportExported,
+        .issueReportSubmissionStarted, .issueReportSubmissionSucceeded,
+        .issueReportSubmissionDeferred, .issueReportSubmissionFailed, .attachmentPreviewFailed,
+        .diagnosticSharingStarted, .diagnosticSharingStopped
     ]
 
     private static let browserClientUploadEvents: Set<Self> = [
@@ -285,5 +299,5 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
 
 public enum RemoteDiagnosticContract {
     public static let schemaVersion = 1
-    public static let fingerprint = "24b81b135b57fdb9293550ae3450f2fbc3cbc936cd72e6e37c53a2b15e2d0e23"
+    public static let fingerprint = "039fbc21e8380b69e3a12ddbb0763f195fb807a811af12284bbf29c755dabb7b"
 }

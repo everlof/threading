@@ -55,6 +55,19 @@ enum MobileAgentIdentity: Equatable {
         }
     }
 
+    /// The runtime as a diagnostics token: a closed set, so a name the Mac sends that this build
+    /// does not know is recorded as `other` rather than copied into the journal.
+    var diagnosticToken: String {
+        switch self {
+        case .claude: return "claude"
+        case .codex: return "codex"
+        case .grok: return "grok"
+        case .openCode: return "opencode"
+        case .cursor: return "cursor"
+        case .unknown: return "other"
+        }
+    }
+
     /// The name of this runtime's own interactive TUI, hosted in a mirrored terminal. The Mac
     /// spells it the same way, through the same catalogue key.
     var originalUITitle: String {

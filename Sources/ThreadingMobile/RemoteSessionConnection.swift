@@ -476,6 +476,14 @@ final class RemoteSessionConnection: ObservableObject {
     private var socketAttempt = 1
     private var sessionResumeTrace: String?
     private var sessionResumeStartedAt: UInt64?
+    /// The opening the person is waiting on, handed over by the detail screen. It ends when the
+    /// surface is revealed or the person leaves; a replaced one is recorded as superseded.
+    var openSpan: MobileSessionOpenSpan? {
+        didSet {
+            guard oldValue !== openSpan else { return }
+            oldValue?.superseded()
+        }
+    }
     private var stopped = false
     private var connectionGeneration = 0
     private let wireEncodingLane = RemoteWireEncodingLane(
@@ -717,6 +725,7 @@ final class RemoteSessionConnection: ObservableObject {
         stopped = false
         lossPeerSentClose = false
         phase = .connecting
+        openSpan?.reached(.socket)
         beginTerminalHydration()
         lastSentTerminalViewport = nil
         // A reconnect keeps what the last hello established until the next hello replaces it
@@ -882,6 +891,7 @@ final class RemoteSessionConnection: ObservableObject {
         isAttentionRequestPending = false
         conversationStore.cancelLoadingEarlier()
         if markEnded {
+            endOpenSpanAbandoned()
             phase = .ended(MobileL10n.string("Disconnected"))
             MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
                 phase: "session"
@@ -909,6 +919,7 @@ final class RemoteSessionConnection: ObservableObject {
         // last update while this view disappears; a renderer must not remount onto a connection
         // that has already committed to leaving host fan-out.
         warmTransportState = .parking
+        endOpenSpanAbandoned()
         reportTyping(false)
         terminalHydrationQuietTask?.cancel()
         terminalHydrationQuietTask = nil
@@ -1001,7 +1012,7 @@ final class RemoteSessionConnection: ObservableObject {
             terminalHydrationMaximumTask = Task { [weak self, terminalHydrationMaximumDelay] in
                 try? await Task.sleep(for: terminalHydrationMaximumDelay)
                 guard !Task.isCancelled else { return }
-                self?.completeTerminalHydration()
+                self?.completeTerminalHydration(revealedBy: .ceiling)
             }
         }
         scheduleTerminalHydrationCompletionIfReady()
@@ -1026,11 +1037,11 @@ final class RemoteSessionConnection: ObservableObject {
         terminalHydrationQuietTask = Task { [weak self, terminalHydrationQuietDelay] in
             try? await Task.sleep(for: terminalHydrationQuietDelay)
             guard !Task.isCancelled else { return }
-            self?.completeTerminalHydration()
+            self?.completeTerminalHydration(revealedBy: .quiet)
         }
     }
 
-    private func completeTerminalHydration() {
+    private func completeTerminalHydration(revealedBy reveal: MobileSessionOpenSpan.Reveal) {
         guard isTerminalHydrating else { return }
         terminalHydrationQuietTask?.cancel()
         terminalHydrationQuietTask = nil
@@ -1039,6 +1050,7 @@ final class RemoteSessionConnection: ObservableObject {
         isTerminalHydrating = false
         releaseHeldReplay()
         isAwaitingResume = false
+        endOpenSpanRevealed(by: reveal)
 #if DEBUG
         MobileTerminalWirePerformanceProbe.terminalHydrationCompleted(session)
 #endif
@@ -1242,6 +1254,7 @@ final class RemoteSessionConnection: ObservableObject {
                 .reason: "userLeft",
             ]) { current, _ in current })
         }
+        endOpenSpanAbandoned()
         disconnect(markEnded: false)
     }
 
@@ -1253,6 +1266,22 @@ final class RemoteSessionConnection: ObservableObject {
         return nil
     }
 
+    private func endOpenSpanRevealed(by reveal: MobileSessionOpenSpan.Reveal) {
+        guard let span = openSpan else { return }
+        let destination = destinationFields
+        span.revealed(
+            by: reveal,
+            transport: destination[.transport],
+            origin: destination[.origin]
+        )
+        openSpan = nil
+    }
+
+    private func endOpenSpanAbandoned() {
+        openSpan?.abandoned()
+        openSpan = nil
+    }
+
     private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
         guard isTerminalHydrating else { return }
         if capability == .interact {
@@ -1261,7 +1290,7 @@ final class RemoteSessionConnection: ObservableObject {
         } else {
             guard ready.requestID == nil else { return }
         }
-        completeTerminalHydration()
+        completeTerminalHydration(revealedBy: .boundary)
     }
 
     func sendTerminalInput(_ data: ArraySlice<UInt8>) {
@@ -1932,7 +1961,7 @@ final class RemoteSessionConnection: ObservableObject {
             mirroredCaption = hello.title.isEmpty ? mirroredCaption : hello.title
             surface = hello.surface
             if surface != .terminal {
-                completeTerminalHydration()
+                completeTerminalHydration(revealedBy: .hello)
             }
             capability = hello.capability.knownCapability ?? .view
             theme = hello.theme ?? theme
@@ -1966,6 +1995,13 @@ final class RemoteSessionConnection: ObservableObject {
             try? send(RemoteClientMessage(type: RemoteClipboardPolicy.readyType))
             recoveryFailure = nil
             hasEverConnected = true
+            openSpan?.reached(.hello)
+            // A surface that holds nothing for hydration is usable now. A terminal is revealed
+            // by `completeTerminalHydration`, when the Mac's boundary or the phone's fallback
+            // ends the hold.
+            if !isTerminalHydrating {
+                endOpenSpanRevealed(by: .hello)
+            }
 #if DEBUG
             MobileTerminalWirePerformanceProbe.helloReceived(
                 session,
@@ -2314,6 +2350,7 @@ final class RemoteSessionConnection: ObservableObject {
         let failureCode = code ?? "connection.\(failure.cause.rawValue)"
         finishSessionResume(result: "failed", code: failureCode)
         finishTerminalInputProbe(result: "failed")
+        openSpan?.reached(.retry)
         clearRunPlanState(resetFeature: true)
         recoveryFailure = failure
         phase = .failed(failure)
