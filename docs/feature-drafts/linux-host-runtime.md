@@ -129,6 +129,9 @@ not a working Linux `StateManager`, recovery system, agent runtime, or applicati
 Three additional recovery contracts now pin commit rollback, probe refusal/retry, and the mandatory
 model reload after a successful SQLite probe. [FINDINGS section 32](../../Spikes/linux-appkit/FINDINGS.md#32-recovery-primitives-preserve-the-graph-across-refusal-and-retry)
 details that narrower recovery evidence; host recovery policy remains outside the slice.
+Three migration contracts also verify schema-4 upgrade rollback/retry, retained authority history,
+new receipt storage and post-upgrade uniqueness/cascades; [FINDINGS section 33](../../Spikes/linux-appkit/FINDINGS.md#33-historical-authority-migration-survives-refusal-and-retry-on-linux)
+records the synthetic fixture's scope. The project executable now passes eleven contracts.
 
 ## The boundary to build
 

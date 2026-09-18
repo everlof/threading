@@ -87,6 +87,7 @@ func runContracts() throws {
 do {
     try runContracts()
     try runRecoveryContracts()
+    try runMigrationContracts()
 } catch {
     FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
     exit(1)

@@ -813,3 +813,27 @@ suite already exercises real `SQLITE_FULL` through SQLite page limits. This slic
 StateManager, quarantine, recovery presentation or the complete app's in-process resume policy.
 No shipping source changed, so the previous macOS shipping validation remains applicable; the
 new executable code was built and run through `coreslice.sh`. Logs are `out/coreslice-*.log`.
+
+
+## 33. Historical authority migration survives refusal and retry on Linux
+
+`MigrationContracts.swift` creates a schema-4 fixture using the production historical DDL and
+seeds two sessions, a manager grant, a released supervision tenure and its event. It exercises
+`ProjectDatabase`'s real migration chain to the current schema (6), not a harness copy of that
+chain. Three new contracts pass on arm64 Linux with Swift 6.3.2 and SQLite 3.45.1:
+
+- An injected commit refusal rolls back the schema version and DDL, leaves the historical event
+  present, leaves no intermediate v5 or later receipt tables, and passes `foreign_key_check`.
+- Retrying the upgrade preserves the ordered graph, full grant, tenure and event payloads. The
+  same child can be readopted into a new tenure; the new receipt tables work. Both tenures, the
+  historical event and receipt survive close/reopen.
+- A second active tenure receives the typed constraint refusal without changing history.
+  Deleting the manager cascades its grant, both tenures and their event while retaining the
+  surviving child's receipt. The upgraded database has no dangling foreign keys.
+
+All **eleven** project contracts pass (five persistence, three recovery, three migration), and
+all ten runner tests pass. The 27 vendored production files remain unchanged and byte-identical.
+Logs are `out/coreslice-*.log`. This is a synthetic historical database using current model
+encodings, not a corpus of old user databases; it verifies this schema-4 upgrade path, not every
+historical payload format. No shipping code changed, so no additional macOS build was needed.
+StateManager, quarantine and complete host recovery remain outside the executable.
