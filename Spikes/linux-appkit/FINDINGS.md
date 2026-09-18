@@ -863,3 +863,29 @@ All **thirteen** project contracts and all ten runner tests pass. The 27 product
 byte-identical and unchanged. Logs are `out/coreslice-*.log`. No shipping source changed, so the
 previous macOS validation remains applicable. The fixture models a future schema increment and
 unknown table, not arbitrary future formats or a complete downgraded application launch.
+
+
+## 35. Project stores move safely after pinned readers release WAL
+
+Two additional Linux contracts exercise `ProjectDatabase.prepareForFileMove()` and actual
+single-file relocation for healthy and deliberately damaged project stores. Each holds an old
+reader snapshot while committing a new session, selection, participant receipt and opaque panel
+and attachment payloads. The damaged variant also writes invalid JSON into the new session row.
+
+The move primitive refuses while the reader pins WAL and leaves all bundle paths in place; the
+reader still sees its original snapshot. After the reader closes, the primitive succeeds,
+checkpointing the committed state and removing dependence on sidecars. The fixture closes the
+writer and moves only the main file, then reopens through `ProjectDatabase` at the new path.
+
+The healthy variant retains ordered session identities, the latest title and selection. The
+damaged variant still fails its authoritative load with the original corrupt row identity; direct
+inspection confirms the exact damaged payload and both session rows remain. Both retain the
+latest receipt and byte-equivalent opaque auxiliary strings. These strings test storage, not the
+panel/attachment codecs. A file move must preserve recoverable evidence rather than turn damage
+into missing data.
+
+All **fifteen** project contracts pass on arm64 Linux with Swift 6.3.2 and SQLite 3.45.1. The 27
+production copies are unchanged and verify byte-identical; `git diff --check` passes. Full logs are
+`out/coreslice-*.log`. No shipping source or runner changed, so the prior macOS and runner-test
+validation remains applicable. These fixtures verify the move primitive, not StateManager's
+choice to quarantine, naming/recovery policy, or an app-level recovery flow.
