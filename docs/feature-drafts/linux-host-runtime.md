@@ -112,16 +112,20 @@ without Keychain. They also contain platform TLS adapters. The linked persistenc
 `RemoteHostPinning` through account appearance preferences in `ThreadingRemoteKit`; substituting
 SHA-256 would not supply `SecTrust` or Apple server-trust challenge handling. Moving those values
 into `ThreadingDomain`, with public aliases in the wire kit, removed that dependency from local
-preferences. The full slice now stops at account discovery's `os` import, reached from runtime
-handoff helpers embedded in the session model. Continue separating stored values from runtime
-operations before treating the remaining work as library substitutions. Credential custody still
-needs an explicit product decision.
+preferences. Moving live handoff helpers out of the persisted session file then removed account
+discovery and its `os` import from the slice. Separating launch environment composition, title
+policy, terminal creation, SSH conversion and read-receipt state then allowed the real project
+slice to compile and run. Durable actors/scopes stay beside grants; the shared outbox bound no
+longer requires runtime delivery types. Credential custody still needs an explicit product decision.
 
-The independent production SQLite wrapper now passes nine on-disk Linux contracts, including
-close/reopen, rollback, schema refusal, pinned-WAL moves and typed full-disk recovery. Run
-`Spikes/linux-appkit/coreslice.sh --sqlite`; [FINDINGS section 28](../../Spikes/linux-appkit/FINDINGS.md#28-the-storage-engine-runs-unchanged-the-project-graph-still-reaches-tls)
-records the scope. The complete project graph remains blocked, so this result does not establish
-that local sessions persist on Linux.
+The production SQLite wrapper passes nine on-disk Linux contracts, including close/reopen,
+rollback, schema refusal, pinned-WAL moves and typed full-disk recovery. Run
+`Spikes/linux-appkit/coreslice.sh --sqlite`. The full persistence slice now separately passes five
+contracts on arm64 Linux: project/session save and reopen, incremental updates, stale graph
+writer refusal, participant receipt cascade, and refusal of corrupt session payloads without
+row loss. Run `Spikes/linux-appkit/coreslice.sh`; [FINDINGS section 31](../../Spikes/linux-appkit/FINDINGS.md#31-the-real-project-database-runs-on-linux)
+records the boundaries. This is evidence for `ProjectDatabase` and the exercised stored records,
+not a working Linux `StateManager`, recovery system, agent runtime, or application.
 
 ## The boundary to build
 

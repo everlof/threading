@@ -1,4 +1,4 @@
-# The persistence slice, vendored byte-identical from master. One path per line; an optional
+# The persistence slice, vendored byte-identical from the working tree. One path per line; an optional
 # second, tab-separated field renames the copy (only where a basename would mislead).
 #
 # There are no stand-ins. There used to be two — `TerminalThemeID` extracted from an AppKit file,
@@ -16,10 +16,7 @@ Sources/Threading/Core/Events/AppEvent.swift
 Sources/Threading/Core/Settings/SettingsEvents.swift
 Sources/Threading/Core/Settings/LimitRecoveryPolicy.swift
 Sources/Threading/Core/Settings/PreferenceStore.swift
-Sources/Threading/Core/Settings/AccountPreferencesStore.swift
 Sources/Threading/Core/Agent/AgentDefaults.swift
-Sources/Threading/Core/Agent/AgentAccountDiscovery.swift
-Sources/Threading/Core/Agent/AgentModels.swift
 Sources/Threading/Core/Agent/ModelName.swift
 Sources/Threading/Models/Identifiers.swift
 Sources/Threading/Models/Project.swift
@@ -31,3 +28,10 @@ Sources/Threading/Models/SessionCurfew.swift
 Sources/Threading/Models/SessionLaunchFailure.swift
 Sources/Threading/Models/ManagedWorkspace.swift
 Sources/Threading/Models/PendingCheckoutMove.swift
+Sources/Threading/Core/Control/ControlAuthority.swift
+Sources/Threading/Core/Agent/ConversationContextAttachment.swift
+Sources/Threading/Core/Agent/ConversationOutboxDefaults.swift
+Sources/Threading/Models/ProjectExecutionHost.swift
+Sources/Threading/Models/RemoteHostRecord.swift
+Sources/Threading/Models/SessionReadReceiptState.swift
+Sources/Threading/Models/AccountUsage.swift
