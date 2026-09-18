@@ -311,3 +311,63 @@ files of genuine platform decisions, one of which (credentials) is a product que
 of mechanical substitutions. Against the nine-subsystem conjunction the UI faces, that is a very
 different size of problem — which is exactly why the draft put it first and said it is worth doing
 even if Linux stops there.
+
+## 14. The ceiling holds: the compiler says 66%
+
+`./sweep-core.sh` type-checks each of those 636 files on Linux against **Foundation alone** — no
+AppKit shim, nothing from this spike. That absence is the design: with no `AppKit`, `Security` or
+`IOKit` module in the container, a file that needs one fails with an unambiguous `no such module`
+instead of a thousand cascading symbol errors, so the blocked set classifies itself.
+`./classify-core.py` then separates a *platform* failure from a file that merely missed its
+siblings, because only the first is a portability problem.
+
+| Verdict | Files | |
+|---:|---:|---|
+| compiles standalone | 36 | 5% |
+| needs only our own siblings | 383 | 60% |
+| needs `import FoundationNetworking` | 6 | 0% |
+| blocked: missing module | 189 | 29% |
+| blocked: platform symbol | 22 | 3% |
+| **nothing platform-specific in the way** | **425** | **66%** |
+
+66% measured against the 69% the import ceiling predicted. The ceiling was close to honest, which
+is itself worth knowing: for this codebase, the cheap import scan is a decent proxy for the
+expensive compile, and slice 2 can be tracked with the cheap one between sweeps.
+
+Of the 211 blocked, **72 are `AppKit`** — the UI question — and most of the rest have a known
+Linux equivalent rather than a wall: `Darwin` → Glibc (29 files), `os`/`OSLog` → swift-log (27),
+`CryptoKit` → swift-crypto with the same API (16), `CoreGraphics` (9), `Network` → NIO (8),
+FSEvents → inotify (4 files, one file-watcher), `SQLite3` and `Compression` (1 each).
+
+**The genuinely hard tail is about twenty files:**
+
+| Files | Blocker |
+|---:|---|
+| 12 | `Security` — Keychain |
+| 3 | `AVFoundation` |
+| 2 each | `UserNotifications`, `ApplicationServices`, `Sparkle` |
+| 1 each | `MetricKit`, `ServiceManagement`, `CoreImage` |
+| 1 each | `RelativeDateTimeFormatter`, `ListFormatter`, `ProcessInfo.beginActivity`, `URLResourceValues.volumeAvailableCapacityForImportantUsage`, `NSNotification.Name.NSSystemClockDidChange` |
+
+That last group is the interesting one, because none of it is a framework — it is Foundation APIs
+that **swift-corelibs-foundation simply does not have**. `RelativeDateTimeFormatter` and
+`ListFormatter` are the kind of thing an import scan can never find, and they are exactly why the
+compile was worth running rather than reasoning about.
+
+## 15. Two bugs in the measurement, worth recording
+
+Both would have produced a flattering number, and both were caught by disbelieving a good result:
+
+- **`str.splitlines()` splits on `\v`.** The sweep escapes each file's errors onto one line with a
+  vertical tab; Python treats that as a line break. Twenty-six rows read as 1,810 files and the
+  tool reported "97% compiles standalone". The classifier now splits on `"\n"` explicitly.
+- **Our own modules counted as platform blockers.** `ThreadingDomain`, `ThreadingRemoteKit` and
+  `NativeDiffCore` are not on the search path for a one-file type-check — the same artifact as a
+  sibling type not being compiled alongside, not a portability problem. `NativeDiffCore` needed
+  naming specially because it is referenced as a `.product(name:)` from a package of ours fetched
+  from GitHub, so scanning package directories and target declarations both missed it.
+
+And one real finding fell out of the noise: on Linux, **`URLSession` and friends are not in
+Foundation** — swift-corelibs-foundation splits them into `FoundationNetworking`. Those files are
+not blocked, but each needs a `#if canImport(FoundationNetworking)` import, so it is a genuine
+porting chore with its own bucket rather than a footnote.
