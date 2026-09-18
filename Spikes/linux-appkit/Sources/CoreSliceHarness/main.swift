@@ -88,6 +88,7 @@ do {
     try runContracts()
     try runRecoveryContracts()
     try runMigrationContracts()
+    try runFutureSchemaContracts()
 } catch {
     FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
     exit(1)

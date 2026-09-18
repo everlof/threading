@@ -837,3 +837,29 @@ Logs are `out/coreslice-*.log`. This is a synthetic historical database using cu
 encodings, not a corpus of old user databases; it verifies this schema-4 upgrade path, not every
 historical payload format. No shipping code changed, so no additional macOS build was needed.
 StateManager, quarantine and complete host recovery remain outside the executable.
+
+
+## 34. Downgrades refuse future project schemas, including live WAL
+
+Two additional contracts exercise `ProjectDatabase`'s constructor against a synthetic newer
+schema, rather than testing only `SQLiteDatabase`'s optional version bound. Each fixture contains
+a real project plus an unknown future table and payload. Both pass on arm64 Linux, Swift 6.3.2,
+SQLite 3.45.1:
+
+- A checkpointed future database is refused three times with exact found/supported versions,
+  without entering the migration commit seam, changing main-file bytes or creating sidecars.
+- A live-WAL future database is refused the same way. The fixture verifies that the main-file
+  header still records the supported version while the future version and table exist in WAL;
+  this proves the check reads SQLite's effective state, not merely the main header. Main-file
+  and committed WAL bytes remain identical across refusals, and the directory entry set stays
+  unchanged. The newer writer then updates its unknown payload successfully, closes, and the
+  version, project and updated future payload survive reopening.
+
+The shared-memory sidecar's presence is checked, not its byte contents: it is SQLite's transient
+coordination state, not the persisted-data assertion. Directory equality proves no artifacts
+were introduced by this constructor; this is not a test of StateManager's quarantine policy.
+
+All **thirteen** project contracts and all ten runner tests pass. The 27 production copies remain
+byte-identical and unchanged. Logs are `out/coreslice-*.log`. No shipping source changed, so the
+previous macOS validation remains applicable. The fixture models a future schema increment and
+unknown table, not arbitrary future formats or a complete downgraded application launch.

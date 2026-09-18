@@ -49,7 +49,9 @@ probe. These use the production commit-preflight injection seam, not a full host
 section 32; StateManager's recovery policy is still outside this executable.
 Three migration contracts additionally build a schema-4 fixture, refuse and retry its upgrade,
 verify retained authority history and new receipt storage, then check active-tenure uniqueness
-and deletion cascades. See FINDINGS section 33. The full executable now runs eleven contracts.
+and deletion cascades. See FINDINGS section 33. Two downgrade contracts also exercise the project-store constructor against checkpointed and
+live-WAL future schemas, preserving unknown data and the newer writer. See FINDINGS section 34.
+The full executable now runs thirteen contracts.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound
