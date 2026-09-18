@@ -1,4 +1,6 @@
+#if canImport(Compression)
 import Compression
+#endif
 import Foundation
 
 /// Wraps a body in the gzip container (RFC 1952) so an HTTP response can carry
@@ -46,6 +48,19 @@ public enum GzipWriter {
     // MARK: - Private Methods
 
     private static func deflate(_ data: Data) -> Data? {
+        #if !canImport(Compression)
+        // No Compression framework: report "not worth compressing", which the caller already
+        // handles by sending the body uncompressed. Every `URLSession` advertises gzip but none
+        // requires it, so this costs bandwidth and nothing else.
+        //
+        // A real port routes this to zlib, and there is one trap worth knowing before someone
+        // does: `COMPRESSION_ZLIB` produces *raw* DEFLATE, which is what the gzip framing above
+        // expects, while zlib's own `compress2()` writes a zlib header instead. Getting that
+        // wrong yields a stream that passes every length check here and is not valid gzip.
+        // The right call is `deflateInit2_` with a *negative* window size, which is zlib's way of
+        // asking for raw DEFLATE with no header or trailer.
+        return nil
+        #else
         let capacity = data.count
         var deflated = Data(count: capacity)
         let written = deflated.withUnsafeMutableBytes { destination -> Int in
@@ -71,6 +86,7 @@ public enum GzipWriter {
         guard written > 0, written + 18 < data.count else { return nil }
         deflated.removeSubrange(written...)
         return deflated
+        #endif
     }
 }
 

@@ -1,6 +1,40 @@
 import Foundation
 #if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
+#if !os(WASI)
+// POSIX `read` and `write` are spelled identically on Darwin and Glibc but live in different
+// modules, and the descriptor paths below qualify them because `read` and `write` also name
+// members in scope here. A module-qualified name cannot itself be conditional, so the
+// qualification lives here rather than at each call site.
+@inline(__always)
+private func posixRead(
+    _ descriptor: Int32,
+    _ buffer: UnsafeMutableRawPointer?,
+    _ count: Int
+) -> Int {
+    #if canImport(Darwin)
+    Darwin.read(descriptor, buffer, count)
+    #else
+    Glibc.read(descriptor, buffer, count)
+    #endif
+}
+
+@inline(__always)
+private func posixWrite(
+    _ descriptor: Int32,
+    _ buffer: UnsafeRawPointer?,
+    _ count: Int
+) -> Int {
+    #if canImport(Darwin)
+    Darwin.write(descriptor, buffer, count)
+    #else
+    Glibc.write(descriptor, buffer, count)
+    #endif
+}
 #endif
 
 #if os(WASI)
@@ -171,7 +205,7 @@ public final class ExtensionHostDescriptorTransport: @unchecked Sendable {
             let read = chunk.withUnsafeMutableBytes { raw -> Int in
                 var result = 0
                 repeat {
-                    result = Darwin.read(descriptor, raw.baseAddress, raw.count)
+                    result = posixRead(descriptor, raw.baseAddress, raw.count)
                 } while result < 0 && errno == EINTR
                 return result
             }
@@ -231,7 +265,7 @@ public final class ExtensionHostDescriptorTransport: @unchecked Sendable {
             while offset < raw.count {
                 var written = 0
                 repeat {
-                    written = Darwin.write(
+                    written = posixWrite(
                         descriptor,
                         raw.baseAddress.map { $0 + offset },
                         raw.count - offset

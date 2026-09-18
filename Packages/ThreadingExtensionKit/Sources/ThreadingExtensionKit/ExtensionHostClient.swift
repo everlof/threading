@@ -1,4 +1,12 @@
 import Foundation
+// swift-corelibs-foundation splits networking out of Foundation, and — unhelpfully — leaves
+// `URLSession` and `HTTPURLResponse` behind as placeholder `AnyObject` typealiases. Without this
+// the names still resolve and every use of them fails as "type 'URLSession' (aka 'AnyObject') has
+// no member 'shared'", which reads like an API change rather than a missing import. No effect on
+// Apple platforms, where `canImport` is false.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// One complete, atomic component-state publication to Threading's extension host.
 ///
