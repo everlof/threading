@@ -43,6 +43,10 @@ participant receipt persistence/cascade, and corrupt graph refusal without delet
 27 production files are byte-identical to their sources. Runtime helpers remain in the app;
 the slice includes neither RemoteKit nor live account discovery. See FINDINGS section 31.
 The debug harness uses `@testable import CoreSlice` without widening the production APIs.
+Three additional recovery contracts verify refused-commit rollback (including receipt cascades and
+writer generation), refused-probe retry, and the required model reload after a successful SQLite
+probe. These use the production commit-preflight injection seam, not a full host disk. See FINDINGS
+section 32; StateManager's recovery policy is still outside this executable.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound

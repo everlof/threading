@@ -126,6 +126,9 @@ writer refusal, participant receipt cascade, and refusal of corrupt session payl
 row loss. Run `Spikes/linux-appkit/coreslice.sh`; [FINDINGS section 31](../../Spikes/linux-appkit/FINDINGS.md#31-the-real-project-database-runs-on-linux)
 records the boundaries. This is evidence for `ProjectDatabase` and the exercised stored records,
 not a working Linux `StateManager`, recovery system, agent runtime, or application.
+Three additional recovery contracts now pin commit rollback, probe refusal/retry, and the mandatory
+model reload after a successful SQLite probe. [FINDINGS section 32](../../Spikes/linux-appkit/FINDINGS.md#32-recovery-primitives-preserve-the-graph-across-refusal-and-retry)
+details that narrower recovery evidence; host recovery policy remains outside the slice.
 
 ## The boundary to build
 
