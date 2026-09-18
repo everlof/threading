@@ -46,7 +46,16 @@ The pane does not overlap those public device transactions with its private fram
 Before an agent install/launch or public screenshot, it stops the current direct transport; after
 the bounded command completes or fails, it establishes a fresh stream for the same live lease.
 CoreSimulator otherwise can leave `simctl` waiting while the old helper remains connected but
-receives no frames. This is one serialization rule owned by the pane, not a retry budget.
+receives no frames. This is one serialization rule owned by the pane, not a retry budget: while a
+public transaction is in flight the pane opens no direct stream at all, whether for presentation,
+Retry or an agent command on a hidden pane.
+
+An agent screenshot of a **presented pane on a direct stream is not a public transaction.** It
+answers from the next frame the stream decodes after the request (PNG-encoded off main) and leaves
+the stream running. Tearing the helper down for every capture restarted it once per agent step, so
+an agent that screenshots between taps kept the pane reconnecting and its next tap or element read
+waiting on a handshake. Only when no live frame arrives within a second, or the pane is hidden or
+on the fallback, does the capture take the public route above.
 
 The public path is the fallback and lifecycle plane, not the intended live renderer. The direct
 backend is a first-party signed helper using the CoreSimulator framebuffer and device HID seams:
@@ -138,6 +147,26 @@ order rather than one, because one is exactly what a frozen stream produces. The
 counts the frames it decoded itself and logs that beside the helper's own statistics, which only
 arrive every few seconds of sent frames and never for a stream that froze early.
 
+**A hidden pane gives its helper back.** Hiding a pane stops capture, but the helper is still a
+process, three mapped frame buffers and one of the four budget slots. They used to be kept until the
+tab closed, and switching sessions never closes a tab, so every session whose simulator tab had
+been shown held a helper for the life of the app. Observed on 17 September 2026: four helpers
+under one Threading, aged 54 minutes to 1.5 days, only the newest capturing, and any other pane
+refused with "already has 4 live Simulator streams" into the one-frame-per-second fallback. A pane
+now releases its transport once it has stayed hidden for fifteen seconds with no agent command
+running; a glance elsewhere and back stays live, and showing it later reconnects. Agent tools still
+address a hidden pane (its session need not be on screen), so input, element reads and element
+screenshots open the transport on demand without asking for frames, and the grace restarts when
+the last command ends. A failed on-demand open answers the command with its reason instead of
+waiting out the handshake deadline.
+
+**Stopping a stream returns its slot synchronously.** The slot used to come back only after the
+helper's queued teardown finished and an actor hop ran, so a pane that stopped and at once reopened
+(Retry, the reconnect after an install) was overtaken by its own reopen and, at a full budget,
+refused by its own slot. `SimulatorHelperClient.stop()` now releases the reservation on the
+caller's thread; the budget sits behind a lock for that reason. The teardown's own release is
+idempotent.
+
 ## Device and session ownership
 
 One simulator tab has one stable session-owned identity and one selected UDID. The initial product
@@ -170,7 +199,8 @@ The built-in **iOS Simulator** tool group is session-scoped. Its preferred seque
 2. The agent runs `xcodebuild` through its ordinary shell permission flow, using the returned UDID
    and a session-specific DerivedData directory.
 3. `simulator_install_launch` installs the resulting `.app` and launches it in that same device.
-4. `simulator_screenshot` reads the current pixels from that lease.
+4. `simulator_screenshot` reads the current pixels from that lease, from the live stream when the
+   pane is showing one.
 5. `simulator_tap`, `simulator_swipe`, `simulator_type_text` and `simulator_press_button` address
    that same visible lease with normalized coordinates and a closed, bounded input vocabulary.
 

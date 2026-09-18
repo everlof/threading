@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os
 import ThreadingSimulatorKit
 import XCTest
 @testable import Threading
@@ -300,7 +301,42 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         XCTAssertEqual(installOpenCount, 2)
     }
 
-    func testAgentScreenshotQuiescesDirectTransportAndReconnectsAfterCapture() async throws {
+    func testAgentScreenshotAnswersFromTheNextLiveFrameWithoutStoppingTheStream() async throws {
+        let session = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(session)])
+        let control = SimulatorRecoveryControlFake()
+        let controller = makeController(control: control, coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        // The real helper captures continuously while the tab is visible.
+        let capture = session.emitFramesContinuously(width: 4, height: 8)
+        defer { capture.cancel() }
+
+        let result: SimulatorPaneAgentResult<SimulatorPaneScreenshot> =
+            await withCheckedContinuation { continuation in
+                controller.screenshotForAgent {
+                    continuation.resume(returning: $0)
+                }
+            }
+
+        guard case .success(let screenshot) = result else {
+            return XCTFail("The capture did not answer from the live stream.")
+        }
+        let image = try XCTUnwrap(NSBitmapImageRep(data: screenshot.data))
+        XCTAssertEqual(image.pixelsWide, 4)
+        XCTAssertEqual(image.pixelsHigh, 8)
+        XCTAssertFalse(session.didStop)
+        let screenshotCount = await control.screenshotCount
+        let openCount = await coordinator.openCount
+        XCTAssertEqual(screenshotCount, 0)
+        XCTAssertEqual(openCount, 1)
+        XCTAssertEqual(controller.liveBackendForTesting, .direct(codec: .h264))
+    }
+
+    func testAgentScreenshotWithoutALiveFrameQuiescesTransportAndReconnects() async throws {
         let firstSession = SimulatorRecoveryStreamSessionFake()
         let recoveredSession = SimulatorRecoveryStreamSessionFake()
         let coordinator = SimulatorRecoveryStreamCoordinatorFake([
@@ -310,7 +346,11 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         let control = SimulatorRecoveryControlFake(
             transportStoppedProbe: { firstSession.didStop }
         )
-        let controller = makeController(control: control, coordinator: coordinator)
+        let controller = makeController(
+            control: control,
+            coordinator: coordinator,
+            liveFrameWait: .milliseconds(50)
+        )
         _ = controller.view
         defer { controller.terminate() }
 
@@ -333,6 +373,153 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
         let screenshotOpenCount = await coordinator.openCount
         XCTAssertEqual(screenshotOpenCount, 2)
+    }
+
+    func testHiddenPaneReleasesItsTransportAfterTheGraceAndReconnectsWhenShown() async throws {
+        let firstSession = SimulatorRecoveryStreamSessionFake()
+        let shownAgainSession = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([
+            .success(firstSession),
+            .success(shownAgainSession),
+        ])
+        let control = SimulatorRecoveryControlFake()
+        let controller = makeController(
+            control: control,
+            coordinator: coordinator,
+            hiddenTransportGrace: .milliseconds(50)
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+
+        controller.setPresented(false)
+        try await eventually { firstSession.didStop }
+        XCTAssertNil(controller.liveBackendForTesting)
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        let openCount = await coordinator.openCount
+        XCTAssertEqual(openCount, 2)
+        XCTAssertFalse(shownAgainSession.didStop)
+        let screenshotCount = await control.screenshotCount
+        XCTAssertEqual(screenshotCount, 0)
+    }
+
+    func testReshowingWithinTheGraceKeepsTheHiddenTransport() async throws {
+        let session = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(session)])
+        let controller = makeController(
+            control: SimulatorRecoveryControlFake(),
+            coordinator: coordinator,
+            hiddenTransportGrace: .milliseconds(200)
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        controller.setPresented(false)
+        controller.setPresented(true)
+        try await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertFalse(session.didStop)
+        XCTAssertEqual(session.visibilityChanges, [true, false, true])
+        let openCount = await coordinator.openCount
+        XCTAssertEqual(openCount, 1)
+    }
+
+    func testAgentInputOnAReleasedHiddenPaneReopensTheTransportAndReleasesItAgain() async throws {
+        let firstSession = SimulatorRecoveryStreamSessionFake()
+        let agentSession = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([
+            .success(firstSession),
+            .success(agentSession),
+        ])
+        let controller = makeController(
+            control: SimulatorRecoveryControlFake(),
+            coordinator: coordinator,
+            hiddenTransportGrace: .milliseconds(50)
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        controller.setPresented(false)
+        try await eventually { firstSession.didStop }
+
+        // An agent in a session that is not on screen still addresses this pane.
+        let result: SimulatorPaneAgentResult<Void> = await withCheckedContinuation {
+            continuation in
+            controller.sendInputForAgent(.button(.home)) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        guard case .success = result else {
+            return XCTFail("Input on a hidden pane did not reopen its transport.")
+        }
+        XCTAssertEqual(agentSession.inputs, [.button(.home)])
+        // Opened for input, not for pixels: the hidden helper is never asked to capture.
+        XCTAssertEqual(agentSession.visibilityChanges, [false])
+        try await eventually { agentSession.didStop }
+        let openCount = await coordinator.openCount
+        XCTAssertEqual(openCount, 2)
+    }
+
+    func testAgentInputOnAHiddenPaneReportsWhyTheTransportCouldNotOpen() async throws {
+        let firstSession = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([
+            .success(firstSession),
+            .failure(.streamLimit(maximum: 4)),
+        ])
+        let controller = makeController(
+            control: SimulatorRecoveryControlFake(),
+            coordinator: coordinator,
+            hiddenTransportGrace: .milliseconds(50)
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        controller.setPresented(false)
+        try await eventually { firstSession.didStop }
+
+        let result: SimulatorPaneAgentResult<Void> = await withCheckedContinuation {
+            continuation in
+            controller.sendInputForAgent(.button(.home)) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        guard case .failure(let message) = result else {
+            return XCTFail("Input succeeded without a transport.")
+        }
+        XCTAssertEqual(
+            message,
+            SimulatorLiveStreamError.streamLimit(maximum: 4).localizedDescription
+        )
+    }
+
+    func testStoppingAStreamReturnsItsBudgetSlotBeforeTheHelperTearsDown() throws {
+        let budget = OSAllocatedUnfairLock(initialState: SimulatorStreamBudget(maximum: 1))
+        let token = try budget.withLock { try $0.reserve() }
+        let client = SimulatorHelperClient(
+            helperURL: URL(fileURLWithPath: "/nonexistent/threading-simulator-helper"),
+            deviceID: simulatorRecoveryFirstDevice.id,
+            developerDirectory: "/nonexistent"
+        ) {
+            budget.withLock { $0.release(token) }
+        }
+        XCTAssertFalse(budget.withLock { $0.hasCapacity })
+
+        client.stop()
+
+        // Synchronously: a pane that stops and at once reopens must find its own slot free.
+        XCTAssertTrue(budget.withLock { $0.hasCapacity })
     }
 
     func testStoppedDeviceFailureRefreshesLeaseBeforeRetryingTransport() async throws {
@@ -368,7 +555,9 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
     private func makeController(
         control: SimulatorRecoveryControlFake,
         coordinator: SimulatorRecoveryStreamCoordinatorFake,
-        inputAuthorizer: any SimulatorInputAuthorizing = SimulatorRecoveryInputAuthorizerFake()
+        inputAuthorizer: any SimulatorInputAuthorizing = SimulatorRecoveryInputAuthorizerFake(),
+        hiddenTransportGrace: Duration? = nil,
+        liveFrameWait: Duration? = nil
     ) -> SimulatorPaneViewController {
         SimulatorPaneViewController(
             preferredDeviceID: simulatorRecoveryFirstDevice.id,
@@ -378,7 +567,9 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
                 releaseGraceNanoseconds: 1_000_000
             ),
             streamCoordinator: coordinator,
-            inputAuthorizer: inputAuthorizer
+            inputAuthorizer: inputAuthorizer,
+            hiddenTransportGrace: hiddenTransportGrace,
+            liveFrameWait: liveFrameWait
         )
     }
 
@@ -462,9 +653,37 @@ private final class SimulatorRecoveryStreamSessionFake: SimulatorLiveStreamSessi
 
     var didStop: Bool { lock.withLock { stopped } }
     var inputs: [SimulatorBridgeInput] { lock.withLock { recordedInputs } }
+    var visibilityChanges: [Bool] { lock.withLock { visibility } }
 
     func emit(_ event: SimulatorLiveStreamEvent) {
         continuation.yield(event)
+    }
+
+    /// Delivers a solid frame every 20 ms until cancelled, the way a visible helper captures.
+    func emitFramesContinuously(width: Int, height: Int) -> Task<Void, Never> {
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let frame = SimulatorLiveFrame(
+            sequence: 0,
+            image: context.makeImage()!,
+            codec: .h264,
+            presentationTimeNanoseconds: 0
+        )
+        return Task { [continuation] in
+            while !Task.isCancelled {
+                continuation.yield(.frame(frame))
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
     }
 
     func setVisible(_ visible: Bool) {

@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import ThreadingSimulatorKit
 
 enum SimulatorPaneAgentResult<Value: Sendable>: Sendable {
@@ -50,6 +51,15 @@ final class SimulatorPaneViewController: NSViewController {
         /// A public-process fallback, not the eventual live stream. One frame per second makes
         /// progress visible without pretending repeated `simctl` launches are a 30 fps backend.
         static let fallbackFrameInterval: UInt64 = 1_000_000_000
+        /// How long a hidden pane keeps its direct helper. A glance at another session and back
+        /// stays live; a pane left behind returns its helper and its slot in the app-wide stream
+        /// budget. Kept for the life of the tab instead, every session that had ever shown one
+        /// held a helper, and the fifth session's pane was refused into the screenshot fallback.
+        static let hiddenTransportGrace: Duration = .seconds(15)
+        /// How long an agent screenshot waits for the live stream's next frame. The helper
+        /// captures continuously at 30 fps, so a frame is normally tens of milliseconds away;
+        /// silence past this means the stream is not delivering, and the public capture answers.
+        static let liveFrameWait: Duration = .seconds(1)
     }
 
     private enum ControlActivity: Equatable {
@@ -94,6 +104,15 @@ final class SimulatorPaneViewController: NSViewController {
     private var controlAuthorizationDecisions: [SimulatorDeviceID: Bool] = [:]
     private var agentCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var isPresented = false
+    private let hiddenTransportGrace: Duration
+    private let liveFrameWait: Duration
+    private var hiddenTransportReleaseTask: Task<Void, Never>?
+    /// Agent screenshots waiting for the next decoded live frame; resumed with nil when the
+    /// transport stops or the pane hides, so a waiter never outlives the stream it waits on.
+    private var liveFrameWaiters: [UUID: CheckedContinuation<SimulatorLiveFrame?, Never>] = [:]
+    /// Public `simctl` device transactions in flight. The private framebuffer stream must not be
+    /// opened while one runs (see `installAndLaunchForAgent`).
+    private var publicTransactionCount = 0
 
     private(set) var presentationState: PresentationState = .idle {
         didSet { renderState() }
@@ -398,13 +417,17 @@ final class SimulatorPaneViewController: NSViewController {
         control: any SimulatorControlling,
         leaseManager: (any SimulatorLeaseManaging)? = nil,
         streamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
-        inputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared
+        inputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared,
+        hiddenTransportGrace: Duration? = nil,
+        liveFrameWait: Duration? = nil
     ) {
         self.preferredDeviceID = preferredDeviceID
         self.control = control
         self.leaseManager = leaseManager ?? SimulatorLeaseManager(control: control)
         self.streamCoordinator = streamCoordinator
         self.inputAuthorizer = inputAuthorizer
+        self.hiddenTransportGrace = hiddenTransportGrace ?? Timing.hiddenTransportGrace
+        self.liveFrameWait = liveFrameWait ?? Timing.liveFrameWait
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -540,6 +563,8 @@ final class SimulatorPaneViewController: NSViewController {
                 }
                 return event
             }
+            hiddenTransportReleaseTask?.cancel()
+            hiddenTransportReleaseTask = nil
             if let lease {
                 presentationState = .ready(lease.device)
                 // The stream can drop while the pane is hidden (a helper loss, or a background
@@ -556,6 +581,7 @@ final class SimulatorPaneViewController: NSViewController {
         } else {
             captureModifierMonitor.remove()
             stopFrameLoop()
+            scheduleHiddenTransportRelease()
         }
     }
 
@@ -564,6 +590,8 @@ final class SimulatorPaneViewController: NSViewController {
     func terminate() {
         captureModifierMonitor.remove()
         isPresented = false
+        hiddenTransportReleaseTask?.cancel()
+        hiddenTransportReleaseTask = nil
         preparationTask?.cancel()
         preparationTask = nil
         preparationGeneration += 1
@@ -634,7 +662,9 @@ final class SimulatorPaneViewController: NSViewController {
             // while simctl never answers. Quiesce the one pane-owned transport for the bounded
             // public mutation, then establish a fresh stream against the launched process.
             self.stopTransport()
+            self.publicTransactionCount += 1
             defer {
+                self.publicTransactionCount -= 1
                 if self.isPresented, self.lease?.device.id == deviceID {
                     self.startFrameLoop()
                 }
@@ -672,11 +702,28 @@ final class SimulatorPaneViewController: NSViewController {
         let control = control
         runAgentCommand { [weak self] in
             guard let self else { return }
+            // A visible pane already holds the device's pixels. Answering from its next live frame
+            // costs no public transaction, so the stream keeps running and the agent's following
+            // tap or element read finds it connected rather than mid-reconnect.
+            if let frame = await self.nextLiveFrame() {
+                guard let png = await Self.encodedPNG(frame) else {
+                    completion(.failure("The live Simulator frame could not be encoded."))
+                    return
+                }
+                guard self.lease?.device.id == device.id else {
+                    completion(.failure("The selected Simulator changed during capture."))
+                    return
+                }
+                completion(.success(SimulatorPaneScreenshot(data: png, device: device)))
+                return
+            }
             // A public screenshot is another CoreSimulator service transaction. It must not
             // overlap the adopted private framebuffer stream for the same device; after the
             // capture, reconnect so subsequent input stays on the direct pane transport.
             self.stopTransport()
+            self.publicTransactionCount += 1
             defer {
+                self.publicTransactionCount -= 1
                 if self.isPresented, self.lease?.device.id == device.id {
                     self.startFrameLoop()
                 }
@@ -714,16 +761,12 @@ final class SimulatorPaneViewController: NSViewController {
             completion(.failure("Call simulator_prepare before reading the Simulator's elements."))
             return
         }
-        guard let session = streamSession else {
-            completion(.failure(
-                "The Simulator is not streaming live; element reading needs the direct pane transport."
-            ))
-            return
-        }
-        Task { @MainActor [weak self] in
+        runAgentCommand { [weak self] in
+            guard let self else { return }
             do {
+                let session = try await self.awaitLiveSession(for: device.id)
                 let root = try await session.requestAccessibilitySnapshot()
-                guard let self, self.lease?.device.id == device.id,
+                guard self.lease?.device.id == device.id,
                       self.streamSession === session else {
                     completion(.failure("The selected Simulator changed during the read."))
                     return
@@ -750,16 +793,12 @@ final class SimulatorPaneViewController: NSViewController {
             completion(.failure("Call simulator_prepare before capturing the Simulator."))
             return
         }
-        guard let session = streamSession else {
-            completion(.failure(
-                "The Simulator is not streaming live; an element screenshot needs the pane transport."
-            ))
-            return
-        }
-        Task { @MainActor [weak self] in
+        runAgentCommand { [weak self] in
+            guard let self else { return }
             do {
+                let session = try await self.awaitLiveSession(for: device.id)
                 let root = try await session.requestAccessibilitySnapshot()
-                guard let self, self.lease?.device.id == device.id,
+                guard self.lease?.device.id == device.id,
                       self.streamSession === session else {
                     completion(.failure("The selected Simulator changed during capture."))
                     return
@@ -913,12 +952,36 @@ final class SimulatorPaneViewController: NSViewController {
         let id = UUID()
         agentCommandTasks[id] = Task { [weak self] in
             await operation()
-            self?.agentCommandTasks[id] = nil
+            guard let self else { return }
+            self.agentCommandTasks[id] = nil
+            // A command may have opened the transport of a hidden pane; it goes again once idle.
+            if !self.isPresented, self.agentCommandTasks.isEmpty {
+                self.scheduleHiddenTransportRelease()
+            }
+        }
+    }
+
+    /// A hidden pane captures nothing, but its helper is still a process and a slot in the
+    /// app-wide stream budget. Once the pane has stayed hidden for the grace period with no agent
+    /// command using it, the transport is released. Showing the pane again, or an agent command
+    /// reaching it (its session need not be the one on screen), opens a fresh stream.
+    private func scheduleHiddenTransportRelease() {
+        hiddenTransportReleaseTask?.cancel()
+        hiddenTransportReleaseTask = nil
+        guard !isPresented,
+              streamSession != nil || streamTask != nil || liveBackend != nil else { return }
+        let grace = hiddenTransportGrace
+        hiddenTransportReleaseTask = Task { [weak self] in
+            try? await Task.sleep(for: grace)
+            guard !Task.isCancelled, let self else { return }
+            self.hiddenTransportReleaseTask = nil
+            guard !self.isPresented, self.agentCommandTasks.isEmpty else { return }
+            self.stopTransport()
         }
     }
 
     private func startFrameLoop() {
-        guard isPresented, let deviceID = lease?.device.id else { return }
+        guard isPresented, lease != nil else { return }
         if let streamSession {
             streamSession.setVisible(true)
             if let capabilities = liveCapabilities {
@@ -929,7 +992,17 @@ final class SimulatorPaneViewController: NSViewController {
             }
             return
         }
-        guard streamTask == nil, fallbackTask == nil else { return }
+        openTransport()
+    }
+
+    /// Opens the direct stream for the adopted device. A presented pane asks the helper for frames;
+    /// a hidden one, opened for an agent command, asks for none and gains input and element reads.
+    /// Returns whether an open was started.
+    @discardableResult
+    private func openTransport() -> Bool {
+        guard let deviceID = lease?.device.id,
+              streamSession == nil, streamTask == nil, fallbackTask == nil,
+              publicTransactionCount == 0 else { return false }
 
         liveBackend = nil
         liveCapabilities = nil
@@ -946,13 +1019,12 @@ final class SimulatorPaneViewController: NSViewController {
                 }
                 guard let self,
                       self.streamGeneration == generation,
-                      self.isPresented,
                       self.lease?.device.id == deviceID else {
                     session.stop()
                     return
                 }
                 self.streamSession = session
-                session.setVisible(true)
+                session.setVisible(self.isPresented)
 
                 var terminalFailure: String?
                 for await event in session.events {
@@ -973,6 +1045,7 @@ final class SimulatorPaneViewController: NSViewController {
                     case .frame(let frame):
                         self.screenView.image = NSImage(cgImage: frame.image, size: .zero)
                         self.feedStreamRecorder(frame.image)
+                        self.resumeLiveFrameWaiters(with: frame)
                     case .statistics:
                         break
                     case .failed(let message):
@@ -990,9 +1063,11 @@ final class SimulatorPaneViewController: NSViewController {
                       self.lease?.device.id == deviceID else { return }
                 self.streamSession = nil
                 self.streamTask = nil
-                self.beginFallback(reason: terminalFailure ?? L10n.string(
-                    "The direct Simulator stream ended."
-                ))
+                let reason = terminalFailure ?? L10n.string("The direct Simulator stream ended.")
+                // A hidden pane takes no fallback; the reason still answers the agent command
+                // that is waiting on this transport.
+                self.lastStreamFailure = reason
+                self.beginFallback(reason: reason)
             } catch is CancellationError {
                 return
             } catch {
@@ -1001,9 +1076,11 @@ final class SimulatorPaneViewController: NSViewController {
                       self.streamGeneration == generation,
                       self.lease?.device.id == deviceID else { return }
                 self.streamTask = nil
+                self.lastStreamFailure = error.localizedDescription
                 self.beginFallback(reason: error.localizedDescription)
             }
         }
+        return true
     }
 
     private func beginFallback(reason: String) {
@@ -1053,6 +1130,7 @@ final class SimulatorPaneViewController: NSViewController {
     private func stopFrameLoop() {
         screenView.interactionState = .unavailable
         streamSession?.setVisible(false)
+        resumeLiveFrameWaiters(with: nil)
         fallbackTask?.cancel()
         fallbackTask = nil
         fallbackGeneration += 1
@@ -1072,6 +1150,7 @@ final class SimulatorPaneViewController: NSViewController {
         streamGeneration += 1
         streamSession?.stop()
         streamSession = nil
+        resumeLiveFrameWaiters(with: nil)
         liveBackend = nil
         liveCapabilities = nil
         lastStreamFailure = nil
@@ -1240,7 +1319,7 @@ final class SimulatorPaneViewController: NSViewController {
             controlAuthorizationDecisions.removeValue(forKey: device.id)
         }
         reconnectTransportForInputIfNeeded(on: device.id)
-        let session = try await awaitInputSession(for: device.id)
+        let session = try await awaitLiveSession(for: device.id)
         let approved = await inputAuthorization(for: device)
         controlAuthorizationDecisions[device.id] = approved
         renderState()
@@ -1269,11 +1348,12 @@ final class SimulatorPaneViewController: NSViewController {
         startFrameLoop()
     }
 
-    private func awaitInputSession(
+    private func awaitLiveSession(
         for deviceID: SimulatorDeviceID
     ) async throws -> any SimulatorLiveStreamSession {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(4))
+        var openedOnDemand = false
         while clock.now < deadline {
             try Task.checkCancellation()
             guard lease?.device.id == deviceID else {
@@ -1285,9 +1365,67 @@ final class SimulatorPaneViewController: NSViewController {
                     "Direct Simulator control is unavailable while the pane uses screenshot fallback."
                 )
             }
+            // A hidden pane has no transport once its grace lapses, and nothing else will open one
+            // for it. The command opens it once; finding it empty again means that attempt ended.
+            if !isPresented, streamSession == nil, streamTask == nil, publicTransactionCount == 0 {
+                guard !openedOnDemand, !requiresLeaseRefresh else {
+                    throw SimulatorLiveStreamError.helperUnavailable(
+                        lastStreamFailure ?? SimulatorLiveStreamError.disconnected.localizedDescription
+                    )
+                }
+                openedOnDemand = true
+                openTransport()
+                continue
+            }
             try await Task.sleep(for: .milliseconds(20))
         }
         throw SimulatorLiveStreamError.handshakeTimedOut
+    }
+
+    /// The next frame the live stream delivers, or nil when the pane is not showing a direct stream
+    /// or none arrives within the wait. Only a frame decoded after the request counts, so a capture
+    /// taken just after an input is not the picture from before it.
+    private func nextLiveFrame() async -> SimulatorLiveFrame? {
+        guard isPresented, streamSession != nil, liveCapabilities != nil else { return nil }
+        switch liveBackend {
+        case .direct, .sharedMemory: break
+        case .screenshotFallback, nil: return nil
+        }
+        let id = UUID()
+        let wait = liveFrameWait
+        let timeout = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled else { return }
+            self?.liveFrameWaiters.removeValue(forKey: id)?.resume(returning: nil)
+        }
+        defer { timeout.cancel() }
+        return await withCheckedContinuation { continuation in
+            liveFrameWaiters[id] = continuation
+        }
+    }
+
+    private func resumeLiveFrameWaiters(with frame: SimulatorLiveFrame?) {
+        guard !liveFrameWaiters.isEmpty else { return }
+        let waiters = liveFrameWaiters.values
+        liveFrameWaiters.removeAll()
+        waiters.forEach { $0.resume(returning: frame) }
+    }
+
+    /// PNG-encodes a whole live frame on a worker. A full-resolution iPhone frame is a
+    /// multi-megapixel compression, which is not main-actor work.
+    private nonisolated static func encodedPNG(_ frame: SimulatorLiveFrame) async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            let output = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(
+                output,
+                "public.png" as CFString,
+                1,
+                nil
+            ) else { return nil }
+            CGImageDestinationAddImage(destination, frame.image, nil)
+            guard CGImageDestinationFinalize(destination) else { return nil }
+            return output as Data
+        }.value
     }
 
     private func inputAuthorization(for device: SimulatorDevice) async -> Bool {

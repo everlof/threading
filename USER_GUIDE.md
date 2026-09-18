@@ -3373,7 +3373,11 @@ uses a slower screenshot preview if that live connection is unavailable.
 Agents are told to prefer this route. They choose the device in the panel, build for the exact
 destination Threading returns, install and launch the resulting app there, and inspect it in the
 same place. Input asks for permission once per exact device for this Threading launch. Hiding the
-tab pauses live capture; closing it releases Threading's lease. A device that was already running
+tab pauses live capture, and a tab left hidden for about fifteen seconds lets its live connection
+go, so the sessions you are looking at always get one; showing it again reconnects. An agent can
+keep using a tab in a session you are not looking at, which reconnects for as long as it needs to.
+An agent's screenshot of a visible tab is read from the live picture, so it does not interrupt the
+connection. Closing the tab releases Threading's lease. A device that was already running
 is left running. If Threading itself started the device, it may stop it when the final lease is
 deliberately released.
 

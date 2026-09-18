@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 import ThreadingSimulatorKit
 
 final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendable {
@@ -22,7 +23,9 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     private let helperURL: URL
     private let deviceID: SimulatorDeviceID
     private let developerDirectory: String
-    private let onStop: @Sendable () -> Void
+    /// Returns this stream's slot in the app-wide budget. Idempotent: it runs both when the owner
+    /// calls `stop()` and when the teardown finishes.
+    private let releaseReservation: @Sendable () -> Void
     private let diagnosticID = UUID()
     private let startedAt = DispatchTime.now().uptimeNanoseconds
 
@@ -54,7 +57,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         helperURL: URL,
         deviceID: SimulatorDeviceID,
         developerDirectory: String,
-        onStop: @escaping @Sendable () -> Void
+        releaseReservation: @escaping @Sendable () -> Void
     ) {
         let pair = AsyncStream<SimulatorLiveStreamEvent>.makeStream(
             bufferingPolicy: .bufferingNewest(2)
@@ -64,7 +67,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         self.helperURL = helperURL
         self.deviceID = deviceID
         self.developerDirectory = developerDirectory
-        self.onStop = onStop
+        self.releaseReservation = releaseReservation
     }
 
     func start() async throws {
@@ -172,6 +175,11 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     }
 
     func stop() {
+        // The owner is done with this stream, so its budget slot is returned now rather than after
+        // the queued teardown. A pane that stops and at once reopens (Retry, the reconnect after an
+        // install) otherwise found its own slot still taken and, at a full budget, was refused into
+        // the screenshot fallback by it. The helper still exits on the state queue a moment later.
+        releaseReservation()
         stateQueue.async { [weak self] in self?.stopLocked() }
     }
 
@@ -488,7 +496,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
             didStartDiagnostics = false
         }
         eventContinuation.finish()
-        onStop()
+        releaseReservation()
     }
 
     private func refusalDescription(_ refusal: SimulatorBridgeRefusal) -> String {
@@ -552,19 +560,24 @@ actor SimulatorLiveStreamCoordinator: SimulatorLiveStreamCoordinating {
     static let shared = SimulatorLiveStreamCoordinator()
 
     private let bundle: Bundle
-    private var budget: SimulatorStreamBudget
+    /// Behind a lock rather than in actor state so a stream's owner returns its slot synchronously
+    /// from `stop()`, without an actor hop that a reopen issued straight afterwards would overtake.
+    private let budget: OSAllocatedUnfairLock<SimulatorStreamBudget>
 
     init(
         maximumStreams: Int = SimulatorStreamBudget.defaultMaximum,
         bundle: Bundle = .main
     ) {
         self.bundle = bundle
-        self.budget = SimulatorStreamBudget(maximum: maximumStreams)
+        self.budget = OSAllocatedUnfairLock(
+            initialState: SimulatorStreamBudget(maximum: maximumStreams)
+        )
     }
 
     func openStream(for deviceID: SimulatorDeviceID) async throws -> any SimulatorLiveStreamSession {
-        guard budget.hasCapacity else {
-            throw SimulatorLiveStreamError.streamLimit(maximum: budget.maximum)
+        let (hasCapacity, maximum) = budget.withLock { ($0.hasCapacity, $0.maximum) }
+        guard hasCapacity else {
+            throw SimulatorLiveStreamError.streamLimit(maximum: maximum)
         }
         guard let helperURL = SimulatorHelperLocation.bundledExecutable(in: bundle),
               FileManager.default.isExecutableFile(atPath: helperURL.path) else {
@@ -574,13 +587,14 @@ actor SimulatorLiveStreamCoordinator: SimulatorLiveStreamCoordinating {
         }
         try SimulatorHelperTrust.verify(executableURL: helperURL, bundle: bundle)
         let developerDirectory = try SimulatorDeveloperDirectory.active()
-        let token = try budget.reserve()
+        let token = try budget.withLock { try $0.reserve() }
+        let budget = budget
         let client = SimulatorHelperClient(
             helperURL: helperURL,
             deviceID: deviceID,
             developerDirectory: developerDirectory
-        ) { [weak self] in
-            Task { await self?.release(token) }
+        ) {
+            budget.withLock { $0.release(token) }
         }
         do {
             try await withTaskCancellationHandler {
@@ -594,15 +608,11 @@ actor SimulatorLiveStreamCoordinator: SimulatorLiveStreamCoordinating {
             }
             return client
         } catch {
-            budget.release(token)
+            budget.withLock { $0.release(token) }
             if let streamError = error as? SimulatorLiveStreamError {
                 SimulatorStreamDiagnostics.shared.recordedFailure(streamError)
             }
             throw error
         }
-    }
-
-    private func release(_ token: UUID) {
-        budget.release(token)
     }
 }
