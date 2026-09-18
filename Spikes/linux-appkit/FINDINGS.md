@@ -549,3 +549,59 @@ effect to cause unasked.
 They are independent of everything else on the branch and can be cherry-picked to master at any
 time. Anyone reading this later should assume they *should* be, since each one is a small
 correctness improvement to a package that claims to be Foundation-only.
+
+---
+
+# Round five: landing it
+
+## 24. The fixes are on master, and the stand-ins are gone
+
+Everything in rounds four and five that was worth keeping regardless of Linux is now on master, as
+three ordinary commits verified with the full app build (boundary lints included) and the `fast`
+test level:
+
+| Commit | Change |
+|---|---|
+| `c9a43797c` | `TerminalThemeID` and `TerminalThemeNames` move into `ThreadingDomain`, gain `Sendable`, and get six tests for their persisted contract |
+| `1f33a569c` | `ProfileDidChange` moves beside `TerminalProfile`, leaving `SettingsEvents.swift` Foundation-only |
+| `12cfbf576` | The three package guards: `FoundationNetworking`, `posixRead`/`posixWrite`, `canImport(Compression)` |
+
+The payoff the spike predicted was that the stand-ins would be **deleted rather than reconciled**,
+and they were. `standins.sh` is gone; `coreslice.list` now names 23 files, all vendored
+byte-identical and checked by `./vendor-core.sh --verify`; and the slice stops at exactly the same
+`CryptoKit` frontier as before. That equivalence is the evidence that the two splits on master do
+precisely what the stand-ins did, and nothing less.
+
+Section 23's broken rule is repaired too: outside `Spikes/`, this branch now differs from master
+only by the draft update in `docs/feature-drafts/linux-host-runtime.md`.
+
+## 25. What landing it turned up that the spike did not
+
+- **`ThreadingDesignKit` compiled its own `TerminalThemeID`.** Its `Shared/` folder is symlinks into
+  the app's sources, so it built `TerminalTheme.swift` itself. `plugins.md` confirmed the kit
+  already depends on `ThreadingDomain` and has `Seam/SharedNames.swift` for exactly this, so the
+  fix was two aliases rather than a design change. A Linux build of the slice could never have seen
+  this: the kit is not on its path.
+- **An alias narrower than the type it replaces changes an API.** `TerminalThemeID` was `public`
+  in the app and `ThemeResolution` names it in public API, while the neighbouring domain aliases are
+  internal. Following the neighbours' pattern exactly would have broken the build; the two new
+  aliases keep the access level the types had.
+- **The two private tests nobody had.** `migratedFromName` and `recoveredFromCollision` had no
+  direct coverage. Moving them into a package whose purpose is pinning persisted identities was the
+  natural moment to add it — and the base64url round-trip test was checked to exercise `+`, `/` and
+  both padding lengths, rather than assumed to.
+
+## 26. The test run, stated exactly
+
+The `fast` level ran 9,311 tests with 14 failing assertions across 12 cases. None is caused by
+these changes:
+
+- **Eight cases fail identically on the pristine parent commit**, `60f92498b` —
+  `AppSettingDefinitionTests` (4), `SidebarBrandViewTests` (3), `SilenceGateFooterTests` (1). They
+  track work landing on master at the time: the sidebar re-sort and new settings rows.
+- **Four cases in `GitTurnCheckpointTests` were timeouts**, `timedOut(nil)` and "exceeded timeout of
+  20 seconds", during a run that took over two hours with real `git` processes under load. Run on
+  its own with these changes, the class passes all 38 tests.
+
+Both halves were established by running the failing classes against the parent commit and in
+isolation, not by reading the failure messages and deciding they looked unrelated.
