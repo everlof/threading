@@ -27,6 +27,18 @@ every file in `Sources/Threading/UI/Design/` against the shim alone and classifi
 byte-identical to the repository. That check is the whole difference between a measurement and a
 flattering one, and it is why the vendored file is copied rather than adapted.
 
+## Runner checks
+
+Run `python3 -m unittest discover -s Spikes/linux-appkit/tests` without Docker to check the
+runner failure contracts. The UI build and sweep mount the repository so local package paths
+resolve, and select `Harness` independently of the core slice. Both refuse failed builds;
+`sweep.sh` takes modules from the selected build directory rather than searching old artifacts.
+
+`coreslice.sh` verifies the vendored sources before starting Docker, saves complete build/run
+logs under `out/`, and runs the already-built executable only after a successful build. The
+current executable is still a placeholder: a successful run will not prove persistence behavior
+until real save/reopen assertions replace it.
+
 ## What is in the shim
 
 About 1,870 lines:

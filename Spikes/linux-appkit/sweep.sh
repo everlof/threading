@@ -12,13 +12,19 @@
 # UI compiles?") conflates them and flatters the answer in one direction or the other.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-docker run --rm -i -v "$PWD:/w" -v "$PWD/../..:/repo:ro" -w /w swift:6.3.2-noble bash -s <<'INNER'
+docker run --rm -i -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER'
 set -uo pipefail
-swift build >/dev/null 2>&1
-modules="$(find .build -name 'AppKit.swiftmodule' -printf '%h\n' | head -1)"
+# A failed build is not a sweep: stale modules would produce a plausible, false report.
+mkdir -p out
+if ! swift build --product Harness >out/sweep-build.log 2>&1; then
+  cat out/sweep-build.log >&2
+  exit 1
+fi
+binary_path="$(swift build --show-bin-path)" || exit 1
+modules="${binary_path}/Modules"
+[[ -f "${modules}/AppKit.swiftmodule" ]] || { echo "missing AppKit module" >&2; exit 1; }
 echo "modules: ${modules}"
-mkdir -p /w/out
-report=/w/out/sweep.tsv
+report=out/sweep.tsv
 : > "${report}"
 for file in /repo/Sources/Threading/UI/Design/*.swift; do
   name="$(basename "${file}")"
@@ -43,5 +49,5 @@ done
 echo "=== verdicts ==="
 cut -f2 "${report}" | sort | uniq -c | sort -rn
 echo "=== what a Linux AppKit would still owe, by how many files want it ==="
-cut -f3 "${report}" | tr ',' '\n' | grep -v '^$' | sort | uniq -c | sort -rn | head -45
+cut -f3 "${report}" | tr ',' '\n' | grep -v '^$' | sort | uniq -c | sort -rn | sed -n '1,45p'
 INNER
