@@ -17,7 +17,7 @@ On Linux there is no system AppKit, so a module named `AppKit` is simply ours, a
 
 ## What it does
 
-`swift build` in a `swift:6.3.2-noble` container produces `Harness`, which runs the layout
+`swift build --product Harness` in a `swift:6.3.2-noble` container produces `Harness`, which runs the layout
 correctness cases, prints the solver's scaling curve, and renders PNGs into `out/`.
 `./analyse.py` groups a sweep's missing symbols into subsystems and reports how many must close
 before a file compiles. `./build.sh` runs that build and ranks whatever did not resolve. `./sweep.sh` type-checks
@@ -35,9 +35,20 @@ resolve, and select `Harness` independently of the core slice. Both refuse faile
 `sweep.sh` takes modules from the selected build directory rather than searching old artifacts.
 
 `coreslice.sh` verifies the vendored sources before starting Docker, saves complete build/run
-logs under `out/`, and runs the already-built executable only after a successful build. The
-current executable is still a placeholder: a successful run will not prove persistence behavior
-until real save/reopen assertions replace it.
+logs under `out/`, and runs the already-built executable only after a successful build. It requests
+`linux/arm64` explicitly and prints the actual architecture. Without arguments it builds the full
+project-graph slice, currently blocked by account discovery's Apple `os` import; that executable
+remains a placeholder. The account appearance values now live in `ThreadingDomain`, so the slice
+no longer depends on `ThreadingRemoteKit` or its TLS adapters.
+
+`./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
+production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound
+values surviving close/reopen, statement lifetime and reset, transaction and commit rollback,
+foreign keys, migration atomicity, future-schema refusal, pinned-WAL file moves, and typed
+`SQLITE_FULL` recovery. Every test uses a disposable directory; the full-disk test limits SQLite's
+page allocation rather than filling the host disk. Logs are `out/sqlite-build.log` and
+`out/sqlite-run.log`. Passing these contracts verifies the wrapper, not `ProjectDatabase`, project
+model encoding, or the complete application's recovery path.
 
 ## What is in the shim
 

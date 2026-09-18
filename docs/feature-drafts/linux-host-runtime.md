@@ -107,10 +107,21 @@ does change is **ordering confidence**: slice 2 is roughly thirty files of genui
 decisions against the UI's nine-subsystem conjunction, which is why this document puts it first and
 says it is worth doing even if Linux stops there.
 
-`Security` at twelve files is the one item in slice 2 that is a product decision rather than a
-port: where an agent account's credentials live when there is no Keychain is a question about what
-Threading promises, not about which library to link. It should be answered before the slice starts,
-not during it.
+The twelve `Security` files include a product decision: where an agent account's credentials live
+without Keychain. They also contain platform TLS adapters. The linked persistence spike initially reached
+`RemoteHostPinning` through account appearance preferences in `ThreadingRemoteKit`; substituting
+SHA-256 would not supply `SecTrust` or Apple server-trust challenge handling. Moving those values
+into `ThreadingDomain`, with public aliases in the wire kit, removed that dependency from local
+preferences. The full slice now stops at account discovery's `os` import, reached from runtime
+handoff helpers embedded in the session model. Continue separating stored values from runtime
+operations before treating the remaining work as library substitutions. Credential custody still
+needs an explicit product decision.
+
+The independent production SQLite wrapper now passes nine on-disk Linux contracts, including
+close/reopen, rollback, schema refusal, pinned-WAL moves and typed full-disk recovery. Run
+`Spikes/linux-appkit/coreslice.sh --sqlite`; [FINDINGS section 28](../../Spikes/linux-appkit/FINDINGS.md#28-the-storage-engine-runs-unchanged-the-project-graph-still-reaches-tls)
+records the scope. The complete project graph remains blocked, so this result does not establish
+that local sessions persist on Linux.
 
 ## The boundary to build
 
