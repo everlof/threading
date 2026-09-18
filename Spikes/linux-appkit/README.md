@@ -37,9 +37,12 @@ resolve, and select `Harness` independently of the core slice. Both refuse faile
 `coreslice.sh` verifies the vendored sources before starting Docker, saves complete build/run
 logs under `out/`, and runs the already-built executable only after a successful build. It requests
 `linux/arm64` explicitly and prints the actual architecture. Without arguments it builds the full
-project-graph slice, currently blocked by account discovery's Apple `os` import; that executable
-remains a placeholder. The account appearance values now live in `ThreadingDomain`, so the slice
-no longer depends on `ThreadingRemoteKit` or its TLS adapters.
+project-graph slice and runs five on-disk contracts: save/close/reopen (including Unicode, order,
+selection and a remote execution record), incremental session updates, stale graph writer refusal,
+participant receipt persistence/cascade, and corrupt graph refusal without deleting rows. The
+27 production files are byte-identical to their sources. Runtime helpers remain in the app;
+the slice includes neither RemoteKit nor live account discovery. See FINDINGS section 31.
+The debug harness uses `@testable import CoreSlice` without widening the production APIs.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound

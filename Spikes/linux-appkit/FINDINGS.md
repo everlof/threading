@@ -705,3 +705,86 @@ with its repository gates and passes all 11 hosted `AccountAppearanceTests`. The
 shared-code move; they do not establish that the full Linux project slice compiles.
 The shipping `ThreadingMobile` Debug build also succeeds for a generic iOS Simulator destination;
 this is compilation/link verification, not an iPhone runtime test.
+
+## 30. Live handoff lookup leaves the persisted session file
+
+`ConversationHandoff.continuing` and `AgentSession.handoffModelSnapshot` moved unchanged into
+`Core/Agent/ConversationHandoffRuntime.swift`. The stored path, validating initializer, decoder,
+provisional-model settlement and compatibility properties remain in `Models/AgentSession.swift`.
+This preserves call sites and runtime behavior while making it possible to compile the record
+without discovering accounts or loading their configured models.
+
+The measured dependency set shrank from **23 files / 9,516 lines to 20 files / 7,546 lines**.
+`AgentAccountDiscovery`, `AgentModels` and `AccountPreferencesStore` are no longer vendored. Every
+remaining copy verifies byte-identical against the working tree; no source-body adaptation or
+replacement lock was needed.
+
+Rebuilding on arm64 Linux clears the `os` import failure and reaches semantic checking. The full
+slice still does not compile. Its next errors are a mixture, not one platform substitution:
+
+- Missing durable types: `ProjectExecutionHost`, control grants/supervision/roles, prompt and
+  attachment values, and session read-receipt state.
+- `AgentEnvironment` shares `AgentDefaults.swift` with constants but reaches command-line tool
+  installation, environment keys and `AppSettings`.
+- `AgentSession.displayTitle` consults `AppSettings` for its title policy.
+- `ProjectTerminal.init` calls `GitInfo.currentBranch` while sharing the persisted project file.
+- Scheduled-message records refer to outbox and usage defaults declared in larger feature files.
+
+Blindly expanding the manifest would reintroduce platform imports: environment keys share an
+AppKit-bearing constants file, `GitInfo` imports `os`, read receipts import RemoteKit, and the
+command-line tool installer imports Darwin. These are the next ownership boundaries to inspect;
+a list of unresolved names is not evidence that every corresponding file belongs in persistence.
+
+Verification: the shipping macOS app builds with repository gates and passes all 106 selected
+handoff, provider-capability, side-chat and `StateManager` tests. Three new cases exercise the
+runtime entry point directly: frozen source provenance/provisional target settlement, a repeated
+handoff refreshing only its direct source, and rejection of same-runtime/same-session targets.
+All ten runner tests pass and all twenty vendored copies match. Linux compilation still fails on
+the unresolved dependencies listed above; the project-graph executable has not run.
+
+
+## 31. The real project database runs on Linux
+
+The persistence slice now builds, links and runs on **arm64 Linux**, Swift 6.3.2 in Swift 5
+language mode, with SQLite 3.45.1. All **27 files / 8,877 lines** are byte-identical production
+copies. The only compatibility module used by these records is the existing OSLog adapter;
+there is no AppKit, RemoteKit, account scanner or replacement persistence implementation.
+
+The last dependencies were ownership boundaries:
+
+- Launch environment composition moved from `AgentDefaults` into `AgentEnvironment`.
+- Session title preferences and terminal creation's git lookup moved into runtime extensions.
+- Remote host to SSH destination conversion moved beside the SSH adapter.
+- `SessionReadReceiptState` became a standalone model, separate from its RemoteKit-aware store.
+- Outbox capacity became a shared default, independent of queue delivery protocols.
+- Durable `ControlActor` and `ControlScope` moved beside `ControlGrant`, separate from live
+  control outcomes. Their authority and encoding semantics are unchanged.
+
+The manifest additionally takes the real prompt/context values, usage values, host records and
+control-authority records. Moved bodies are unchanged; no field, permission rule or JSON key was
+adapted for Linux. These production extractions remain prepared on this branch for independent
+review/landing, not as spike-only alternate definitions.
+
+`CoreSliceHarness` replaces the placeholder with five contracts against disposable on-disk state:
+
+1. Save, close and reopen projects/sessions, retaining IDs, order, Unicode titles, selection and
+   a remote execution host record.
+2. Update one session and retain its sibling and unrelated project.
+3. Refuse a stale whole-graph writer after another connection adds a project; preserve that project.
+4. Persist participant receipt generations across connections and cascade them with session deletion.
+5. Reject a corrupt session payload as an identified corrupt row, leaving the row in place.
+
+All five pass through `coreslice.sh`; the debug executable uses `@testable import` rather than
+changing access control in the production files. A first stale-writer fixture incorrectly used a
+selection-only mutation, which does not advance the graph generation; the corrected fixture uses
+a new project, matching the production contract. Full logs remain under `out/coreslice-*.log`.
+
+This establishes the exercised database behavior, not a complete Linux host. StateManager,
+application recovery, all schema migration histories, standalone terminal creation, credential
+custody and live agent transports remain outside this Linux executable.
+
+Shipping verification: the macOS app builds with its repository gates, and the focused hosted
+run passes **109 tests**, with one existing legacy-import test skipped because there is no live
+`projects.json` fixture. The run covers ProjectDatabase, read receipts, launch environment,
+remote host components/store, handoff runtime and StateManager. All ten spike runner tests pass;
+all 27 vendored files verify and `git diff --check` is clean. No UI appearance changed.

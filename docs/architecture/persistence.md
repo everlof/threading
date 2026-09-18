@@ -11,7 +11,8 @@ intact, and there is no ORM: a dozen queries are fewer lines than a query builde
 The persistence dependency slice compiles stored records independently of launch environment,
 account discovery, SSH transport and title preferences. `SessionReadReceiptState` lives under
 `Models/`; its participant-aware runtime store remains in `Core/Session/SessionReadReceipts.swift`.
-This extraction does not establish portability of `StateManager` or application recovery.
+The Linux spike vendors these production files byte-for-byte and exercises the database with
+throwaway files; it does not establish portability of `StateManager` or application recovery.
 
 **Thin rows, JSON payloads**, which is opencode's own shape (they made this same move, from
 per-file JSON to `opencode.db`, and their schema keeps `message.data` and `event.data` as

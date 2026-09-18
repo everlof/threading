@@ -58,21 +58,6 @@ struct ProjectTerminal: Codable, Identifiable {
   var soundOverrides: [String: String]?
   let createdAt: Date
 
-  init(
-    currentDirectory: String,
-    id: TerminalID = TerminalID(),
-    title: String = "Terminal"
-  ) {
-    self.id = id
-    self.title = title
-    self.customTitle = nil
-    self.currentDirectory = currentDirectory
-    self.branch = GitInfo.currentBranch(for: currentDirectory)
-    self.themeID = nil
-    self.soundOverrides = nil
-    self.createdAt = Date()
-  }
-
   /// The *stored* name — a rename, else the last title a program reported, else the
   /// `"Terminal"` placeholder a record is born with.
   ///

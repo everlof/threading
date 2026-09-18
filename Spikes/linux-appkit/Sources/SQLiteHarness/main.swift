@@ -231,4 +231,4 @@ for (name, body) in contracts {
     try fixture(body)
     print("PASS: \(name)")
 }
-print("\(contracts.count) storage contracts passed; ProjectDatabase remains a separate, unverified slice")
+print("\(contracts.count) storage contracts passed; run CoreSliceHarness separately for project graph contracts")
