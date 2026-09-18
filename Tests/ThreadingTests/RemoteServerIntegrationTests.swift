@@ -1130,6 +1130,55 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+    /// A phone still holding the current edition is answered without the main thread. The
+    /// probe blocks main outright — no run loop spins while it waits — so a `304` that still
+    /// hopped to main for a projection it then discarded could not arrive inside the deadline.
+    /// That hop was 450–600 ms of every ordinary conditional refresh in the 2026-09-17 journal.
+    func testAnUnchangedCatalogueIsAnsweredWithoutTheMainThread() throws {
+        let first = try XCTUnwrap(get("/api/me", bearer: "goodtoken"))
+        XCTAssertEqual(first.status, 200)
+        let entityTag = try XCTUnwrap(header("ETag", in: first))
+
+        let unchanged = try XCTUnwrap(getBlockingMain(
+            "/api/me",
+            bearer: "goodtoken",
+            headers: ["If-None-Match": entityTag]
+        ), "a conditional request waited on the main thread")
+        XCTAssertEqual(unchanged.status, 304)
+        XCTAssertTrue(unchanged.body.isEmpty)
+        XCTAssertEqual(header("ETag", in: unchanged), entityTag)
+    }
+
+    /// `get`, but waiting on a semaphore so the main thread does nothing until it answers.
+    private func getBlockingMain(
+        _ path: String,
+        bearer: String,
+        headers: [String: String]
+    ) -> Probe? {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port!)\(path)")!)
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue("test-device", forHTTPHeaderField: "X-Threading-Device")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+
+        let answered = DispatchSemaphore(value: 0)
+        // The semaphore orders the write before the read.
+        final class Box: @unchecked Sendable { var probe: Probe? }
+        let box = Box()
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            if let http = response as? HTTPURLResponse {
+                let probe = Probe(
+                    status: http.statusCode,
+                    headers: http.allHeaderFields,
+                    body: data ?? Data()
+                )
+                box.probe = probe
+            }
+            answered.signal()
+        }.resume()
+        guard answered.wait(timeout: .now() + 3) == .success else { return nil }
+        return box.probe
+    }
+
     /// Header lookup that tolerates whichever casing Foundation surfaces the field under.
     private func header(_ name: String, in probe: Probe) -> String? {
         for (key, value) in probe.headers {

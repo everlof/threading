@@ -992,9 +992,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     /// Answers with this authorization's catalogue, doing on the main queue only what has to be
     /// there.
     ///
+    /// A client still holding the current edition is answered `304` from the published edition
+    /// on the caller's queue: that answer needs no projection and no main thread. Before, the
+    /// comparison ran after the projection, so a phone's conditional refresh waited for the main
+    /// queue and a full catalogue build it then threw away — 450–600 ms of `serverWaitMS` on an
+    /// ordinary refresh and 3.9 s on a busy Mac (2026-09-17), against 5–20 ms when a body
+    /// happened to be shelved.
+    ///
     /// The projection reads main-actor state and stays on it, behind the registry's one-second
-    /// shared owner cache. Everything after that — comparing the client's validator, encoding
-    /// the JSON, compressing it — is either one comparison or work a `userInitiated` worker
+    /// shared owner cache. Encoding and compressing the JSON is work a `userInitiated` worker
     /// does on an immutable value. The encoded body is handed back to the registry so the next
     /// device asking for the same catalogue edition is served bytes that already exist. Measured
     /// during a session-relaunch storm at 2.65 s of `serverWaitMS` per phone refresh when all of
@@ -1006,12 +1012,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     ) {
         let acceptsGzip = RemoteRouter.acceptsGzip(request)
         let requestedRevision = RemoteRouter.requestedCatalogueRevision(request)
+        let currentRevision = services.mirrors.catalogueRevision
+        if currentRevision.matches(ifNoneMatch: requestedRevision) {
+            respond(.respond(RemoteRouter.notModified(currentRevision)))
+            return
+        }
         DispatchQueue.main.async {
             let snapshot = self.services.mirrors.meResponseSnapshot(for: authorization)
-            if snapshot.revision.matches(ifNoneMatch: requestedRevision) {
-                respond(.respond(RemoteRouter.notModified(snapshot.revision)))
-                return
-            }
             if let encoded = snapshot.encoded {
                 respond(.respond(RemoteRouter.encodedJSON(encoded, acceptsGzip: acceptsGzip)))
                 return

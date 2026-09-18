@@ -3,6 +3,7 @@ import CryptoKit
 import Foundation
 import ThreadingPTYHostKit
 import ThreadingRemoteKit
+import os
 
 private enum RemoteTerminalHydrationDefaults {
     /// PTY programs do not expose a resize-repaint acknowledgement. Once the first output after
@@ -218,8 +219,17 @@ final class RemoteSessionMirrorRegistry {
 
     /// The catalogue edition, advanced by every invalidation and minted fresh per process so a
     /// phone that remembers one from before a relaunch is answered in full rather than `304`.
-    private let catalogueEpoch = RemoteCatalogueRevisionDTO.newEpoch()
-    private var catalogueRevisionNumber: UInt64 = 1
+    ///
+    /// Behind a lock rather than the main actor so the server can answer a conditional request
+    /// on its own queue. The edition moves only in `invalidateMeCatalogue`, never as a side
+    /// effect of projecting, so reading it alone gives the same `304` answer the projection
+    /// would have — without paying for the projection, or waiting for a busy main thread.
+    private nonisolated let publishedCatalogueRevision = OSAllocatedUnfairLock(
+        initialState: RemoteCatalogueRevisionDTO(
+            epoch: RemoteCatalogueRevisionDTO.newEpoch(),
+            revision: 1
+        )
+    )
 
     /// Encoded `/api/me` bodies for the current edition; see `RemoteMeResponseCache`.
     private var meResponseCache = RemoteMeResponseCache()
@@ -473,9 +483,9 @@ final class RemoteSessionMirrorRegistry {
 
     // MARK: - REST
 
-    /// Which edition of the catalogue `/api/me` describes right now.
-    var catalogueRevision: RemoteCatalogueRevisionDTO {
-        RemoteCatalogueRevisionDTO(epoch: catalogueEpoch, revision: catalogueRevisionNumber)
+    /// Which edition of the catalogue `/api/me` describes right now. Readable from any queue.
+    nonisolated var catalogueRevision: RemoteCatalogueRevisionDTO {
+        publishedCatalogueRevision.withLock { $0 }
     }
 
     /// The main-actor half of answering `/api/me`: the projection, plus the encoded body if one
@@ -701,7 +711,12 @@ final class RemoteSessionMirrorRegistry {
 
     private func invalidateMeCatalogue() {
         allSessionsCatalogueCache.removeAll(keepingCapacity: true)
-        catalogueRevisionNumber &+= 1
+        publishedCatalogueRevision.withLock { current in
+            current = RemoteCatalogueRevisionDTO(
+                epoch: current.epoch,
+                revision: current.revision &+ 1
+            )
+        }
         meResponseCache.removeAll()
     }
 

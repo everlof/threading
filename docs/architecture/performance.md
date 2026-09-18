@@ -749,6 +749,26 @@ most of a row's bytes and the dashboard list never draws them — is the next le
 cellular refresh still exceeds a second after this; `MobileDashboardCacheSnapshot.Session` already
 names the thirteen fields the list needs.
 
+**The `304`, 2026-09-18.** The 2026-09-17 phone journal (two hours, 130 sessions, LAN) put
+`serverWaitMS` at 85–99 % of every slow conditional refresh: 450–600 ms typically, 3,944 ms at
+worst, against 10–30 ms for DNS, TCP and TLS together and 5–20 ms whenever a body happened to be
+shelved. `respondWithCatalogue` compared the validator only *after* hopping to the main queue and
+asking for `meResponseSnapshot`, which projects the whole catalogue on a shelf miss — so every
+`304` paid the projection it then discarded, and a busy main thread on top of it. Ten of 22 chat
+opens in that window went through an `openTarget` refresh, so this sat in front of nearly half
+of them. The edition moves only in `invalidateMeCatalogue`, never as a side effect of
+projecting, so it is now published behind an `OSAllocatedUnfairLock` and a matching validator is
+answered `304` on the server's own queue before any main-queue work.
+`RemoteServerIntegrationTests.testAnUnchangedCatalogueIsAnsweredWithoutTheMainThread` blocks the
+main thread outright while it waits; the old order fails it.
+
+The phone's side of the same refresh had its own hole. The conditional warm probe ran before the
+route race and outside `RemoteRouteWalkDeadline`, bounded only by `URLRequest.timeoutInterval` —
+an idle timer that restarts on every byte and stops while the app is suspended. One probe given
+4,000 ms failed after 2,263,174 ms, and the single-flight refresh made everything behind it wait
+too. The probe now runs under `RemoteRouteWalkDeadline` with its `warmProbeTimeout` as the
+ceiling, so its `timeoutMS` is a deadline and a lost probe falls through to the bounded race.
+
 Standalone project terminals add one bounded summary per durable terminal to initial and
 structural catalogues. Their dashboard group is lazy and keeps no socket, emulator, polling task
 or timer per row. Selecting one opens exactly one terminal socket and one bounded replay. Starting

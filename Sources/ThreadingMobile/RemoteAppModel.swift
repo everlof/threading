@@ -2953,14 +2953,23 @@ final class RemoteAppModel: ObservableObject {
             fields: baseFields.merging([.result: "started"]) { current, _ in current }
         )
         let metrics = RemoteRequestMetricsCollector()
+        let client = RemoteClient(link: candidate.link, endpointKind: candidate.kind)
         do {
-            let fetched = try await RemoteClient(
-                link: candidate.link,
-                endpointKind: candidate.kind
-            ).fetchCatalogue(
-                timeout: timeout,
-                metrics: metrics,
-                ifNoneMatch: edition.entityTag
+            // `timeout` is a deadline, not the request's idle timer. URLSession's
+            // `timeoutInterval` restarts on every byte and stops while the app is suspended; a
+            // probe given 4000 ms failed after 2,263,174 ms (2026-09-17), and every refresh and
+            // chat open joined to it waited that long. The deadline cancels the request and falls
+            // through to the race, whose own ceiling bounds the rest.
+            let fetched = try await RemoteRouteWalkDeadline.run(
+                ceiling: timeout,
+                walk: {
+                    try await client.fetchCatalogue(
+                        timeout: timeout,
+                        metrics: metrics,
+                        ifNoneMatch: edition.entityTag
+                    )
+                },
+                exceeded: { URLError(.timedOut) }
             )
             let status: String
             let answer: ConditionalAnswer
