@@ -515,3 +515,64 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         return try XCTUnwrap(runs.max { $0.count < $1.count })
     }
 }
+
+@MainActor
+final class TerminalComposeContinuityTests: XCTestCase {
+    func testEditingIsSavedBeforeAnImmediatePopAndRestoredAfterRemount() throws {
+        let suite = "TerminalComposeContinuityTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: store)
+        model.startDemo()
+        let hostID = try XCTUnwrap(model.activeHostID)
+        let session = RemoteSessionSummaryDTO(
+            id: "compose-continuity", title: "Compose", agentKind: "codex",
+            surface: .terminal, state: .idle, projectName: "Fixture"
+        )
+        let connection = RemoteSessionConnection(
+            session: session,
+            client: RemoteClient(link: try XCTUnwrap(RemoteConnectionLink(
+                string: "https://demo.threading.invalid/#compose-continuity"
+            )))
+        )
+        func host(_ continuity: MobileSessionContinuityStore) -> UIViewController {
+            UIHostingController(rootView: TerminalLineComposer(
+                connection: connection, bridge: TerminalKeyBridge(), quotes: .constant([])
+            )
+            .environmentObject(model)
+            .environmentObject(continuity)
+            .mobileTheme(RemoteThemePalette(nil)))
+        }
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let navigation = UINavigationController(rootViewController: UIViewController())
+        window.rootViewController = navigation
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let first = host(store)
+        navigation.pushViewController(first, animated: false)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        let editor = try XCTUnwrap(findEditor(first.view))
+        let words = "Keep my unfinished reply 👋\nincluding its second line"
+        editor.text = words
+        editor.delegate?.textViewDidChange?(editor)
+        // Back can unmount SwiftUI before its next onChange transaction. The native edit is
+        // the persistence boundary; merely testing the store would miss the lost callback.
+        navigation.popViewController(animated: false)
+        let reloaded = MobileSessionContinuityStore(defaults: defaults)
+        XCTAssertEqual(reloaded.draft(surface: .terminal, hostID: hostID, sessionID: session.id), words)
+        let second = host(reloaded)
+        navigation.pushViewController(second, animated: false)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        XCTAssertEqual(try XCTUnwrap(findEditor(second.view)).text, words)
+    }
+
+    private func findEditor(_ view: UIView) -> UITextView? {
+        if let editor = view as? UITextView { return editor }
+        return view.subviews.lazy.compactMap { self.findEditor($0) }.first
+    }
+}

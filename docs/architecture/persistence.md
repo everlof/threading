@@ -714,6 +714,14 @@ follows the same candidate-first, bounded rule. No continuity archive is synchro
 clients, because merging partial human input, moving another person's viewport or inheriting their
 input preference would turn private continuity into collaboration state.
 
+The iPhone terminal Compose editor writes through its binding setter, in the native edit callback.
+SwiftUI `onChange` is not a persistence boundary: Back or a Direct/Compose switch can unmount the
+view before the next render transaction delivers it. The same setter clears the durable draft
+only after acceptance of the exact submitted text; restoring a draft does not write it again.
+`TerminalComposeContinuityTests` edits the shipping editor inside a navigation controller, pops
+it in the same turn, reloads the archive, and remounts the composer. That sequence loses both
+the saved and visible text with the deferred `onChange` writer.
+
 The iPhone's last resolved Mac app theme is a separate optional cache, not another field in that
 continuity archive. `MobileThemeCacheStore` keeps at most 64 complete `RemoteThemeDTO` records,
 scoped to the paired Mac, under a 256 KiB archive ceiling. A candidate is validated, written, and

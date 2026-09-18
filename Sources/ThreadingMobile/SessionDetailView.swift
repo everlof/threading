@@ -2217,7 +2217,7 @@ private struct TerminalCollaborationBar: View {
     }
 }
 
-private struct TerminalLineComposer: View {
+struct TerminalLineComposer: View {
     @ObservedObject var connection: RemoteSessionConnection
     @ObservedObject var bridge: TerminalKeyBridge
     @Binding var quotes: [RemoteTerminalSelectionQuote]
@@ -2273,7 +2273,7 @@ private struct TerminalLineComposer: View {
 
             ZStack(alignment: .topLeading) {
                 TerminalLinePromptEditor(
-                    text: $draft,
+                    text: Binding(get: { draft }, set: { value in updateDraft(value) }),
                     isFocused: $draftIsFocused,
                     theme: theme,
                     onSubmit: submit
@@ -2310,7 +2310,6 @@ private struct TerminalLineComposer: View {
         .onChange(of: draft) { _, value in
             submissionNotice = nil
             connection.reportTyping(!value.isEmpty)
-            saveDraft(value)
         }
         .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
             handle(feedback)
@@ -2559,7 +2558,10 @@ private struct TerminalLineComposer: View {
         )
     }
 
-    private func saveDraft(_ value: String) {
+    /// Persist at the editor's mutation boundary. SwiftUI's onChange is a later render
+    /// transaction and may never run when Back or a Direct/Compose switch unmounts this view.
+    private func updateDraft(_ value: String) {
+        draft = value
         guard let hostID = model.activeHostID else { return }
         continuity.setDraft(
             value,
@@ -2576,7 +2578,7 @@ private struct TerminalLineComposer: View {
         pendingSubmissionDraft = nil
         if feedback.status == .accepted {
             if draft == sentDraft {
-                draft = ""
+                updateDraft("")
             }
             quotes = []
             submissionNotice = nil
@@ -2643,6 +2645,7 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ view: IntrinsicTextView, context: Context) {
+        context.coordinator.updateBindings(text: $text, isFocused: $isFocused)
         context.coordinator.onSubmit = onSubmit
         if view.text != text {
             view.text = text
@@ -2706,6 +2709,11 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             text.wrappedValue = textView.text
             textView.invalidateIntrinsicContentSize()
+        }
+
+        func updateBindings(text: Binding<String>, isFocused: Binding<Bool>) {
+            self.text = text
+            self.isFocused = isFocused
         }
 
         func textViewDidBeginEditing(_: UITextView) {

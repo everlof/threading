@@ -3035,9 +3035,10 @@ text. If another composer wins the current turn, the session changes, or reconne
 retry, your draft stays in place with an explanation.
 
 Unsent Native drafts are saved as you type on macOS, iPhone, and the browser. iPhone terminal
-Compose drafts and each terminal's Direct/Compose choice are saved the same way. iPhone and browser
-also reopen the last session and restore the reading position for Native conversations and
-agent-UI terminals; the Mac restores each Native conversation's draft and reading position. This
+Compose drafts and each terminal's Direct/Compose choice are saved the same way. On iPhone,
+immediately going Back or switching to Direct keeps your Compose text for the next visit.
+iPhone and browser also reopen the last session and restore the reading position for Native
+conversations and agent-UI terminals; the Mac restores each Native conversation's draft and reading position. This
 state is device-local rather than collaborative: another person or one of your other devices does
 not inherit half-written text, your terminal input choice, or pull your view away from where you
 left it. Drafts are retained until sent or cleared; older position-only records may be pruned.
