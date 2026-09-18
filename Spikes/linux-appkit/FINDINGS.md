@@ -605,3 +605,25 @@ these changes:
 
 Both halves were established by running the failing classes against the parent commit and in
 isolation, not by reading the failure messages and deciding they looked unrelated.
+
+## 27. Repair the measurement runners before extending the shim
+
+The UI runner still mounted only the spike at `/w`, although the manifest now refers to two
+packages under `../../Packages`. Those paths do not exist in that container. Worse, `build.sh`
+looked only for source-location diagnostics and printed "builds clean" when Docker or package
+resolution failed without one. `sweep.sh` ignored the failed build and searched all old build
+artifacts for an AppKit module, so stale output could stand in for a new measurement.
+
+Both runners now mount the repository at `/repo` and select the UI `Harness` product, independently
+of the core slice's blockers. Build failure returns failure. The sweep requires a successful build
+and uses that configuration's module directory before touching the previous report.
+
+The core runner now checks all vendored files before launching Docker, retains complete logs,
+stops after build failure, and runs with `--skip-build`. Its old `head -60` pipeline could close
+the compiler's output early and discard later diagnostics. The harness itself remains a placeholder;
+none of this establishes that a project graph saves and reopens on Linux.
+
+Verification: seven runner regression tests passed using substituted Docker/Swift commands,
+shell syntax checks passed, and all 23 core copies matched their originals. A real Linux UI build
+attempt timed out after 45 seconds while Docker's independent info probe also failed to respond.
+No new compiler frontier, sweep counts, or runtime evidence is claimed by this increment.
