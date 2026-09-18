@@ -351,6 +351,44 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         XCTAssertTrue(call.arguments.contains("TRYIT"), call.arguments)
     }
 
+    /// What someone who is not the developer gets: no local build directory at all. The host is
+    /// prepared from the components this build publishes — downloaded from the release, verified
+    /// against the manifest compiled in, cached — and answers `hello` with them.
+    func testPreparesAHostFromThePublishedComponentsAlone() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination] else {
+            throw XCTSkip("set \(Key.destination) to run against a real host")
+        }
+        guard RemoteHostComponentSource.hasPublishedComponents else {
+            throw XCTSkip("this build publishes no Linux components")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let sockets = URL(fileURLWithPath: "/tmp/threading-rh-\(getpid())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sockets) }
+        let cache = sockets.appendingPathComponent("components", isDirectory: true)
+        let components = RemoteHostPublishedComponents(root: cache)
+
+        let hosts = RemoteExecutionHosts(localDirectory: sockets)
+        defer { hosts.closeAllTunnels() }
+        _ = hosts.readiness(for: destination, components: components)
+        let deadline = Date().addingTimeInterval(Fixture.preparationTimeout)
+        var context: RemoteHostLaunchContext?
+        while Date() < deadline, context == nil {
+            switch hosts.phase(for: destination) {
+            case .ready(let ready): context = ready
+            case .failed(let failure):
+                XCTFail("preparation failed: \(failure.token): \(failure.detail)")
+                throw failure
+            case .idle, .preparing: Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+        let ready = try XCTUnwrap(context, "preparation did not settle")
+        let architecture = try XCTUnwrap(ready.facts.architecture)
+        let daemon = try XCTUnwrap(RemoteHostComponentManifest.component(.daemon, for: architecture))
+        XCTAssertNotNil(components.cachedURL(for: daemon), "the published daemon was not downloaded and kept")
+        XCTAssertEqual(PTYHostClient.probe(socketPath: ready.localSocketPath, build: "remote-live-test"), .ready)
+    }
+
     private func prepare(
         _ hosts: RemoteExecutionHosts,
         _ destination: RemoteHostDestination,

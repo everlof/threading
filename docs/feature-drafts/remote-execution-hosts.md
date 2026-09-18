@@ -327,9 +327,16 @@ somebody already typed. It carries no authority — the project's own folder is 
 and is held to the same validation, so a default the host would refuse is refused where it is typed
 rather than handed to every project.
 
-**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it),
-and the first actual publication: the manifest is empty until `publish_remote_components.sh` runs,
-so only a developer directory works today.
+**Published, 2026-09-18.** The first release is `remote-components-fe551bcd036f`: both binaries
+for both architectures, 21–23 MB each compressed, built from the commit the tag names. Both suites
+passed on arm64 and on emulated amd64 before upload. The public downloads were checked byte for byte
+against the regenerated manifest, and
+`RemoteExecutionHostLiveTests/testPreparesAHostFromThePublishedComponentsAlone` then prepared the
+spike's VM from the download alone — fetched through the app's own code, verified, cached — with no
+build directory anywhere. A release is **never deleted or rewritten**: every build carrying its
+manifest resolves its download from it.
+
+**Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it).
 
 ## Hooks and tools, as built, 2026-09-17
 

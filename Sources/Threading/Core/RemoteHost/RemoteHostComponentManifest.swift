@@ -17,12 +17,45 @@ import Foundation
 enum RemoteHostComponentManifest {
 
     /// The release tag carrying these assets.
-    static let release = ""
+    static let release = "remote-components-fe551bcd036f"
 
     /// Where the assets are, one directory for the release.
     static let baseURL = "https://github.com/everlof/threading/releases/download/"
 
-    static let components: [RemoteHostComponent] = []
+    static let components: [RemoteHostComponent] = [
+        RemoteHostComponent(
+            kind: .daemon,
+            architecture: .arm64,
+            assetName: "threading-ptyd-arm64.gz",
+            assetSHA256: "537742b16bd31cda3b9d38bcbc67d6089bffe94198b73fb8c45e4fd8ff9e4b2c",
+            assetByteCount: 22192856,
+            sha256: "dd0a94882f2871515b44941f88705df5ce96298280c806ad8972a3ea5546d91d"
+        ),
+        RemoteHostComponent(
+            kind: .bridge,
+            architecture: .arm64,
+            assetName: "threading-mcp-bridge-arm64.gz",
+            assetSHA256: "f93fa1bb9e1042d193b51e3d0c0212a6da556b5fa45eb05108b88729ee2448b8",
+            assetByteCount: 21827405,
+            sha256: "67e33bbec9a6928e26a745f55857df727e2cb1322d822739ddfe2ea5064c52b2"
+        ),
+        RemoteHostComponent(
+            kind: .daemon,
+            architecture: .amd64,
+            assetName: "threading-ptyd-amd64.gz",
+            assetSHA256: "58d73d538199a2d18e4947aacf150ae9201e48292ceca16a97f5a257482885bf",
+            assetByteCount: 22997796,
+            sha256: "0df3704292eb1246a936d3b110f661b10fb2dcd5b3f250ffc9f04f4cadf17736"
+        ),
+        RemoteHostComponent(
+            kind: .bridge,
+            architecture: .amd64,
+            assetName: "threading-mcp-bridge-amd64.gz",
+            assetSHA256: "4c9878960dee150454e2f4a95aaed4957a97ff2397e4d02ddf51c17facf2b03b",
+            assetByteCount: 22600686,
+            sha256: "375e493b2b9e16e80c19e9a8d61b2cfd634de15ba574f579249f9f395892b401"
+        )
+    ]
 
     static func component(
         _ kind: RemoteHostBinaryKind,

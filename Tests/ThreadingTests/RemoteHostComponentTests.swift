@@ -90,7 +90,7 @@ final class RemoteHostComponentTests: XCTestCase {
 
     /// A build that published nothing says so in those words, rather than failing as a download.
     func testABuildWithNoPublishedComponentSaysSo() {
-        let components = RemoteHostPublishedComponents(session: .shared, root: root)
+        let components = RemoteHostPublishedComponents(session: .shared, root: root, lookup: { _, _ in nil })
         XCTAssertThrowsError(try components.binary(.daemon, for: .amd64, progress: { _ in })) { error in
             XCTAssertEqual(error as? RemoteHostComponentError, .unpublished(.amd64))
         }
@@ -117,7 +117,28 @@ final class RemoteHostComponentTests: XCTestCase {
                              "a directory without the bridge has no bridge to give")
     }
 
-    // MARK: - Pruning the host
+    /// The published manifest names both binaries for both architectures, with digests shaped like
+    /// digests. A half-written manifest would set up some hosts and refuse others for no reason a
+    /// person could see.
+    func testThePublishedManifestIsCompleteWhenThereIsOne() throws {
+        guard RemoteHostComponentSource.hasPublishedComponents else {
+            throw XCTSkip("this build publishes no Linux components")
+        }
+        for architecture in RemoteHostArchitecture.allCases {
+            for kind in [RemoteHostBinaryKind.daemon, .bridge] {
+                let component = try XCTUnwrap(
+                    RemoteHostComponentManifest.component(kind, for: architecture),
+                    "no \(kind) for \(architecture)"
+                )
+                XCTAssertEqual(component.sha256.count, 64)
+                XCTAssertEqual(component.assetSHA256.count, 64)
+                XCTAssertGreaterThan(component.assetByteCount, 0)
+                XCTAssertNotNil(RemoteHostComponentManifest.url(for: component))
+            }
+        }
+    }
+
+    // MARK: - Pruning the host    // MARK: - Pruning the host
 
     /// Every build a host was ever given is tens of megabytes. What runs now is kept; everything
     /// else in the two install roots goes — and a name that is not one of ours is left alone.

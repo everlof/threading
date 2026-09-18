@@ -101,16 +101,23 @@ final class RemoteHostPublishedComponents: RemoteHostComponentProviding {
 
     static let shared = RemoteHostPublishedComponents()
 
+    /// Which component this build publishes for a machine. The compiled manifest in production;
+    /// injectable so a test can ask about a build that publishes nothing, whatever this one does.
+    typealias ManifestLookup = @Sendable (RemoteHostBinaryKind, RemoteHostArchitecture) -> RemoteHostComponent?
+
     private let session: URLSession
     private let root: URL
+    private let lookup: ManifestLookup
 
     init(
         session: URLSession = .shared,
         root: URL = PTYHostLocation.supportRoot
-            .appendingPathComponent(RemoteHostComponentDefaults.cacheDirectoryName, isDirectory: true)
+            .appendingPathComponent(RemoteHostComponentDefaults.cacheDirectoryName, isDirectory: true),
+        lookup: @escaping ManifestLookup = { RemoteHostComponentManifest.component($0, for: $1) }
     ) {
         self.session = session
         self.root = root
+        self.lookup = lookup
     }
 
     /// The cached binary for a component, or nil when it has not been fetched.
@@ -124,7 +131,7 @@ final class RemoteHostPublishedComponents: RemoteHostComponentProviding {
         for architecture: RemoteHostArchitecture,
         progress: @escaping @Sendable (Double) -> Void
     ) throws -> RemoteHostBinary {
-        guard let component = RemoteHostComponentManifest.component(kind, for: architecture) else {
+        guard let component = lookup(kind, architecture) else {
             throw RemoteHostComponentError.unpublished(architecture)
         }
         guard let source = RemoteHostComponentManifest.url(for: component) else {
