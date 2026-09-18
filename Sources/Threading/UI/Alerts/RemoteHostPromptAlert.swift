@@ -126,6 +126,7 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
         remoteDirectoryField.stringValue = current?.remoteDirectory ?? ""
         setup()
         selectHost(current)
+        offerDefaultDirectory()
     }
 
     @available(*, unavailable)
@@ -233,7 +234,10 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
 
     /// Add Host… is the last item: it opens the machine editor and comes back with it chosen.
     @objc private func hostChosen() {
-        guard hostPopUp.indexOfSelectedItem == records.count else { return }
+        guard hostPopUp.indexOfSelectedItem == records.count else {
+            offerDefaultDirectory()
+            return
+        }
         guard let record = RemoteHostRecordPromptAlert.ask(editing: nil),
               store.add(record) == .applied else {
             reloadHosts()
@@ -244,6 +248,15 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
         if let index = records.firstIndex(where: { $0.id == record.id }) {
             hostPopUp.selectItem(at: index)
         }
+        offerDefaultDirectory()
+    }
+
+    /// Fills an empty folder from the machine's own default. Only ever *offers*: a folder already
+    /// typed is the project's answer and is not replaced by picking a different machine.
+    private func offerDefaultDirectory() {
+        guard remoteDirectoryField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let folder = selectedRecord?.defaultDirectory else { return }
+        remoteDirectoryField.stringValue = folder
     }
 
     private func popUpRow(title: String, control: ThemedPopUp) -> NSView {

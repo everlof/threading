@@ -50,6 +50,11 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         let context = try prepare(hosts, destination, binaries: URL(fileURLWithPath: binaries))
         XCTAssertTrue(FileManager.default.fileExists(atPath: context.localSocketPath))
         XCTAssertNotNil(context.facts.architecture)
+        // The facts the Remote Hosts page reads to say a machine is reachable but cannot yet run an
+        // agent. Heuristics, so they are checked against a real host rather than trusted.
+        XCTAssertNotNil(context.facts.curlPath, "no curl: this host's hooks could not report")
+        XCTAssertNotNil(context.facts.claudePath, "the spike's VM has claude on its login PATH")
+        XCTAssertEqual(context.facts.claudeSignedIn, true, "the spike's VM is signed in")
 
         let output = OutputCollector()
         let exited = PTYHostLatch<PTYHostExited>()

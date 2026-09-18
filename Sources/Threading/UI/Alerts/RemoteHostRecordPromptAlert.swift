@@ -53,6 +53,7 @@ enum RemoteHostRecordPromptDefaults {
     static let labelIdentifier = "remote-host-record.label"
     static let destinationIdentifier = "remote-host-record.destination"
     static let configFileIdentifier = "remote-host-record.ssh-config"
+    static let defaultDirectoryIdentifier = "remote-host-record.default-directory"
     static let helperIdentifier = "remote-host-record.helper"
 }
 
@@ -65,6 +66,7 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
     let labelField = ThemedTextField()
     let destinationField = ThemedTextField()
     let configFileField = ThemedTextField()
+    let defaultDirectoryField = ThemedTextField()
     let helperLabel = NSTextField(wrappingLabelWithString: "")
 
     var firstField: ThemedTextField { destinationField }
@@ -75,7 +77,8 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
         let typed = RemoteHostRecord.typed(
             label: labelField.stringValue,
             destination: destinationField.stringValue,
-            sshConfigFile: configFileField.stringValue
+            sshConfigFile: configFileField.stringValue,
+            defaultDirectory: defaultDirectoryField.stringValue
         )
         guard let existing else { return typed }
         return RemoteHostRecord(
@@ -83,6 +86,7 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
             label: typed.label,
             destination: typed.destination,
             sshConfigFile: typed.sshConfigFile,
+            defaultDirectory: typed.defaultDirectory,
             addedAt: existing.addedAt
         )
     }
@@ -97,6 +101,7 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
         labelField.stringValue = current?.label ?? ""
         destinationField.stringValue = current?.destination ?? ""
         configFileField.stringValue = current?.sshConfigFile ?? ""
+        defaultDirectoryField.stringValue = current?.defaultDirectory ?? ""
         setup()
     }
 
@@ -129,6 +134,12 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
                 field: configFileField,
                 placeholder: L10n.string("Optional"),
                 identifier: RemoteHostRecordPromptDefaults.configFileIdentifier
+            ),
+            row(
+                title: L10n.string("Projects in"),
+                field: defaultDirectoryField,
+                placeholder: L10n.string("/home/you/src — optional"),
+                identifier: RemoteHostRecordPromptDefaults.defaultDirectoryIdentifier
             )
         ]
 
@@ -192,7 +203,8 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
         let field: ThemedTextField
         switch problem {
         case .missingDestination, .unsafeDestination: field = destinationField
-        case .relativeConfigFile, .relativeRemoteDirectory: field = configFileField
+        case .relativeConfigFile: field = configFileField
+        case .relativeRemoteDirectory: field = defaultDirectoryField
         }
         field.window?.makeFirstResponder(field)
         field.selectText(nil)

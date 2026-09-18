@@ -48,6 +48,14 @@ struct RemoteHostFacts: Equatable, Sendable {
     var installedBridges: Set<String> = []
     /// Where `curl` is, which every lifecycle hook runs. Nil means hooks cannot report.
     var curlPath: String?
+    /// Whether Claude looks signed in on the host.
+    ///
+    /// A heuristic, and named as one: on Linux the CLI keeps its credentials in
+    /// `~/.claude/.credentials.json`, so the file being readable is the cheapest honest answer.
+    /// Nothing is refused on it — a launch still starts the CLI, which asks for itself — it only
+    /// lets the Remote Hosts page say "sign in there first" instead of leaving a person to find out
+    /// from a login prompt inside a session.
+    var claudeSignedIn: Bool?
 
     var architecture: RemoteHostArchitecture? { RemoteHostArchitecture(unameMachine: machine) }
 
@@ -79,11 +87,15 @@ enum RemoteHostFactsDefaults {
         static let claude = "claude"
         static let bridge = "bridge"
         static let curl = "curl"
+        static let auth = "auth"
     }
 
     static let instanceNameCharacters = CharacterSet(
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
     )
+
+    /// Relative to the remote home. Where Claude Code keeps its credentials on Linux.
+    static let claudeCredentialsPath = ".claude/.credentials.json"
 
     static let lingerYes = "yes"
     static let lingerNo = "no"
@@ -131,6 +143,11 @@ extension RemoteHostFacts {
         fi
         printf 'claude=%s\\n' "$("$shell" -lc 'command -v claude' </dev/null 2>/dev/null | tail -n 1)"
         printf 'curl=%s\\n' "$("$shell" -lc 'command -v curl' </dev/null 2>/dev/null | tail -n 1)"
+        if [ -r "$HOME/\(RemoteHostFactsDefaults.claudeCredentialsPath)" ]; then
+          printf 'auth=%s\\n' yes
+        else
+          printf 'auth=%s\\n' no
+        fi
         """
 
     /// Reads the probe's output. Lines that are not `key=value`, such as a login shell's greeting,
@@ -156,7 +173,8 @@ extension RemoteHostFacts {
                 if let instance = instanceName(fromUnit: value) { enabled.append(instance) }
             case Key.bridge:
                 if !value.isEmpty { bridges.insert(value) }
-            case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude, Key.curl:
+            case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude,
+                 Key.curl, Key.auth:
                 single[key] = value
             default:
                 continue
@@ -178,6 +196,12 @@ extension RemoteHostFacts {
         }
         let claude = single[Key.claude].flatMap { $0.hasPrefix("/") ? $0 : nil }
         let curl = single[Key.curl].flatMap { $0.hasPrefix("/") ? $0 : nil }
+        let signedIn: Bool?
+        switch single[Key.auth] {
+        case RemoteHostFactsDefaults.lingerYes: signedIn = true
+        case RemoteHostFactsDefaults.lingerNo: signedIn = false
+        default: signedIn = nil
+        }
 
         return RemoteHostFacts(
             machine: try required(Key.machine),
@@ -191,7 +215,8 @@ extension RemoteHostFacts {
             enabledInstances: enabled,
             claudePath: claude,
             installedBridges: bridges,
-            curlPath: curl
+            curlPath: curl,
+            claudeSignedIn: signedIn
         )
     }
 

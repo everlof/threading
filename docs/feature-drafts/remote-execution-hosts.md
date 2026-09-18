@@ -313,10 +313,23 @@ accepting a host key is their decision and their `known_hosts` — so the row sa
 to connect once in a terminal. `Permission denied` and a missing systemd session get the same
 treatment; anything else is reported in the host's own words rather than replaced by ours.
 
+**Reachable is not usable.** A machine can answer, install and serve and still not run an agent,
+because the CLI is missing or nobody has signed in to it there. The probe reports both — `claude` on
+the login shell's `PATH`, and whether `~/.claude/.credentials.json` is readable, which is a
+heuristic and documented as one — and the page says which half is missing with the command that
+fixes it (`ssh -t <host> claude`). Nothing is refused on it: a launch still starts the CLI, which
+asks for itself. Asserted against the spike's VM by the live preparation test, so the heuristic is
+measured rather than assumed.
+
+**A machine can say where its checkouts live.** `RemoteHostRecord.defaultDirectory` fills the
+project dialog's folder for every project that picks that machine, and never replaces a folder
+somebody already typed. It carries no authority — the project's own folder is what a launch uses —
+and is held to the same validation, so a default the host would refuse is refused where it is typed
+rather than handed to every project.
+
 **Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it),
-the first actual publication (the manifest is empty until `publish_remote_components.sh` runs), a
-host's own folder defaults (each project still names its checkout by hand), and sign-in to the
-agent CLI on the box.
+and the first actual publication: the manifest is empty until `publish_remote_components.sh` runs,
+so only a developer directory works today.
 
 ## Hooks and tools, as built, 2026-09-17
 

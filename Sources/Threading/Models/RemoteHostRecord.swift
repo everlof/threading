@@ -43,6 +43,13 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
     var destination: String
     /// An ssh config file other than `~/.ssh/config`, such as a Lima VM's. Nil for the default.
     var sshConfigFile: String?
+    /// Where checkouts usually live on this machine, offered when a project picks it.
+    ///
+    /// A convenience with no authority: the project's own folder is what a launch uses, and this
+    /// only fills the field. Machines tend to keep their work in one place, and typing
+    /// `/home/me/src` again for every checkout is the sort of friction that makes a person keep one
+    /// project per machine.
+    var defaultDirectory: String?
     let addedAt: Date
 
     init(
@@ -50,12 +57,14 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
         label: String = "",
         destination: String,
         sshConfigFile: String? = nil,
+        defaultDirectory: String? = nil,
         addedAt: Date = Date()
     ) {
         self.id = id
         self.label = label
         self.destination = destination
         self.sshConfigFile = sshConfigFile
+        self.defaultDirectory = defaultDirectory
         self.addedAt = addedAt
     }
 
@@ -68,6 +77,7 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
         label = (try? container.decodeIfPresent(String.self, forKey: .label)) ?? ""
         destination = (try? container.decodeIfPresent(String.self, forKey: .destination)) ?? ""
         sshConfigFile = (try? container.decodeIfPresent(String.self, forKey: .sshConfigFile)) ?? nil
+        defaultDirectory = (try? container.decodeIfPresent(String.self, forKey: .defaultDirectory)) ?? nil
         addedAt = (try? container.decodeIfPresent(Date.self, forKey: .addedAt)) ?? Date()
     }
 
@@ -90,20 +100,35 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
     /// Why this host cannot be used, in the words its editor shows. Nil when it can.
     var problem: ProjectExecutionHost.Problem? {
         // The machine's half of the same validation: a destination `ssh` would read as an option,
-        // and a config file that is not a full path. The folder belongs to the project, not here.
-        ProjectExecutionHost(destination: destination, sshConfigFile: sshConfigFile, remoteDirectory: "/")
-            .problem
+        // and a config file that is not a full path. A project's folder is checked where the
+        // project names it; the default offered here is held to the same rule so a bad one cannot
+        // be handed to every project that picks this machine.
+        if let defaultDirectory, !defaultDirectory.hasPrefix("/") || defaultDirectory.contains("\0") {
+            return .relativeRemoteDirectory
+        }
+        return ProjectExecutionHost(
+            destination: destination,
+            sshConfigFile: sshConfigFile,
+            remoteDirectory: "/"
+        ).problem
     }
 
     var isValid: Bool { problem == nil }
 
     /// Builds a record from what a person typed.
-    static func typed(label: String, destination: String, sshConfigFile: String) -> RemoteHostRecord {
+    static func typed(
+        label: String,
+        destination: String,
+        sshConfigFile: String,
+        defaultDirectory: String = ""
+    ) -> RemoteHostRecord {
         let config = sshConfigFile.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folder = defaultDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         return RemoteHostRecord(
             label: label.trimmingCharacters(in: .whitespacesAndNewlines),
             destination: destination.trimmingCharacters(in: .whitespacesAndNewlines),
-            sshConfigFile: config.isEmpty ? nil : config
+            sshConfigFile: config.isEmpty ? nil : config,
+            defaultDirectory: folder.isEmpty ? nil : folder
         )
     }
 }

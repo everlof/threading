@@ -123,6 +123,39 @@ final class RemoteHostsSettingsTests: HostedStoreTestCase {
         )
     }
 
+    /// Reachable is not the same as usable. A machine that answers but has no signed-in Claude gets
+    /// the sentence that fixes it, rather than a session that opens on a login prompt.
+    func testAHostThatAnswersButCannotRunAnAgentSaysWhichHalfIsMissing() {
+        let record = RemoteHostRecord.typed(label: "Pi", destination: "pi", sshConfigFile: "")
+
+        let missing = RemoteHostPresentation.state(
+            of: record,
+            phase: .ready(context(claude: nil, signedIn: nil)),
+            step: nil
+        )
+        XCTAssertEqual(missing.label, RemoteHostsSettingsStrings.needsAgent)
+        XCTAssertEqual(missing.color, Design.Status.warning)
+        XCTAssertTrue(missing.detail?.contains("ssh pi") == true, missing.detail ?? "")
+
+        let signedOut = RemoteHostPresentation.state(
+            of: record,
+            phase: .ready(context(signedIn: false)),
+            step: nil
+        )
+        XCTAssertEqual(signedOut.label, RemoteHostsSettingsStrings.needsSignIn)
+        XCTAssertTrue(signedOut.detail?.contains("ssh -t pi claude") == true, signedOut.detail ?? "")
+
+        // Unknown is not "signed out": an older host answers no `auth` line at all.
+        XCTAssertEqual(
+            RemoteHostPresentation.state(of: record, phase: .ready(context(signedIn: nil)), step: nil).label,
+            RemoteHostsSettingsStrings.ready
+        )
+        XCTAssertEqual(
+            RemoteHostPresentation.state(of: record, phase: .ready(context(signedIn: true)), step: nil).label,
+            RemoteHostsSettingsStrings.ready
+        )
+    }
+
     // MARK: - Choosing one on a project
 
     /// A project picks a machine from the list and names only its own folder — and a project set up
@@ -151,6 +184,33 @@ final class RemoteHostsSettingsTests: HostedStoreTestCase {
         let adopted = try XCTUnwrap(store.host(naming: "box", sshConfigFile: nil), "the machine was not adopted")
         XCTAssertEqual(adopting.selectedRecord?.id, adopted.id)
         XCTAssertEqual(adopting.remoteDirectoryField.stringValue, "/srv/app")
+    }
+
+    /// A machine that says where its checkouts live fills the field for every project that picks
+    /// it — and never overwrites a folder somebody already typed.
+    func testAMachinesDefaultFolderIsOfferedButNeverImposed() throws {
+        let store = RemoteHostStore(directory: directory)
+        let record = RemoteHostRecord.typed(
+            label: "Build box",
+            destination: "box",
+            sshConfigFile: "",
+            defaultDirectory: "/home/me/src"
+        )
+        XCTAssertEqual(store.add(record), .applied)
+
+        let fresh = RemoteHostPromptAccessory(current: nil, store: store)
+        XCTAssertEqual(fresh.remoteDirectoryField.stringValue, "/home/me/src")
+
+        let existing = ProjectExecutionHost.on(record, remoteDirectory: "/srv/elsewhere")
+        let kept = RemoteHostPromptAccessory(current: existing, store: store)
+        XCTAssertEqual(kept.remoteDirectoryField.stringValue, "/srv/elsewhere",
+                       "the project's own folder was replaced by the machine's default")
+
+        // A default the host would refuse is refused where it is typed, not handed to projects.
+        XCTAssertEqual(
+            store.add(RemoteHostRecord.typed(label: "Bad", destination: "other", sshConfigFile: "", defaultDirectory: "src")),
+            .refused(.relativeRemoteDirectory)
+        )
     }
 
     // MARK: - Images
@@ -189,13 +249,16 @@ final class RemoteHostsSettingsTests: HostedStoreTestCase {
 
     // MARK: - Helpers
 
-    private func context() -> RemoteHostLaunchContext {
+    private func context(
+        claude: String? = "/usr/bin/claude",
+        signedIn: Bool? = true
+    ) -> RemoteHostLaunchContext {
         RemoteHostLaunchContext(
             destination: RemoteHostDestination(alias: "pi", configFile: nil),
             facts: RemoteHostFacts(
                 machine: "aarch64", home: "/home/me", user: "me", loginShell: "/bin/bash",
                 hasSystemd: true, lingerEnabled: true, installedBinaries: [], activeInstances: [],
-                claudePath: "/usr/bin/claude"
+                claudePath: claude, claudeSignedIn: signedIn
             ),
             localSocketPath: "/tmp/x.sock"
         )

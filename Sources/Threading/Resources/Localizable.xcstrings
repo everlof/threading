@@ -2949,6 +2949,17 @@
         }
       }
     },
+    "/home/you/src — optional" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/home/du/src — valfritt"
+          }
+        }
+      }
+    },
     "0.9 GiB" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11705,6 +11716,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude kan rita sitt gränssnitt på terminalens alternativa skärm och rulla sin egen transkribering, eller på huvudskärmen så att transkriberingen hamnar i Threadings rullningshistorik — där appens rullning, sökfält och en parkopplad iPhone kan nå den. Följ lämnar valet till Claude, som använder sin egen inställning som standard. En enskild chatt kan fortfarande ställas in från menyn ⋯, och valet gäller från chattens nästa start."
+          }
+        }
+      }
+    },
+    "Claude missing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude saknas"
           }
         }
       }
@@ -33660,6 +33682,17 @@
         }
       }
     },
+    "Projects in" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekt i"
+          }
+        }
+      }
+    },
     "Projects without an icon use an image in the checkout or request the GitHub organization avatar implied by the origin remote. Other websites are contacted only when you choose Use Website Favicon." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35015,6 +35048,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klar — interagera med någon historia."
+          }
+        }
+      }
+    },
+    "Ready, but Claude isn’t signed in on the host. Run “ssh -t %@ claude” once, sign in there, then check again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klar, men Claude är inte inloggad på värden. Kör ”ssh -t %@ claude” en gång, logga in där och kontrollera sedan igen."
+          }
+        }
+      }
+    },
+    "Ready, but the host’s login shell doesn’t find claude. Install it there, then check again: ssh %@ and follow claude.ai/install." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klar, men värdens inloggningsskal hittar inte claude. Installera det där och kontrollera sedan igen: ssh %@ och följ claude.ai/install."
           }
         }
       }

@@ -420,7 +420,26 @@ enum RemoteHostPresentation {
                 detail: nil,
                 allowsChecking: false
             )
-        case .ready:
+        case .ready(let context):
+            // Reachable, installed, and still not able to run an agent: the CLI is missing, or
+            // nobody has signed in to it there. Said here rather than discovered inside a session
+            // that opens on a login prompt.
+            if context.facts.claudePath == nil {
+                return State(
+                    label: RemoteHostsSettingsStrings.needsAgent,
+                    color: Design.Status.warning,
+                    detail: RemoteHostsSettingsStrings.installAgent(record.destination),
+                    allowsChecking: true
+                )
+            }
+            if context.facts.claudeSignedIn == false {
+                return State(
+                    label: RemoteHostsSettingsStrings.needsSignIn,
+                    color: Design.Status.warning,
+                    detail: RemoteHostsSettingsStrings.signInThere(record.destination),
+                    allowsChecking: true
+                )
+            }
             return State(
                 label: RemoteHostsSettingsStrings.ready,
                 color: Design.Status.positive,
@@ -494,6 +513,22 @@ enum RemoteHostsSettingsStrings {
     static var notChecked: String { L10n.string("Not checked") }
     static var unreachable: String { L10n.string("Unreachable") }
     static var unusable: String { L10n.string("Not usable") }
+    static var needsAgent: String { L10n.string("Claude missing") }
+    static var needsSignIn: String { L10n.string("Not signed in") }
+
+    static func installAgent(_ destination: String) -> String {
+        L10n.format(
+            "Ready, but the host’s login shell doesn’t find claude. Install it there, then check again: ssh %@ and follow claude.ai/install.",
+            destination
+        )
+    }
+
+    static func signInThere(_ destination: String) -> String {
+        L10n.format(
+            "Ready, but Claude isn’t signed in on the host. Run “ssh -t %@ claude” once, sign in there, then check again.",
+            destination
+        )
+    }
     static var notSaved: String { L10n.string("The host wasn’t saved") }
 
     static var note: String {
