@@ -199,3 +199,115 @@ order the frequency table suggests.
   AppKit would, and a real port needs the comparison, not the assurance.
 - **One solve per subtree, from scratch.** No incremental edit, no per-container scoping, no
   `updateConstraints` pass. See section 8.
+
+---
+
+# Round two, part two: warm starting
+
+`Simplex` now retains `B⁻¹` beside its tableau. Moving a constraint's `constant` changes only the
+right-hand side, which leaves the basis dual-feasible — the objective did not move — so a few
+*dual* simplex pivots can restore primal feasibility instead of a fresh phase one and phase two.
+`LayoutEngine` caches the program per root and compares its structure (coefficients and relations,
+compared rather than hashed: a false positive lays the window out against the wrong constraints).
+
+Three cases guard it, all passing: a warm re-solve lands on the same geometry a cold solve does; an
+edit that makes the program infeasible is still *reported* rather than returning stale frames; and
+two hundred successive resizes on one retained tableau do not drift from a cold answer. The last is
+the failure a warm-start cache is most likely to ship with, because it looks perfect on the first
+frame and goes wrong where nothing is asserting.
+
+## 11. The warm start fixes one case, not the scaling — and the pivot count is what says so
+
+| rows | LP rows | cold | warm, active set unchanged | pivots | warm, crossing a threshold | pivots |
+|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 89 | 1.8 ms | 0.11 ms | 0 | 0.29 ms | 5 |
+| 10 | 174 | 10.8 ms | 0.22 ms | 0 | 1.48 ms | 10 |
+| 20 | 344 | 80.9 ms | 0.48 ms | 0 | 10.4 ms | 20 |
+| 40 | 684 | 619 ms | 1.04 ms | 0 | 79.5 ms | 40 |
+| 80 | 1364 | 4910 ms | 2.76 ms | 0 | 653 ms | 80 |
+| 160 | 2724 | 47468 ms | 8.40 ms | 0 | 5158 ms | 160 |
+
+The first warm column is a resize that never changes *which* constraints are active — a drag that
+does not push any label through its compression threshold. It is 5,600× faster than cold at 160
+rows, and **it took zero pivots**, which means it measured the `B⁻¹ · b` multiply and nothing else.
+A benchmark reports that number by accident unless someone checks the pivot count, and the first
+version of this table did exactly that.
+
+The second column widens the sweep until every row's label stops being clipped by its chip and its
+soft 400pt width becomes satisfiable. The active set changes, the dual simplex has to work, and the
+pivot count comes out at exactly one per row. At 160 rows that is 5.2 seconds — nine times better
+than cold, and still growing about 8× per doubling. **Cubic again.**
+
+The arithmetic says why, and it is not incrementality. One pivot rewrites the whole dense tableau:
+2,724 rows × 6,891 columns ≈ 18.8M operations, times 160 pivots ≈ 3.0G operations — which is the
+five seconds, near enough. Meanwhile each constraint row has at most six non-zero coefficients out
+of 4,166 variables. **The tableau is about 99.9% zeros and every pivot touches all of them.**
+
+So the ranking for anyone who picks this up:
+
+1. **Sparsity is the big lever**, not incrementality. A sparse revised simplex pivots over the
+   non-zeros, which here is three orders of magnitude fewer numbers.
+2. **Then scope.** One solve per *container* rather than one per window keeps n small in the first
+   place; AppKit does not solve a whole window as one program either.
+3. **Then the warm start**, which is already here and is worth keeping — a drag that does not
+   change the active set is the common case, and 8ms at 160 rows is a frame.
+
+None of this changes the draft's estimate. It sharpens what "own the solver and its invalidation
+contract" has to mean: a sparse, scoped, incremental solver, where this spike has built the third
+of those three and measured why the other two are not optional.
+---
+
+# Round three: the headless core
+
+Measured 2026-09-18. `./headless.py ../..` classifies every import in `Sources/Threading/Core`,
+`Models` and `Application` — the draft's delivery slice 2, "make the product layers compilable",
+asked as a number instead of a plan.
+
+## 12. Two thirds of the non-UI code already imports nothing Linux lacks
+
+636 files:
+
+| | Files | |
+|---:|---:|---|
+| **443** | 69% | import only what Linux already has |
+| **88** | 13% | also need a substitution with a known Linux equivalent |
+| **105** | 16% | reach something with no Linux story yet |
+
+The substitutions are unglamorous and mostly mechanical: `Darwin` → `Glibc` (32 files), `os`/`OSLog`
+→ swift-log (36), `CryptoKit` → swift-crypto, which is the same API (21), `Network` → NIO or POSIX
+sockets (10), `ImageIO` → libpng/libjpeg (11).
+
+The blockers are more interesting, because **73 of the 105 are `AppKit`** — the UI question, which
+is the other half of this spike and not slice 2's problem. Strip those and the genuinely non-UI
+blockers come to about thirty files:
+
+| Files | Blocker | What it would become |
+|---:|---|---|
+| 20 | `Security` | Keychain — libsecret, or a different credential story |
+| 6 | `UserNotifications` | libnotify / D-Bus |
+| 6 | `SwiftTerm` | ours, but its AppKit half is the UI question again |
+| 3 | `AVFoundation` | GStreamer / ffmpeg |
+| 2 each | `ServiceManagement`, `IOKit`, `AuthenticationServices`, `Sparkle`, `ApplicationServices` | systemd user units; device identity; a browser handoff; updates; look at these |
+| 1 each | `SystemConfiguration`, `PDFKit`, `CoreImage`, `CoreMedia`, `CoreVideo`, `VideoToolbox`, `MetricKit` | |
+
+`Security` at 20 files is the one that is a *product* decision rather than a port: where an agent
+account's credentials live when there is no Keychain is a question about what Threading promises,
+not about which library to link.
+
+## 13. This is an upper bound, and saying so is the point
+
+Imports say what a file *reaches for*. They do not say it compiles. A Foundation-only file can
+still be unportable through a path assumption, a `Process` launching a macOS binary, a
+case-sensitivity assumption, or a Darwin API reached through a typealias. Every number in section
+12 is a ceiling.
+
+Converting it into a measurement means doing to `Core` what round one did to `UI/Design`:
+type-check each file on Linux and separate "fails only on Threading's own types" from "fails on a
+platform symbol". That is the obvious next step and it is not expensive — the sweep machinery
+already exists.
+
+What the ceiling is good for is *ordering*. It says slice 2 is not a rewrite: it is roughly thirty
+files of genuine platform decisions, one of which (credentials) is a product question, plus a pile
+of mechanical substitutions. Against the nine-subsystem conjunction the UI faces, that is a very
+different size of problem — which is exactly why the draft put it first and said it is worth doing
+even if Linux stops there.

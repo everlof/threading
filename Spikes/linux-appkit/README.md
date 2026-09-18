@@ -42,7 +42,7 @@ About 1,870 lines:
 | `Layout/NSLayoutConstraint.swift` | Constraints, priorities, the common-ancestor rule, `NSLayoutGuide` |
 | `Layout/NSLayoutAnchor.swift` | The anchor family, generic exactly where AppKit is |
 | `Layout/LayoutEngine.swift` | Constraints to a linear program, and frames back out |
-| `Layout/Simplex.swift` | Two-phase simplex — correct, and deliberately not incremental |
+| `Layout/Simplex.swift` | Two-phase simplex that retains `B⁻¹`, so a constant edit warm-starts through dual simplex |
 | `Raster.swift` | Scanline fill, analytic horizontal coverage, 4× vertical supersampling |
 | `PNG.swift` | Stored-deflate PNG, so the container needs no system library |
 | `Stubs.swift` | `NSAnimationContext`, `NSEvent`, `NSFont`, `NSAppearance` — named, not implemented |
@@ -61,8 +61,9 @@ See `FINDINGS.md`.
 ## What this spike deliberately does not touch
 
 Text shaping, IME, accessibility, layers, the window server, the event loop, and virtualization.
-Auto Layout is now present but its solver is not incremental and has a measured cubic cost — see
-FINDINGS section 8. Each is a real item in the draft's platform-leaf list, and none
+Auto Layout is present. Its solver is dense and solves a whole subtree at a time; it warm-starts a
+constant edit but still pays a cold cubic cost for any structural change. See FINDINGS sections 8
+and 11. Each is a real item in the draft's platform-leaf list, and none
 of them is made smaller by the shim compiling.
 
 ## Working on this branch
