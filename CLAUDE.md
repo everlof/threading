@@ -85,7 +85,9 @@ agents or MCP server.
 
 `Tests/ThreadingTests` and `Tests/ThreadingUITests` are filesystem-synchronized Xcode groups.
 A new Swift file under either directory is compiled by its owning target automatically; do not
-add per-file `PBXFileReference`, `PBXBuildFile`, group, or Sources-phase entries. UI tests launch
+add per-file `PBXFileReference`, `PBXBuildFile`, group, or Sources-phase entries.
+`Tests/ThreadingMobileTests` is **not** synchronized: a new file there needs all four entries
+(copy a neighbour's), or `-only-testing:` for its class reports 0 tests and passes. UI tests launch
 the shipping executable against a disposable `CFFIXED_USER_HOME`; read
 [`ui-scenario-testing.md`](docs/architecture/ui-scenario-testing.md) before adding a scenario or
 recording provider traffic.
