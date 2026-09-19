@@ -2625,7 +2625,7 @@ enum ComposerDefaults {
     /// What the end offer is called, on its tooltip and to a screen reader alike. "At a time"
     /// rather than "later": the clock beside it already owns *later*, and these two must not read
     /// as two spellings of one offer.
-    static var curfewAccessibility: String { L10n.string("End this session at a time") }
+    static var curfewAccessibility: String { L10n.string("Set a curfew for this session") }
 
     /// The hero's mark: larger than the sidebar's 24 because it stands alone over a greeting,
     /// smaller than an app icon because it is a flourish, not the content.

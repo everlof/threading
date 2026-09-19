@@ -44,6 +44,7 @@ struct ScheduledMessageID: Hashable, Sendable, Codable, CustomStringConvertible 
 /// `at` needs no resolving. A wall-clock time somebody named is its own reason, exactly as
 /// `ScheduledMessage.Anchor.wallClock` is.
 enum ScheduledCurfewPlan: Codable, Sendable, Equatable {
+    case atUsage(percent: Int, windowID: String)
 
     /// End the session at this moment, whatever the settings say by then.
     case at(Date)

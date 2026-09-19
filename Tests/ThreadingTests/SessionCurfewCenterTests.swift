@@ -43,6 +43,8 @@ final class SessionCurfewCenterTests: XCTestCase {
     private var terminalInterruptLands = true
     private var stoppedAgents: [SessionID] = []
     private var usageRefreshes: [AccountID] = []
+    private var usageReadings: [AccountID: AccountUsageReading] = [:]
+    private var usageReads: [AccountID] = []
     private var gaveUpAlerts: [(session: SessionID, interrupts: Int, stopped: Bool)] = []
     private var withdrawnAlerts: [SessionID] = []
     private var announcedChanges: [SessionID] = []
@@ -118,6 +120,10 @@ final class SessionCurfewCenterTests: XCTestCase {
             notificationCenter: events,
             workspaceCenter: workspaceEvents,
             eventLog: EventLog(directory: directory.appendingPathComponent("events")),
+            usageReading: { [weak self] id in
+                self?.usageReads.append(id)
+                return self?.usageReadings[id] ?? .notFetched
+            },
             performers: recordingPerformers(),
             typesIntoLiveSessions: typesIntoLiveSessions
         )
@@ -270,6 +276,167 @@ final class SessionCurfewCenterTests: XCTestCase {
     }
 
     // MARK: - The Hold
+
+    private var usageAccount: AccountID { AccountID(provider: .claude, handle: .standard) }
+
+    private func thresholdReading(
+        fraction: Double?, windowID: String = "7d", age: TimeInterval = 0,
+        resetIn: TimeInterval = 3_600
+    ) -> AccountUsage {
+        AccountUsage(
+            windows: [.init(id: windowID, label: windowID, fraction: fraction,
+                            resetsAt: now.addingTimeInterval(resetIn), windowDuration: 604_800)],
+            planLabel: nil, observedAt: now.addingTimeInterval(-age), source: .api
+        )
+    }
+
+    func testUsageThresholdHoldsAtExactPercentageAndUsesConfiguredInterruptLadder() throws {
+        setPreferences(grace: 0)
+        center.start()
+        activities[chatID] = .working
+        usageReadings[usageAccount] = .current(thresholdReading(fraction: 0.799))
+        XCTAssertEqual(center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: chatID), .applied)
+        XCTAssertNil(state(of: chatID))
+        XCTAssertEqual(usageRefreshes, [usageAccount])
+
+        usageReadings[usageAccount] = .current(thresholdReading(fraction: 0.8))
+        events.post(AccountUsageDidChange(accountID: usageAccount))
+        XCTAssertEqual(state(of: chatID)?.has(.held), true)
+        XCTAssertEqual(nativeInterrupts, [chatID])
+        XCTAssertTrue(messages.messages(for: chatID).isEmpty, "a wrap-up would spend beyond the ceiling")
+        events.post(AccountUsageDidChange(accountID: usageAccount))
+        XCTAssertEqual(nativeInterrupts.count, 1)
+    }
+
+    func testUsageThresholdIgnoresOtherAccountsWindowsAndUnusableReadings() {
+        center.start()
+        center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: chatID)
+        let otherAccount = AccountID(provider: .codex, handle: .standard)
+        usageReadings[otherAccount] = .current(thresholdReading(fraction: 1))
+        events.post(AccountUsageDidChange(accountID: otherAccount))
+        XCTAssertNil(state(of: chatID))
+
+        let samples: [AccountUsageReading] = [
+            .notFetched,
+            .current(thresholdReading(fraction: 1, windowID: "5h")),
+            .current(thresholdReading(fraction: nil)),
+            .current(thresholdReading(fraction: .nan)),
+            .current(thresholdReading(fraction: .infinity)),
+            .current(thresholdReading(fraction: 1, age: CurfewDefaults.maximumUsageAge + 1)),
+            .current(thresholdReading(fraction: 1, age: -1)),
+            .current(thresholdReading(fraction: 1, resetIn: 0)),
+            .stale(thresholdReading(fraction: 1), error: .tokenExpired),
+        ]
+        for sample in samples {
+            usageReadings[usageAccount] = sample
+            events.post(AccountUsageDidChange(accountID: usageAccount))
+            XCTAssertNil(state(of: chatID), "unusable evidence triggered: \(sample)")
+        }
+    }
+
+    func testUsageThresholdAlreadyReachedHoldsImmediatelyAndSurvivesResetAndRelaunch() throws {
+        usageReadings[usageAccount] = .current(thresholdReading(fraction: 0.9))
+        center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: chatID)
+        let fired = try XCTUnwrap(state(of: chatID))
+        XCTAssertTrue(fired.has(.held))
+        usageReadings[usageAccount] = .current(thresholdReading(fraction: 0.01))
+        now = now.addingTimeInterval(60)
+        center = makeCenter()
+        center.rebuildAndMaterialize()
+        XCTAssertEqual(state(of: chatID)?.deadline, fired.deadline)
+        XCTAssertTrue(CurfewHoldPolicy.isHeld(sessionID: chatID, in: store, at: now))
+
+        let reloaded = ProjectStore(stateManager: StateManager(appSupportDirectory: directory))
+        XCTAssertEqual(reloaded.session(withID: chatID)?.curfewState, state(of: chatID))
+        XCTAssertTrue(CurfewHoldPolicy.isHeld(sessionID: chatID, in: reloaded, at: now))
+        center.lift(sessionID: chatID)
+        XCTAssertFalse(CurfewHoldPolicy.isHeld(sessionID: chatID, in: store, at: now))
+        XCTAssertNil(store.session(withID: chatID)?.curfewRule)
+    }
+
+    func testUsageThresholdGraceNeverInterruptAndTerminalCapabilityArePreserved() {
+        setPreferences(grace: CurfewDefaults.grace)
+        activities[terminalID] = .working
+        usageReadings[usageAccount] = .current(thresholdReading(fraction: 0.9))
+        center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: terminalID)
+        XCTAssertTrue(terminalInterrupts.isEmpty)
+        now = now.addingTimeInterval(CurfewDefaults.grace)
+        reportsTurns = false
+        center.evaluateAll()
+        XCTAssertTrue(terminalInterrupts.isEmpty)
+        reportsTurns = true
+        center.evaluateAll()
+        XCTAssertEqual(terminalInterrupts, [terminalID])
+
+        setPreferences(grace: nil)
+        activities[chatID] = .working
+        center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: chatID)
+        now = now.addingTimeInterval(3_600)
+        center.evaluateAll()
+        XCTAssertTrue(nativeInterrupts.isEmpty)
+        XCTAssertEqual(state(of: chatID)?.has(.held), true)
+    }
+
+    func testUsageUpdatesVisitOnlyArmedSessionsAndRemovedRulesLeaveTheIndex() {
+        center.start()
+        center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: chatID)
+        usageReads.removeAll()
+        events.post(AccountUsageDidChange(accountID: usageAccount))
+        XCTAssertEqual(usageReads, [usageAccount])
+        center.setCurfew(nil, forSessionID: chatID)
+        usageReads.removeAll()
+        events.post(AccountUsageDidChange(accountID: usageAccount))
+        XCTAssertTrue(usageReads.isEmpty)
+    }
+
+    func testUsageUpdateScalingWithHistoricalSessions() throws {
+        let stress = ProcessInfo.processInfo.environment["THREADING_STRESS"] == "1"
+        let counts = stress ? [100, 10_000] : [100]
+        for count in counts {
+            center = nil
+            var project = try XCTUnwrap(store.projects.first)
+            project.sessions = (0..<count).map { index in
+                AgentSession(kind: .claude, title: "Usage fixture \(index)")
+            }
+            chatID = project.sessions[0].id
+            project.sessions[0].curfewRule = .atUsage(
+                percent: 80, armedAt: now, accountID: usageAccount, windowID: "7d"
+            )
+            let manager = StateManager(appSupportDirectory: directory.appendingPathComponent("scale-\(count)"))
+            XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [project])))
+            store = ProjectStore(stateManager: manager)
+            center = makeCenter()
+            center.start()
+            usageReads.removeAll()
+            var milliseconds: [Double] = []
+            for _ in 0..<100 {
+                let start = CFAbsoluteTimeGetCurrent()
+                events.post(AccountUsageDidChange(accountID: usageAccount))
+                milliseconds.append((CFAbsoluteTimeGetCurrent() - start) * 1_000)
+            }
+            XCTAssertEqual(usageReads.count, 100, "a reading visited unrelated sessions")
+            milliseconds.sort()
+            print("CURFEW_USAGE_SCALE sessions=\(count) median_ms=\(milliseconds[50]) max_ms=\(milliseconds.last!)")
+        }
+    }
+
+    func testUsageThresholdRejectsInvalidPercentagesWithoutChangingRule() {
+        for percent in [0, -1, 101] {
+            XCTAssertEqual(center.setCurfewAtUsage(percent: percent, windowID: "7d", forSessionID: chatID),
+                           .unsupportedValue)
+        }
+        XCTAssertNil(store.session(withID: chatID)?.curfewRule)
+    }
+
+    func testReplacingTimedCurfewWithdrawsItsQueuedWrapUp() {
+        activities[chatID] = .working
+        center.setCurfew(.until(now.addingTimeInterval(60)), forSessionID: chatID)
+        XCTAssertEqual(messages.messages(for: chatID).count, 1)
+        usageReadings[usageAccount] = .current(thresholdReading(fraction: 0.9))
+        center.setCurfewAtUsage(percent: 80, windowID: "7d", forSessionID: chatID)
+        XCTAssertEqual(state(of: chatID)?.has(.held), true)
+        XCTAssertTrue(messages.messages(for: chatID).isEmpty)
+    }
 
     func testAWindowResetCurfewIgnoresSparkAndStopsOnlyForItsSelectedWindow() throws {
         setPreferences()

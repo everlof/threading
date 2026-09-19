@@ -74,7 +74,13 @@ extension SessionComposerViewController {
         now: Date
     ) -> CurfewResolution.Answer {
         let sessionRule: CurfewRule?
-        if case .untilUsageReset(let expectedAt, let windowID)? = selectedCurfew {
+        if case .atUsage(let percent, let windowID)? = selectedCurfew {
+            sessionRule = .atUsage(
+                percent: percent, armedAt: now,
+                accountID: AccountID(provider: selectedAgent, handle: selectedAccountHandle),
+                windowID: windowID
+            )
+        } else if case .untilUsageReset(let expectedAt, let windowID)? = selectedCurfew {
             sessionRule = .untilUsageReset(
                 expectedAt: expectedAt,
                 armedAt: now,
@@ -106,6 +112,8 @@ extension SessionComposerViewController {
 
     private func chooseCurfew(_ choice: CurfewMenu.Choice) {
         switch choice {
+        case .atUsage(let percent, let windowID):
+            selectedCurfew = .atUsage(percent: percent, windowID: windowID)
         case .at(let deadline):
             selectedCurfew = .at(deadline)
 
@@ -172,6 +180,9 @@ extension SessionComposerViewController {
     /// the chip keeps its own title then rather than inventing times for a window nobody set.
     func curfewLadderSentence(now: Date = Date()) -> String? {
         let preferences = CurfewSettings.shared.preferences
+        if case .atUsage? = selectedCurfew {
+            return CurfewReceiptWords.usageThresholdHelp
+        }
         if case .untilUsageReset(_, let windowID)? = selectedCurfew {
             return L10n.format(
                 "Stops at the %@ window’s scheduled reset, or sooner if the provider resets that same window early.",

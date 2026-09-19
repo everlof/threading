@@ -127,10 +127,11 @@ failure sentence are all the ones every other send has. Three things are its own
 not none**, the chain pure and the store passed as a parameter:
 
 - **Session**: `.exempt`, `.until(Date)`, or
-  `.untilUsageReset(expectedAt:armedAt:accountID:windowID:)`. The reset rule keeps the provider's
+  `.untilUsageReset(expectedAt:armedAt:accountID:windowID:)`, or
+  `.atUsage(percent:armedAt:accountID:windowID:)`. The reset rule keeps the provider's
   expected boundary as its latest end, but matching reset evidence can move it earlier. Account
   and window are both part of the rule: a 5h/Spark event cannot satisfy a 7d rule.
-- **Project**: `.exempt` only. `setCurfewRule(_:forProjectID:)` refuses `.until` — a moment on a
+- **Project**: `.exempt` only. `setCurfewRule(_:forProjectID:)` refuses session-only conditions — a moment on a
   checkout would keep ending chats created weeks later at a time nobody chose. A stored one
   decodes and falls through.
 - **Settings**: `QuietHours` — two minutes-of-day, `end <= start` crossing midnight (the ordinary
@@ -148,6 +149,41 @@ every night, keyed by its start; **lifting** one writes `liftedAt` on the state 
 arms the timer for its window's end.
 
 ## The engine
+
+### Percentage conditions
+
+`CurfewRule.atUsage(percent:armedAt:accountID:windowID:)` arms a one-shot session curfew at an
+absolute percentage of one account window. The percentage is a whole number in 1...100; it is
+neither session-attributed spend nor a delta from the reading at arming. The account is captured
+when armed, as for reset conditions. `ScheduledCurfewPlan.atUsage` keeps only the percentage and
+window until the session exists. A current reading already past the threshold triggers immediately.
+A scheduled start checks the newly armed hold before delivering its opening prompt and waits
+without a busy timeout. Retrying after a lift recognizes that same completed plan instead of
+arming it again.
+
+Before triggering, resolution returns a condition with no deadline. The menu, composer chip and
+row conduct statement still name that condition; nil deadline must not be mistaken for exemption
+or “No curfew.” A `.current` account reading no older than the normal five-minute refresh interval,
+not from the future, with a finite fraction on an unexpired exact window supplies evidence. Failed,
+stale, absent or unknown readings leave it armed. A triggered instance persists its full condition
+identity in `.usageThreshold` origin and uses the observation's arrival as its deadline. It stays
+held across resets, lower readings and relaunch until explicitly lifted. No wrap-up is sent after
+crossing a usage ceiling; the existing grace, bounded interrupts and opt-in stop-agent escalation
+apply. Polling delay and grace can allow overshoot, so the UI does not promise an exact spend cap.
+
+The existing Curfew menu and integer-input alert remain host-only operational choices. Threading
+owns validation, account/window identity, persistence, hold and interrupt authority. No extension
+data or presentation capability is introduced.
+
+The percentage subscription index is keyed by account and session. A reading evaluates only armed
+sessions on that account, not historical sessions; triggering, rule removal, archiving and removal
+withdraw the subscription. Timer callbacks visit only due entries in the pending-moment map.
+Expected scale is tens of armed sessions and thousands of stored chats; provider fetches retain
+the usage service's single-flight and concurrency limits. Menu construction scans at most eight
+account windows plus eight model windows and offers at most eight lightweight window rows, each
+with a fixed preset list and the validated custom input.
+
+### Clock and observations
 
 `SessionCurfewCenter` is `SessionSnoozeCenter` one feature along: **one process timer, the
 persisted state is the truth, the injected clock is the only authority.** The timer re-arms at the
@@ -206,10 +242,10 @@ otherwise have held it), and the session popover.
 
 ## Where it appears
 
-- **Draft view**: a moon beside the clock ("End this session at a time") opens `CurfewMenu`;
+- **Draft view**: a moon beside the clock ("Set a curfew for this session") opens `CurfewMenu`;
   the choice becomes a footer chip ("Until 04:00", tooltip = the whole ladder) present only when
   chosen, frozen into `ScheduledSessionPlan.curfew` as a *plan* (`.at(Date)`,
-  `.atQuietHours`, or `.untilUsageReset(expectedAt:windowID:)`; quiet hours resolve at fire time —
+  `.atQuietHours`, `.untilUsageReset(expectedAt:windowID:)`, or `.atUsage(percent:windowID:)`; quiet hours resolve at fire time —
   a plan that wrote down Tuesday's 04:00 and fired on
   Thursday would name a deadline before its own session started). **Armed when the session
   actually starts, never while the row waits**; a moment already passed is journalled and skipped.
@@ -258,4 +294,4 @@ otherwise have held it), and the session popover.
 - A **`UserPromptSubmit` enforcement hook** that blocks a loop's re-submission in-band at zero
   spend — Claude-first, measured, and only once a blocked prompt is shown not to strand the
   activity tracker.
-- Per-session ceilings stay with [`feature-drafts/usage-aware-accounts.md`](../feature-drafts/usage-aware-accounts.md) § C.
+- Session-attributed token/cost ceilings stay with [`feature-drafts/usage-aware-accounts.md`](../feature-drafts/usage-aware-accounts.md) § C.

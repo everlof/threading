@@ -1847,15 +1847,29 @@ while you sleep, you want a session to use what is left of *this* window (say, w
 own `/loop` or `/goal`), and you do not want it eating into the fresh one. `/loop` and `/goal`
 have no clock of their own; the curfew is the clock.
 
-**Setting one.** When writing a new session, the moon beside the clock (**End this session at a
-time**) offers the same kind of choices the clock does — *In an hour*, *In 3 hours*, *Tonight at
+**Setting one.** When writing a new session, the moon beside the clock (**Set a curfew for this
+session**) offers the same kind of choices the clock does — *In an hour*, *In 3 hours*, *Tonight at
 23:00*, **Until the 5h window resets**, **Until the 7d window resets**, *At quiet hours*
 when you have them, or a custom time. The choice becomes a chip in the footer ("Until 04:00";
 hover it for the whole plan) and is armed the moment the session starts — never while a scheduled
 start is still waiting. For a session that is already running, the row's menu has a **Curfew**
 fold, and a native chat shows the same chip while a curfew applies.
 
-A usage-window choice follows the **specific row you picked**. Its displayed reset is the latest
+**Stopping at a usage percentage.** In the same menu, choose **At usage percentage (7d)**
+(or another window), then a preset or **Custom percentage…** for any whole percentage from 1 to
+100. **80%** means the account's total used capacity in that window, including other sessions;
+it is not an additional 80% for this chat. The choice applies only to this session. A scheduled
+session arms it when it starts.
+
+Threading checks about once a minute while running and holds the session on the first fresh
+reading at or above the threshold. A current reading already over the threshold holds it
+immediately. Missing, expired or failed readings cannot trigger it. Usage can overshoot between
+readings and during your configured interrupt grace period; choose **At the curfew** for the
+interrupt setting if you want an in-flight turn interrupted as soon as the threshold is seen.
+No wrap-up message is sent for a percentage curfew. Once triggered, it stays held across usage
+resets and app restarts until you choose **Lift Curfew**.
+
+An **Until … window resets** choice follows the **specific row you picked**. Its displayed reset is the latest
 time Threading will stop, but a provider-proven early reset of that same window stops it sooner.
 So choosing **7d** will react to an announced or unannounced 7d reset and will **not** react to the
 5h/Spark reset. An unused rollover does not count as a reset: Threading requires observed used

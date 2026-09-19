@@ -23,6 +23,7 @@ enum CurfewMenu {
 
     /// What a chosen row asks for.
     enum Choice {
+        case atUsage(percent: Int, windowID: String)
         /// End at this moment.
         case at(Date)
         /// End when quiet hours next begin. The date is what the menu named, so a caller that
@@ -45,6 +46,7 @@ enum CurfewMenu {
     /// A named identity rather than a title match: the titles carry times and are localized, and
     /// a test asserting on "At quiet hours (04:00)" would be asserting on a formatter.
     enum RowID: String {
+        case usageThreshold
         case atQuietHours
         case endsAt
         case inherit
@@ -110,6 +112,13 @@ enum CurfewMenu {
             }
         }
 
+        let thresholds = usageThresholdEntries(usage: usage, model: model, resolved: resolved,
+                                               onChoose: onChoose)
+        if !thresholds.isEmpty {
+            entries.append(.separator)
+            entries.append(contentsOf: thresholds)
+        }
+
         let quietHours = quietHours.flatMap { $0.isEnabled ? $0 : nil }
         if let start = quietHours?.nextWindow(after: now, calendar: calendar)?.start {
             entries.append(.separator)
@@ -169,6 +178,8 @@ enum CurfewMenu {
         locale: Locale = .current
     ) -> String? {
         switch plan {
+        case .atUsage(let percent, let windowID):
+            return CurfewReceiptWords.usageThreshold(percent: percent, windowID: windowID)
         case nil:
             return nil
         case .at(let deadline):
@@ -208,6 +219,15 @@ enum CurfewMenu {
     ) -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = []
 
+        if case .usageThreshold(let percent, _, _, let windowID)? = resolved.condition {
+            entries.append(.item(ThemedMenuItem(
+                title: CurfewReceiptWords.usageThreshold(percent: percent, windowID: windowID),
+                representedValue: RowID.usageThreshold,
+                isSelected: true,
+                isEnabled: false
+            )))
+        }
+
         if resolved.scope == .session,
            resolved.condition == nil,
            let curfew = resolved.curfew {
@@ -227,7 +247,7 @@ enum CurfewMenu {
                 title: L10n.string("No curfew"),
                 help: L10n.string("Nothing ends this session; it runs until you stop it."),
                 representedValue: RowID.inherit,
-                isSelected: resolved.curfew == nil,
+                isSelected: resolved.curfew == nil && resolved.condition == nil,
                 onChoose: { onChoose(.inherit) }
             )))
             return entries
@@ -249,12 +269,80 @@ enum CurfewMenu {
                 representedValue: RowID.exempt,
                 // Nothing resolved, and it was this record or its checkout that said so — the
                 // standing window answering "no curfew" is a window that is simply not on.
-                isSelected: resolved.curfew == nil && resolved.scope != .app,
+                isSelected: resolved.curfew == nil && resolved.condition == nil && resolved.scope != .app,
                 onChoose: { onChoose(.exempt) }
             )))
         }
 
         return entries
+    }
+
+    /// A fixed percentage list per window; cached provider values stay menu models. Bound both
+    /// the source scan and the output before constructing rows (normally two to four windows).
+    private static func usageThresholdEntries(
+        usage: AccountUsage?,
+        model: String?,
+        resolved: CurfewResolution.Answer,
+        onChoose: @escaping (Choice) -> Void
+    ) -> [ThemedMenuEntry] {
+        guard let usage else { return [] }
+        let maximumWindows = 8
+        let windows = Array(usage.windows.prefix(maximumWindows))
+            + usage.modelWindows.prefix(maximumWindows).filter {
+                guard let model else { return false }
+                return ModelName.scope($0.id, meters: model)
+            }
+        return windows.prefix(maximumWindows).map { window in
+            let selected: Int?
+            if case .usageThreshold(let percent, _, _, let windowID)? = resolved.condition,
+               windowID == window.id {
+                selected = percent
+            } else {
+                selected = nil
+            }
+            var choices: [ThemedMenuEntry] = CurfewDefaults.usagePercentPresets.map { percent in
+                .item(ThemedMenuItem(
+                    title: L10n.format("%lld%%", Int64(percent)),
+                    representedValue: percent,
+                    isSelected: selected == percent,
+                    onChoose: { onChoose(.atUsage(percent: percent, windowID: window.id)) }
+                ))
+            }
+            choices.append(.separator)
+            choices.append(.item(ThemedMenuItem(
+                title: L10n.string("Custom percentage…"),
+                onChoose: {
+                    guard let percent = IntegerPromptAlert.ask(usagePrompt(
+                        windowID: window.compactName,
+                        current: selected ?? CurfewDefaults.defaultUsagePercent
+                    ))?.first else { return }
+                    onChoose(.atUsage(percent: percent, windowID: window.id))
+                }
+            )))
+            return .item(ThemedMenuItem(
+                title: L10n.format("At usage percentage (%@)", window.compactName),
+                help: CurfewReceiptWords.usageThresholdHelp,
+                representedValue: window.id,
+                isSelected: selected != nil,
+                submenu: choices
+            ))
+        }
+    }
+
+    static func usagePrompt(windowID: String, current: Int) -> IntegerPromptRequest {
+        IntegerPromptRequest(
+            title: L10n.format("Usage curfew (%@)", windowID),
+            message: CurfewReceiptWords.usageThresholdHelp,
+            confirmTitle: L10n.string("Set Curfew"),
+            fields: [IntegerPromptFieldRequest(
+                title: L10n.string("Stop at"),
+                accessibilityLabel: L10n.string("Usage percentage"),
+                suffix: "%",
+                current: current,
+                range: CurfewDefaults.usagePercentRange
+            )],
+            helperText: L10n.string("Enter a whole percentage from 1 to 100.")
+        )
     }
 
     /// One offer, with its reading placed by how much of a reading it is — `ScheduleMenu.row`'s

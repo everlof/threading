@@ -687,12 +687,12 @@
       "status": "implemented",
       "priority": "important",
       "title": "Curfew menu",
-      "description": "The shared curfew chooser with the exact 7d reset condition selected, proving the 5h row remains a separate unselected condition.",
-      "states": ["7d selected", "5h unselected", "Light", "Dark"],
+      "description": "The shared curfew chooser with an exact 7d reset, plus an 80% weekly usage ceiling and its percentage submenu in the real product shell.",
+      "states": ["7d selected", "5h unselected", "80% usage selected", "Percentage submenu", "Light", "Dark"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["Natural menu size"]
+        "sizes": ["Natural menu size", "1120×820 product shell"]
       },
       "source": {
         "path": "Tests/ThreadingTests/CurfewMenuTests.swift",

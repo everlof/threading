@@ -272,6 +272,16 @@ extension ConversationViewController {
         guard isViewLoaded else { return }
         let now = Date()
         let answer = CurfewResolution.answer(forSessionID: sessionID, now: now)
+        if case .usageThreshold(let percent, _, _, let windowID)? = answer.condition,
+           answer.curfew == nil {
+            curfewChip.isHidden = false
+            curfewChip.configure(
+                symbolName: CurfewDefaults.symbol,
+                title: CurfewReceiptWords.usageThreshold(percent: percent, windowID: windowID)
+            )
+            curfewChip.toolTip = CurfewReceiptWords.usageThresholdHelp
+            return
+        }
         guard let curfew = answer.curfew else {
             curfewChip.isHidden = true
             return
@@ -349,6 +359,10 @@ extension ConversationViewController {
 
     private func chooseCurfew(_ choice: CurfewMenu.Choice) {
         switch choice {
+        case .atUsage(let percent, let windowID):
+            SessionCurfewCenter.shared.setCurfewAtUsage(
+                percent: percent, windowID: windowID, forSessionID: sessionID
+            )
         case .at(let deadline):
             SessionCurfewCenter.shared.setCurfew(.until(deadline), forSessionID: sessionID)
         case .atQuietHours(let start):

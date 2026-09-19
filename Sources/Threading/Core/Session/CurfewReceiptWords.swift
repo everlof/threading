@@ -16,6 +16,14 @@ import Foundation
 /// negotiable, and that this one is not liftable when it is the one thing here that always is.
 enum CurfewReceiptWords {
 
+    static func usageThreshold(percent: Int, windowID: String) -> String {
+        L10n.format("At %1$lld%% usage (%2$@)", Int64(percent), windowID)
+    }
+
+    static var usageThresholdHelp: String {
+        L10n.string("Holds this session when a fresh account reading reaches the chosen percentage. Uses total usage in this window, including other sessions. Checks about once a minute while Threading is running; usage can pass the percentage between readings. Applies your curfew interrupt settings, without a wrap-up message. Stays held until lifted.")
+    }
+
     // MARK: - Holds
 
     /// The one sentence a hold prints: why nothing is being sent, in terms of a decision the
@@ -57,6 +65,9 @@ enum CurfewReceiptWords {
                 ? L10n.format("Curfew since %@", time, locale: locale)
                 : L10n.format("Curfew at %@", time, locale: locale)
         ]
+        if case .usageThreshold(let percent, _, _, let windowID) = curfew.origin {
+            clauses.append(usageThreshold(percent: percent, windowID: windowID))
+        }
 
         if let sentAt = state?.momentOf(.windDownSent) {
             clauses.append(

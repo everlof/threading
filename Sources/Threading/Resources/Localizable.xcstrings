@@ -2850,6 +2850,23 @@
         }
       }
     },
+    "%lld%%" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%%"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld %%"
+          }
+        }
+      }
+    },
     "%lld%% served from cache" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8129,6 +8146,23 @@
         }
       }
     },
+    "At %1$lld%% usage (%2$@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At %1$lld%% usage (%2$@)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid %1$lld %% användning (%2$@)"
+          }
+        }
+      }
+    },
     "At most %d" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8169,6 +8203,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Med den observerade veckotakten"
+          }
+        }
+      }
+    },
+    "At usage percentage (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At usage percentage (%@)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid användningsprocent (%@)"
           }
         }
       }
@@ -16135,6 +16186,23 @@
         }
       }
     },
+    "Custom percentage…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom percentage…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anpassad procent…"
+          }
+        }
+      }
+    },
     "Custom repeating alert" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18475,6 +18543,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ange ett kort namn, en fullständig HTTPS-adress utan inbäddade inloggningsuppgifter och en begränsad API-nyckel."
+          }
+        }
+      }
+    },
+    "Enter a whole percentage from 1 to 100." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a whole percentage from 1 to 100."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange en hel procent från 1 till 100."
           }
         }
       }
@@ -22295,6 +22380,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Håller tillbaka varje ljud Threading gör — både aviseringsljud och terminalens ljudsignal — utan att ändra vad någon av dem är inställd på; när det stängs av får båda tillbaka precis det de hade. Ingenting undertrycks: aviseringar kommer fortfarande fram och sidofältet markerar fortfarande sessionen, fast tyst. Högtalaren längst ned i sidofältet är samma knapp."
+          }
+        }
+      }
+    },
+    "Holds this session when a fresh account reading reaches the chosen percentage. Uses total usage in this window, including other sessions. Checks about once a minute while Threading is running; usage can pass the percentage between readings. Applies your curfew interrupt settings, without a wrap-up message. Stays held until lifted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Holds this session when a fresh account reading reaches the chosen percentage. Uses total usage in this window, including other sessions. Checks about once a minute while Threading is running; usage can pass the percentage between readings. Applies your curfew interrupt settings, without a wrap-up message. Stays held until lifted."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausar den här sessionen när en aktuell kontoavläsning når den valda procenten. Använder den totala användningen i detta fönster, inklusive andra sessioner. Kontrollerar ungefär en gång i minuten medan Threading körs; användningen kan överstiga procenten mellan avläsningarna. Tillämpar dina inställningar för stoppets avbrott, utan ett avslutningsmeddelande. Förblir pausad tills stoppet hävs."
           }
         }
       }
@@ -40563,6 +40665,23 @@
         }
       }
     },
+    "Set a curfew for this session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set a curfew for this session"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ställ in ett stopp för den här sessionen"
+          }
+        }
+      }
+    },
     "Set a goal Claude checks before it stops" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43836,6 +43955,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stanna och vänta på mig"
+          }
+        }
+      }
+    },
+    "Stop at" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop at"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa vid"
           }
         }
       }
@@ -54092,6 +54228,23 @@
         }
       }
     },
+    "Usage curfew (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage curfew (%@)"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användningsstopp (%@)"
+          }
+        }
+      }
+    },
     "Usage date range" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54143,6 +54296,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Användning över tid"
+          }
+        }
+      }
+    },
+    "Usage percentage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage percentage"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användningsprocent"
           }
         }
       }

@@ -10,7 +10,7 @@ import XCTest
 /// will happen to it tonight — and a chat that named its own moment marks neither standing rule,
 /// because it is under neither.
 @MainActor
-final class CurfewMenuTests: XCTestCase {
+final class CurfewMenuTests: HostedStoreTestCase {
 
     // MARK: - Fixture
 
@@ -162,10 +162,10 @@ final class CurfewMenuTests: XCTestCase {
         let named = entries.compactMap { $0.item?.representedValue as? CurfewMenu.RowID }
         XCTAssertEqual(named, [.atQuietHours, .inherit, .exempt, .lift, .custom])
 
-        // Each run stands behind a rule of its own: moments, resets, the window, the rules.
+        // Each run stands apart: moments, resets, percentages, quiet hours, standing choices.
         XCTAssertEqual(
             entries.filter { !$0.isItem }.count,
-            4,
+            5,
             "the runs would read as one list of interchangeable answers"
         )
     }
@@ -453,6 +453,44 @@ final class CurfewMenuTests: XCTestCase {
 
     // MARK: - Rendered
 
+    private var percentageAnswer: CurfewResolution.Answer {
+        .init(scope: .session, curfew: nil, condition: .usageThreshold(
+            percent: 80, armedAt: now, accountID: AccountID(provider: .codex, handle: .standard),
+            windowID: "7d"
+        ))
+    }
+
+    func testPercentageMenuKeepsWindowIdentityAndDoesNotMarkNoCurfew() throws {
+        var picked: (Int, String)?
+        let rows = entries(usage: usage(), resolved: percentageAnswer) { choice in
+            if case .atUsage(let percent, let windowID) = choice { picked = (percent, windowID) }
+        }
+        let weekly = try XCTUnwrap(rows.compactMap(\.item).first { $0.submenu != nil && $0.representedValue as? String == "7d" })
+        XCTAssertTrue(weekly.isSelected)
+        let percent = try XCTUnwrap(weekly.submenu?.compactMap(\.item).first { $0.representedValue as? Int == 80 })
+        XCTAssertTrue(percent.isSelected)
+        percent.onChoose?()
+        XCTAssertEqual(picked?.0, 80)
+        XCTAssertEqual(picked?.1, "7d")
+        XCTAssertEqual(item(.inherit, in: rows)?.isSelected, false)
+        XCTAssertEqual(item(.usageThreshold, in: entries(resolved: percentageAnswer))?.isSelected, true,
+                       "the chosen rule must remain visible with no cached reading")
+    }
+
+    func testCustomPercentageValidationAndScheduledPlanResolution() {
+        let request = CurfewMenu.usagePrompt(windowID: "7d", current: 80)
+        XCTAssertEqual(try? request.validatedValues(["73"]).get(), [73])
+        for invalid in ["0", "101", "oops", ""] {
+            if case .success = request.validatedValues([invalid]) { XCTFail("accepted \(invalid)") }
+        }
+        XCTAssertEqual(ScheduledCurfewPlanResolution.deadline(
+            for: .atUsage(percent: 73, windowID: "7d"), preferences: .default, now: now
+        ), .armUsageThreshold(percent: 73, windowID: "7d"))
+        XCTAssertEqual(ScheduledCurfewPlanResolution.deadline(
+            for: .atUsage(percent: 101, windowID: "7d"), preferences: .default, now: now
+        ), .skipped(.invalidUsageThreshold))
+    }
+
     /// The whole menu, drawn. A statement row that reads as a disabled choice, or a run of
     /// offers padded to a second line's height, is the sort of defect that is obvious in a
     /// picture and invisible in every assertion anyone would think to write. The weekly reset
@@ -494,6 +532,53 @@ final class CurfewMenuTests: XCTestCase {
             try data.write(to: directory.appendingPathComponent("curfew-menu-\(name).png"))
         }
         XCTAssertEqual(renders.count, 2, "the menu ignored the appearance it was drawn in")
+        try renderPercentageInShell(to: directory)
+    }
+
+    private func renderPercentageInShell(to directory: URL) throws {
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1120, height: 820))
+        let root = try XCTUnwrap(window.contentView)
+        // The menu is the subject. Keep the shell's randomly chosen greeting from creating
+        // unrelated pixel changes between captures; use the shipping label without animation.
+        func greeting(in view: NSView) -> MorphingMultilineTitleLabel? {
+            if let label = view as? MorphingMultilineTitleLabel { return label }
+            for child in view.subviews {
+                if let label = greeting(in: child) { return label }
+            }
+            return nil
+        }
+        try XCTUnwrap(greeting(in: controller.containerViewController.composerViewController.view))
+            .setStringValue(L10n.string("What are we building today?"), animated: false)
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        let rows = entries(usage: usage(), resolved: percentageAnswer)
+        let weeklyIndex = rows.firstIndex { $0.item?.representedValue as? String == "7d" }
+        for theme in [AppTheme.system, AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist] {
+            AppThemePalette.set(theme)
+            root.appearance = NSAppearance(named: .darkAqua)
+            root.layoutSubtreeIfNeeded()
+            let token = ThemedMenuPresenter.present(
+                ThemedMenuPresentation(entries: rows, minimumWidth: 0),
+                from: controller.sidebarViewController.view, selectedEntryIndex: weeklyIndex,
+                onChoose: { _, _ in }, onDismiss: {}
+            )
+            defer { ThemedMenuPresenter.dismiss(token) }
+            let overlay = try XCTUnwrap(root.subviews.last)
+            overlay.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil,
+                characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 124
+            )))
+            AppThemeRefresh.repaint(root)
+            root.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+            root.cacheDisplay(in: root.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: directory.appendingPathComponent("curfew-menu-percentage-shell-\(theme.id.rawValue).png")
+            )
+        }
     }
 
     /// The panel presented in a window that is built and never shown — `ThemedMenuPresenter`
@@ -508,7 +593,7 @@ final class CurfewMenuTests: XCTestCase {
         var data: Data?
         let render: @MainActor () -> Void = {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 380, height: 520),
+                contentRect: NSRect(x: 0, y: 0, width: 380, height: 720),
                 styleMask: [.titled],
                 backing: .buffered,
                 defer: false
@@ -516,9 +601,9 @@ final class CurfewMenuTests: XCTestCase {
             window.appearance = appearance
             let root = ThemedSurfaceView()
             root.translatesAutoresizingMaskIntoConstraints = true
-            root.frame = NSRect(x: 0, y: 0, width: 380, height: 520)
+            root.frame = NSRect(x: 0, y: 0, width: 380, height: 720)
             root.applySurface(fill: Design.Surface.background, radius: .fixed(0))
-            let source = NSView(frame: NSRect(x: 12, y: 488, width: 1, height: 1))
+            let source = NSView(frame: NSRect(x: 12, y: 688, width: 1, height: 1))
             root.addSubview(source)
             window.contentView = root
 

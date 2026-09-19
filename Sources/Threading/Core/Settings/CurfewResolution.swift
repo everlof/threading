@@ -89,6 +89,9 @@ enum CurfewResolution {
     /// has no curfew*, which is what an exemption produces.
     struct Answer: Equatable, Sendable {
         enum Condition: Equatable, Sendable {
+            case usageThreshold(
+                percent: Int, armedAt: Date, accountID: AccountID, windowID: String
+            )
             case usageReset(
                 expectedAt: Date,
                 armedAt: Date,
@@ -129,6 +132,20 @@ enum CurfewResolution {
         calendar: Calendar = .current
     ) -> Answer {
         switch session {
+        case .atUsage(let percent, let armedAt, let accountID, let windowID):
+            let origin = CurfewOrigin.usageThreshold(
+                percent: percent, armedAt: armedAt, accountID: accountID, windowID: windowID
+            )
+            return Answer(
+                scope: .session,
+                curfew: state.flatMap { state in
+                    guard state.origin == origin else { return nil }
+                    return curfew(deadline: state.deadline, origin: origin, preferences: preferences)
+                },
+                condition: .usageThreshold(
+                    percent: percent, armedAt: armedAt, accountID: accountID, windowID: windowID
+                )
+            )
         case .exempt:
             return Answer(scope: .session, curfew: nil)
         case .until(let deadline):
@@ -278,9 +295,10 @@ enum CurfewResolution {
         // would spend the capacity that was just restored, which is exactly what this condition
         // exists to prevent.
         let windDownMargin: TimeInterval?
-        if case .usageReset = origin {
+        switch origin {
+        case .usageReset, .usageThreshold:
             windDownMargin = nil
-        } else {
+        case .session, .quietHours:
             windDownMargin = preferences.windDownMargin
         }
         return ResolvedCurfew(

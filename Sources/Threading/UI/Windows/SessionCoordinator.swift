@@ -1256,6 +1256,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 windowID: windowID,
                 forSessionID: sessionID
             )
+        case .armUsageThreshold(let percent, let windowID):
+            if let session = environment.projectStore.session(withID: sessionID),
+               ScheduledCurfewPlanResolution.hasArmedUsageThreshold(
+                percent: percent, windowID: windowID, session: session
+               ) { return }
+            SessionCurfewCenter.shared.setCurfewAtUsage(
+                percent: percent, windowID: windowID, forSessionID: sessionID
+            )
         case .skipped(let reason):
             environment.eventLog.record(.curfew, "Planned curfew not armed", [
                 "session": sessionID.uuidString,

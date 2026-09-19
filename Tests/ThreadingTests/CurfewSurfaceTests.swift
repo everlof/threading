@@ -118,6 +118,24 @@ final class ConversationCurfewChipTests: HostedStoreTestCase {
         XCTAssertTrue(fixture.controller.curfewChip.isHidden)
     }
 
+    func testArmedPercentageCurfewKeepsItsChipAndRowBeforeItHasADeadline() throws {
+        let fixture = try conversation(curfew: .atUsage(
+            percent: 73, armedAt: Date(), accountID: AccountID(provider: .codex, handle: .standard),
+            windowID: "7d"
+        ))
+        let chip = fixture.controller.curfewChip
+        XCTAssertFalse(chip.isHidden)
+        XCTAssertEqual(chip.accessibilityTitle(), CurfewReceiptWords.usageThreshold(percent: 73, windowID: "7d"))
+        XCTAssertFalse(CurfewHoldPolicy.isHeld(sessionID: fixture.sessionID))
+        let answer = CurfewResolution.answer(forSessionID: fixture.sessionID)
+        XCTAssertNil(answer.curfew)
+        let row = RowConductSummary.curfewStatement(
+            hold: .clear, answer: answer, inherited: nil, ownScope: .session, now: Date()
+        )
+        XCTAssertEqual(row?.text, chip.accessibilityTitle())
+        XCTAssertEqual(try item(.inherit, in: chip).isSelected, false)
+    }
+
     /// An armed curfew is a plan, and reads as one: what it is *until*, at a glance, while
     /// somebody is typing.
     func testAnArmedCurfewNamesTheMomentItEnds() throws {

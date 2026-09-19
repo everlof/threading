@@ -88,6 +88,7 @@ final class SessionCurfewModelTests: XCTestCase {
 
         for rule in [
             CurfewRule.exempt,
+            CurfewRule.atUsage(percent: 73, armedAt: deadline, accountID: accountID, windowID: "7d"),
             CurfewRule.until(deadline),
             CurfewRule.untilUsageReset(
                 expectedAt: deadline,

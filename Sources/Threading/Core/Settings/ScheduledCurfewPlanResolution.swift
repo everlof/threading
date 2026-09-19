@@ -18,10 +18,28 @@ import Foundation
 /// is *which* of them happened.
 enum ScheduledCurfewPlanResolution {
 
+    /// A scheduled start held by its newly armed ceiling is retried after Lift Curfew. Keep
+    /// that user's lift (and an already armed instance) instead of arming the same plan again.
+    static func hasArmedUsageThreshold(
+        percent: Int, windowID: String, session: AgentSession
+    ) -> Bool {
+        let accountID = AccountID(provider: session.kind, handle: session.accountHandle)
+        if case .atUsage(let priorPercent, _, let priorAccount, let priorWindow)? = session.curfewRule,
+           priorPercent == percent, priorAccount == accountID, priorWindow == windowID {
+            return true
+        }
+        if let state = session.curfewState, state.liftedAt != nil,
+           case .usageThreshold(let priorPercent, _, let priorAccount, let priorWindow) = state.origin {
+            return priorPercent == percent && priorAccount == accountID && priorWindow == windowID
+        }
+        return false
+    }
+
     // MARK: - Outcome
 
     /// What the caller should do with the plan it is holding.
     enum Outcome: Equatable, Sendable {
+        case armUsageThreshold(percent: Int, windowID: String)
 
         /// The plan carried no curfew. The session runs until somebody stops it.
         case noCurfew
@@ -38,6 +56,7 @@ enum ScheduledCurfewPlanResolution {
 
     /// Why a plan that asked for an end got none. Raw values are what the journal prints.
     enum Reason: String, Equatable, Sendable {
+        case invalidUsageThreshold
 
         /// A wall-clock end that had already passed when the start finally fired — the missed
         /// overnight case. Arming it would hold the session from its first breath, which is not
@@ -64,6 +83,11 @@ enum ScheduledCurfewPlanResolution {
         calendar: Calendar = .current
     ) -> Outcome {
         switch plan {
+        case .atUsage(let percent, let windowID):
+            guard CurfewDefaults.usagePercentRange.contains(percent), !windowID.isEmpty else {
+                return .skipped(.invalidUsageThreshold)
+            }
+            return .armUsageThreshold(percent: percent, windowID: windowID)
         case nil:
             return .noCurfew
 

@@ -1202,9 +1202,9 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
 
         XCTAssertEqual(
             composer.curfewButton.accessibilityTitle(),
-            "End this session at a time"
+            "Set a curfew for this session"
         )
-        XCTAssertEqual(composer.curfewButton.toolTip, "End this session at a time")
+        XCTAssertEqual(composer.curfewButton.toolTip, "Set a curfew for this session")
         XCTAssertEqual(
             composer.scheduleButton.accessibilityTitle(),
             "Start this session later",

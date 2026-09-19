@@ -11,6 +11,34 @@ import XCTest
 /// that is now behind it, and a standing window that has since been switched off.
 final class ScheduledCurfewPlanResolutionTests: XCTestCase {
 
+    func testAWaitingPercentageStartDoesNotRearmAfterItsCurfewIsLifted() {
+        let armedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let account = AccountID(provider: .codex, handle: .standard)
+        var session = AgentSession(kind: .codex, title: "Scheduled work")
+        XCTAssertFalse(ScheduledCurfewPlanResolution.hasArmedUsageThreshold(
+            percent: 80, windowID: "7d", session: session
+        ))
+        session.curfewRule = .atUsage(percent: 80, armedAt: armedAt, accountID: account, windowID: "7d")
+        XCTAssertTrue(ScheduledCurfewPlanResolution.hasArmedUsageThreshold(
+            percent: 80, windowID: "7d", session: session
+        ))
+        session.curfewRule = nil
+        session.curfewState = SessionCurfewState(
+            deadline: armedAt,
+            origin: .usageThreshold(percent: 80, armedAt: armedAt, accountID: account, windowID: "7d"),
+            liftedAt: armedAt.addingTimeInterval(60)
+        )
+        XCTAssertTrue(ScheduledCurfewPlanResolution.hasArmedUsageThreshold(
+            percent: 80, windowID: "7d", session: session
+        ))
+        XCTAssertFalse(ScheduledCurfewPlanResolution.hasArmedUsageThreshold(
+            percent: 90, windowID: "7d", session: session
+        ))
+        XCTAssertFalse(ScheduledCurfewPlanResolution.hasArmedUsageThreshold(
+            percent: 80, windowID: "5h", session: session
+        ))
+    }
+
     // MARK: - Fixture
 
     /// Fixed rather than `.current`: every answer below is a wall-clock reading, and a suite that

@@ -56,6 +56,7 @@ final class ScheduledCurfewPlanTests: XCTestCase {
     func testEachCurfewChoiceSurvivesTheWait() throws {
         for choice in [
             ScheduledCurfewPlan.at(deadline),
+            .atUsage(percent: 73, windowID: "7d"),
             .atQuietHours,
             .untilUsageReset(
                 expectedAt: deadline,

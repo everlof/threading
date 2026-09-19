@@ -176,7 +176,12 @@ final class AccountUsageService {
     // MARK: - Public Methods
 
     func reading(for account: AgentAccount) -> AccountUsageReading {
-        entries[account.id]?.reading ?? .notFetched
+        reading(for: account.id)
+    }
+
+    /// Cache-only lookup for armed usage conditions; never rediscovers account files.
+    func reading(for accountID: AccountID) -> AccountUsageReading {
+        entries[accountID]?.reading ?? .notFetched
     }
 
     func usage(for account: AgentAccount) -> AccountUsage? {

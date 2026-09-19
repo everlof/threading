@@ -137,6 +137,13 @@ struct RowConductSummary: Equatable, Sendable {
 
         guard answer.scope == ownScope else { return nil }
 
+        if case .usageThreshold(let percent, _, _, let windowID)? = answer.condition {
+            return RowCurfewStatement(
+                text: CurfewReceiptWords.usageThreshold(percent: percent, windowID: windowID),
+                leads: false
+            )
+        }
+
         guard let curfew = answer.curfew else {
             // The record exempted itself. `scope == ownScope` with no curfew is exactly that:
             // a checkout's exemption answers at `.project`, so a chat inheriting one is silent

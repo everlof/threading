@@ -1465,7 +1465,7 @@ final class ProjectStore {
     ) -> ProjectMutationResult {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         switch rule {
-        case .until, .untilUsageReset:
+        case .until, .untilUsageReset, .atUsage:
             return .unsupportedValue
         case .exempt, nil:
             break

@@ -4,6 +4,27 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Percentage curfew observations, 2026-09-18
+
+An account usage update evaluates only sessions with an armed percentage curfew on that account.
+The subscription index removes triggered, cleared, archived and deleted sessions. The minute
+timer evaluates due entries in the pending-moment map; it no longer walks every stored session.
+Usage reads are cache-only, and refresh requests are coalesced per account before reaching the
+usage service's existing bounded worker. Menu construction scans at most eight account windows
+and eight model windows, then constructs at most eight window rows with a fixed preset list.
+
+`SessionCurfewCenterTests.testUsageUpdateScalingWithHistoricalSessions` posts 100 usage events
+with one armed session among 100 and 10,000 stored sessions. The Debug run measured median/max
+0.014/0.044 ms at 100 sessions and 0.014/0.073 ms at 10,000, with exactly one cached usage read
+per event at both sizes. Fixture generation, database creation and engine startup are outside
+these timings. This measures the new observation path's scaling, not Release launch performance
+or a before/after speedup. Run the larger fixture with:
+
+```bash
+TEST_RUNNER_THREADING_STRESS=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/SessionCurfewCenterTests/testUsageUpdateScalingWithHistoricalSessions
+```
+
 ## The layers answer different questions
 
 No one profiler should try to answer everything:

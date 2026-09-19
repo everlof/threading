@@ -1413,6 +1413,15 @@ extension ProjectSidebarViewController {
         guard let sessionID = actionSessionID else { return }
 
         switch choice {
+        case .atUsage(let percent, let windowID):
+            guard SessionCurfewCenter.shared.setCurfewAtUsage(
+                percent: percent, windowID: windowID, forSessionID: sessionID
+            ).succeeded else {
+                reload()
+                presentProjectNotice(L10n.string("The project data could not be saved."))
+                return
+            }
+            reload()
         case .at(let deadline), .atQuietHours(let deadline):
             // Both are stored as the moment, the standing window's next opening included: a
             // session already running is armed *now*, so what it gets is the time the menu named.

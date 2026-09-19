@@ -206,8 +206,8 @@ extension SessionCoordinator {
     /// something that never happened. A record held by a curfew is therefore kept *out* of
     /// `waitingSince` entirely, and any patience it accrued on an earlier busy attempt is
     /// forgotten as the hold takes over. The scheduler re-offers it on `CurfewDidChange`.
-    private func standAsideForCurfew(_ message: ScheduledMessage) -> Bool {
-        guard let sessionID = message.target.sessionID else { return false }
+    private func standAsideForCurfew(_ message: ScheduledMessage, sessionID: SessionID? = nil) -> Bool {
+        guard let sessionID = sessionID ?? message.target.sessionID else { return false }
 
         let hold = CurfewHoldPolicy.hold(sessionID: sessionID, in: environment.projectStore)
         switch CurfewStandAside.decide(message: message, hold: hold, now: Date()) {
@@ -423,6 +423,9 @@ extension SessionCoordinator {
         // switched off in the meantime; both are journalled and armed as nothing, because a
         // curfew that begins in the past would hold the session from its first breath.
         armCurfew(plan.curfew, forSessionID: session.id)
+        // A percentage can already be reached at launch. Preserve the scheduled prompt and
+        // wait for a lift before handing its opening message to either provider surface.
+        guard !standAsideForCurfew(message, sessionID: session.id) else { return }
 
         // Composed after the session exists rather than before it, because the pictures can only
         // be filed against a session that has a folder — and the paths that go into the opening

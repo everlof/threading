@@ -530,6 +530,11 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+The Curfew menu's usage-percentage choices reuse the host-owned session scheduling surface and
+integer-input alert. Threading retains threshold validation, account/window binding, durable
+arming and lifting, and every hold/interrupt decision. A percentage choice introduces no extension
+authority or data access; the native menu and input remain the fallback under every theme.
+
 Before adding a component:
 
 1. Name the durable semantic surface and its entity context. For a popover, register its stable

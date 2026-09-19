@@ -125,6 +125,7 @@ final class SessionCurfewCenter {
     private let notificationCenter: NotificationCenter
     private let workspaceCenter: NotificationCenter
     private let eventLog: EventLog
+    private let usageReading: @MainActor (AccountID) -> AccountUsageReading
 
     /// Whether this instance acts on the running app's own sessions.
     ///
@@ -146,6 +147,11 @@ final class SessionCurfewCenter {
     /// supplies the second line of defence — per-account single-flight and bounded provider
     /// concurrency — while this map prevents duplicate discovery and refresh requests up front.
     private var nextUsageRefreshAt: [AccountID: Date] = [:]
+
+    /// Minute-scale usage events visit only armed sessions on the changed account. Expected:
+    /// tens of armed chats; stress: 10,000 stored chats. No historical-session scan per reading.
+    private var usageSessions: [AccountID: Set<SessionID>] = [:]
+    private var usageAccountBySession: [SessionID: AccountID] = [:]
 
     /// Whether the turn now in flight began in front of the user.
     ///
@@ -185,6 +191,9 @@ final class SessionCurfewCenter {
         notificationCenter: NotificationCenter = .default,
         workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         eventLog: EventLog = .shared,
+        usageReading: @escaping @MainActor (AccountID) -> AccountUsageReading = {
+            AccountUsageService.shared.reading(for: $0)
+        },
         performers: Performers? = nil,
         typesIntoLiveSessions: Bool = true
     ) {
@@ -201,6 +210,7 @@ final class SessionCurfewCenter {
         self.notificationCenter = notificationCenter
         self.workspaceCenter = workspaceCenter
         self.eventLog = eventLog
+        self.usageReading = usageReading
         // Built here rather than in a default argument because it needs the centre this instance
         // was handed, and a default argument cannot read another parameter.
         self.performers = performers ?? Performers.live(posting: notificationCenter)
@@ -246,6 +256,9 @@ final class SessionCurfewCenter {
         observations.observe(UsageLimitHistoryDidChange.self) { [weak self] event in
             self?.usageHistoryChanged(event)
         }
+        observations.observe(AccountUsageDidChange.self) { [weak self] event in
+            self?.usageChanged(event.accountID)
+        }
         // A rule written on a session or its checkout changes what resolves for it, and the store
         // is the only place that says so.
         observations.observe(ProjectsDidChange.self) { [weak self] event in
@@ -255,6 +268,7 @@ final class SessionCurfewCenter {
                 evaluateAll()
             case .projectRemoved(_, let sessionIDs, _):
                 for sessionID in sessionIDs {
+                    removeUsageSession(sessionID)
                     pendingMoments[sessionID] = nil
                     turnStartedWatched[sessionID] = nil
                 }
@@ -294,6 +308,8 @@ final class SessionCurfewCenter {
 
         let moment = now()
         pendingMoments.removeAll(keepingCapacity: true)
+        usageSessions.removeAll(keepingCapacity: true)
+        usageAccountBySession.removeAll(keepingCapacity: true)
         walkSessions { [weak self] sessionID in
             self?.evaluate(sessionID, at: moment, materializing: true)
         }
@@ -351,6 +367,7 @@ final class SessionCurfewCenter {
         _ rule: CurfewRule?,
         forSessionID sessionID: SessionID
     ) -> ProjectMutationResult {
+        let previousWindDown = projectStore.session(withID: sessionID)?.curfewState?.windDownMessageID
         let outcome = suspendingEvaluation {
             projectStore.setCurfewRule(rule, forSessionID: sessionID)
         }
@@ -360,6 +377,10 @@ final class SessionCurfewCenter {
             "outcome": String(describing: outcome)
         ])
         guard outcome == .applied else { return outcome }
+
+        // The old instance's wrap-up must not outlive its rule, particularly when its
+        // replacement protects a usage ceiling and deliberately sends no extra turn.
+        removeUndeliveredWindDown(previousWindDown)
 
         evaluateSession(sessionID)
         notificationCenter.post(CurfewDidChange(sessionID: sessionID))
@@ -393,6 +414,23 @@ final class SessionCurfewCenter {
         )
     }
 
+    @discardableResult
+    func setCurfewAtUsage(
+        percent: Int,
+        windowID: String,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard CurfewDefaults.usagePercentRange.contains(percent), !windowID.isEmpty else {
+            return .unsupportedValue
+        }
+        guard let session = projectStore.session(withID: sessionID) else { return .targetNotFound }
+        let accountID = AccountID(provider: session.kind, handle: session.accountHandle)
+        return setCurfew(
+            .atUsage(percent: percent, armedAt: now(), accountID: accountID, windowID: windowID),
+            forSessionID: sessionID
+        )
+    }
+
     /// Ends the curfew this session is under, by the only route that ever ends one early.
     ///
     /// Two shapes, because "not tonight" and "never" are different sentences. A curfew the user
@@ -411,7 +449,7 @@ final class SessionCurfewCenter {
 
         suspendingEvaluation {
             switch curfew.origin {
-            case .session, .usageReset:
+            case .session, .usageReset, .usageThreshold:
                 projectStore.setCurfewRule(nil, forSessionID: sessionID)
             case .quietHours:
                 break
@@ -503,7 +541,56 @@ final class SessionCurfewCenter {
             return
         }
         pendingMoments[sessionID] = nil
+        removeUsageSession(sessionID)
         rearmTimer()
+    }
+
+    private func removeUsageSession(_ sessionID: SessionID) {
+        guard let accountID = usageAccountBySession.removeValue(forKey: sessionID) else { return }
+        usageSessions[accountID]?.remove(sessionID)
+        if usageSessions[accountID]?.isEmpty == true { usageSessions[accountID] = nil }
+    }
+
+    private func usageChanged(_ accountID: AccountID) {
+        guard !isEvaluating, let sessions = usageSessions[accountID] else { return }
+        isEvaluating = true
+        defer { isEvaluating = false }
+        let moment = now()
+        for sessionID in sessions {
+            evaluate(sessionID, at: moment, materializing: false)
+        }
+        rearmTimer()
+    }
+
+    /// A fresh, unexpired provider reading is evidence; an error or missing value is not.
+    /// Once reached, the persisted instance survives resets, lower readings and app relaunch.
+    private func materializeUsageThreshold(_ session: AgentSession, at moment: Date) {
+        removeUsageSession(session.id)
+        guard case .atUsage(let percent, let armedAt, let accountID, let windowID)? =
+            session.curfewRule else { return }
+        let origin = CurfewOrigin.usageThreshold(
+            percent: percent, armedAt: armedAt, accountID: accountID, windowID: windowID
+        )
+        guard session.curfewState?.origin != origin else { return }
+        usageAccountBySession[session.id] = accountID
+        usageSessions[accountID, default: []].insert(session.id)
+
+        guard case .current(let usage) = usageReading(accountID),
+              usage.observedAt <= moment,
+              moment.timeIntervalSince(usage.observedAt) <= CurfewDefaults.maximumUsageAge,
+              let window = usage.windows.first(where: { $0.id == windowID })
+                ?? usage.modelWindows.first(where: { $0.id == windowID }),
+              !window.isExpired(at: moment),
+              let fraction = window.fraction, fraction.isFinite,
+              fraction >= Double(percent) / 100 else { return }
+
+        let state = SessionCurfewState(deadline: moment, origin: origin)
+        guard projectStore.updateCurfewState(state, forSessionID: session.id).succeeded else { return }
+        removeUsageSession(session.id)
+        eventLog.record(.curfew, "Usage percentage triggered curfew", [
+            "session": session.id.uuidString, "account": accountID.rawValue,
+            "window": windowID, "percent": String(percent)
+        ])
     }
 
     private func activityChanged(_ sessionID: SessionID) {
@@ -631,15 +718,21 @@ final class SessionCurfewCenter {
     // MARK: - Private Methods — One Session, One Moment
 
     private func evaluate(_ sessionID: SessionID, at moment: Date, materializing: Bool) {
-        guard let session = projectStore.session(withID: sessionID) else {
+        guard let session = projectStore.session(withID: sessionID), !session.isArchived else {
             pendingMoments[sessionID] = nil
+            removeUsageSession(sessionID)
             return
         }
+        materializeUsageThreshold(session, at: moment)
         guard let answer = resolve(sessionID, at: moment) else {
             pendingMoments[sessionID] = nil
             return
         }
         guard let curfew = answer.curfew else {
+            if case .usageThreshold(_, _, let accountID, _)? = answer.condition {
+                pendingMoments[sessionID] = nextUsagePoll(for: accountID, at: moment)
+                return
+            }
             closeStaleInstance(session.curfewState, for: sessionID, at: moment)
             // A lifted standing instance resolves to *nothing* until its own window closes, and
             // then tomorrow's resolves again. Without an alarm for that end, a machine left alone
@@ -985,8 +1078,18 @@ final class SessionCurfewCenter {
             next.timeIntervalSince(now())
         )
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.evaluateAll() }
+            Task { @MainActor in self?.evaluateDueSessions() }
         }
+    }
+
+    private func evaluateDueSessions() {
+        guard !isEvaluating else { return }
+        isEvaluating = true
+        defer { isEvaluating = false }
+        let moment = now()
+        let due = pendingMoments.filter { $0.value <= moment }.map(\.key)
+        for sessionID in due { evaluate(sessionID, at: moment, materializing: false) }
+        rearmTimer()
     }
 
     // MARK: - Private Methods — Words For The Journal
@@ -998,6 +1101,8 @@ final class SessionCurfewCenter {
     private static func describe(_ rule: CurfewRule?) -> String {
         guard let rule else { return "inherit" }
         switch rule {
+        case .atUsage(let percent, let armedAt, let accountID, let windowID):
+            return "at \(windowID) usage \(percent)%; armed \(stamp(armedAt)) for \(accountID.rawValue)"
         case .exempt: return "exempt"
         case .until(let deadline): return "until \(stamp(deadline))"
         case .untilUsageReset(let expectedAt, let armedAt, let accountID, let windowID):
