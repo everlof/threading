@@ -326,6 +326,35 @@ line. The failed source is not marked used in `UsageLedgerIndex`, so end-of-scan
 removes its prior complete revision; retaining stale rows while declaring partial coverage would
 still mix old and current facts. The spend is visibly missing rather than invisibly short.
 
+### Remote hosts are sources of their own
+
+A session on a remote execution host keeps its transcript on the host; this Mac reads a mirror of
+it (`RemoteTranscriptMirror`, see [`remote-execution-hosts.md`](../feature-drafts/remote-execution-hosts.md)).
+The scan adds one source per host that projects run on, listing that host's mirror directory flat
+(`TranscriptUsageIndex.transcripts(inMirrorAt:)`) and feeding it to the same Claude adapter.
+
+Three rules keep that honest:
+
+- **Billed to the host, not to a Mac account.** A remote agent spends the host's own Claude login,
+  so its records carry `remote-host:<identifier>` and the host's name, and appear in the account
+  breakdown as that machine. Attributing them to a local account would show it spending tokens it
+  never spent, and move its limit projections.
+- **Never inside a Claude directory.** The account scan walks `~/.claude*/projects` without a
+  resolver; a mirror there would be counted as a second conversation (and offered for import, and
+  win "newest transcript"). The mirror root is under Application Support and a test holds it there.
+- **Nothing counted twice.** Records are deduplicated by response identity across every source,
+  and a remote conversation's transcript exists only in its mirror.
+
+A remote project's checkout is a folder on its host, which is what its transcripts record as the
+working directory, so the scan also names each project's remote folder: the checkout breakdown
+says the project rather than a path on a machine this Mac cannot see. The per-session receipt needs
+nothing new — it matches the conversation id the records already carry — but at a turn end it now
+refreshes after the mirror does, so a session without hooks is not a turn behind.
+
+What is not covered: subagent transcripts (the mirror holds the root conversation only), and a
+remote conversation whose mirror has never been refreshed on this Mac — its usage appears once its
+session runs or is taken back here.
+
 ### Session receipts
 
 The Session Status Card, Overview ▸ Info and Subagents pane read a second projection of the same

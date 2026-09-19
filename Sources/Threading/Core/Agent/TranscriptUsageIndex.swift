@@ -135,6 +135,18 @@ enum TranscriptUsageIndex {
         }
     }
 
+    /// The transcripts mirrored from one remote host (`RemoteTranscriptMirror`): its conversations,
+    /// flat in the host's directory. Listed apart from `transcripts(inAccountAt:)` because a mirror
+    /// has no `projects/` tree, and must never be placed inside one — an account scan would count it
+    /// as a local conversation.
+    static func transcripts(inMirrorAt directory: String) -> [URL] {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: URL(fileURLWithPath: directory, isDirectory: true),
+            includingPropertiesForKeys: nil
+        )) ?? []
+        return contents.filter { $0.pathExtension == AgentDefaults.transcriptExtension }
+    }
+
     // MARK: - Reading
 
     /// Every priced turn in one transcript, deduplicated against scan-global state the caller

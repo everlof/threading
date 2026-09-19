@@ -5571,15 +5571,14 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         // typed end-of-turn edge; otherwise one repainting off-screen terminal
         // can launch this whole fan-out on every quiet interval.
         if transition.endedTurn {
-            // A finished turn is the useful freshness boundary for this receipt. The global
-            // scan is off-main and warm files resolve through the usage cache.
-            SessionUsageService.shared.refresh(sessionID, forceIndex: true)
-
-            // The two readers of the transcript at this edge. On a remote host that transcript is a
+            // The readers of the transcript at this edge. On a remote host that transcript is a
             // mirror, brought level first — for a session without hooks this edge is the only
             // turn end there is, and read before the refresh they would describe the previous turn.
             // A local session, or a remote one already refreshed by its hook, runs them at once.
             let readTranscript: @MainActor () -> Void = {
+                // A finished turn is the useful freshness boundary for this receipt. The global
+                // scan is off-main and warm files resolve through the usage cache.
+                SessionUsageService.shared.refresh(sessionID, forceIndex: true)
                 // The hook-less half of observed-work capture. A reporting session already caught
                 // up on its `turnFinished` hook; this edge is inferred from output, so it is later
                 // and vaguer, but it is the only "something happened" a session without lifecycle

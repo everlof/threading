@@ -379,9 +379,12 @@ the next refresh would put the host's bytes back. Account migration refuses a re
 which uses the host's own login. Checkout moves refuse a remote chat, whose checkout is a folder on
 the host.
 
-**Not yet.** Usage: a mirror outside `~/.claude*` is invisible to the usage scan, so a remote
-session's tokens do not reach the dashboard or its receipt — the next surface for slice 5. Subagent
-transcripts, whose paths the hooks report on the host, are not mirrored. Mid-turn readers (run
+**Usage, 2026-09-19.** Each remote host is now a usage source of its own, scanning that host's
+mirrors and billed to the host's login rather than a Mac account; see
+[`usage-dashboard.md`](../architecture/usage-dashboard.md#remote-hosts-are-sources-of-their-own).
+
+**Not yet.** Subagent transcripts, whose paths the hooks report on the host, are not mirrored — so
+neither their navigator detail nor their usage reaches this Mac. Mid-turn readers (run
 progress, live attachment detection) see the transcript as of the last refresh.
 
 **Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it).

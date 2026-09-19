@@ -681,11 +681,19 @@ enum TranscriptUsageExportRevision {
 final class TranscriptUsageService {
     static let shared = TranscriptUsageService()
 
-    private struct AccountSource: Sendable {
+    struct AccountSource: Sendable, Equatable {
         let runtimeID: String
         let path: String
         let accountID: String
         let accountName: String
+        /// How `path` holds its transcripts: an account's `projects/` tree, or one remote host's
+        /// flat mirror.
+        var layout: Layout = .accountDirectory
+
+        enum Layout: Sendable, Equatable {
+            case accountDirectory
+            case remoteMirror
+        }
     }
 
     private struct ExportSource: Sendable {
@@ -752,9 +760,20 @@ final class TranscriptUsageService {
                     )
                 }
             }
+            + Self.remoteHostSources(
+                projects: ProjectStore.shared.projects,
+                hostName: { RemoteHostStore.shared.host(withID: $0)?.displayName }
+            )
         let projects = ProjectStore.shared.projects
+        // A remote project's checkout is a folder on its host, which is what its transcripts
+        // record as the working directory; naming it lets the checkout breakdown say the project's
+        // name rather than a path on a machine this Mac cannot see.
         let projectDescriptors = projects.map {
             UsageLedgerBuilder.ProjectDescriptor(path: $0.folderPath, name: $0.name)
+        } + projects.compactMap { project in
+            project.executionHost.map {
+                UsageLedgerBuilder.ProjectDescriptor(path: $0.remoteDirectory, name: project.name)
+            }
         }
         let sampledAt = Date()
         let exports: [ExportSource] = projects.flatMap { project in
@@ -823,6 +842,35 @@ final class TranscriptUsageService {
         }
     }
 
+    /// One source per remote host that projects run on: the host's mirrored transcripts, billed to
+    /// the host's own Claude login.
+    ///
+    /// Not an account on this Mac, so it is named for the machine rather than borrowing a local
+    /// account's name: usage a remote agent spent on the host's login attributed to a Mac account
+    /// would show that account spending tokens it never spent. Transcript usage is deduplicated by
+    /// response identity across every source, and a remote conversation's transcript exists only in
+    /// its mirror, so nothing here is counted twice.
+    static func remoteHostSources(
+        projects: [Project],
+        hostName: (RemoteHostID) -> String?,
+        mirrorRoot: URL = RemoteTranscriptMirror.shared.root
+    ) -> [AccountSource] {
+        var seen = Set<String>()
+        return projects.compactMap { project -> AccountSource? in
+            guard let host = project.executionHost else { return nil }
+            let destination = host.sshDestination
+            guard seen.insert(destination.identifier).inserted else { return nil }
+            let name = host.hostID.flatMap(hostName) ?? host.destination
+            return AccountSource(
+                runtimeID: AgentKind.claude.rawValue,
+                path: mirrorRoot.appendingPathComponent(destination.identifier, isDirectory: true).path,
+                accountID: UsageReportDefaults.remoteHostAccountPrefix + destination.identifier,
+                accountName: L10n.format("%@ (remote host)", name),
+                layout: .remoteMirror
+            )
+        }
+    }
+
     private nonisolated static func build(
         accountSources: [AccountSource],
         exportSources: [ExportSource],
@@ -884,12 +932,17 @@ final class TranscriptUsageService {
         var pending: [PendingSource] = []
         for source in accountSources {
             guard let runtime = AgentKind(rawValue: source.runtimeID) else { continue }
-            let files: [URL]
+            var files: [URL]
             let parserID: String
             switch runtime {
             case .claude:
-                files = TranscriptUsageIndex.transcripts(inAccountAt: source.path)
-                    .sorted { $0.path < $1.path }
+                switch source.layout {
+                case .accountDirectory:
+                    files = TranscriptUsageIndex.transcripts(inAccountAt: source.path)
+                case .remoteMirror:
+                    files = TranscriptUsageIndex.transcripts(inMirrorAt: source.path)
+                }
+                files.sort { $0.path < $1.path }
                 parserID = UsageScanCacheDefaults.claudeParserID
             case .codex:
                 files = CodexUsageAdapter.rollouts(inAccountAt: source.path)
@@ -1115,6 +1168,8 @@ final class TranscriptUsageService {
 }
 
 enum UsageReportDefaults {
+    /// The account id of a remote host's usage: the host's own login, never an account on this Mac.
+    static let remoteHostAccountPrefix = "remote-host:"
     static let fileName = "usage-report-v2.json"
     static let staleAfter: TimeInterval = 60 * 60
     static let maximumDayRange = 90

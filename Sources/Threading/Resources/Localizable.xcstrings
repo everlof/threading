@@ -430,6 +430,17 @@
         }
       }
     },
+    "%@ (remote host)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (fjärrvärd)"
+          }
+        }
+      }
+    },
     "%@ Help" : {
       "extractionState" : "manual",
       "localizations" : {
