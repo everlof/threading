@@ -22,6 +22,7 @@ protocol RemoteSessionMutating: Sendable {
     var persistenceBlockReason: ProjectStorePersistenceBlock? { get }
 
     func renameSession(id sessionID: SessionID, to title: String?) -> ProjectMutationResult
+    func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult
     func setUsesNativeUI(
         _ usesNativeUI: Bool,

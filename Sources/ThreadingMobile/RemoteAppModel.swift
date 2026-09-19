@@ -548,6 +548,7 @@ final class RemoteAppModel: ObservableObject {
     private var recentNotificationOpenIdentitySet = Set<NotificationOpenIdentity>()
     private static let maximumRecentNotificationOpenCount = 128
     private var catalogueRevision = 0
+    private var liveDashboardProjection: (revision: Int, catalogue: MobileDashboardCatalogue)?
     private var catalogueRefreshInFlightGeneration: Int?
     private var refreshGeneration = 0
     /// How many attempts of the walk in progress have failed. One counter rather than one per
@@ -844,7 +845,15 @@ final class RemoteAppModel: ObservableObject {
 
     /// Live rows when available, otherwise the last bounded list for this exact membership.
     var dashboardCatalogue: MobileDashboardCatalogue? {
-        if let me { return MobileDashboardCatalogue.current(live: me, cached: nil) }
+        if let me {
+            if let prepared = liveDashboardProjection, prepared.revision == catalogueRevision {
+                return prepared.catalogue
+            }
+            let prepared = MobileDashboardCatalogue.current(live: me, cached: nil)
+            liveDashboardProjection = prepared.map { (catalogueRevision, $0) }
+            return prepared
+        }
+        liveDashboardProjection = nil
         guard let activeHostID,
               let cached = cachedDashboardCatalogues[activeHostID],
               cached.isUsable() else { return nil }
@@ -2129,6 +2138,23 @@ final class RemoteAppModel: ObservableObject {
     ) {
         guard !isDemo else { return }
         newSessionDefaults.remember(choice, for: identity)
+    }
+
+    var canManageProjectVisibility: Bool {
+        canManageSessions && me?.features?.contains(RemoteRESTFeature.projectVisibility.rawValue) == true
+    }
+
+    func setProjectHidden(_ hidden: Bool, projectID: String) async throws {
+        guard canManageProjectVisibility, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setProjectHidden(projectID: projectID, isHidden: hidden, requestID: requestID)
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
     }
 
     func renameSession(_ session: RemoteSessionSummaryDTO, to title: String) async throws {
@@ -5201,7 +5227,9 @@ final class RemoteAppModel: ObservableObject {
                         id: "project-another-terminal",
                         name: "AnotherTerminal",
                         branch: "main",
-                        checkoutLabel: "AnotherTerminal"
+                        checkoutLabel: "AnotherTerminal",
+                        isHidden: ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
+                            == "session-dashboard-show-project-custom-dark"
                     ),
                     .init(
                         id: "project-strom",
@@ -5357,6 +5385,7 @@ final class RemoteAppModel: ObservableObject {
                 supportsManagerRole: true
             ),
             features: [
+                RemoteRESTFeature.projectVisibility.rawValue,
                 RemoteRESTFeature.usageDashboard.rawValue,
                 RemoteRESTFeature.sessionContinuation.rawValue,
             ]

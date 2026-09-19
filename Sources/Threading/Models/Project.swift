@@ -109,7 +109,7 @@ struct Project: Codable, Identifiable {
   /// with an answer of its own overrides it either way. See `AttentionAlertScope`.
   var notificationsMuted: Bool?
 
-  /// Hidden from the native sidebar until Show Hidden Projects is enabled.
+  /// Hidden from native project navigation on Mac and iPhone until Show Hidden Projects is enabled.
   var isHidden: Bool = false
 
   /// Sounds this checkout overrides, in the same stored shape `AgentSession` carries — and for

@@ -1387,7 +1387,9 @@ hover help and a registered, rebindable command. Settings yields title width at 
 Project Hide/Show changes `Project.isHidden`, persisted in its existing JSON row. Hidden projects
 are filtered before the native sidebar builds nodes; Show Hidden Projects includes them again.
 Hiding preserves sessions, processes, notifications and project ownership. It applies
-to native sidebar navigation, not to agent project access or replacement extension navigators.
+to native sidebar and iPhone dashboard navigation, not to agent project access or replacement
+extension navigators. The phone uses the same durable flag through the owner-only remote route;
+each device keeps its own Show Hidden Projects display preference.
 The General setting “Unhide projects when writing in their chats” defaults off. Human native
 composer edits, accepted remote prompts and terminal input consult it through an indexed store
 lookup; provider output, loading a draft and merely visiting a chat do not unhide it. Only the

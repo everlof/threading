@@ -1119,6 +1119,18 @@ struct RemoteClient {
         try await postResponse(creation, to: link.createSessionURL, requestID: requestID)
     }
 
+    func setProjectHidden(
+        projectID: String,
+        isHidden: Bool,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteSetProjectHiddenRequestDTO(projectID: projectID, isHidden: isHidden),
+            to: link.projectVisibilityURL,
+            requestID: requestID
+        )
+    }
+
     func renameSession(
         sessionID: String,
         title: String,

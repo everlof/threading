@@ -1632,6 +1632,38 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+    func testProjectVisibilityIsOwnerOnlyAndKeepsChatsInTheCatalogue() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: folder))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .claude))
+        authority.set(RemoteAuthorization(shareID: "guest", capability: .interact,
+            scope: .session(session.id)), forToken: "visibility-guest")
+        authority.set(RemoteAuthorization(shareID: "viewer", capability: .view,
+            scope: .allSessions), forToken: "visibility-viewer")
+        let hidden = try JSONEncoder().encode(RemoteSetProjectHiddenRequestDTO(
+            projectID: project.id.uuidString, isHidden: true))
+        for token in ["visibility-guest", "visibility-viewer"] {
+            XCTAssertEqual(try XCTUnwrap(post("/api/project/visibility", bearer: token, body: hidden)).status, 403)
+        }
+        XCTAssertFalse(try XCTUnwrap(ProjectStore.shared.project(withID: project.id)).isHidden)
+        for value in [true, true, false] {
+            let body = try JSONEncoder().encode(RemoteSetProjectHiddenRequestDTO(
+                projectID: project.id.uuidString, isHidden: value))
+            let response = try XCTUnwrap(post("/api/project/visibility", bearer: "goodtoken", body: body))
+            XCTAssertEqual(response.status, 200)
+            let catalogue = try JSONDecoder().decode(RemoteMeDTO.self, from: response.body)
+            XCTAssertEqual(catalogue.newSessionCatalog?.projects.first { $0.id == project.id.uuidString }?.isHidden, value)
+            XCTAssertTrue(catalogue.sessions.contains { $0.id == session.id.uuidString })
+            XCTAssertEqual(ProjectStore.shared.project(withID: project.id)?.isHidden, value)
+        }
+        let missing = try JSONEncoder().encode(RemoteSetProjectHiddenRequestDTO(
+            projectID: UUID().uuidString, isHidden: true))
+        XCTAssertEqual(try XCTUnwrap(post("/api/project/visibility", bearer: "goodtoken", body: missing)).status, 404)
+        XCTAssertEqual(try XCTUnwrap(post("/api/project/visibility", bearer: "goodtoken", body: Data("{}".utf8))).status, 400)
+    }
+
     func testSessionRefreshesRouteThroughInjectedApplicationCommands() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-refresh-\(UUID().uuidString)",
@@ -4934,6 +4966,10 @@ private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
     private let appSettings: AppSettings
     private(set) var appThemeIDs: [AppThemeID] = []
     private(set) var appSettingMutations: [AppSettingMutation] = []
+    func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
+        store.setProjectHidden(hidden, projectID: projectID)
+    }
+
     var appliesAppThemesToHost = false
 
     init(appSettings: AppSettings) {

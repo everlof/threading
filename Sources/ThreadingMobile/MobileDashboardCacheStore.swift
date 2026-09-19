@@ -87,6 +87,8 @@ struct MobileDashboardCacheSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// Optional for caches written before project visibility was mirrored.
+    var hiddenProjectIDs: Set<String>? = nil
     let capturedAt: Double
     let shareExpiresAt: Double?
     let sessions: [Session]
@@ -100,12 +102,15 @@ struct MobileDashboardCacheSnapshot: Codable, Equatable, Sendable {
         let active = response.sessions
         let archived = response.archivedSessions ?? []
         let terminals = response.terminals ?? []
-        guard active.count <= MobileDashboardCacheStore.maximumSessionsPerList,
+        let hidden = Set(response.newSessionCatalog?.projects.filter { $0.isHidden == true }.map(\.id) ?? [])
+        guard hidden.count <= MobileDashboardCacheStore.maximumRows,
+              active.count <= MobileDashboardCacheStore.maximumSessionsPerList,
               archived.count <= MobileDashboardCacheStore.maximumSessionsPerList,
               terminals.count <= MobileDashboardCacheStore.maximumTerminals,
               active.count + archived.count + terminals.count
                   <= MobileDashboardCacheStore.maximumRows else { return nil }
         return Self(
+            hiddenProjectIDs: hidden,
             capturedAt: capturedAt.timeIntervalSince1970,
             shareExpiresAt: response.share.expiresAt,
             sessions: active.map(Session.init),
@@ -127,6 +132,9 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
         case cached(capturedAt: Date)
     }
 
+    let hiddenProjectIDs: Set<String>
+    private let projectsByID: [String: RemoteProjectChoiceDTO]
+    private let uniqueProjectsByName: [String: RemoteProjectChoiceDTO]
     let source: Source
     let sessions: [RemoteSessionSummaryDTO]
     let terminals: [RemoteProjectTerminalSummaryDTO]
@@ -150,7 +158,12 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
         now: Date = Date()
     ) -> Self? {
         if let live {
+            let projects = live.newSessionCatalog?.projects ?? []
             return Self(
+                hiddenProjectIDs: Set(live.newSessionCatalog?.projects.filter { $0.isHidden == true }.map(\.id) ?? []),
+                projectsByID: projects.reduce(into: [:]) { $0[$1.id] = $1 },
+                uniqueProjectsByName: Dictionary(grouping: projects, by: \.name)
+                    .compactMapValues { $0.count == 1 ? $0.first : nil },
                 source: .live,
                 sessions: live.sessions,
                 terminals: live.terminals ?? [],
@@ -160,12 +173,31 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
         }
         guard let cached, cached.isUsable(at: now) else { return nil }
         return Self(
+            hiddenProjectIDs: cached.hiddenProjectIDs ?? [],
+            projectsByID: [:],
+            uniqueProjectsByName: [:],
             source: .cached(capturedAt: Date(timeIntervalSince1970: cached.capturedAt)),
             sessions: cached.sessions.map(\.presentation),
             terminals: cached.terminals.map(\.presentation),
             archivedSessions: cached.archivedSessions.map(\.presentation),
             shareExpiresAt: cached.shareExpiresAt.map(Date.init(timeIntervalSince1970:))
         )
+    }
+
+    func project(id: String?, name: String) -> RemoteProjectChoiceDTO? {
+        if let id { return projectsByID[id] }
+        return uniqueProjectsByName[name]
+    }
+
+    func visibleSessions(archived: Bool, showHiddenProjects: Bool) -> [RemoteSessionSummaryDTO] {
+        let rows = archived ? archivedSessions : sessions
+        guard !showHiddenProjects, !hiddenProjectIDs.isEmpty else { return rows }
+        return rows.filter { !hiddenProjectIDs.contains($0.projectID ?? "") }
+    }
+
+    func visibleTerminals(showHiddenProjects: Bool) -> [RemoteProjectTerminalSummaryDTO] {
+        guard !showHiddenProjects, !hiddenProjectIDs.isEmpty else { return terminals }
+        return terminals.filter { !hiddenProjectIDs.contains($0.projectID ?? "") }
     }
 
     func session(id: String) -> RemoteSessionSummaryDTO? {
@@ -413,7 +445,8 @@ actor MobileDashboardCacheStore {
         for record in archive.records {
             try count(record.identity, required: true, limit: maximumIdentifierBytes)
             let snapshot = record.snapshot
-            guard snapshot.sessions.count <= maximumSessionsPerList,
+            guard (snapshot.hiddenProjectIDs?.count ?? 0) <= maximumRows,
+                  snapshot.sessions.count <= maximumSessionsPerList,
                   snapshot.archivedSessions.count <= maximumSessionsPerList,
                   snapshot.terminals.count <= maximumTerminals,
                   snapshot.sessions.count + snapshot.archivedSessions.count
@@ -426,6 +459,9 @@ actor MobileDashboardCacheStore {
             guard Set(sessionIDs).count == sessionIDs.count,
                   Set(snapshot.terminals.map(\.id)).count == snapshot.terminals.count else {
                 throw ValidationError.invalidArchive
+            }
+            for id in snapshot.hiddenProjectIDs ?? [] {
+                try count(id, required: true, limit: maximumIdentifierBytes)
             }
             for session in snapshot.sessions + snapshot.archivedSessions {
                 try count(session.id, required: true, limit: maximumIdentifierBytes)

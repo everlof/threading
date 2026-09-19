@@ -829,6 +829,7 @@ final class RemoteSessionMirrorRegistry {
             features.append(RemoteRESTFeature.sessionContinuation.rawValue)
         }
         return features.isEmpty ? nil : features
+            features.append(RemoteRESTFeature.projectVisibility.rawValue)
     }
 
     private func summary(
@@ -923,7 +924,8 @@ final class RemoteSessionMirrorRegistry {
                 name: project.name,
                 branch: GitInfo.currentBranch(for: project.folderPath),
                 checkoutLabel: project.folderURL.lastPathComponent,
-                reportLaunch: reportLaunch(for: project)
+                reportLaunch: reportLaunch(for: project),
+                isHidden: project.isHidden
             )
         }
 

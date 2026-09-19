@@ -141,6 +141,7 @@ struct RemoteRouter {
     static let mobileDiagnosticsCaptureUploadPath = RemoteRoute.localDiagnosticsCapture.absolutePath
     static let invitationAcceptancePath = RemoteRoute.invitationAcceptance.absolutePath
     static let hostedDeviceCredentialPath = RemoteRoute.hostedDeviceCredential.absolutePath
+    static let projectVisibilityPath = RemoteRoute.projectVisibility.absolutePath
     static let appThemePath = RemoteRoute.theme.absolutePath
     private static let appSettingPrefix = RemoteRoute.settings.prefix
     static let themeEventsPath = RemoteSocketRoute.events.absolutePath

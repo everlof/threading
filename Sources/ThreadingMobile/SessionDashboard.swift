@@ -3097,9 +3097,10 @@ struct SessionDashboard: View {
     }
 
     private var sessions: [RemoteSessionSummaryDTO] {
-        let all = showsArchived
-            ? model.dashboardCatalogue?.archivedSessions ?? []
-            : model.dashboardCatalogue?.sessions ?? []
+        let all = model.dashboardCatalogue?.visibleSessions(
+            archived: showsArchived,
+            showHiddenProjects: showsHiddenProjects || projectName != nil || projectID != nil
+        ) ?? []
         let scoped = showsArchived ? all : all.filter {
             showsSnoozed ? $0.isSnoozed() : !$0.isSnoozed()
         }
@@ -3112,6 +3113,8 @@ struct SessionDashboard: View {
         } else if let projectName {
             projectScoped = scoped.filter { $0.projectName == projectName }
         } else {
+    @AppStorage("sessionDashboardShowHiddenProjects") private var showsHiddenProjects = false
+    @State private var pendingVisibilityProjectIDs = Set<String>()
             projectScoped = scoped
         }
         let visible = projectScoped.filter {
@@ -3123,7 +3126,9 @@ struct SessionDashboard: View {
 
     private var terminals: [RemoteProjectTerminalSummaryDTO] {
         guard !showsArchived, !showsSnoozed else { return [] }
-        let all = model.dashboardCatalogue?.terminals ?? []
+        let all = model.dashboardCatalogue?.visibleTerminals(
+            showHiddenProjects: showsHiddenProjects || projectName != nil || projectID != nil
+        ) ?? []
         let scoped: [RemoteProjectTerminalSummaryDTO]
         if let projectID {
             scoped = all.filter {
@@ -3150,6 +3155,9 @@ struct SessionDashboard: View {
                 let projectSessions = sessionsByProject[key] ?? []
                 let projectTerminals = terminalsByProject[key] ?? []
                 let name = projectSessions.first?.projectName ?? projectTerminals.first?.projectName ?? ""
+            _showsHiddenProjects = AppStorage(
+                wrappedValue: capture == "session-dashboard-show-project-custom-dark",
+                "sessionDashboardShowHiddenProjects", store: defaults)
                 return DashboardProjectSection(
                     id: key,
                     projectName: name,
@@ -3465,6 +3473,9 @@ struct SessionDashboard: View {
             radius: theme.panelRadius
         ))
     }
+            let id = section?.sessions.first?.projectID ?? section?.terminals.first?.projectID
+            let catalogue = model.dashboardCatalogue
+            let project = catalogue?.project(id: id, name: name)
 
     private func dashboardUIKitRowConfiguration(
         _ row: DashboardCollectionRow
@@ -3476,6 +3487,13 @@ struct SessionDashboard: View {
                 theme: theme,
                 isArchived: false,
                 isCatalogueLive: model.dashboardCatalogue?.isLive == true,
+                isHidden: id.map { catalogue?.hiddenProjectIDs.contains($0) == true }
+                    ?? (project?.isHidden == true),
+                toggleHidden: project.flatMap { project in
+                    guard model.canManageProjectVisibility,
+                          !pendingVisibilityProjectIDs.contains(project.id) else { return nil }
+                    return { toggleProjectVisibility(project) }
+                },
                 showsProjectName: projectName == nil,
                 activate: {
                     guard model.navigationPath.last != .terminal(terminal.id) else { return }
@@ -3940,7 +3958,8 @@ struct SessionDashboard: View {
 
     private var dashboardMenuDestinations: [MobileDashboardMenuDestination] {
         MobileDashboardMenuDestination.available(
-            canManageSessions: model.canManageSessions,
+            canManageSessions: model.canManageSessions
+                || model.dashboardCatalogue?.hiddenProjectIDs.isEmpty == false,
             canManageThemes: model.canManageThemes,
             canReadUsage: model.canReadUsage
         )
@@ -4033,6 +4052,18 @@ struct SessionDashboard: View {
         case .macs:
             Menu {
                 Button {
+    private func toggleProjectVisibility(_ project: RemoteProjectChoiceDTO) {
+        guard pendingVisibilityProjectIDs.insert(project.id).inserted else { return }
+        Task { @MainActor in
+            defer { pendingVisibilityProjectIDs.remove(project.id) }
+            do {
+                try await model.setProjectHidden(project.isHidden != true, projectID: project.id)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
                     model.isPairing = true
                 } label: {
                     Label("Pair another Mac", systemImage: "qrcode.viewfinder")
@@ -4078,6 +4109,8 @@ struct SessionDashboard: View {
             guard surface != session.surface else { return }
             surfaceChangeRequest = .init(session: session, surface: surface)
         case .share:
+                Toggle("Show Hidden Projects", isOn: $showsHiddenProjects)
+                    .accessibilityIdentifier("dashboard.showHiddenProjects")
             shareRequest = .init(session: session)
         case .stopSharing:
             mutate(session) { try await model.revokeShares(for: session) }
@@ -4587,7 +4620,7 @@ private struct DashboardProjectHeader: View {
                 MobileNavigationRoute.searchProject(id: $0, name: projectName)
             } ?? .project(projectName)) {
                 HStack(spacing: MobileDesign.Spacing.tight) {
-                    Label(title, systemImage: "folder")
+                    Label(title, systemImage: isHidden ? "eye.slash" : "folder")
                         .font(.headline)
                         .foregroundStyle(theme.label)
                         .lineLimit(1)
@@ -4654,6 +4687,8 @@ enum MobileSessionNavigationTransition {
 
 /// A session row as the long press lifts it.
 ///
+    var isHidden = false
+    var toggleHidden: (() -> Void)? = nil
 /// A row on the shared plate paints no plate of its own, and the system's default preview would
 /// stand a transparent row on `systemBackground` — a white or black platter under an authored
 /// theme, the slab this app keeps off its screens. So the preview restates the plate the row
@@ -4696,6 +4731,23 @@ struct MobileLiftedSessionRow: View {
 
     var body: some View {
         let shape = Self.shape(for: theme)
+            if let toggleHidden {
+                Menu {
+                    Button(action: toggleHidden) {
+                        Label(
+                            MobileL10n.string(isHidden ? "Show Project" : "Hide Project"),
+                            systemImage: isHidden ? "eye" : "eye.slash"
+                        )
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(width: MobileDesign.Size.minimumTapTarget,
+                               height: MobileDesign.Size.minimumTapTarget)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(MobileL10n.string("Project options for %@", title))
+            }
         SessionRow(session: session, isCatalogueLive: isCatalogueLive)
             .frame(width: width)
             .background(theme.panel, in: shape)

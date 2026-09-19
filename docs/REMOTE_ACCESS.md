@@ -444,8 +444,8 @@ main queue, and served gzip-compressed to any client whose `Accept-Encoding` all
 `URLSession` and every browser do by default. See the mobile dashboard scaling contract in
 [`performance.md`](architecture/performance.md).
 
-The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
-including dormant sessions. The remote row's `lastActiveAt` projects `AgentSession.lastUsedAt`:
+The iOS app shows unarchived sessions from visible projects, grouped by project or ordered by
+recent activity, including dormant sessions. The remote row's `lastActiveAt` projects `AgentSession.lastUsedAt`:
 the latest observed work boundary or accepted steering input, falling back to turn start and then
 process activity for legacy records. Ordering and row age share this value, so a long-running turn
 moves up when it finishes and an idle process relaunch does not promote an old conversation.
@@ -481,6 +481,28 @@ animate snapshot differences, honoring Reduce Motion. Expand keeps the visible a
 returns to the project header, clamped to the valid scroll extent. The light button haptic runs
 at activation, never from catalogue publication or animation. Presentation stays in the existing
 mobile theme boundary and these navigation semantics remain host-owned.
+
+Project Hide/Show uses the Mac's durable `Project.isHidden` flag, published as an optional
+`RemoteProjectChoiceDTO.isHidden` (absent means visible). The owner-only
+`POST /api/project/visibility` accepts a project ID and desired hidden state, returns the canonical
+catalogue and preserves persistence refusals. `project-visibility` advertises the mutation so older
+hosts receive no unsupported requests. Project structure events invalidate the catalogue on every
+paired device. Guests cannot mutate visibility and their chat access remains unchanged.
+
+The iPhone project heading menu offers Hide/Show, and **… → Sessions → Show Hidden Projects**
+controls a device-local preference. Root dashboard filtering covers chats, terminals, archived and
+snoozed rows across every organization before collection items are constructed. Explicit project
+navigation and search remain available. Hidden IDs survive the bounded offline dashboard cache;
+legacy wire and cache records default to visible. This extends the existing host-only dashboard:
+identity, persistence, authorization and navigation remain host-owned.
+
+Scaling: ordinary 1,000-session and stress 5,000-session catalogues retain the existing virtual
+collection viewport. Hidden project IDs are value sets prepared with the catalogue; filtering adds
+constant-time membership per candidate row, before view creation, with no filesystem work, timers
+or per-row remote calls. Visibility changes arrive only on explicit mutation or the existing
+project structure invalidation. `MobileDashboardCacheStoreTests` covers the 5,000-chat filter,
+identity collisions, exact restoration order, offline state and legacy decoding;
+`MobileProjectChatPreviewTests` keeps the shipping collection’s viewport and disclosure bounds.
 
 This mobile browser is deliberately host-owned. Threading retains project/session navigation,
 launch scoping, connection truth, row actions and the native fallback; the macOS extension

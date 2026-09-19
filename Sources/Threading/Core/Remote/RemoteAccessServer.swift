@@ -607,6 +607,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "POST", path == RemoteRouter.projectVisibilityPath {
+            handleProjectVisibility(request, respond: respond)
+            return
+        }
+
         if request.method == "POST", path == RemoteRouter.appThemePath {
             handleAppTheme(request, respond: respond)
             return
@@ -2223,6 +2228,35 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             self.respondWithCatalogue(for: authorization, request: request, respond: respond)
+        }
+    }
+
+    private func handleProjectVisibility(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteSetProjectHiddenRequestDTO.self, from: request.body
+        ), let projectID = ProjectID(uuidString: choice.projectID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        DispatchQueue.main.async {
+            switch self.services.sessionMutations.setProjectHidden(choice.isHidden, projectID: projectID) {
+            case .applied, .unchanged:
+                self.respondWithCatalogue(for: authorization, request: request, respond: respond)
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case .persistenceRefused:
+                respond(.respond(self.persistenceRefusalResponse()))
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Value", code: .unsupportedValue)))
+            }
         }
     }
 

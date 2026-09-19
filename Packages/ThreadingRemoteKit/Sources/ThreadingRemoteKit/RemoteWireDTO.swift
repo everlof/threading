@@ -733,19 +733,23 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
     /// shake report sent to the Mac. Absent from an older host, and from a client that has no
     /// business starting one.
     public let reportLaunch: RemoteReportLaunchDTO?
+    /// Absent on older hosts; visibility is presentation state, never access control.
+    public let isHidden: Bool?
 
     public init(
         id: String,
         name: String,
         branch: String?,
         checkoutLabel: String,
-        reportLaunch: RemoteReportLaunchDTO? = nil
+        reportLaunch: RemoteReportLaunchDTO? = nil,
+        isHidden: Bool? = nil
     ) {
         self.id = id
         self.name = name
         self.branch = branch
         self.checkoutLabel = checkoutLabel
         self.reportLaunch = reportLaunch
+        self.isHidden = isHidden
     }
 }
 
@@ -1316,6 +1320,7 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
 /// Optional REST surfaces advertised by `GET /api/me`. Raw strings keep discovery additive:
 /// older clients ignore the field and newer clients can ignore feature names they do not know.
 public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
+    case projectVisibility = "project-visibility"
     case usageCapacity = "usage-capacity"
     /// Owner-device search across the Mac's bounded structured and indexed providers. Results
     /// carry short-lived opaque resolution tokens rather than host-side locator identities.
@@ -1995,6 +2000,16 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         self.newSessionCatalog = newSessionCatalog
         self.features = features
         self.revision = revision
+    }
+}
+
+public struct RemoteSetProjectHiddenRequestDTO: Codable, Equatable, Sendable {
+    public let projectID: String
+    public let isHidden: Bool
+
+    public init(projectID: String, isHidden: Bool) {
+        self.projectID = projectID
+        self.isHidden = isHidden
     }
 }
 

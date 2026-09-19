@@ -20,6 +20,62 @@ final class MobileDashboardCacheStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    func testVisibilityFiltersEveryDashboardRowKindByIdentityAndRestoresExactOrder() throws {
+        let base = response()
+        let sessions = (0..<5_000).map { index in
+            RemoteSessionSummaryDTO(id: String(index), title: "Chat", agentKind: "claude",
+                surface: .conversation, state: .idle, projectName: "Same name",
+                projectID: index.isMultiple(of: 2) ? "hidden" : "visible")
+        }
+        let terminals: [RemoteProjectTerminalSummaryDTO] = [
+            .init(id: "t-hidden", title: "Shell", projectName: "Same name", projectID: "hidden", state: .idle, isAvailable: true),
+            .init(id: "t-visible", title: "Shell", projectName: "Same name", projectID: "visible", state: .idle, isAvailable: true),
+        ]
+        let payload = RemoteMeDTO(serverProtocol: base.serverProtocol, share: base.share,
+            sessions: sessions, terminals: terminals, archivedSessions: Array(sessions.prefix(10)),
+            newSessionCatalog: .init(projects: [
+                .init(id: "hidden", name: "Same name", branch: nil, checkoutLabel: "a", isHidden: true),
+                .init(id: "visible", name: "Same name", branch: nil, checkoutLabel: "b", isHidden: false),
+            ], agents: []))
+        let catalogue = try XCTUnwrap(MobileDashboardCatalogue.current(live: payload, cached: nil))
+        XCTAssertNil(catalogue.project(id: nil, name: "Same name"))
+        XCTAssertEqual(catalogue.project(id: "hidden", name: "Same name")?.isHidden, true)
+        XCTAssertEqual(catalogue.visibleSessions(archived: false, showHiddenProjects: false).map(\.id),
+            stride(from: 1, to: 5_000, by: 2).map(String.init))
+        XCTAssertEqual(catalogue.visibleSessions(archived: true, showHiddenProjects: false).map(\.id),
+            ["1", "3", "5", "7", "9"])
+        XCTAssertEqual(catalogue.visibleSessions(archived: false, showHiddenProjects: true), sessions)
+        XCTAssertEqual(catalogue.visibleTerminals(showHiddenProjects: false).map(\.id), ["t-visible"])
+        XCTAssertEqual(catalogue.visibleTerminals(showHiddenProjects: true), terminals)
+        XCTAssertEqual(catalogue.session(id: "0")?.id, "0", "Direct navigation still reaches hidden chats")
+    }
+
+    func testProjectVisibilitySurvivesOfflineCacheAndLegacyPayloads() async throws {
+        let base = response()
+        let catalogue = RemoteMeDTO(serverProtocol: base.serverProtocol, share: base.share,
+            sessions: base.sessions, terminals: base.terminals,
+            newSessionCatalog: .init(projects: [
+                .init(id: "hidden", name: "Same name", branch: nil, checkoutLabel: "a", isHidden: true),
+                .init(id: "visible", name: "Same name", branch: nil, checkoutLabel: "b", isHidden: false),
+                .init(id: "legacy", name: "Old host", branch: nil, checkoutLabel: "c"),
+            ], agents: []))
+        let snapshot = try XCTUnwrap(MobileDashboardCacheSnapshot.make(from: catalogue))
+        let store = MobileDashboardCacheStore(suiteName: suiteName)
+        let saved = await store.remember(snapshot, for: "pairing")
+        XCTAssertTrue(saved)
+        let reloaded = await MobileDashboardCacheStore(suiteName: suiteName).loadCatalogues()
+        XCTAssertEqual(reloaded["pairing"]?.hiddenProjectIDs, ["hidden"])
+        XCTAssertEqual(MobileDashboardCatalogue.current(live: catalogue, cached: nil)?.hiddenProjectIDs, ["hidden"])
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        json.removeValue(forKey: "hiddenProjectIDs")
+        let legacy = try JSONDecoder().decode(MobileDashboardCacheSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(MobileDashboardCatalogue.current(live: nil, cached: legacy)?.hiddenProjectIDs, [])
+        let oldProject = try JSONDecoder().decode(RemoteProjectChoiceDTO.self,
+            from: Data(#"{"id":"old","name":"Old","checkoutLabel":"Old"}"#.utf8))
+        XCTAssertNil(oldProject.isHidden)
+    }
+
     func testSnapshotReloadsForTheExactPairingOnly() async throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let snapshot = try XCTUnwrap(MobileDashboardCacheSnapshot.make(

@@ -317,6 +317,8 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         sessionActionURL(sessionID: sessionID, action: .theme)
     }
 
+    public var projectVisibilityURL: URL { routeURL(.projectVisibility) }
+
     public func renameSessionURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: .rename)
     }

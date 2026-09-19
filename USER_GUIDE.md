@@ -5811,3 +5811,7 @@ restore a hidden project when you type in one of its chats (off by default).
 
 The sidebar footer keeps **Settings** on the left and the icon-only **Triggers**, mute and
 hidden-project controls on the right.
+On iPhone, use the **…** beside a project heading for **Hide Project** or **Show Project**.
+Under the dashboard’s **… → Sessions**, toggle **Show Hidden Projects** to include them again.
+Project visibility is shared with the Mac; the Show Hidden Projects display toggle is local to
+each device. Direct chat links and search remain available while a project is hidden.
