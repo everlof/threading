@@ -2055,6 +2055,69 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+    /// A fresh socket to a chat whose agent is not running is told so in words before the close.
+    /// It used to get the 4004 close alone, which the phone read as a network drop and redialled
+    /// every eight seconds: 474 attempts at one exited chat on 2026-09-19.
+    func testAFreshSocketToAStoppedChatIsToldItIsDormantBeforeTheClose() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-dormant-socket-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            usesNativeUI: false,
+            title: "Stopped chat"
+        ))
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: URL(string: "http://127.0.0.1:\(port!)")!,
+            token: "goodtoken"
+        ))
+        let socketURL = try XCTUnwrap(link.webSocketURL(sessionID: session.id.uuidString))
+
+        let task = URLSession.shared.webSocketTask(with: socketURL)
+        task.resume()
+        let auth = RemoteClientMessage(
+            type: "auth",
+            token: "goodtoken",
+            device: "test-device",
+            protocolVersion: RemoteProtocol.current,
+            protocolMinimum: RemoteProtocol.minimumSupported
+        )
+        let authText = String(decoding: try JSONEncoder().encode(auth), as: UTF8.self)
+        task.send(.string(authText)) { _ in }
+
+        // The expectation orders the last append before the read.
+        final class Frames: @unchecked Sendable { var texts: [String] = [] }
+        let received = Frames()
+        let closed = expectation(description: "the host closes the socket")
+        @Sendable func receive() {
+            task.receive { result in
+                switch result {
+                case .success(.string(let text)):
+                    received.texts.append(text)
+                    receive()
+                case .success:
+                    receive()
+                case .failure:
+                    closed.fulfill()
+                }
+            }
+        }
+        receive()
+        wait(for: [closed], timeout: 5)
+        let frames = received.texts
+
+        XCTAssertEqual(task.closeCode.rawValue, 4004)
+        let ended = try XCTUnwrap(frames.compactMap {
+            try? JSONDecoder().decode(RemoteEndedDTO.self, from: Data($0.utf8))
+        }.first { $0.type == "ended" }, "the refusal must say why before it closes")
+        XCTAssertEqual(ended.reason, "sessionDormant")
+    }
+
     func testStorageBlockedResumeReturnsItsCauseAndLeavesCatalogueReachable() throws {
         let project = try XCTUnwrap(ProjectStore.shared.addProject(
             folderURL: FileManager.default.temporaryDirectory

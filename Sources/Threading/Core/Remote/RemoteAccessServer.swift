@@ -3806,12 +3806,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     )
                 }
             )
-            switch attach {
-            case .attached, .waitingForStartup:
-                break
-            case .dormant, .unavailable:
-                connection.sendClose(code: 4004, reason: "Session not available")
-            }
+            guard let refusal = attach.refusal else { return }
+            connection.sendText(self.encode(RemoteEndedDTO(reason: refusal.reason)))
+            connection.sendClose(code: 4004, reason: refusal.close)
         }
     }
 
@@ -4246,7 +4243,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 // retired it. Rejoining is not a new client arriving.
                 didAttach: {}
             )
-            guard let refusal = attach.parkedResumeRefusal else { return }
+            guard let refusal = attach.refusal else { return }
             connection.sendText(self.encode(RemoteEndedDTO(reason: refusal.reason)))
             connection.sendClose(code: 4004, reason: refusal.close)
         }

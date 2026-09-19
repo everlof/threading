@@ -1305,6 +1305,14 @@ than "Session closed on Mac". A shake report on 12 Sep 2026 is why: the phone cl
 closed on the Mac, and the same chat opened normally eight seconds later. The host had answered a
 warm resume through a bare attach, which fails identically for both, and had one word for both.
 
+A fresh socket gets the same words. Until 2026-09-19 only a warm resume was told `sessionDormant`
+or `sessionClosed`; a new socket to a chat whose agent had exited got the 4004 close alone, which
+the phone read as a lost network and redialled every eight seconds for as long as that chat's
+screen lived — 474 attempts at one exited Claude, each also costing a catalogue refresh that chat
+openings then queued behind. Every refused attach now sends `ended` with its reason before 4004
+(`RemoteServerIntegrationTests.testAFreshSocketToAStoppedChatIsToldItIsDormantBeforeTheClose`),
+and the phone treats a bare 4004 from an older Mac as terminal too rather than as a drop.
+
 The same page exposes the evidence for changing those defaults: current and peak occupancy,
 reuse hits and misses, hit rate, actual hold timing, holds that ended without reuse, each expiry or
 eviction reason, unsupported hosts, and fixed reuse/unused age buckets. These aggregates persist

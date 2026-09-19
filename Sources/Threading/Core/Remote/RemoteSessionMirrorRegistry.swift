@@ -380,7 +380,12 @@ final class RemoteSessionMirrorRegistry {
     /// the phone says so in those words. A chat whose agent has merely stopped keeps its row, its
     /// transcript and its resume route, so saying it closed on the Mac is false, and provably so:
     /// the next tap on the same row opens it.
-    struct ParkedResumeRefusal: Equatable {
+    ///
+    /// Every socket the host cannot attach is told which one it is, a fresh socket as much as a
+    /// parked one rejoining. A fresh socket was once given only the close code, which the phone
+    /// read as a network drop and retried every eight seconds; on 2026-09-19 one exited chat had
+    /// been redialled 474 times, each attempt also costing a catalogue refresh.
+    struct AttachRefusal: Equatable {
         /// The `ended` reason carried to the client.
         let reason: String
         /// The WebSocket close reason, which is for a log rather than for a person.
@@ -4120,9 +4125,9 @@ extension RemoteSessionContinuation {
 }
 
 extension RemoteSessionMirrorRegistry.InitialSessionAttach {
-    /// What to tell a parked socket that asked to rejoin, or `nil` while it is still in play —
+    /// What to tell a socket the host could not attach, or `nil` while it is still in play —
     /// attached now, or held for a host-owned startup transaction that will attach it.
-    var parkedResumeRefusal: RemoteSessionMirrorRegistry.ParkedResumeRefusal? {
+    var refusal: RemoteSessionMirrorRegistry.AttachRefusal? {
         switch self {
         case .attached, .waitingForStartup:
             return nil

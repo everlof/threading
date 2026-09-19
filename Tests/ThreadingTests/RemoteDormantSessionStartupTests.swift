@@ -106,7 +106,7 @@ final class RemoteDormantSessionStartupTests: HostedStoreTestCase {
             didAttach: { XCTFail("a dormant chat has no live surface to attach to") }
         )
         XCTAssertEqual(asleep, .dormant)
-        XCTAssertEqual(asleep.parkedResumeRefusal?.reason, "sessionDormant")
+        XCTAssertEqual(asleep.refusal?.reason, "sessionDormant")
 
         ProjectStore.shared.setArchived(true, for: fixture.sessionID)
         let gone = registry.attachOrWaitForStartup(
@@ -117,7 +117,7 @@ final class RemoteDormantSessionStartupTests: HostedStoreTestCase {
             didAttach: { XCTFail("an archived chat has no live surface to attach to") }
         )
         XCTAssertEqual(gone, .unavailable)
-        XCTAssertEqual(gone.parkedResumeRefusal?.reason, "sessionClosed")
+        XCTAssertEqual(gone.refusal?.reason, "sessionClosed")
     }
 
     /// The other half of the same report: a warm transport must be a saved handshake, never a
@@ -141,7 +141,7 @@ final class RemoteDormantSessionStartupTests: HostedStoreTestCase {
         )
         XCTAssertEqual(waiting, .waitingForStartup)
         XCTAssertNil(
-            waiting.parkedResumeRefusal,
+            waiting.refusal,
             "a socket the host is holding has not been refused and must be told nothing"
         )
 

@@ -149,6 +149,9 @@ enum RemoteMobileConnectionDefaults {
     /// How long a return from the background waits for the socket to answer a ping before
     /// treating it as dead and reconnecting.
     static let resumeLivenessDeadline: Duration = .seconds(1)
+    /// The WebSocket close code a Mac uses for a session it cannot attach: gone, dormant, not
+    /// started in time, or unknown. Terminal for this socket, never a reason to redial.
+    static let sessionUnavailableCloseCode = 4004
     /// Direct terminal input stays fire-and-forget. One write per interval carries an opaque
     /// diagnostic request id so a support capture can measure host admission without adding an
     /// acknowledgement or journal record for every keystroke.
@@ -1787,6 +1790,10 @@ final class RemoteSessionConnection: ObservableObject {
                 invalidatePooledConnection()
                 return
             }
+            if Self.hostRefusedSession(task) {
+                endRefusedByHost()
+                return
+            }
             lossPeerSentClose = Self.peerSentClose(on: task)
             fail(
                 with: RemoteConnectionFailure.transport(error, host: destinationHost),
@@ -1794,6 +1801,27 @@ final class RemoteSessionConnection: ObservableObject {
             )
             scheduleReconnect(generation: generation)
         }
+    }
+
+    /// Whether the Mac closed this socket saying the session cannot be reached (4004) rather
+    /// than the socket being lost. A current Mac sends `ended` first and this is never reached;
+    /// an older one sends the code alone, which was retried every eight seconds for as long as
+    /// the screen stayed open — 474 attempts at one exited chat on 2026-09-19.
+    private static func hostRefusedSession(_ task: URLSessionWebSocketTask) -> Bool {
+        task.closeCode.rawValue == RemoteMobileConnectionDefaults.sessionUnavailableCloseCode
+    }
+
+    private func endRefusedByHost() {
+        stopped = true
+        clearRunPlanState(resetFeature: true)
+        phase = .ended(MobileL10n.string("Session ended"))
+        MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+            phase: "session"
+        ).merging([
+            .result: "ended",
+            .reason: "hostRefused",
+            .code: "close.\(RemoteMobileConnectionDefaults.sessionUnavailableCloseCode)",
+        ]) { current, _ in current })
     }
 
     // MARK: - The demo's wire
