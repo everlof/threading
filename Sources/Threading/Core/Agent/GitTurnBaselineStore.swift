@@ -201,6 +201,15 @@ final class GitTurnBaselineStore {
         expectsActivityEdge: Bool = true,
         completion: @escaping @MainActor (GitTurnCheckpointID?) -> Void
     ) {
+        // A remote session's turn happens in a checkout on its host. The only checkout here is the
+        // Mac folder its project was created from, and snapshotting that would record whatever
+        // changed *on this Mac* during the turn — a person's own edits included — as the agent's
+        // work, with refs written into a repository the agent never touched. No checkpoint is
+        // the truth; Last Turn then says it has none.
+        if ProjectStore.shared.sessionRunsOnRemoteHost(sessionID) {
+            completion(nil)
+            return
+        }
         if lastRuntime[sessionID]?.activity == .awaitingUser {
             completion(activeCheckpointIDs[sessionID] ?? preparingCheckpointIDs[sessionID])
             return

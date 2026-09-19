@@ -51229,6 +51229,17 @@
         }
       }
     },
+    "This project runs on %@, so its checkout is there.\nGit Review can’t read a remote checkout yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här projektet körs på %@, så dess utcheckning finns där.\nGit-granskning kan inte läsa en fjärrutcheckning än."
+          }
+        }
+      }
+    },
     "This project’s baselines already use the %lld bytes they are allowed." : {
       "extractionState" : "manual",
       "localizations" : {

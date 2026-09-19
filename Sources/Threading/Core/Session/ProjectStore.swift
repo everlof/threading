@@ -1851,8 +1851,16 @@ final class ProjectStore {
         guard let location = locate(sessionID: sessionID) else { return }
 
         let folderPath = projects[location.projectIndex].folderPath
-        GitInfo.invalidateCache(for: folderPath)
-        let branch = GitInfo.currentBranch(for: folderPath)
+        // A remote project's branch is its host checkout's, which this Mac cannot read yet. The
+        // folder here would answer with its own branch — a confident, wrong label — so a remote
+        // session shows none rather than that one.
+        let branch: String?
+        if projects[location.projectIndex].executionHost != nil {
+            branch = nil
+        } else {
+            GitInfo.invalidateCache(for: folderPath)
+            branch = GitInfo.currentBranch(for: folderPath)
+        }
         guard projects[location.projectIndex].sessions[location.sessionIndex].branch != branch
         else { return }
 
@@ -1885,8 +1893,11 @@ final class ProjectStore {
 
         var changedSessionLocations: [(projectIndex: Int, sessionIndex: Int)] = []
         var changedProjectIndexes: Set<Int> = []
+        // A remote project's sessions do not follow this Mac's checkout: their branch is the
+        // host's, and a HEAD moving here says nothing about it.
         for projectIndex in projects.indices
-        where GitInfo.worktreeIdentity(for: projects[projectIndex].folderPath) == identity {
+        where projects[projectIndex].executionHost == nil
+            && GitInfo.worktreeIdentity(for: projects[projectIndex].folderPath) == identity {
             for sessionIndex in projects[projectIndex].sessions.indices
             where projects[projectIndex].sessions[sessionIndex].branch != branch {
                 projects[projectIndex].sessions[sessionIndex].branch = branch

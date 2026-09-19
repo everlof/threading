@@ -1135,7 +1135,9 @@ final class GitReviewViewController: NSViewController {
         }
 
         let root: URL?
-        if mode == .lastTurn {
+        if remoteHost != nil {
+            root = nil
+        } else if mode == .lastTurn {
             let checkpoints = GitTurnBaselineStore.shared.checkpoints(forSessionID: sessionID)
             guard !checkpoints.isEmpty else {
                 setChangeRequestBarVisible(false)
@@ -1169,6 +1171,11 @@ final class GitReviewViewController: NSViewController {
             if mode == .lastTurn,
                GitTurnBaselineStore.shared.latestCheckpoint(forSessionID: sessionID) != nil {
                 show(.message(L10n.string("The checkpoint repository is no longer available.")))
+            } else if let remoteHost {
+                show(.message(L10n.format(
+                    "This project runs on %@, so its checkout is there.\nGit Review can’t read a remote checkout yet.",
+                    remoteHost.destination
+                )))
             } else {
                 show(.message("Not a git repository."))
             }
@@ -1268,8 +1275,13 @@ final class GitReviewViewController: NSViewController {
 
     // MARK: - Loading
 
+    /// Nil for a project that runs on a remote host: its checkout is on the host, and the folder
+    /// here is only where the project was created from — reviewing it would show this Mac's changes
+    /// as the agent's. Everything that reads git here goes through this, so the watcher, loads and
+    /// staging all stay off that folder.
     var repositoryRoot: URL? {
-        GitInfo.repositoryRoot(for: folderPath)
+        guard remoteHost == nil else { return nil }
+        return GitInfo.repositoryRoot(for: folderPath)
     }
 
     private func loadDiff(_ request: GitReviewReader.DiffRequest, in root: URL) {
@@ -1746,4 +1758,11 @@ enum GitReviewUIDefaults {
     /// The `···` dropdown's floor, so a diff-less menu (one Refresh row) still reads as the
     /// same control as the full one.
     static let overflowMenuWidth: CGFloat = 190
+}
+
+extension GitReviewViewController {
+    /// The host this session's project runs on, if any.
+    var remoteHost: ProjectExecutionHost? {
+        ProjectStore.shared.project(forSessionID: sessionID)?.executionHost
+    }
 }

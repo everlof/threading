@@ -383,8 +383,22 @@ the host.
 mirrors and billed to the host's login rather than a Mac account; see
 [`usage-dashboard.md`](../architecture/usage-dashboard.md#remote-hosts-are-sources-of-their-own).
 
-**Not yet.** Subagent transcripts, whose paths the hooks report on the host, are not mirrored — so
-neither their navigator detail nor their usage reaches this Mac. Mid-turn readers (run
+**Git surfaces refuse the Mac folder, 2026-09-19.** A remote project still has the Mac folder it
+was created from, and every git surface read it: Git Review showed that folder's diffs, the status
+card and sidebar its branch, and — the worst of it — turn checkpoints snapshotted it at each remote
+turn's start and end and wrote refs into its repository, so Last Turn showed whatever changed on
+this Mac during the turn, a person's own edits included, as the agent's work. The rule in the plan
+applies: a surface this build cannot answer for a remote project is refused, never replaced by a
+lookalike. A remote turn records no checkpoint; the review pane runs no git and no watcher on the
+folder (`repositoryRoot` is nil, which everything there reads) and says the checkout is on the host;
+a remote session shows no branch and ignores a HEAD moving here; the status card is not built.
+`RemoteProjectGitTests` holds each against a real repository on a real branch with an uncommitted
+change, so a surface still reading it would have something to find.
+
+**Not yet.** A remote Git Review itself: the host's status, diffs and log, read in one batched `ssh`
+round trip per refresh (a `git status` there measured 150–280 ms). A host without git needs saying
+so; the spike's VM had none. Subagent transcripts, whose paths the hooks report on the host, are
+not mirrored — so neither their navigator detail nor their usage reaches this Mac. Mid-turn readers (run
 progress, live attachment detection) see the transcript as of the last refresh.
 
 **Not yet.** Noticing Mac sleep or a network change before `ssh` exits (`ServerAlive` bounds it).

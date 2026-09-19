@@ -2260,8 +2260,11 @@ private extension TerminalContainerViewController {
             SessionUsageService.shared.refresh(currentSessionID)
         }
 
+        // A remote project's checkout is on its host; the status card would otherwise report the
+        // Mac folder's changes and branch as the agent's.
         guard let sessionID = currentSessionID,
-              let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return }
+              let project = ProjectStore.shared.executionProject(forSessionID: sessionID),
+              project.executionHost == nil else { return }
 
         gitStatusLoadingSessionID = sessionID
         delegate?.terminalContainer(self, gitStatusLoadingDidChange: true, for: sessionID)
