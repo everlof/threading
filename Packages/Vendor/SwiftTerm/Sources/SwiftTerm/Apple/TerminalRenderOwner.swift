@@ -143,6 +143,9 @@ private struct TerminalRenderState {
 /// -> TerminalLock`.
 final class TerminalRenderOwner: Sendable {
     let mailbox = TerminalRenderMailbox()
+#if os(iOS) || os(visionOS)
+    let inputEchoProbe = TerminalInputEchoProbe()
+#endif
     private let session = Locked<TerminalRenderSession?>(nil)
     private let renderState = Locked(TerminalRenderState())
 
@@ -192,6 +195,9 @@ final class TerminalRenderOwner: Sendable {
             if let selectedContent {
                 session.selection.clearIfSelectedContentChanged(from: selectedContent)
             }
+#if os(iOS) || os(visionOS)
+            inputEchoProbe.parsed(terminal: terminal)
+#endif
             return terminal.synchronizedOutputActive
         }
     }
@@ -210,6 +216,9 @@ final class TerminalRenderOwner: Sendable {
             if let selectedContent {
                 session.selection.clearIfSelectedContentChanged(from: selectedContent)
             }
+#if os(iOS) || os(visionOS)
+            inputEchoProbe.parsed(terminal: terminal)
+#endif
             return terminal.synchronizedOutputActive
         }
     }
@@ -227,6 +236,9 @@ final class TerminalRenderOwner: Sendable {
             if let selectedContent {
                 session.selection.clearIfSelectedContentChanged(from: selectedContent)
             }
+#if os(iOS) || os(visionOS)
+            inputEchoProbe.parsed(terminal: terminal)
+#endif
             return terminal.synchronizedOutputActive
         }
     }

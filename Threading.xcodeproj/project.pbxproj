@@ -511,6 +511,7 @@
 				ThreadingMobile/MobileSocketRecoveryBackoff.swift,
 				ThreadingMobile/MobileSystemShareSheet.swift,
 				ThreadingMobile/MobileTerminalFontSize.swift,
+				ThreadingMobile/MobileTerminalInputLatencyProbe.swift,
 				ThreadingMobile/MobileTerminalKeyboardStore.swift,
 				ThreadingMobile/MobileTerminalPresentation.swift,
 				ThreadingMobile/MobileTerminalWireFixture.swift,

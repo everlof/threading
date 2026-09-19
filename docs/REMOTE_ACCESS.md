@@ -1785,6 +1785,24 @@ sampled direct-terminal input at most every five seconds. The phone records its 
 Mac records time from frame handling through main-queue/PTY admission under the same pseudonymous
 trace. Ordinary input remains fire-and-forget, older hosts receive no probes, and neither event
 contains the input bytes or prompt text.
+The iPhone also observes a bounded subset of printable direct-terminal keys through the shipping
+Core Graphics renderer. One expected cursor cell is held only in memory; its parsed transition
+and the actual draw of that same cell produce `terminalInputVisualProbeProgress` records. The
+next display-link timestamp after the draw ends the sample as `displayOpportunity/estimated`.
+This is a compositor opportunity estimate, **not physical scanout**, and a matching cell is
+heuristic echo evidence, not an application acknowledgement. First output is recorded separately
+and is never treated as an echo. All durations start at UIKit `insertText`, include the delegate
+hop, and share the acknowledgement probe's pseudonymous trace. UIKit delivery does not measure
+finger-to-keyboard or keyboard-to-app latency before `insertText`.
+
+The sampler retains at most one key per renderer for ten seconds and starts at most once per five
+seconds per connection. It excludes IME composition, multi-character insertions, spaces,
+controls, wrapping, preexisting matching cells and unsupported renderers. A moved/reflowed cursor,
+concealed/blinking glyph, image, scrollback, or unmatched TUI repaint may produce no matched draw;
+timeout is recorded as `unmatchedTimeout`, never a fabricated latency. Unmount, rebind and
+backgrounding cancel observation. Nothing is injected into the PTY. Diagnostic records contain
+only phase, duration, result and trace, never the character, cell coordinates or terminal text.
+
 They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
 iPhone, or use the control beside the Mac in the browser session list, and choose **Share
 diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow

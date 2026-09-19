@@ -81,6 +81,15 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
     case terminalInputProbeStarted
     /// A sampled direct-terminal input reached host admission or timed out.
     case terminalInputProbeEnded
+    /// A sampled printable key began expected-cursor-cell observation; no characters or coordinates
+    /// are retained in diagnostics.
+    case terminalInputVisualProbeStarted
+    /// Cumulative keypress timing at send, first output, matched cell parse, or actual matched cell
+    /// draw. First output is not necessarily an echo.
+    case terminalInputVisualProbeProgress
+    /// A matched draw reached an estimated display opportunity, or observation ended without a
+    /// match. This is not physical scanout measurement.
+    case terminalInputVisualProbeEnded
     case permissionDecisionSent
     case permissionDecisionReceived
     case notificationAuthorization
@@ -123,15 +132,17 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
         .socketConnected, .socketEnded, .socketFailed, .socketReconnectScheduled,
         .sessionResumeStarted, .sessionResumeEnded, .sessionOpenStarted, .sessionOpenProgress,
         .sessionOpenEnded, .promptSubmissionStarted, .promptSubmissionEnded,
-        .terminalInputProbeStarted, .terminalInputProbeEnded, .permissionDecisionSent,
-        .notificationAuthorization, .apnsRegistrationSucceeded, .apnsRegistrationFailed,
-        .notificationRegistrationStarted, .notificationRegistrationSucceeded,
-        .notificationRegistrationFailed, .notificationReceived, .notificationSuppressed,
-        .notificationPresented, .notificationOpened, .notificationRetractionReceived,
-        .notificationLocallyCleared, .issueReportOpened, .issueReportExported,
-        .issueReportSubmissionStarted, .issueReportSubmissionSucceeded,
-        .issueReportSubmissionDeferred, .issueReportSubmissionFailed, .attachmentPreviewFailed,
-        .diagnosticSharingStarted, .diagnosticSharingStopped
+        .terminalInputProbeStarted, .terminalInputProbeEnded, .terminalInputVisualProbeStarted,
+        .terminalInputVisualProbeProgress, .terminalInputVisualProbeEnded,
+        .permissionDecisionSent, .notificationAuthorization, .apnsRegistrationSucceeded,
+        .apnsRegistrationFailed, .notificationRegistrationStarted,
+        .notificationRegistrationSucceeded, .notificationRegistrationFailed,
+        .notificationReceived, .notificationSuppressed, .notificationPresented,
+        .notificationOpened, .notificationRetractionReceived, .notificationLocallyCleared,
+        .issueReportOpened, .issueReportExported, .issueReportSubmissionStarted,
+        .issueReportSubmissionSucceeded, .issueReportSubmissionDeferred,
+        .issueReportSubmissionFailed, .attachmentPreviewFailed, .diagnosticSharingStarted,
+        .diagnosticSharingStopped
     ]
 
     private static let browserClientUploadEvents: Set<Self> = [
@@ -299,5 +310,5 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
 
 public enum RemoteDiagnosticContract {
     public static let schemaVersion = 1
-    public static let fingerprint = "039fbc21e8380b69e3a12ddbb0763f195fb807a811af12284bbf29c755dabb7b"
+    public static let fingerprint = "a70d957f85bedb3e09de96e6f6ebccfb1319b5f55fac6ced195a609e5dc7bc5c"
 }

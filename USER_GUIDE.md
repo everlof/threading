@@ -3271,6 +3271,11 @@ then join the Mac's share-safe support timeline until the timer expires, you sto
 client closes. Raw logs, messages, prompts, terminal output, paths, URLs, notification text and
 credentials are never sent, and one-chat guest links do not get this control.
 
+Direct terminal typing also keeps occasional content-free latency samples. For supported
+single-character input, these follow the key through a matching terminal-cell draw and estimate
+the next display opportunity. They distinguish that estimate from the Mac's input acknowledgement;
+unmatched samples report no visible-character latency. Typed characters are never included.
+
 For ongoing agent-assisted checkups, **Local diagnostics** is a separate opt-in. Turn on **Allow
 paired-iPhone checkups** under **Settings > Advanced > Local Diagnostics** on the Mac, then turn
 on **Local diagnostics** under **Settings > Advanced > Device checkups** on the iPhone. Both are

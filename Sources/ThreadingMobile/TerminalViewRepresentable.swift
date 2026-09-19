@@ -101,6 +101,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: RemoteTerminalLayoutView, context: Context) {
         let terminalView = uiView.terminalView
+        if connection.phase != .connected { terminalView.inputLatencyProbe.cancel(result: "disconnected") }
         context.coordinator.bindRenderer(to: connection)
         context.coordinator.allowsInput = allowsDirectInput
         context.coordinator.initialScrollProgress = initialScrollProgress
@@ -268,11 +269,22 @@ struct TerminalViewRepresentable: UIViewRepresentable {
                 connection = nextConnection
             }
             guard !connection.isTerminalRendererOwner(view) else { return }
+            view.inputLatencyProbe.cancel()
+            view.prepareInputLatencyProbe = { [weak self] in
+                guard let self, self.allowsInput else { return nil }
+                return self.connection.prepareTerminalInputLatencyProbe()
+            }
+            view.inputLatencyProbe.record = { [weak nextConnection] event, id, phase, result, duration in
+                nextConnection?.recordTerminalInputVisualProbe(
+                    event, requestID: id, phase: phase, result: result, durationMS: duration
+                )
+            }
             let terminalSession = connection.session
             connection.mountTerminalRenderer(
                 view,
                 output: { [weak self, weak view] data in
                     guard let self, let view else { return }
+                    view.inputLatencyProbe.outputReceived()
 #if DEBUG
                     MobileTerminalWirePerformanceProbe.feed(data, session: terminalSession) {
                         view.feed(byteArray: Array(data)[...])
@@ -291,6 +303,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         }
 
         func unbindRenderer(from view: RemoteTerminalView) {
+            view.inputLatencyProbe.cancel()
+            view.prepareInputLatencyProbe = nil
+            view.inputLatencyProbe.record = nil
             connection.unmountTerminalRenderer(view)
         }
 
@@ -377,8 +392,13 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
         nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
             let bytes = Array(data)
+            let sample = (source as? RemoteTerminalView)?.inputSampleContext.sample(for: data)
+            let probeID = sample?.id
+            let sourceID = ObjectIdentifier(source)
             Task { @MainActor [weak self] in
-                guard let self, self.allowsInput else { return }
+                guard let self, self.allowsInput, let view = self.terminalView,
+                      ObjectIdentifier(view) == sourceID,
+                      self.connection.isTerminalRendererOwner(view) else { return }
                 let typed = self.keyBridge.applyLatchesToTyped(bytes)
 #if DEBUG
                 MobileTerminalWirePerformanceProbe.terminalInput(
@@ -386,7 +406,13 @@ struct TerminalViewRepresentable: UIViewRepresentable {
                     session: self.connection.session
                 )
 #endif
-                self.connection.sendTerminalInput(typed[...])
+                if let probeID {
+                    if typed != bytes || sample?.matches == false {
+                        view.inputLatencyProbe.cancel(result: "modifiedInput")
+                    }
+                    view.inputLatencyProbe.sent(requestID: probeID)
+                }
+                self.connection.sendTerminalInput(typed[...], probeID: probeID)
             }
         }
 
@@ -757,6 +783,30 @@ private final class KeyboardObserverBag: @unchecked Sendable {
 /// for the Mac's PTY grid, though, so cursor addressing and wraps only remain correct when this
 /// view holds that authoritative size against its own layout.
 final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
+    nonisolated let inputSampleContext = MobileTerminalInputSampleContext()
+    let inputLatencyProbe = MobileTerminalInputLatencyProbe()
+    var prepareInputLatencyProbe: (() -> String?)?
+
+    override func insertText(_ text: String) {
+        let startedAt = CACurrentMediaTime()
+        let prefix = text.utf8.prefix(2)
+        // One visible ASCII key only. IME, paste, control keys and wrapping remain unmeasured.
+        if !inputLatencyProbe.isPending, markedTextRange == nil, window != nil,
+           prefix.count == 1, let ascii = prefix.first, ascii > 0x20, ascii < 0x7f,
+           let id = prepareInputLatencyProbe?() {
+            inputLatencyProbe.begin(ascii: ascii, requestID: id,
+                                    startedAt: startedAt, view: self)
+            inputSampleContext.set(ascii: ascii, requestID: id)
+        }
+        defer { inputSampleContext.clear() }
+        super.insertText(text)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { inputLatencyProbe.cancel(result: "unmounted") }
+    }
+
     private(set) var usesLocalViewport = false
     private(set) var isAdjustingFontSize = false
     /// The theme `TerminalViewRepresentable.apply` last installed. `hasAppliedTheme` tells the

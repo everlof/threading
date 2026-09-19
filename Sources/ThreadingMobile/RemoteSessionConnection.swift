@@ -1296,11 +1296,11 @@ final class RemoteSessionConnection: ObservableObject {
         completeTerminalHydration(revealedBy: .boundary)
     }
 
-    func sendTerminalInput(_ data: ArraySlice<UInt8>) {
+    func sendTerminalInput(_ data: ArraySlice<UInt8>, probeID: String? = nil) {
         guard phase == .connected, capability == .interact,
               inputControl?.canWrite != false else { return }
         reportTyping(true)
-        sendTerminalInputMessage(String(decoding: data, as: UTF8.self))
+        sendTerminalInputMessage(String(decoding: data, as: UTF8.self), probeID: probeID)
     }
 
     func sendTerminalKey(_ text: String) {
@@ -1310,8 +1310,8 @@ final class RemoteSessionConnection: ObservableObject {
         sendTerminalInputMessage(text)
     }
 
-    private func sendTerminalInputMessage(_ text: String) {
-        let probeID = beginTerminalInputProbeIfEligible()
+    private func sendTerminalInputMessage(_ text: String, probeID suppliedProbeID: String? = nil) {
+        let probeID = suppliedProbeID ?? beginTerminalInputProbeIfEligible()
         do {
             try send(RemoteClientMessage(type: "input", data: text, requestID: probeID))
         } catch {
@@ -2481,6 +2481,26 @@ final class RemoteSessionConnection: ObservableObject {
         )
         sessionResumeTrace = nil
         sessionResumeStartedAt = nil
+    }
+
+    /// Called at UIKit text entry, before the delegate's main-actor hop.
+    func prepareTerminalInputLatencyProbe() -> String? {
+        guard phase == .connected, capability == .interact,
+              inputControl?.canWrite != false, !isTerminalHydrating else { return nil }
+        return beginTerminalInputProbeIfEligible()
+    }
+
+    func recordTerminalInputVisualProbe(
+        _ event: RemoteDiagnosticEvent, requestID: String, phase: String,
+        result: String, durationMS: String
+    ) {
+        var fields = destinationFields
+        fields[.trace] = MobileDiagnostics.pseudonym(requestID, prefix: "trace")
+        fields[.kind] = "terminal"
+        fields[.phase] = phase
+        fields[.result] = result
+        fields[.durationMS] = durationMS
+        recordInteractionDiagnostic(event, level: .info, fields: fields)
     }
 
     private func beginTerminalInputProbeIfEligible() -> String? {

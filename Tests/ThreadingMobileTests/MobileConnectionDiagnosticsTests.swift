@@ -161,6 +161,41 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
         XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(request))
     }
 
+    func testAKeyScopeHandsItsTraceToOnlyOneWireMessage() {
+        let context = MobileTerminalInputSampleContext()
+        context.set(ascii: 81, requestID: "sample")
+        let sample = context.sample(for: [81][...])
+        XCTAssertEqual(sample?.id, "sample")
+        XCTAssertEqual(sample?.matches, true)
+        XCTAssertNil(context.sample(for: [81][...]))
+        context.set(ascii: 81, requestID: "modified")
+        XCTAssertEqual(context.sample(for: [27, 81][...])?.matches, false)
+        context.clear()
+        XCTAssertNil(context.sample(for: [81][...]))
+    }
+
+    func testVisualInputTimingsCanBeSharedButInputContentCannot() {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        for event in [RemoteDiagnosticEvent.terminalInputVisualProbeStarted,
+                      .terminalInputVisualProbeProgress, .terminalInputVisualProbeEnded] {
+            let fields = [
+                "trace": "trace-0123456789ab", "phase": "displayOpportunity",
+                "result": "estimated", "durationMS": "1324", "kind": "terminal",
+            ]
+            func request(_ fields: [String: String]) -> RemoteDiagnosticUploadRequestDTO {
+                .init(source: .iOSClient, records: [.init(
+                    timestamp: formatter.string(from: Date()), source: .iOSClient,
+                    level: .info, event: event, fields: fields
+                )])
+            }
+            XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(request(fields)))
+            var leaking = fields
+            leaking["character"] = "Q"
+            XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(request(leaking)))
+        }
+    }
+
     func testTheSharedPolicyRefusesNonNumericConnectivityMeasurements() {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -135,6 +135,137 @@ final class RemoteTerminalInitialViewportTests: XCTestCase {
         XCTAssertTrue(connection.hasPresentedTerminalOutput)
     }
 
+    func testKeypressProbeTraversesProductionEchoDrawAndDisplayOpportunity() async throws {
+        let host = try await makeProbeHost()
+        defer { host.connection.disconnect(); host.window.isHidden = true }
+        var records: [(RemoteDiagnosticEvent, String, String, String, String)] = []
+        host.view.inputLatencyProbe.record = { records.append(($0, $1, $2, $3, $4)) }
+
+        XCTAssertGreaterThan(host.view.diagnostics.renders, 0, "fixture must actually draw on screen")
+        host.view.insertText("Q")
+        let completed = await eventually {
+            records.contains { $0.0 == .terminalInputVisualProbeEnded }
+        }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(records.map { $0.2 }, [
+            "keypress", "send", "firstOutput", "echoParsed", "echoDrawn", "displayOpportunity",
+        ])
+        XCTAssertEqual(records.last?.3, "estimated")
+        XCTAssertEqual(Set(records.map { $0.1 }).count, 1)
+        let durations = records.compactMap { UInt64($0.4) }
+        XCTAssertEqual(durations, durations.sorted())
+        XCTAssertFalse(host.view.inputLatencyProbe.isPending)
+
+        // The connection's production gate must bound a burst, not just the fixture recorder.
+        for _ in 0..<100 { host.view.insertText("x") }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(records.filter { $0.0 == .terminalInputVisualProbeStarted }.count, 1)
+    }
+
+    func testUnrelatedOutputCannotCompleteTheExpectedCellProbeAndUnmountCancels() async throws {
+        let host = try await makeProbeHost()
+        defer { host.connection.disconnect(); host.window.isHidden = true }
+        var results: [String] = []
+        host.view.inputLatencyProbe.record = { event, _, _, result, _ in
+            if event == .terminalInputVisualProbeEnded { results.append(result) }
+        }
+        XCTAssertTrue(host.view.inputLatencyProbe.begin(
+            ascii: 81, requestID: "fixture", startedAt: CACurrentMediaTime(), view: host.view
+        ))
+        host.view.inputLatencyProbe.sent(requestID: "fixture")
+        // The same glyph on another row is not the character at the input cursor.
+        host.view.feed(text: "\u{1b}[2;1HQ")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(results.isEmpty)
+        host.view.removeFromSuperview()
+        XCTAssertEqual(results, ["unmounted"])
+        host.view.feed(text: "\u{1b}[1;1HQ")
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(results, ["unmounted"], "late draws cannot complete a retired sample")
+    }
+
+    func testEchoProbeRejectsPreexistingCharacterAndDoesNotMatchBeforeSend() async throws {
+        let host = try await makeProbeHost()
+        defer { host.connection.disconnect(); host.window.isHidden = true }
+        host.view.feed(text: "Q\r")
+        XCTAssertFalse(host.view.inputLatencyProbe.begin(
+            ascii: 81, requestID: "preexisting", startedAt: CACurrentMediaTime(), view: host.view
+        ))
+        host.view.feed(text: "\u{1b}[2J\u{1b}[H")
+        var phases: [String] = []
+        host.view.inputLatencyProbe.record = { _, _, phase, _, _ in phases.append(phase) }
+        XCTAssertTrue(host.view.inputLatencyProbe.begin(
+            ascii: 81, requestID: "unsent", startedAt: CACurrentMediaTime(), view: host.view
+        ))
+        host.view.feed(text: "Q")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(phases, ["keypress"])
+        host.view.inputLatencyProbe.cancel()
+    }
+
+    func testDelayedEchoIsIncludedInTheDrawAndDisplayTimings() async throws {
+        let host = try await makeProbeHost()
+        defer { host.connection.disconnect(); host.window.isHidden = true }
+        var durations: [String: UInt64] = [:]
+        host.view.inputLatencyProbe.record = { _, _, phase, _, duration in
+            durations[phase] = UInt64(duration)
+        }
+        XCTAssertTrue(host.view.inputLatencyProbe.begin(
+            ascii: 81, requestID: "delayed", startedAt: CACurrentMediaTime(), view: host.view
+        ))
+        host.view.inputLatencyProbe.sent(requestID: "delayed")
+        try await Task.sleep(for: .milliseconds(100))
+        host.view.feed(text: "Q")
+        let completed = await eventually { durations["displayOpportunity"] != nil }
+        XCTAssertTrue(completed)
+        let parsed = try XCTUnwrap(durations["echoParsed"])
+        let drawn = try XCTUnwrap(durations["echoDrawn"])
+        let displayed = try XCTUnwrap(durations["displayOpportunity"])
+        XCTAssertGreaterThanOrEqual(parsed, 100)
+        XCTAssertGreaterThanOrEqual(drawn, parsed)
+        XCTAssertGreaterThanOrEqual(displayed, drawn)
+    }
+
+    func testMissingEchoTimesOutAndBackgroundRetiresAnObservation() async throws {
+        let host = try await makeProbeHost()
+        defer { host.connection.disconnect(); host.window.isHidden = true }
+        let probe = MobileTerminalInputLatencyProbe(timeout: .milliseconds(30))
+        var results: [String] = []
+        probe.record = { event, _, _, result, _ in
+            if event == .terminalInputVisualProbeEnded { results.append(result) }
+        }
+        XCTAssertTrue(probe.begin(ascii: 81, requestID: "timeout",
+                                 startedAt: CACurrentMediaTime(), view: host.view))
+        let timedOut = await eventually { !probe.isPending }
+        XCTAssertTrue(timedOut)
+        XCTAssertEqual(results, ["unmatchedTimeout"])
+        XCTAssertTrue(probe.begin(ascii: 81, requestID: "background",
+                                 startedAt: CACurrentMediaTime(), view: host.view))
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        XCTAssertFalse(probe.isPending)
+        XCTAssertEqual(results, ["unmatchedTimeout", "backgrounded"])
+    }
+
+    private func makeProbeHost() async throws -> (
+        connection: RemoteSessionConnection, window: UIWindow, view: RemoteTerminalView
+    ) {
+        let connection = makeConnection()
+        connection.connect()
+        let connected = await eventually { connection.phase == .connected }
+        XCTAssertTrue(connected)
+        let host = makeHost(connection: connection)
+        host.window.layoutIfNeeded()
+        host.controller.view.layoutIfNeeded()
+        let ready = await eventually {
+            self.terminalLayout(in: host.controller.view) != nil && !connection.isTerminalHydrating
+        }
+        XCTAssertTrue(ready)
+        let view = try XCTUnwrap(terminalLayout(in: host.controller.view)?.terminalView)
+        view.feed(text: "\u{1b}[2J\u{1b}[H")
+        try await Task.sleep(for: .milliseconds(100))
+        return (connection, host.window, view)
+    }
+
     private func makeConnection() -> RemoteSessionConnection {
         RemoteSessionConnection(
             session: RemoteSessionSummaryDTO(
@@ -180,7 +311,10 @@ final class RemoteTerminalInitialViewportTests: XCTestCase {
             hosting.view.heightAnchor.constraint(equalToConstant: Fixture.contentSize.height),
         ])
         hosting.didMove(toParent: controller)
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: UIScreen.main.bounds)
+        window.frame = UIScreen.main.bounds
         window.rootViewController = controller
         window.makeKeyAndVisible()
         return (window, controller)

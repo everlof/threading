@@ -5406,3 +5406,49 @@ shell and measures five stress hide/show pairs separately from fixture construct
 The focused Debug run on 2026-09-17 measured 35.03 ms for five 25,000-project hide/show
 pairs (7.01 ms per pair), excluding value construction. This is a projection cost, not a
 whole-sidebar render or a Release launch measurement. All visibility assertions passed.
+
+
+## Permanent iOS terminal key-to-display observations
+
+`MobileTerminalInputLatencyProbe` and SwiftTerm's `TerminalInputEchoProbe` follow a sampled
+printable key from UIKit `insertText` through the transport delegate, first output, a matching
+parsed cursor cell, the Core Graphics snapshot that actually draws that cell, and the next
+`CADisplayLink.timestamp` after draw completion. This last phase is explicitly an **estimated
+display opportunity**. Neither a feed nor a display tick alone proves the key was drawn, and
+UIKit offers no physical scanout acknowledgement for this renderer. A match is heuristic echo
+evidence: unrelated output could coincidentally write the expected glyph at that cell.
+
+The scaling gate is one pending cell per mounted renderer, a ten-second deadline, and the
+connection's existing maximum of one sampled input every five seconds. Normal typing (including
+a 100-key burst) adds constant work per key/feed/draw, never a buffer search, text copy, file
+operation, per-glyph callback or screen capture. Stress is sustained output plus repeated typing
+and renderer replacement: no backlog of cells, timers or display links may accumulate. A display
+link exists only between a matched draw and completion/cancellation. The existing asynchronous,
+bounded diagnostics journal owns persistence and opt-in sharing. The permanent implementation
+is present in Release, independently of the Debug wire lab.
+
+Only one printable ASCII character is eligible; IME, paste, space/control keys, last-column
+wrapping, a preexisting identical cell, Metal, bidi/doubled lines and concealed/blinking/image
+cells do not produce a claimed matched draw. Unmatched samples time out; hiding/unmounting,
+replacing the renderer and backgrounding cannot leave an observer running. Unsupported cases
+retain the ordinary acknowledgement probe. No typed value or cell coordinates are logged.
+
+`RemoteTerminalInitialViewportTests` exercises the production SwiftUI terminal host, coordinator,
+demo wire echo, SwiftTerm parser/draw and display opportunity. Negative cases cover wrong-row
+output, unsent observations, preexisting glyphs, retirement and sampling a burst. Simulator
+observations verify instrumentation, not physical-device latency or hardware scanout.
+
+The 2026-09-19 physical-phone capture, joined to Mac records by trace, measured 1,324 ms client
+acknowledgement with 1,242 ms Mac admission, and 191 ms with 134 ms Mac admission. The host span
+includes waiting for main plus PTY admission; it does not isolate those two costs. Subtracting
+the same-trace monotonic durations leaves 82/57 ms outside admission, not a network-only cost.
+Those samples establish host-side stalls but cannot establish the still-unmeasured echo/display
+time or attribute another session's concurrent reconnect loop as their cause.
+
+Verification on 2026-09-19: the generic iOS Simulator Release build passed for arm64 and x86_64;
+25 focused `MobileConnectionDiagnosticsTests` and `RemoteTerminalInitialViewportTests` passed,
+including a controlled 100 ms echo delay that must remain in parse/draw/display durations.
+The fixture attaches its window to the active `UIWindowScene` and asserts a real draw occurred:
+a legacy unattached window exercised echo delivery but never drew. Diagnostic-contract generation
+and its five tests, the main-actor latency gate and theme boundary gate passed. These checks do
+not replace installing updated phone/Mac builds and collecting a fresh physical-device sample.

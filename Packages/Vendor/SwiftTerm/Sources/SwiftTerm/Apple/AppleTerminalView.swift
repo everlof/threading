@@ -3209,6 +3209,14 @@ extension TerminalView {
         let lastRow = snapshot.yDisp+Int((boundsMaxY-dirtyRect.minY)/cellHeight)
         #endif
 
+        #if os(iOS) || os(visionOS)
+        defer {
+            renderOwner.inputEchoProbe.drawn(
+                snapshot: snapshot, dirtyRect: dirtyRect, visibleRect: bounds,
+                cellWidth: cellDimension.width, cellHeight: cellHeight)
+        }
+        #endif
+
         let kittyRenderSnapshot = snapshot.kitty.renderSnapshot
         // Most frames carry no image at all. Everything below - the grouping
         // dictionary, the live-key set, and the three per-row placement passes -
