@@ -189,10 +189,9 @@ final class HookLifecycleTests: XCTestCase {
         ].joined(separator: "\n") + "\n"
         try Data(interrupted.utf8).write(to: transcript)
 
-        XCTAssertEqual(
-            CodexTranscriptTurnBoundary.newestBoundary(at: transcript),
-            .interrupted(turnID: "turn-1")
-        )
+        var cursor = CodexTurnBoundaryCursor()
+        XCTAssertFalse(cursor.readPass(at: transcript))
+        XCTAssertEqual(cursor.boundary, .interrupted(turnID: "turn-1"))
 
         let newerTurn =
             #"{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}"# + "\n"
@@ -201,8 +200,9 @@ final class HookLifecycleTests: XCTestCase {
         try handle.write(contentsOf: Data(newerTurn.utf8))
         try handle.close()
 
+        XCTAssertFalse(cursor.readPass(at: transcript))
         XCTAssertEqual(
-            CodexTranscriptTurnBoundary.newestBoundary(at: transcript),
+            cursor.boundary,
             .started(turnID: "turn-2"),
             "the newer turn is the boundary now, and it is one this build acts on"
         )

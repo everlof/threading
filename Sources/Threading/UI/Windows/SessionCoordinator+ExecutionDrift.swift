@@ -18,7 +18,10 @@ extension SessionCoordinator {
     /// be re-filed anywhere — `SessionCheckoutCoordinator.validate` refuses it as
     /// `differentRepository`, correctly — so the row's marker is the whole of the response, and
     /// putting a band on screen offering nothing would be noise.
-    func reconcileObservedExecutionDrift(_ sessionID: SessionID) {
+    func reconcileObservedExecutionDrift(
+        _ sessionID: SessionID,
+        phase: SessionExecutionObservationPhase
+    ) {
         guard case .siblingCheckout(let checkout) =
                 SessionExecutionLocusTracker.shared.drift(forSessionID: sessionID),
               let session = environment.projectStore.session(withID: sessionID) else { return }
@@ -27,7 +30,8 @@ extension SessionCoordinator {
 
         switch checkoutCoordinator.reconcileObservedExecution(
             sessionID: sessionID,
-            checkout: checkout
+            checkout: checkout,
+            phase: phase
         ) {
         case .queued(let move):
             // A move already fenced for somewhere else comes back as that move, not this one.
@@ -48,7 +52,9 @@ extension SessionCoordinator {
             toastPresenter(Self.observedMoveOfferToast(
                 for: session,
                 checkout: checkout,
-                move: { [weak self] in self?.approveObservedMove(sessionID, to: checkout) }
+                move: { [weak self] in
+                    self?.approveObservedMove(sessionID, to: checkout, phase: phase)
+                }
             ))
         case .denied, .failed:
             // The row keeps its marker and the user keeps the row menu. A refusal here is
@@ -73,12 +79,15 @@ extension SessionCoordinator {
     /// A refusal is reported rather than swallowed. The user pressed a button; a worktree removed
     /// or a head detached since the offer was drawn is an ordinary outcome, and answering it with
     /// nothing at all is indistinguishable from the button not working.
-    private func approveObservedMove(_ sessionID: SessionID, to checkout: ObservedCheckout) {
-        switch SessionCheckoutCoordinator.shared.requestMove(
+    private func approveObservedMove(
+        _ sessionID: SessionID,
+        to checkout: ObservedCheckout,
+        phase: SessionExecutionObservationPhase
+    ) {
+        switch SessionCheckoutCoordinator.shared.reconcileObservedExecution(
             sessionID: sessionID,
-            checkoutPath: checkout.root,
-            authorityBasis: .observedExecution,
-            reason: "Observed running in \(checkout.displayName)",
+            checkout: checkout,
+            phase: phase,
             approval: true
         ) {
         case .queued, .alreadyPending:

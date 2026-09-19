@@ -125,6 +125,7 @@ final class AgentSessionViewController: NSViewController {
     private var transcriptRecheckGeneration: [String: Int] = [:]
     private var agentTitleRefreshWorkItem: DispatchWorkItem?
     private var codexTranscriptURL: URL?
+    private let codexTurnBoundaryMonitor = CodexTurnBoundaryMonitor()
     private var codexTranscriptBoundaryObserver: CodexTranscriptBoundaryObserver?
     private var codexTranscriptResolutionTask: Task<Void, Never>?
     private var codexTranscriptObservationGeneration = 0
@@ -1536,6 +1537,7 @@ final class AgentSessionViewController: NSViewController {
         codexTranscriptResolutionTask = nil
 
         if codexTranscriptURL != url {
+            codexTurnBoundaryMonitor.reset()
             codexTranscriptBoundaryObserver?.stop()
             codexTranscriptBoundaryObserver = nil
             codexTranscriptURL = url
@@ -1676,14 +1678,14 @@ final class AgentSessionViewController: NSViewController {
     /// boundary this exists for most is a turn that began without anybody being told, so a
     /// session the tracker believes is idle is exactly the state worth reading.
     private func scheduleCodexTurnBoundaryRefresh() {
-        guard codexTranscriptURL != nil else { return }
-
-        codexTurnBoundaryRefreshWorkItem?.cancel()
+        // A repaint must not push the first read back forever. One scheduled refresh is
+        // enough; the monitor catches up every appended byte in bounded worker passes.
+        guard codexTranscriptURL != nil, codexTurnBoundaryRefreshWorkItem == nil else { return }
         let item = DispatchWorkItem { [weak self] in
             guard let self, let url = self.codexTranscriptURL else { return }
             self.codexTurnBoundaryRefreshWorkItem = nil
 
-            CodexTranscriptTurnBoundary.revalidate(at: url) { [weak self] boundary in
+            self.codexTurnBoundaryMonitor.revalidate(at: url) { [weak self] boundary in
                 guard let self, self.isRunning, self.codexTranscriptURL == url,
                       let boundary else { return }
                 self.apply(boundary)
@@ -1720,7 +1722,7 @@ final class AgentSessionViewController: NSViewController {
             self.codexContinuationBoundaryRefreshWorkItem = nil
             self.codexContinuationBoundaryRefreshIsOutputPrompted = false
 
-            CodexTranscriptTurnBoundary.revalidate(at: url) { [weak self] boundary in
+            self.codexTurnBoundaryMonitor.revalidate(at: url) { [weak self] boundary in
                 guard let self, self.isRunning, self.codexTranscriptURL == url,
                       let boundary else { return }
                 self.apply(boundary)
@@ -1872,6 +1874,7 @@ final class AgentSessionViewController: NSViewController {
     /// whatever the session record says by then — a resume and an account migration both change
     /// the answer.
     private func resetTranscriptFallbackObservation() {
+        codexTurnBoundaryMonitor.reset()
         codexTranscriptObservationGeneration &+= 1
         codexTranscriptResolutionTask?.cancel()
         codexTranscriptResolutionTask = nil

@@ -109,7 +109,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // policy decision with a confirmation and a receipt attached, so it is decided here.
         // See `reconcileObservedExecutionDrift(_:)`.
         appEvents.observe(SessionExecutionDriftDidChange.self) { [weak self] event in
-            self?.reconcileObservedExecutionDrift(event.sessionID)
+            self?.reconcileObservedExecutionDrift(event.sessionID, phase: event.phase)
         }
         appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
             guard event.authorityBasis == .observedExecution,

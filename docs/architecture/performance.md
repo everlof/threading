@@ -25,6 +25,28 @@ TEST_RUNNER_THREADING_STRESS=1 scripts/test.sh fast \
   -only-testing:ThreadingTests/SessionCurfewCenterTests/testUsageUpdateScalingWithHistoricalSessions
 ```
 
+## Codex lifecycle catch-up, 2026-09-18
+
+A lifecycle reader must not lose a hookless goal start behind tool output. The former 64 KiB
+tail scan returned no boundary for a start followed by a large tool record. The replacement
+`CodexTurnBoundaryMonitor` hydrates once in 64 KiB off-main passes, then scans only appended
+bytes, retaining one boundary and one cursor per live process. It does not publish intermediate
+historical turns and keeps a scheduled refresh's first deadline under continuous terminal output.
+
+The 100 MiB synthetic single-record workload exposed a costly first implementation: Foundation
+file attributes resolve owner/group names through directory services on each pass. A `sample`
+capture attributed 523 of 558 worker samples to that call. Reading only inode, size and precise
+mtime through `stat` changed the three Debug cursor measurements from 9,003 / 9,846 / 7,697 ms
+to 104 / 104 / 262 ms (median 104 ms, maximum 262 ms). Complete asynchronous hydration changed
+from 134,616 to 1,315 ms under concurrent builds. Fixture creation and compiler/process startup
+were outside those timings; they are catch-up measurements, not Release launch claims.
+
+`CodexTurnBoundaryMonitorTests` pins the byte budget, unchanged-file cursor, oversized record
+progress, partial newline handling, replacement and current-boundary publication. Set
+`THREADING_CODEX_BOUNDARY_STRESS=1` for its 100 MiB lane; the ordinary test uses 2 MiB. Ownership
+following separately waits for a turn boundary after live-execution evidence, so delayed lifecycle
+observation cannot authorize killing a worktree-creation process.
+
 ## The layers answer different questions
 
 No one profiler should try to answer everything:

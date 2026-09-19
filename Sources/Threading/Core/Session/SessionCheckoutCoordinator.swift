@@ -113,6 +113,9 @@ final class SessionCheckoutCoordinator {
     private let runtimeSnapshot: @MainActor (SessionID) -> SessionRuntimeSnapshot
     private let now: @MainActor () -> Date
     private var inputFences: Set<SessionID> = []
+    /// A resolver or an approval can arrive after the turn it observed finished. That boundary
+    /// satisfies its fence; waiting for another would strand an otherwise idle chat's input.
+    private var lastTurnBoundaryAt: [SessionID: Date] = [:]
     private var settlements: [SessionID: [@MainActor @Sendable (Bool) -> Void]] = [:]
 
     /// The worktree each session most recently *left*, and when — the dwell's whole memory.
@@ -246,15 +249,16 @@ final class SessionCheckoutCoordinator {
     /// policy will grant that basis. A separate route would be a second way to change durable
     /// ownership, which is the thing this type exists to prevent.
     ///
-    /// The turn boundary is left to `requestMove`'s own reading rather than forced. An
-    /// observation raised by a mid-turn hook finds a turn in flight and is fenced until Stop; one
-    /// raised by the Stop hook itself finds none and settles at once, which matters because that
-    /// event's own checkout fence has already run by the time the report is relayed.
+    /// Executing evidence always waits for the real turn boundary. The tracker can still say
+    /// idle while a hookless goal turn is creating its worktree; trusting that stale snapshot
+    /// would restart the provider and kill Git in the middle of `worktree add`.
     @discardableResult
     func reconcileObservedExecution(
         sessionID: SessionID,
         checkout: ObservedCheckout,
-        policy: SessionCheckoutAuthorityPolicy = AppSettings.shared.sessionCheckoutAuthorityPolicy
+        phase: SessionExecutionObservationPhase,
+        policy: SessionCheckoutAuthorityPolicy = AppSettings.shared.sessionCheckoutAuthorityPolicy,
+        approval: Bool? = nil
     ) -> SessionCheckoutMoveRequestResult {
         // A queued move is already the answer to this question, and re-asking it every time
         // another tool call reports the same directory would rewrite the pending record and
@@ -292,7 +296,11 @@ final class SessionCheckoutCoordinator {
             checkoutPath: checkout.root,
             authorityBasis: .observedExecution,
             reason: "Observed running in \(checkout.displayName)",
-            policy: policy
+            policy: policy,
+            approval: approval,
+            waitForCurrentTurnBoundary: phase.requiresTurnBoundary(
+                after: lastTurnBoundaryAt[sessionID]
+            )
         )
     }
 
@@ -335,6 +343,7 @@ final class SessionCheckoutCoordinator {
         sessionID: SessionID,
         completion: @escaping @MainActor @Sendable (Bool) -> Void
     ) {
+        lastTurnBoundaryAt[sessionID] = now()
         guard let session = projects.session(withID: sessionID),
               let pending = session.pendingCheckoutMove else {
             completion(true)

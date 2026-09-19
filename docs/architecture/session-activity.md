@@ -182,8 +182,8 @@ that with work nobody started.
 
 **But inference is the stopgap here, not the answer — the rollout says it outright.** Codex
 writes `task_started` with the turn's own id whether or not any hook reports it, so
-`CodexTranscriptTurnBoundary` reads the newest boundary off the same tail
-`CodexTranscriptInterruption` used to read, and `noteTurnStartedFromTranscript` admits a turn the
+`CodexTurnBoundaryMonitor` reads lifecycle records through a resumable cursor, and
+`noteTurnStartedFromTranscript` admits a turn the
 CLI opened for itself. That matters beyond the latch accident above: a goal-mode session whose
 *first* turn came from a real prompt has `reportsTurnStarts` set, output is out of the decision
 for good, and **every continuation turn after it would be invisible** — the general case, which
@@ -227,11 +227,25 @@ That reader cannot depend on another terminal repaint. Measured on 5 September 2
 The final repaint had already crossed the PTY, so the output-triggered scan that was meant to
 recover a lost relay was never scheduled again. A running Codex terminal therefore owns one
 FSEvents observer for its validated rollout. It filters sibling files on a utility queue and asks
-the existing capped, single-flight reader only after that exact rollout changes. There is no
+the process-owned, single-flight reader only after that exact rollout changes. There is no
 polling and no session-tree walk in the callback; one live process costs one dormant kernel
-subscription, while actual transcript work remains O(changed). The observer is armed before an
+subscription. Initial hydration walks history in 64 KiB worker passes without publishing stale
+intermediate boundaries; subsequent work is O(appended bytes). The observer is armed before an
 initial read, closing the registration race, and lives between turns because goal mode may write
 its next `task_started` without a hook or user input. Process teardown releases it.
+
+**A live boundary cannot expire behind tool output.** A tail-only scan could miss a goal start
+once a large tool record displaced it, while the 0.5-second debounce could keep postponing the
+read under continuous repaint. On 18 September a goal turn began at 23:04:50, then produced more
+than 200 KiB before an observed worktree move restarted it at 23:05:20. The transcript had no
+completed turn or completed `git worktree add`; the branch survived, the checkout did not.
+Refresh now keeps its first deadline. The cursor preserves the newest boundary across bounded
+passes, skips oversized unrelated records, waits for partial records' newlines, and resets on
+file replacement or truncation. A provider finish still takes priority through the ordinary
+tracker, and checkout following separately fences live-execution evidence even if activity is
+stale. `CodexTurnBoundaryMonitorTests` covers cold hydration, oversized output, partial appends,
+replacement and bounded scanning; its 100 MiB lane is opt-in through
+`THREADING_CODEX_BOUNDARY_STRESS=1`.
 
 **An ending followed by an automatic start is one published activity interval.** The protocol
 still has a real gap: on the measured goal continuation, `Stop` arrived at 13:12:00.931 and the

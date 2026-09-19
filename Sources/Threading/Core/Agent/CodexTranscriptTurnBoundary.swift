@@ -47,63 +47,16 @@ enum CodexTurnBoundary: Equatable, Sendable {
     }
 }
 
-/// Reads the newest lifecycle boundary out of a Codex rollout.
-///
-/// The shared `TranscriptFactReader` makes a quiet-edge refresh one background `stat`, scanning
-/// only when the rollout grew and calling back only when the answer changed. The backwards scan
-/// is capped at one chunk. This path therefore stays O(changed) as both turn count and terminal
-/// output frequency grow; a boundary hidden behind an exceptional record larger than the cap is
-/// left to the ordinary hook rather than turning a UI callback into a whole-transcript read.
+/// Decodes lifecycle boundaries. Live observation uses `CodexTurnBoundaryMonitor`'s resumable
+/// cursor: goal starts have no hook, so losing one behind a large tool record is not recoverable
+/// by a capped tail scan alone.
 @MainActor
 enum CodexTranscriptTurnBoundary {
 
-    // MARK: - Properties
-
-    private static let reader = TranscriptFactReader<CodexTurnBoundary> { url in
-        newestBoundary(at: url)
-    }
-
-    // MARK: - Public Methods
-
-    static func revalidate(
-        at url: URL,
-        completion: @escaping @MainActor @Sendable (CodexTurnBoundary?) -> Void
-    ) {
-        reader.revalidate(at: url, completion: completion)
-    }
-
-    static func forgetAll() {
-        reader.forgetAll()
-    }
-
-    /// Walks back to the first lifecycle record and answers with that one alone.
-    ///
-    /// Stopping at the *first* boundary is the whole rule. Without it a historical interruption
-    /// would remain discoverable underneath a newer active or completed turn and a delayed read
-    /// could stop the wrong work — and, now that starts are admitted too, an old start would be
-    /// discoverable under the turn that already ended it.
-    ///
-    /// An abort whose reason this build does not recognise answers nil rather than falling
-    /// through to the boundary below it: it is still a boundary, so nothing older is current,
-    /// and it is not one this build knows what to do with.
-    nonisolated static func newestBoundary(at url: URL) -> CodexTurnBoundary? {
-        var newest: CodexTurnBoundary?
-
-        JSONLReader.forEachRecordFromEnd(
-            at: url,
-            limit: CodexTurnBoundaryDefaults.scanBytes
-        ) { record in
-            guard let payload = lifecyclePayload(in: record),
-                  let type = payload[CodexTurnBoundaryDefaults.typeKey] as? String,
-                  CodexTurnBoundaryDefaults.boundaryTypes.contains(type) else {
-                return true
-            }
-
-            newest = boundary(inPayload: payload, type: type)
-            return false
-        }
-
-        return newest
+    nonisolated static func isLifecycleBoundary(_ record: [String: Any]) -> Bool {
+        guard let payload = lifecyclePayload(in: record),
+              let type = payload[CodexTurnBoundaryDefaults.typeKey] as? String else { return false }
+        return CodexTurnBoundaryDefaults.boundaryTypes.contains(type)
     }
 
     /// Parses only Codex's structured boundary payloads. Kept visible to focused wire tests.

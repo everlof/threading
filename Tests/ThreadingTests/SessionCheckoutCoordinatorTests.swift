@@ -439,6 +439,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
                 branch: "feature/move",
                 displayName: "sibling"
             ),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
 
@@ -480,6 +481,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let repeated = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: checkout,
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
 
@@ -670,6 +672,67 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
 
     // MARK: - Damping observed execution
 
+    /// A goal continuation may not have reached the activity tracker yet. Its live Git child's
+    /// cwd must queue ownership without restarting the process that is creating that worktree.
+    func testLiveChildCannotMoveAnApparentlyIdleChatBeforeItsTurnBoundary() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = SessionCheckoutCoordinator(
+            projects: store,
+            runtime: AgentRuntime(currentSessionProjection: .projectStore(store)),
+            runtimeSnapshot: { _ in .test(activity: .idle) }
+        )
+        let tracker = SessionExecutionLocusTracker(projects: store)
+        let queued = expectation(description: "live child queued a fenced move")
+        let token = NotificationCenter.default.observe(SessionExecutionDriftDidChange.self) { event in
+            guard event.sessionID == session.id,
+                  case .siblingCheckout(let checkout) = tracker.drift(forSessionID: session.id)
+            else { return }
+            XCTAssertTrue(event.phase.requiresTurnBoundary(after: nil))
+            guard case .queued = coordinator.reconcileObservedExecution(
+                sessionID: session.id, checkout: checkout, phase: event.phase,
+                policy: .allowSameRepository
+            ) else { return XCTFail("Expected a queued move") }
+            queued.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        tracker.observeProcessWorkingDirectories([sibling.path], sessionID: session.id)
+        wait(for: [queued], timeout: 3)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+        XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove?.phase, .pendingBoundary)
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
+
+        let moved = expectation(description: "real turn boundary commits the move")
+        coordinator.finishPendingMove(sessionID: session.id) { succeeded in
+            XCTAssertTrue(succeeded)
+            moved.fulfill()
+        }
+        wait(for: [moved], timeout: 3)
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
+    }
+
+    func testApprovalAfterTheObservedTurnFinishedDoesNotStrandTheInputFence() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+        let phase = SessionExecutionObservationPhase.executing(observedAt: clock)
+        let checkout = try observed(sibling, branch: "feature/move", name: "sibling")
+        guard case .approvalRequired = coordinator.reconcileObservedExecution(
+            sessionID: session.id, checkout: checkout, phase: phase, policy: .alwaysAsk
+        ) else { return XCTFail("Expected the user's confirmation") }
+
+        clock = clock.addingTimeInterval(1)
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        guard case .queued = coordinator.reconcileObservedExecution(
+            sessionID: session.id, checkout: checkout, phase: phase,
+            policy: .alwaysAsk, approval: true
+        ) else { return XCTFail("Expected the approved move") }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+    }
+
     /// The oscillation, reproduced: ownership follows an agent into a sibling, and the reading
     /// taken a moment earlier — against ownership that has since changed — names where it came
     /// from. Measured at 88 committed moves and 89 agent relaunches in 4m34s before this guard.
@@ -684,6 +747,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         _ = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
         XCTAssertEqual(
@@ -696,6 +760,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let back = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(main, branch: "main", name: "main"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
 
@@ -719,6 +784,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         _ = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
         clock = clock.addingTimeInterval(SessionCheckoutDefaults.reversalDwell + 1)
@@ -726,6 +792,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         _ = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(main, branch: "main", name: "main"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
 
@@ -748,6 +815,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         _ = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
         clock = clock.addingTimeInterval(3)
@@ -755,6 +823,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         _ = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(third, branch: "feature/third", name: "third"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
 
@@ -775,6 +844,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         _ = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
         clock = clock.addingTimeInterval(3)
@@ -813,6 +883,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
             _ = coordinator.reconcileObservedExecution(
                 sessionID: session.id,
                 checkout: places[step % 2],
+                phase: .turnFinished,
                 policy: .allowSameRepository
             )
             clock = clock.addingTimeInterval(SessionCheckoutDefaults.reversalDwell + 1)
@@ -824,6 +895,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let after = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: places[0],
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
 
@@ -855,6 +927,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let result = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .turnFinished,
             policy: .allowSameRepository
         )
         guard case .queued(let move) = result else {

@@ -519,6 +519,15 @@ completion receipt. Commit always starts runtime replacement in the destination,
 observed move, because a tool descendant's cwd does not establish the provider root's next-turn
 launch directory.
 
+Live-execution evidence also carries its observation time and requires a turn boundary even
+when the activity snapshot says idle. Codex goal mode can start without a prompt hook; a Git
+child creating a worktree must not cause the provider to be restarted mid-command. The
+coordinator remembers completed boundaries so an observation resolved late, or an approval
+accepted after that turn ended, does not strand the input fence waiting for another turn.
+Stop-origin observations retain their completed-boundary semantics. The regression drives the
+real descendant tracker into the coordinator with a deliberately stale idle snapshot and proves
+that membership changes only after the turn fence.
+
 `ProjectStore.moveSessionsToCheckout` changes membership as one SQLite graph transaction. It
 reuses a project with the same canonical worktree identity or creates the destination project in
 that same transaction, rewrites every affected row position and advances the store generation.

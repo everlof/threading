@@ -7,12 +7,6 @@ import XCTest
 final class CodexTranscriptBoundaryObserverTests: XCTestCase {
 
     @MainActor
-    override func tearDown() async throws {
-        CodexTranscriptTurnBoundary.forgetAll()
-        try await super.tearDown()
-    }
-
-    @MainActor
     func testTranscriptAppendEndsDeclaredTurnWithoutMoreTerminalOutput() throws {
         let fixture = try makeFixture(boundary: .started(turnID: "turn-1"))
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -25,8 +19,9 @@ final class CodexTranscriptBoundaryObserverTests: XCTestCase {
         let armed = expectation(description: "initial rollout boundary was read")
         armed.assertForOverFulfill = false
         let completed = expectation(description: "later rollout completion reached the tracker")
+        let monitor = CodexTurnBoundaryMonitor()
         let observer = CodexTranscriptBoundaryObserver(url: fixture.transcript) {
-            CodexTranscriptTurnBoundary.revalidate(at: fixture.transcript) { boundary in
+            monitor.revalidate(at: fixture.transcript) { boundary in
                 switch boundary {
                 case .started:
                     armed.fulfill()
@@ -60,8 +55,9 @@ final class CodexTranscriptBoundaryObserverTests: XCTestCase {
         tracker.noteTurnStarted(turnID: "turn-1")
 
         let completed = expectation(description: "existing completion was read after arming")
+        let monitor = CodexTurnBoundaryMonitor()
         let observer = CodexTranscriptBoundaryObserver(url: fixture.transcript) {
-            CodexTranscriptTurnBoundary.revalidate(at: fixture.transcript) { boundary in
+            monitor.revalidate(at: fixture.transcript) { boundary in
                 guard case .completed(let turnID) = boundary,
                       tracker.noteTurnFinishedFromTranscript(turnID: turnID) else { return }
                 completed.fulfill()

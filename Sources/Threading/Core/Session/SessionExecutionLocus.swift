@@ -56,6 +56,18 @@ enum SessionExecutionDrift: Equatable, Sendable {
     case unrelated(path: String)
 }
 
+/// A live descendant is positive evidence of execution, even when the activity tracker has
+/// not yet read a hookless goal start. Only a provider finish can waive the next-turn fence.
+enum SessionExecutionObservationPhase: Equatable, Sendable {
+    case executing(observedAt: Date)
+    case turnFinished
+
+    func requiresTurnBoundary(after lastBoundary: Date?) -> Bool {
+        guard case .executing(let observedAt) = self else { return false }
+        return lastBoundary.map { $0 < observedAt } ?? true
+    }
+}
+
 // MARK: - Session Execution Locus Tracker
 
 /// Reconciles what agents report about their working directory against the checkouts that own
@@ -176,6 +188,8 @@ final class SessionExecutionLocusTracker {
         lastReportedPath[report.sessionID] = reported
 
         let sessionID = report.sessionID
+        let phase: SessionExecutionObservationPhase = report.event == .turnFinished
+            ? .turnFinished : .executing(observedAt: Date())
         let resolver = self.resolver
         resolutionQueue.async {
             let reportedCheckout = resolver(reported)
@@ -185,7 +199,8 @@ final class SessionExecutionLocusTracker {
                     reportedCheckout,
                     against: ownedCheckout,
                     reportedPath: reported,
-                    sessionID: sessionID
+                    sessionID: sessionID,
+                    phase: phase
                 )
             }
         }
@@ -197,7 +212,9 @@ final class SessionExecutionLocusTracker {
     /// most `SessionExecutionLocusDefaults.processCandidatesPerSession` paths. Only paths outside
     /// the project's lexical root reach Git resolution. A project may itself be a subdirectory
     /// of its checkout, so resolution still decides whether those paths are truly elsewhere.
-    func observeProcessWorkingDirectories(_ paths: [String], sessionID: SessionID) {
+    func observeProcessWorkingDirectories(
+        _ paths: [String], sessionID: SessionID, observedAt: Date = Date()
+    ) {
         let unique = Array(Set(paths.filter { !$0.isEmpty })).sorted()
         guard !unique.isEmpty,
               let owned = ownedCheckoutPath(
@@ -218,7 +235,7 @@ final class SessionExecutionLocusTracker {
         }
         if candidates.isEmpty {
             classificationsApplied &+= 1
-            applyDrift(.none, sessionID: sessionID)
+            applyDrift(.none, sessionID: sessionID, phase: .executing(observedAt: Date()))
             return
         }
 
@@ -231,7 +248,8 @@ final class SessionExecutionLocusTracker {
                     reported,
                     against: ownedCheckout,
                     signature: signature,
-                    sessionID: sessionID
+                    sessionID: sessionID,
+                    observedAt: observedAt
                 )
             }
         }
@@ -260,7 +278,9 @@ final class SessionExecutionLocusTracker {
         lastProcessPathSignature[sessionID] = nil
         SessionExecutionProcessObserver.shared.forget(sessionID: sessionID)
         guard drifts.removeValue(forKey: sessionID) != nil else { return }
-        NotificationCenter.default.post(SessionExecutionDriftDidChange(sessionID: sessionID))
+        NotificationCenter.default.post(SessionExecutionDriftDidChange(
+            sessionID: sessionID, phase: .executing(observedAt: Date())
+        ))
     }
 
     // MARK: - Private Methods
@@ -290,7 +310,8 @@ final class SessionExecutionLocusTracker {
         _ reported: [ObservedCheckout],
         against owned: ObservedCheckout?,
         signature: String,
-        sessionID: SessionID
+        sessionID: SessionID,
+        observedAt: Date
     ) {
         guard lastProcessPathSignature[sessionID] == signature,
               let owned else { return }
@@ -304,20 +325,24 @@ final class SessionExecutionLocusTracker {
         classificationsApplied &+= 1
         if siblingsByIdentity.isEmpty,
            reported.contains(where: { $0.worktreeIdentity == owned.worktreeIdentity }) {
-            applyDrift(.none, sessionID: sessionID)
+            applyDrift(.none, sessionID: sessionID, phase: .executing(observedAt: observedAt))
             return
         }
         guard siblingsByIdentity.count == 1,
               let checkout = siblingsByIdentity.values.first else { return }
 
-        applyDrift(.siblingCheckout(checkout), sessionID: sessionID)
+        applyDrift(
+            .siblingCheckout(checkout), sessionID: sessionID,
+            phase: .executing(observedAt: observedAt)
+        )
     }
 
     private func apply(
         _ reported: ObservedCheckout?,
         against owned: ObservedCheckout?,
         reportedPath: String,
-        sessionID: SessionID
+        sessionID: SessionID,
+        phase: SessionExecutionObservationPhase
     ) {
         // The report may have been overtaken while the resolution ran, or the session may have
         // gone away entirely. Either way this answer is about a question nobody is asking now.
@@ -334,10 +359,14 @@ final class SessionExecutionLocusTracker {
         }
 
         classificationsApplied &+= 1
-        applyDrift(drift, sessionID: sessionID)
+        applyDrift(drift, sessionID: sessionID, phase: phase)
     }
 
-    private func applyDrift(_ drift: SessionExecutionDrift, sessionID: SessionID) {
+    private func applyDrift(
+        _ drift: SessionExecutionDrift,
+        sessionID: SessionID,
+        phase: SessionExecutionObservationPhase
+    ) {
         if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
             switch drift {
             case .siblingCheckout(let checkout)
@@ -369,7 +398,9 @@ final class SessionExecutionLocusTracker {
         let previous = drifts[sessionID] ?? .none
         guard previous != drift else { return }
         drifts[sessionID] = drift == .none ? nil : drift
-        NotificationCenter.default.post(SessionExecutionDriftDidChange(sessionID: sessionID))
+        NotificationCenter.default.post(SessionExecutionDriftDidChange(
+            sessionID: sessionID, phase: phase
+        ))
 
         guard case .siblingCheckout(let checkout) = drift else { return }
         // Announced rather than acted on. Reconciling ownership means a policy decision, a
@@ -403,6 +434,7 @@ final class SessionExecutionLocusTracker {
 struct SessionExecutionDriftDidChange: AppEvent {
     static let name = Notification.Name("sessionExecutionDriftDidChange")
     let sessionID: SessionID
+    let phase: SessionExecutionObservationPhase
 }
 
 // MARK: - Defaults
@@ -498,6 +530,12 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
         let generation: UInt64
     }
 
+    private struct Observation: Sendable {
+        let request: Request
+        let paths: [String]
+        let observedAt: Date
+    }
+
     private let scanQueue: DispatchQueue
     private let tableReader: TableReader
     private let workingDirectoryReader: WorkingDirectoryReader
@@ -561,15 +599,18 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
         let workingDirectoryReader = self.workingDirectoryReader
 
         scanQueue.async { [self] in
+            let observedAt = Date()
             let snapshot = SessionExecutionProcessSnapshot(table: tableReader())
-            var pathsBySession: [SessionID: (Request, [String])] = [:]
+            var pathsBySession: [SessionID: Observation] = [:]
             pathsBySession.reserveCapacity(requests.count)
             for (sessionID, request) in requests {
                 var seen: Set<String> = []
                 let paths = snapshot.candidateProcessIDs(below: request.rootPID).compactMap {
                     workingDirectoryReader($0)
                 }.filter { seen.insert($0).inserted }
-                pathsBySession[sessionID] = (request, paths)
+                pathsBySession[sessionID] = Observation(
+                    request: request, paths: paths, observedAt: observedAt
+                )
             }
             let completed = pathsBySession
             DispatchQueue.main.async { [self, completed] in
@@ -580,13 +621,14 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
         }
     }
 
-    private func finishScan(_ observations: [SessionID: (Request, [String])]) {
+    private func finishScan(_ observations: [SessionID: Observation]) {
         scanInFlight = false
         for (sessionID, observation) in observations
-        where generations[sessionID, default: 0] == observation.0.generation {
+        where generations[sessionID, default: 0] == observation.request.generation {
             SessionExecutionLocusTracker.shared.observeProcessWorkingDirectories(
-                observation.1,
-                sessionID: sessionID
+                observation.paths,
+                sessionID: sessionID,
+                observedAt: observation.observedAt
             )
         }
         scheduleIfNeeded()
