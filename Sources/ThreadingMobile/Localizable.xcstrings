@@ -4707,23 +4707,6 @@
         }
       }
     },
-    "Hide keyboard" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dölj tangentbordet"
-          }
-        }
-      }
-    },
-    "Hides tool output" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
     "Hide Project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4741,6 +4724,40 @@
         }
       }
     },
+    "Hide keyboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dölj tangentbordet"
+          }
+        }
+      }
+    },
+    "Hides tool output" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "Hide Project" : {
+              "extractionState" : "manual",
+              "localizations" : {
+                "en" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Hide Project"
+                  }
+                },
+                "sv" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Dölj projekt"
+                  }
+                }
+              }
+            },
+            "state" : "translated",
             "value" : "Döljer verktygsutdata"
           }
         }
@@ -7667,23 +7684,6 @@
         }
       }
     },
-    "Projected at reset" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Prognos vid återställning"
-          }
-        }
-      }
-    },
-    "Projected exhaustion" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
     "Project options for %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7701,6 +7701,40 @@
         }
       }
     },
+    "Projected at reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prognos vid återställning"
+          }
+        }
+      }
+    },
+    "Projected exhaustion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "Project options for %@" : {
+              "extractionState" : "manual",
+              "localizations" : {
+                "en" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Project options for %@"
+                  }
+                },
+                "sv" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Projektalternativ för %@"
+                  }
+                }
+              }
+            },
+            "state" : "translated",
             "value" : "Prognostiserad förbrukning"
           }
         }
@@ -9523,41 +9557,41 @@
       "localizations" : {
         "sv" : {
           "stringUnit" : {
+            "Show Hidden Projects" : {
+              "extractionState" : "manual",
+              "localizations" : {
+                "en" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Show Hidden Projects"
+                  }
+                },
+                "sv" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Visa dolda projekt"
+                  }
+                }
+              }
+            },
+            "Show Project" : {
+              "extractionState" : "manual",
+              "localizations" : {
+                "en" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Show Project"
+                  }
+                },
+                "sv" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Visa projekt"
+                  }
+                }
+              }
+            },
             "state" : "translated",
-    "Show Hidden Projects" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show Hidden Projects"
-          }
-        },
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Visa dolda projekt"
-          }
-        }
-      }
-    },
-    "Show Project" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show Project"
-          }
-        },
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Visa projekt"
-          }
-        }
-      }
-    },
             "value" : "Visa färre"
           }
         }
