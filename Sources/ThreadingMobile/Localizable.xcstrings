@@ -9473,6 +9473,40 @@
         }
       }
     },
+    "Show Hidden Projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Hidden Projects"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa dolda projekt"
+          }
+        }
+      }
+    },
+    "Show Project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Project"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa projekt"
+          }
+        }
+      }
+    },
     "Show again" : {
       "extractionState" : "manual",
       "localizations" : {
