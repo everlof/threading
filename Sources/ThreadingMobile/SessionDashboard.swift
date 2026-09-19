@@ -2264,14 +2264,51 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         _ interaction: UIContextMenuInteraction,
         previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
     ) -> UITargetedPreview? {
+        contextMenuPreview()
+    }
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+        contextMenuPreview()
+    }
+
+    private func contextMenuPreview() -> UITargetedPreview? {
         guard let rowConfiguration = self.configuration else { return nil }
+        let theme = rowConfiguration.theme
+        let radius = max(1, theme.panelRadius)
+        // The list's decoration owns the plate and border; neither is inside rowView. UIKit
+        // lifts only the preview, so giving it an opaque panel behind that transparent row
+        // erased the group's border from the first frame of a press. Lift a complete plate.
+        // Snapshot only this viewport-sized row, once per lift/dismissal, never the section.
+        let image = UIGraphicsImageRenderer(bounds: rowView.bounds).image { context in
+            rowView.layer.render(in: context.cgContext)
+        }
+        let plate = UIView(frame: rowView.bounds)
+        plate.backgroundColor = theme.uiPanel
+        plate.layer.cornerRadius = radius
+        plate.layer.cornerCurve = .continuous
+        plate.clipsToBounds = true
+        let content = UIImageView(image: image)
+        content.frame = plate.bounds
+        plate.addSubview(content)
+        let outline = MobileThemeOutlineView(frame: plate.bounds)
+        outline.update(color: theme.uiBorder, radius: radius, width: theme.borderWidth, glow: nil)
+        plate.addSubview(outline)
         let parameters = UIPreviewParameters()
-        parameters.backgroundColor = rowConfiguration.theme.uiPanel
+        parameters.backgroundColor = .clear
         parameters.visiblePath = UIBezierPath(
-            roundedRect: rowView.bounds,
-            cornerRadius: max(1, rowConfiguration.theme.panelRadius)
+            roundedRect: plate.bounds,
+            cornerRadius: radius
         )
-        return UITargetedPreview(view: rowView, parameters: parameters)
+        return UITargetedPreview(
+            view: plate,
+            parameters: parameters,
+            target: UIPreviewTarget(container: contentView, center: rowView.convert(
+                CGPoint(x: rowView.bounds.midX, y: rowView.bounds.midY), to: contentView
+            ))
+        )
     }
 }
 
@@ -2391,6 +2428,61 @@ private final class DashboardPlateDecorationView: UICollectionReusableView {
 }
 
 #if DEBUG
+/// Renders the actual native interaction previews inside the shipping collection host.
+@MainActor
+enum MobileDashboardHighlightProbe {
+    static func capture(theme: RemoteThemePalette, rowIndex: Int) -> [UIImage] {
+        let rows = (0..<3).map { index in
+            DashboardCollectionRow(
+                item: .chat(RemoteSessionSummaryDTO(
+                    id: "highlight:\(index)", title: "Highlighted chat", agentKind: "codex",
+                    surface: .conversation, state: .idle, projectName: "Highlight"
+                )), hasDivider: index > 0, isFirst: index == 0, isLast: index == 2
+            )
+        }
+        let controller = MobileDashboardCollectionViewController(
+            sections: [.init(id: "highlight", kind: .plate,
+                items: rows.map { .row($0.item.id) }, spacingAfter: 0)],
+            theme: theme, bottomContentInset: 0, content: { _ in AnyView(EmptyView()) },
+            rowConfiguration: { id in
+                guard let row = rows.first(where: { $0.item.id == id }) else { return nil }
+                return DashboardUIKitRowConfiguration(row: row, theme: theme,
+                    isArchived: false, isCatalogueLive: true, showsProjectName: false,
+                    activate: {}, swipeAction: nil, contextMenu: { UIMenu(children: []) })
+            }, refresh: {}
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer { window.isHidden = true }
+        guard let collection = controller.view.subviews.first(where: { $0 is UICollectionView })
+                as? UICollectionView,
+              let cell = collection.cellForItem(at: IndexPath(item: rowIndex, section: 0))
+                as? DashboardRowCollectionCell else { return [] }
+        let interaction = UIContextMenuInteraction(delegate: cell)
+        let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            UIMenu(children: [])
+        }
+        return [
+            cell.contextMenuInteraction(interaction,
+                previewForHighlightingMenuWithConfiguration: configuration),
+            cell.contextMenuInteraction(interaction,
+                previewForDismissingMenuWithConfiguration: configuration),
+        ].compactMap { preview in
+            guard let preview else { return nil }
+            preview.view.layoutIfNeeded()
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            return UIGraphicsImageRenderer(bounds: preview.view.bounds, format: format).image {
+                preview.parameters.backgroundColor?.setFill()
+                $0.fill(preview.view.bounds)
+                preview.view.layer.render(in: $0.cgContext)
+            }
+        }
+    }
+}
+
 struct MobileDashboardCollectionPerformanceMetrics: Equatable {
     let snapshotItemCount: Int
     let hostedContentCount: Int
@@ -3020,6 +3112,8 @@ struct SessionDashboard: View {
     @State private var isConfirmingForget = false
     @State private var showsArchived = false
     @State private var showsSnoozed = false
+    @AppStorage("sessionDashboardShowHiddenProjects") private var showsHiddenProjects = false
+    @State private var pendingVisibilityProjectIDs = Set<String>()
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
     @State private var actionError: String?
@@ -3058,6 +3152,9 @@ struct SessionDashboard: View {
         if let run = environment["THREADING_MOBILE_UI_EVIDENCE_RUN"],
            let capture = environment["THREADING_MOBILE_UI_EVIDENCE_ID"],
            let defaults = UserDefaults(suiteName: "threading.mobile.disclosure-evidence.\(run).\(capture)") {
+            _showsHiddenProjects = AppStorage(
+                wrappedValue: capture == "session-dashboard-show-project-custom-dark",
+                "sessionDashboardShowHiddenProjects", store: defaults)
             let disclosure = MobileProjectDisclosureStore(defaults: defaults)
             if capture == "session-dashboard-preview-collapsed-again-custom-dark" {
                 disclosure.setChatPreviewStage(.all, hostID: "demo-mac",
@@ -3113,8 +3210,6 @@ struct SessionDashboard: View {
         } else if let projectName {
             projectScoped = scoped.filter { $0.projectName == projectName }
         } else {
-    @AppStorage("sessionDashboardShowHiddenProjects") private var showsHiddenProjects = false
-    @State private var pendingVisibilityProjectIDs = Set<String>()
             projectScoped = scoped
         }
         let visible = projectScoped.filter {
@@ -3155,9 +3250,6 @@ struct SessionDashboard: View {
                 let projectSessions = sessionsByProject[key] ?? []
                 let projectTerminals = terminalsByProject[key] ?? []
                 let name = projectSessions.first?.projectName ?? projectTerminals.first?.projectName ?? ""
-            _showsHiddenProjects = AppStorage(
-                wrappedValue: capture == "session-dashboard-show-project-custom-dark",
-                "sessionDashboardShowHiddenProjects", store: defaults)
                 return DashboardProjectSection(
                     id: key,
                     projectName: name,
@@ -3381,6 +3473,9 @@ struct SessionDashboard: View {
         case .projectHeader(let key):
             let section = groupedProjects.first { $0.id == key }
             let name = section?.projectName ?? ""
+            let id = section?.sessions.first?.projectID ?? section?.terminals.first?.projectID
+            let catalogue = model.dashboardCatalogue
+            let project = catalogue?.project(id: id, name: name)
             let expanded = projectDisclosure.isExpanded(hostID: model.activeHostID, projectKey: key)
             content = AnyView(DashboardProjectHeader(
                 projectName: name,
@@ -3391,6 +3486,13 @@ struct SessionDashboard: View {
                     if !projectDisclosure.setExpanded(!expanded, hostID: model.activeHostID, projectKey: key) {
                         actionError = MobileL10n.string("The project’s open or closed state could not be saved.")
                     }
+                },
+                isHidden: id.map { catalogue?.hiddenProjectIDs.contains($0) == true }
+                    ?? (project?.isHidden == true),
+                toggleHidden: project.flatMap { project in
+                    guard model.canManageProjectVisibility,
+                          !pendingVisibilityProjectIDs.contains(project.id) else { return nil }
+                    return { toggleProjectVisibility(project) }
                 },
                 startNewSession: model.canManageSessions && !showsArchived
                     ? { startDraft(in: name) }
@@ -3473,9 +3575,6 @@ struct SessionDashboard: View {
             radius: theme.panelRadius
         ))
     }
-            let id = section?.sessions.first?.projectID ?? section?.terminals.first?.projectID
-            let catalogue = model.dashboardCatalogue
-            let project = catalogue?.project(id: id, name: name)
 
     private func dashboardUIKitRowConfiguration(
         _ row: DashboardCollectionRow
@@ -3487,13 +3586,6 @@ struct SessionDashboard: View {
                 theme: theme,
                 isArchived: false,
                 isCatalogueLive: model.dashboardCatalogue?.isLive == true,
-                isHidden: id.map { catalogue?.hiddenProjectIDs.contains($0) == true }
-                    ?? (project?.isHidden == true),
-                toggleHidden: project.flatMap { project in
-                    guard model.canManageProjectVisibility,
-                          !pendingVisibilityProjectIDs.contains(project.id) else { return nil }
-                    return { toggleProjectVisibility(project) }
-                },
                 showsProjectName: projectName == nil,
                 activate: {
                     guard model.navigationPath.last != .terminal(terminal.id) else { return }
@@ -3656,6 +3748,9 @@ struct SessionDashboard: View {
 
     private var dashboardNavigation: some View {
         dashboardContent
+            // Extend only the scrolling viewport through the home-indicator region. The
+            // overlay still uses the safe area, and UIKit adds that region to its scroll inset.
+            .ignoresSafeArea(.container, edges: .bottom)
             .overlay(alignment: .bottom) { dashboardFloatingBar }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -3956,6 +4051,18 @@ struct SessionDashboard: View {
         }
     }
 
+    private func toggleProjectVisibility(_ project: RemoteProjectChoiceDTO) {
+        guard pendingVisibilityProjectIDs.insert(project.id).inserted else { return }
+        Task { @MainActor in
+            defer { pendingVisibilityProjectIDs.remove(project.id) }
+            do {
+                try await model.setProjectHidden(project.isHidden != true, projectID: project.id)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
     private var dashboardMenuDestinations: [MobileDashboardMenuDestination] {
         MobileDashboardMenuDestination.available(
             canManageSessions: model.canManageSessions
@@ -4002,6 +4109,8 @@ struct SessionDashboard: View {
 
         case .sessions:
             Menu {
+                Toggle("Show Hidden Projects", isOn: $showsHiddenProjects)
+                    .accessibilityIdentifier("dashboard.showHiddenProjects")
                 Button {
                     showsArchived = false
                     showsSnoozed.toggle()
@@ -4052,18 +4161,6 @@ struct SessionDashboard: View {
         case .macs:
             Menu {
                 Button {
-    private func toggleProjectVisibility(_ project: RemoteProjectChoiceDTO) {
-        guard pendingVisibilityProjectIDs.insert(project.id).inserted else { return }
-        Task { @MainActor in
-            defer { pendingVisibilityProjectIDs.remove(project.id) }
-            do {
-                try await model.setProjectHidden(project.isHidden != true, projectID: project.id)
-            } catch {
-                actionError = error.localizedDescription
-            }
-        }
-    }
-
                     model.isPairing = true
                 } label: {
                     Label("Pair another Mac", systemImage: "qrcode.viewfinder")
@@ -4109,8 +4206,6 @@ struct SessionDashboard: View {
             guard surface != session.surface else { return }
             surfaceChangeRequest = .init(session: session, surface: surface)
         case .share:
-                Toggle("Show Hidden Projects", isOn: $showsHiddenProjects)
-                    .accessibilityIdentifier("dashboard.showHiddenProjects")
             shareRequest = .init(session: session)
         case .stopSharing:
             mutate(session) { try await model.revokeShares(for: session) }
@@ -4592,6 +4687,8 @@ private struct DashboardProjectHeader: View {
     let title: String
     let isExpanded: Bool
     let toggleExpanded: () -> Void
+    var isHidden = false
+    var toggleHidden: (() -> Void)? = nil
     let startNewSession: (() -> Void)?
     @Environment(\.remoteTheme) private var theme
 
@@ -4634,6 +4731,23 @@ private struct DashboardProjectHeader: View {
             .buttonStyle(.plain)
             .accessibilityHint(MobileL10n.string("Shows this project’s sessions"))
             Spacer(minLength: MobileDesign.Spacing.tight)
+            if let toggleHidden {
+                Menu {
+                    Button(action: toggleHidden) {
+                        Label(
+                            MobileL10n.string(isHidden ? "Show Project" : "Hide Project"),
+                            systemImage: isHidden ? "eye" : "eye.slash"
+                        )
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(theme.secondaryLabel)
+                        .frame(width: MobileDesign.Size.minimumTapTarget,
+                               height: MobileDesign.Size.minimumTapTarget)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(MobileL10n.string("Project options for %@", title))
+            }
             if let startNewSession {
                 NewSessionButton(
                     accessibilityLabel: MobileL10n.string(
@@ -4687,8 +4801,6 @@ enum MobileSessionNavigationTransition {
 
 /// A session row as the long press lifts it.
 ///
-    var isHidden = false
-    var toggleHidden: (() -> Void)? = nil
 /// A row on the shared plate paints no plate of its own, and the system's default preview would
 /// stand a transparent row on `systemBackground` — a white or black platter under an authored
 /// theme, the slab this app keeps off its screens. So the preview restates the plate the row
@@ -4731,23 +4843,6 @@ struct MobileLiftedSessionRow: View {
 
     var body: some View {
         let shape = Self.shape(for: theme)
-            if let toggleHidden {
-                Menu {
-                    Button(action: toggleHidden) {
-                        Label(
-                            MobileL10n.string(isHidden ? "Show Project" : "Hide Project"),
-                            systemImage: isHidden ? "eye" : "eye.slash"
-                        )
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundStyle(theme.secondaryLabel)
-                        .frame(width: MobileDesign.Size.minimumTapTarget,
-                               height: MobileDesign.Size.minimumTapTarget)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel(MobileL10n.string("Project options for %@", title))
-            }
         SessionRow(session: session, isCatalogueLive: isCatalogueLive)
             .frame(width: width)
             .background(theme.panel, in: shape)

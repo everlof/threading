@@ -11,6 +11,11 @@ itself is pre-approved. Localhost is admitted for development, other origins off
 persistent-host, or deny choices. After an action navigates, the new origin is checked before
 any resulting page state is returned.
 
+The paired iPhone's Workspace Browser mirrors Mac-rendered snapshots, including localhost
+pages. Agents use `browser_navigate` with the same local URL they use on the Mac; they do not
+need to expose a development server on the LAN. The iPhone reader is full screen and read-only,
+and the Mac retains navigation, cookies and interaction (see `docs/REMOTE_ACCESS.md`).
+
 Browser traces remain bounded diagnostics returned to the agent. They are not the user's execution
 history. The [Execution Audit](execution-audit.md) records the exact structured browser tool calls,
 results and permission decisions instead; its Browser split embeds this same live controller and

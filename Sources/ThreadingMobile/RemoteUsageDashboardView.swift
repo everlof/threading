@@ -589,6 +589,10 @@ struct RemoteUsageDashboardView: View {
         switch environment[MobileDemoScene.environmentKey].flatMap(MobileDemoFixture.init(rawValue:)) {
         case .usageTotals:
             _scope = State(initialValue: .totals)
+            if let days = environment["THREADING_MOBILE_USAGE_SCROLL_DAYS"].flatMap(Int.init),
+               [7, 30, 90].contains(days) {
+                _overviewDays = State(initialValue: days)
+            }
         case .usageLimitDenseWeek:
             _limitDays = State(initialValue: 7)
         case .usageLimitDenseQuarter:
@@ -623,6 +627,13 @@ struct RemoteUsageDashboardView: View {
                                 .id(MobileUsageSection.consumption)
                         }
                     }
+#if DEBUG
+                    .background {
+                        if isDemo, scope == .totals, model.dashboard != nil {
+                            MobileUsageScrollBenchmark(days: overviewDays)
+                        }
+                    }
+#endif
                     .frame(maxWidth: 720)
                     .padding(.horizontal, MobileDesign.Spacing.inset)
                     .padding(.top, MobileDesign.Spacing.medium)
@@ -1113,46 +1124,12 @@ struct RemoteUsageDashboardView: View {
                     .pickerStyle(.segmented)
                     .fixedSize()
                 }
-                Chart {
-                    ForEach(bands) { band in
-                        let color = seriesColor(band.styleIndex, isOther: band.isOther)
-                        ForEach(band.edges, id: \.at) { edge in
-                            AreaMark(
-                                x: .value("Day", Date(timeIntervalSince1970: edge.at), unit: .day),
-                                yStart: .value("From", edge.lower),
-                                yEnd: .value(metric.title, edge.upper),
-                                series: .value("Provider", band.id)
-                            )
-                            .foregroundStyle(color.opacity(MobileDesign.Chart.bandOpacity))
-                            .interpolationMethod(.monotone)
-                            LineMark(
-                                x: .value("Day", Date(timeIntervalSince1970: edge.at), unit: .day),
-                                y: .value(metric.title, edge.upper),
-                                series: .value("Provider", band.id)
-                            )
-                            .foregroundStyle(color)
-                            .interpolationMethod(.monotone)
-                            .lineStyle(StrokeStyle(
-                                lineWidth: MobileDesign.Chart.bandEdgeWidth,
-                                lineCap: .round,
-                                lineJoin: .round
-                            ))
-                        }
-                    }
-                }
-                .chartLegend(.hidden)
-                .chartXAxis {
-                    AxisMarks(values: dailyTicks(range)) { _ in
-                        AxisGridLine().foregroundStyle(theme.divider)
-                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                            .foregroundStyle(theme.tertiaryLabel)
-                    }
-                }
-                .chartYAxis(.hidden)
-                .frame(height: MobileDesign.Chart.dailyHeight)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Daily \(metric.title.lowercased()) chart")
-                .accessibilityValue(chartSummary(projection))
+                MobileUsageDailyPlot(
+                    bands: bands,
+                    ticks: dailyTicks(range),
+                    metricTitle: metric.title,
+                    summary: chartSummary(projection)
+                ).equatable()
                 HStack(spacing: MobileDesign.Spacing.medium) {
                     ForEach(legend, id: \.title) { entry in
                         UsageChartLegend(entry.title, color: entry.color, symbol: "circle.fill")
@@ -1965,6 +1942,156 @@ struct RemoteUsageDashboardView: View {
     }
 }
 
+/// Prepared paths, one fill and one cumulative top edge per provider. Daily values stay
+/// aligned and the same monotone controls are used for a shared band boundary.
+struct MobileUsageDailyGeometry {
+    struct Band {
+        let fill: Path
+        let line: Path
+        let styleIndex: Int
+        let isOther: Bool
+    }
+    let bands: [Band]
+    let domain: ClosedRange<Date>
+
+    init(bands source: [MobileUsageStackProjection.Band]) {
+        let timestamps = source.flatMap(\.edges).map(\.at).filter(\.isFinite)
+        let calendar = Calendar.current
+        let first = Date(timeIntervalSince1970: timestamps.min() ?? 0)
+        let last = Date(timeIntervalSince1970: timestamps.max() ?? 0)
+        let start = calendar.startOfDay(for: first)
+        let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last))!
+        domain = start...end
+        let span = end.timeIntervalSince(start)
+        let peak = source.flatMap(\.edges).map(\.upper).filter(\.isFinite).max() ?? 0
+        let maximum = peak > 0 ? peak : 1
+        bands = source.map { band in
+            let edges = band.edges.filter { $0.at.isFinite && $0.lower.isFinite && $0.upper.isFinite }
+            let xValues = edges.map { edge -> Double in
+                let day = calendar.dateInterval(of: .day, for: Date(timeIntervalSince1970: edge.at))!
+                return (day.start.timeIntervalSince(start) + day.duration / 2) / span
+            }
+            let upper = zip(xValues, edges).map { CGPoint(x: $0.0, y: 1 - $0.1.upper / maximum) }
+            let lower = zip(xValues, edges).map { CGPoint(x: $0.0, y: 1 - $0.1.lower / maximum) }
+            let line = Self.curve(upper)
+            var fill = line
+            if let last = lower.last {
+                fill.addLine(to: last)
+                Self.appendCurve(lower, reversed: true, to: &fill)
+                fill.closeSubpath()
+            }
+            return Band(fill: fill, line: line, styleIndex: band.styleIndex, isOther: band.isOther)
+        }
+    }
+
+    static func curve(_ points: [CGPoint]) -> Path {
+        var path = Path()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        appendCurve(points, reversed: false, to: &path)
+        return path
+    }
+
+    /// Same bounded monotone tangents as the desktop chart: no invented overshoot at spikes.
+    private static func appendCurve(_ points: [CGPoint], reversed: Bool, to path: inout Path) {
+        guard points.count > 1 else { return }
+        let slopes = zip(points, points.dropFirst()).map { a, b in
+            b.x > a.x ? (b.y - a.y) / (b.x - a.x) : 0
+        }
+        func tangent(_ index: Int) -> CGFloat {
+            if index == 0 { return slopes[0] }
+            if index == points.count - 1 { return slopes[index - 1] }
+            let before = slopes[index - 1], after = slopes[index]
+            return before * after > 0 ? (before + after) / 2 : 0
+        }
+        for step in 0..<(points.count - 1) {
+            let index = reversed ? points.count - 2 - step : step
+            let a = points[index], b = points[index + 1]
+            var left = tangent(index), right = tangent(index + 1)
+            let slope = slopes[index]
+            if slope == 0 {
+                left = 0; right = 0
+            } else {
+                let magnitude = pow(left / slope, 2) + pow(right / slope, 2)
+                if magnitude > 9 {
+                    let scale = 3 / sqrt(magnitude)
+                    left *= scale; right *= scale
+                }
+            }
+            let third = (b.x - a.x) / 3
+            let low = min(a.y, b.y), high = max(a.y, b.y)
+            let first = CGPoint(x: a.x + third, y: min(high, max(low, a.y + left * third)))
+            let second = CGPoint(x: b.x - third, y: min(high, max(low, b.y - right * third)))
+            path.addCurve(to: reversed ? a : b,
+                          control1: reversed ? second : first,
+                          control2: reversed ? first : second)
+        }
+    }
+}
+
+/// A value-only boundary keeps the daily mark graph out of the dashboard's large generic
+/// view/closure tree. Scrolling and unrelated model publications retain the same chart.
+struct MobileUsageDailyPlot: View, Equatable {
+    @Environment(\.remoteTheme) private var theme
+    let bands: [MobileUsageStackProjection.Band]
+    let ticks: [Date]
+    let metricTitle: String
+    let summary: String
+    private let geometry: MobileUsageDailyGeometry
+
+    init(bands: [MobileUsageStackProjection.Band], ticks: [Date], metricTitle: String, summary: String) {
+        self.bands = bands
+        self.ticks = ticks
+        self.metricTitle = metricTitle
+        self.summary = summary
+        geometry = MobileUsageDailyGeometry(bands: bands)
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.bands == rhs.bands && lhs.ticks == rhs.ticks
+            && lhs.metricTitle == rhs.metricTitle && lhs.summary == rhs.summary
+    }
+
+    var body: some View {
+        Chart {}
+        .chartXScale(domain: geometry.domain)
+        .chartYScale(domain: 0...1)
+        .chartPlotStyle { plot in
+            plot.overlay {
+                Canvas { context, size in
+                    let transform = CGAffineTransform(scaleX: size.width, y: size.height)
+                    for band in geometry.bands {
+                        let color = seriesColor(band.styleIndex, isOther: band.isOther)
+                        context.fill(band.fill.applying(transform),
+                                     with: .color(color.opacity(MobileDesign.Chart.bandOpacity)))
+                        context.stroke(band.line.applying(transform), with: .color(color),
+                                       style: StrokeStyle(lineWidth: MobileDesign.Chart.bandEdgeWidth,
+                                                          lineCap: .round, lineJoin: .round))
+                    }
+                }
+                .allowsHitTesting(false)
+            }.clipped()
+        }
+        .chartLegend(.hidden)
+        .chartXAxis {
+            AxisMarks(values: ticks) { _ in
+                AxisGridLine().foregroundStyle(theme.divider)
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    .foregroundStyle(theme.tertiaryLabel)
+            }
+        }
+        .chartYAxis(.hidden)
+        .frame(height: MobileDesign.Chart.dailyHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Daily \(metricTitle.lowercased()) chart")
+        .accessibilityValue(summary)
+    }
+
+    private func seriesColor(_ index: Int, isOther: Bool) -> Color {
+        isOther ? theme.tertiaryLabel : theme.categorical(index)
+    }
+}
+
 /// Unit plot coordinates keep resize independent of the source history. Disjoint provider
 /// windows are separate paths, and every fill closes on zero rather than on another window.
 struct MobileUsageLimitLineGeometry {
@@ -2639,7 +2766,7 @@ enum RemoteUsageDemo {
             reasoning: tokens.reasoning - codexTokens.reasoning
         )
         let totalCost = Double(days) * 86.42
-        let providers = [
+        var providers = [
             RemoteUsageProviderDTO(
                 id: "direct|codex",
                 name: "Codex",
@@ -2657,6 +2784,25 @@ enum RemoteUsageDemo {
                 styleIndex: 1
             ),
         ]
+        var benchmarkBreakdowns: [RemoteUsageBreakdownDTO] = []
+#if DEBUG
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_USAGE_SCROLL_SECONDS"] != nil {
+            providers.append(.init(
+                id: "local|ollama", name: "ollama", tokens: .init(
+                    uncachedInput: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0
+                ), costUSD: 0, records: 0, styleIndex: 2
+            ))
+            // Exercise the wire's full 64-row page as well as the visible daily chart.
+            benchmarkBreakdowns = [.init(
+                kind: .models,
+                rows: (0..<64).map { index in
+                    .init(title: "Model \(index + 1)", tokens: tokens.processed / 64,
+                          costUSD: totalCost / 64, records: days)
+                },
+                omittedRowCount: 0, omittedTokens: 0, omittedCostUSD: 0, omittedRecords: 0
+            )]
+        }
+#endif
         let costMetric = metric(days: days, providers: providers, cost: true)
         let tokenMetric = metric(days: days, providers: providers, cost: false)
         return RemoteUsageRangeDTO(
@@ -2674,7 +2820,7 @@ enum RemoteUsageDemo {
             activeDayCount: days,
             costMetric: costMetric,
             tokenMetric: tokenMetric,
-            breakdowns: []
+            breakdowns: benchmarkBreakdowns
         )
     }
 

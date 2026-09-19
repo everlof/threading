@@ -192,6 +192,13 @@ guest receives 403 and never sees the feature identifier; a revoked bearer follo
 401 path. The bridge omits raw transcript cells, filesystem paths, provider credentials, credit
 identity and the raw history journal.
 
+The phone's daily cost/token chart also uses Swift Charts only for axes, with one Canvas for
+prepared provider paths. Each band keeps its measured cumulative edges and the desktop chart's
+bounded monotone tangents; zero-cost providers, fractional-dollar ranges, and the VoiceOver
+summary survive this boundary. The equatable plot receives values rather than closing over the
+whole dashboard. This removes the per-point AreaMark/LineMark graph (720 marks at four providers
+× 90 days) when the lazy sheet mounts or remounts the chart.
+
 The phone's limit chart uses Swift Charts for axes and a single clipped Canvas for the marks.
 Its immutable geometry keeps each observed window in a separate path, closes every area on zero,
 and never joins or stacks across a reset. Native marks per observation were unnecessary SwiftUI
@@ -765,3 +772,30 @@ still alive when the next file opened.
   feature and route authorization, reset mutation replay, URL construction and response ceilings.
 - `RemoteUsageDashboardTests`: deterministic mobile range/chart budgets, fleet grouping/status,
   plus positive, zero and unavailable banked-reset states.
+
+### iPhone Totals scroll workload
+
+`scripts/profile_threading.sh ios-usage-scroll-stress 8 30 booted neo-brutalism`
+opens the shipping Usage → Totals sheet, with its actual native scroll view, daily bands,
+metric carousel, and themed cards. The opt-in Debug fixture adds the zero-cost local provider
+seen in the reported workload and a complete 64-row breakdown page. Run 30 days for the usual
+case and 90 days for the range ceiling; the wire bounds daily series at four and breakdowns at
+64 rows. The scroll callback must not reconstruct chart marks proportional to those points.
+The surface remains host-owned; provider identity, amounts, range/metric selection and native
+scroll behavior remain exact.
+
+Append `native` with a duration of at least 20 seconds to measure real finger input, for example
+`scripts/profile_threading.sh ios-usage-scroll-stress 20 90 booted neo-brutalism native`.
+That mode uses `idb` on an iPhone-sized simulator to swipe over the chart in both directions;
+it requires observed native tracking/deceleration frames. Work timings describe only the
+programmatic mode; native mode records frame gaps and actual travel, then the harness restores
+the top for the screenshot. The two modes intentionally distinguish offset updates from touch
+recognition and momentum.
+
+The optimized Debug build measures three unprofiled down-and-back passes, excluding a two-second
+sheet/bootstrap warmup. It reports work p50/p95, frame-gap p95/max, slow-frame count, travel and
+return-to-top error. A separate pass supplies a CPU stack sample and a shell screenshot, so
+sampling overhead does not enter the timing runs. Failure to scroll or return to the top fails
+the command. Simulator timings diagnose regressions, not physical-device frame rates. The
+`THREADING_MOBILE_USAGE_SCROLL_SECONDS` and `THREADING_MOBILE_USAGE_SCROLL_DAYS` launch variables
+also allow a development build on a phone to drive the same fixture.

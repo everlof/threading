@@ -64,6 +64,7 @@ enum MobileDemoScene: Equatable {
     /// One standalone project-terminal opening phase, held without starting any operation.
     case projectTerminalOpening(MobileProjectTerminalOpeningFixture)
     case browserPrivate
+    case browserPreview
     case attachments
     case universalSearch
     /// One attachment preview. The kind is whatever followed `attachment-detail-`.
@@ -153,6 +154,7 @@ extension MobileDemoScene {
         case "themed-dialog-confirmation": return .themedDialogConfirmation
         case let id where id.hasPrefix("review"):
             return .review(showsAllFiles: id.contains("files"))
+        case "browser-preview": return .browserPreview
         case "browser-private": return .browserPrivate
         case "attachments": return .attachments
         case "universal-search": return .universalSearch
@@ -297,6 +299,7 @@ enum MobileDemoFixture: String, CaseIterable {
 
     /// The session workspace and what it opens.
     case workspace = "workspace"
+    case browserPreview = "browser-preview"
     case browserPrivate = "browser-private"
     case attachments = "attachments"
     case universalSearch = "universal-search"
@@ -614,6 +617,16 @@ struct RootView: View {
             NavigationStack {
                 ProjectTerminalDetailView(evidenceFixture: openingFixture)
             }
+        case .browserPreview:
+            SessionWorkspaceView(
+                session: Self.workspaceDemoSession,
+                client: Self.workspaceDemoClient,
+                activity: workspaceDemoActivity,
+                initialWorkspace: Self.browserPreviewDemoSnapshot,
+                initialDestination: .browserTab(id: "browser-localhost"),
+                loadsRemotely: false,
+                initialBrowserPreview: Self.browserPreviewDemoImage
+            )
         case .browserPrivate:
             NavigationStack {
                 RemoteBrowserFollowView(
@@ -870,6 +883,38 @@ struct RootView: View {
         ],
         latestActivityID: "workspace-demo-browser"
     )
+
+    private static let browserPreviewDemoSnapshot = RemoteWorkspaceDTO(browserTabs: [
+        RemoteBrowserTabDTO(
+            id: "browser-localhost",
+            title: "Local development preview",
+            displayURL: "http://localhost:3000",
+            isActive: true,
+            isPrivate: false,
+            canPreview: true
+        ),
+    ])
+
+    /// A deterministic page-shaped Mac capture. Saturated edges expose accidental insets.
+    private static let browserPreviewDemoImage: UIImage = {
+        let size = CGSize(width: 600, height: 900)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: size.width, height: 180))
+            let title = "Local development"
+            title.draw(at: CGPoint(x: 24, y: 64), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 36), .foregroundColor: UIColor.white,
+            ])
+            for row in 0..<8 {
+                UIColor(white: 0.9, alpha: 1).setFill()
+                context.fill(CGRect(x: 24, y: 220 + row * 70, width: 552, height: 40))
+            }
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 860, width: size.width, height: 40))
+        }
+    }()
 
     private static let browserDemoSnapshot = RemoteWorkspaceDTO(
         browserTabs: [

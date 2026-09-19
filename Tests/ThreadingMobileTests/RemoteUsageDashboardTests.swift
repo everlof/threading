@@ -428,6 +428,87 @@ final class RemoteUsageDashboardTests: XCTestCase {
 
 @MainActor
 final class MobileUsageChartRenderingTests: XCTestCase {
+    func testDailyGeometryKeepsCumulativeReadingsAndFractionalCosts() {
+        let series = [[0.01, 0.09, 0.01], [0.03, 0.0, 0.06]].enumerated().map { index, values in
+            RemoteUsageChartSeriesDTO(
+                id: "\(index)", title: nil, isOther: false, styleIndex: index,
+                points: values.enumerated().map { day, value in
+                    .init(at: Double(day) * 86_400, value: value)
+                }
+            )
+        }
+        let geometry = MobileUsageDailyGeometry(bands: MobileUsageStackProjection.bands(for: series))
+        XCTAssertEqual(geometry.bands.count, 2)
+        for (band, expected) in zip(geometry.bands, [[0.01, 0.09, 0.01], [0.04, 0.09, 0.07]]) {
+            var readings: [CGFloat] = []
+            band.line.forEach { element in
+                switch element {
+                case .move(let point): readings.append(point.y)
+                case .curve(let point, let first, let second):
+                    readings.append(point.y)
+                    XCTAssertTrue((0...1).contains(first.y))
+                    XCTAssertTrue((0...1).contains(second.y))
+                default: XCTFail("Daily curves must preserve each measured point")
+                }
+            }
+            XCTAssertEqual(readings.count, expected.count)
+            for (actual, value) in zip(readings, expected) {
+                XCTAssertEqual(actual, 1 - value / 0.09, accuracy: 0.000_001)
+            }
+            XCTAssertGreaterThanOrEqual(band.fill.boundingRect.minY, 0)
+            XCTAssertLessThanOrEqual(band.fill.boundingRect.maxY, 1)
+        }
+    }
+
+    func testDailyGeometryHandlesEmptyAndZeroCostProviders() {
+        XCTAssertTrue(MobileUsageDailyGeometry(bands: []).bands.isEmpty)
+        let band = MobileUsageStackProjection.Band(
+            id: "local", title: "Local", isOther: false, styleIndex: 2,
+            edges: (0..<90).map { .init(at: Double($0) * 86_400, lower: 0, upper: 0) }
+        )
+        let geometry = MobileUsageDailyGeometry(bands: [band])
+        XCTAssertEqual(geometry.bands.count, 1)
+        XCTAssertEqual(geometry.bands[0].line.boundingRect.minY, 1)
+        XCTAssertEqual(geometry.bands[0].line.boundingRect.maxY, 1)
+    }
+
+    /// The maximum daily chart is four aligned providers × 90 days. Measure the actual
+    /// production plot mounting and rendering; manufacture DTOs outside the timed operation.
+    func testDailyChartMountPerformance() throws {
+        let start = 1_770_000_000.0
+        let series = (0..<4).map { provider in
+            RemoteUsageChartSeriesDTO(
+                id: "provider-\(provider)", title: "Provider \(provider)", isOther: false,
+                styleIndex: provider,
+                points: (0..<90).map { day in
+                    .init(at: start + Double(day) * 86_400,
+                          value: Double((day * 7 + provider * 3) % 23))
+                }
+            )
+        }
+        let bands = MobileUsageStackProjection.bands(for: series)
+        var durations: [Double] = []
+        for _ in 0..<5 {
+            let plot = MobileUsageDailyPlot(bands: bands, ticks: [], metricTitle: "Cost", summary: "Fixture")
+            let host = UIHostingController(rootView: plot)
+            let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+            window.frame = CGRect(x: 0, y: 0, width: 402, height: 240)
+            let began = CACurrentMediaTime()
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            window.layoutIfNeeded()
+            let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+            _ = renderer.image { window.layer.render(in: $0.cgContext) }
+            durations.append((CACurrentMediaTime() - began) * 1_000)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        let warm = durations.dropFirst().sorted()
+        print("USAGE_DAILY_MOUNT points=360 median_ms=\((warm[1] + warm[2]) / 2) max_ms=\(warm.last!) cold_ms=\(durations[0])")
+        XCTAssertLessThan(warm.last!, 2_000, "daily chart mount must remain bounded")
+    }
+
     /// The wire allows 280 observations and 118 resets. Weekly history normally contains
     /// 2–13 segments; stress uses 119, still inside that same transport envelope. Preparation
     /// is outside the timer; this measures the shipping chart's mount, layout and raster.

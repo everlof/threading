@@ -3207,9 +3207,12 @@ sheet; large movies are prepared from the same bounded stream, and the temporary
 removed when the sheet closes. If an agent opens a
 page, Threading does not pull you away from the chat. The account
 disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
-read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
+full-screen, full-width read-only follow view of the Mac tab. Close returns to Workspace. It
+follows the active Mac tab until you pick a specific tab from the menu. The Mac still owns
+navigation and interaction, and private
 tabs never send a preview. The picture is taken on the Mac, so a page only the Mac can reach, such
-as a dev server on its own localhost, shows on the phone like any other. The Workspace is
+as a dev server on its own localhost, shows on the phone like any other. Ask the agent to open
+its local URL using `browser_navigate`; no LAN address is needed for this preview. The Workspace is
 available only to a paired owner device, not one-chat
 guest links. Attachment files are still fetched only when you choose one, and only if the file
 remains inside that session's checkout.
@@ -5811,12 +5814,12 @@ shortcuts in the palette or **Settings → Keyboard**. **Browser** reveals an ex
 Choose **Hide Project** from a project's menu to remove it from the native sidebar. Its chats and
 running work stay intact. The eye button beside mute toggles **Show Hidden Projects**; while shown,
 use **Show Project** on its menu to restore it permanently. These actions also have palette commands.
+On iPhone, use the **…** beside a project heading for **Hide Project** or **Show Project**.
+Under the dashboard’s **… → Sessions**, toggle **Show Hidden Projects** to include them again.
+Project visibility is shared with the Mac; the Show Hidden Projects display toggle is local to
+each device. Direct chat links and search remain available while a project is hidden.
 In **Settings → General → Sessions**, enable **Unhide projects when writing in their chats** to
 restore a hidden project when you type in one of its chats (off by default).
 
 The sidebar footer keeps **Settings** on the left and the icon-only **Triggers**, mute and
 hidden-project controls on the right.
-On iPhone, use the **…** beside a project heading for **Hide Project** or **Show Project**.
-Under the dashboard’s **… → Sessions**, toggle **Show Hidden Projects** to include them again.
-Project visibility is shared with the Mac; the Show Hidden Projects display toggle is local to
-each device. Direct chat links and search remain available while a project is hidden.

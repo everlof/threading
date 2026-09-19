@@ -1467,6 +1467,12 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
     /// pasteboard exempt from the "allow paste" prompt.
     override func paste(_ sender: Any?) {
         if pasteFiles() { return }
+        pasteText(sender)
+    }
+
+    /// Keeps native insertion separate from attachment routing so hosted tests can observe
+    /// the handoff without reading the person's clipboard or opening a system permission alert.
+    func pasteText(_ sender: Any?) {
         super.paste(sender)
     }
 

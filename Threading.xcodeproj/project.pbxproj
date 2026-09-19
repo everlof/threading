@@ -516,6 +516,7 @@
 				ThreadingMobile/MobileTerminalPresentation.swift,
 				ThreadingMobile/MobileTerminalWireFixture.swift,
 				ThreadingMobile/MobileTerminalWirePerformanceProbe.swift,
+				ThreadingMobile/MobileUsageScrollBenchmark.swift,
 				ThreadingMobile/MobileThemeCacheStore.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileThemedPopoverChrome.swift,

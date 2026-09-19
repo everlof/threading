@@ -169,6 +169,8 @@ final class AppSettingDefinitionTests: XCTestCase {
                 valueType: .boolean
             ),
             .previewsSidebarChats: .init(key: "previewsSidebarChats", valueType: .boolean),
+            .showsHiddenProjects: .init(key: "showsHiddenProjects", valueType: .boolean),
+            .unhidesProjectsOnWriting: .init(key: "unhidesProjectsOnWriting", valueType: .boolean),
             .nativeSidebarGroupByFact: .init(
                 key: "nativeSidebarGroupByFact",
                 valueType: .string
@@ -483,9 +485,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 90)
+        XCTAssertEqual(authoredRows.count, 91)
 #else
-        XCTAssertEqual(authoredRows.count, 89)
+        XCTAssertEqual(authoredRows.count, 90)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -528,7 +530,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Scrolling in new Claude terminals", "Report Codex turn boundaries",
             "Skip Codex hook review", "Updates you receive",
             "Check for updates automatically",
-            "Keep this Mac awake while agents work"
+            "Keep this Mac awake while agents work",
+            "Unhide projects when writing in their chats"
         ])
         XCTAssertEqual(actual["keyboard"], [
             "When writing a prompt, press Return to", "Reset Shortcuts"

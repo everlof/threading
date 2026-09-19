@@ -1,5 +1,6 @@
 import ThreadingRemoteKit
 import SwiftUI
+import UIKit
 
 /// The session-scoped surfaces that complement its primary conversation or terminal.
 ///
@@ -73,6 +74,14 @@ struct SessionWorkspaceView: View {
     @Environment(\.remoteTheme) private var theme
     @State private var workspace: RemoteWorkspaceDTO?
     @State private var path: [SessionWorkspaceRoute]
+    @State private var browserPresentation: BrowserPresentation?
+
+    private struct BrowserPresentation: Identifiable {
+        let tabID: String?
+        var id: String { tabID ?? "active-browser" }
+    }
+    private let loadsRemotely: Bool
+    private let initialBrowserPreview: UIImage?
     /// Whether the Mac advertised `RemoteRESTFeature.attachmentThumbnails`. Carried in rather
     /// than read from the model, because the drawer is hosted outside SwiftUI's environment.
     private let offersAttachmentThumbnails: Bool
@@ -86,28 +95,43 @@ struct SessionWorkspaceView: View {
         initialWorkspace: RemoteWorkspaceDTO? = nil,
         initialDestination: RemoteNotificationDestinationDTO? = nil,
         offersAttachmentThumbnails: Bool = false,
-        offersAttachmentVideoStreaming: Bool = false
+        offersAttachmentVideoStreaming: Bool = false,
+        loadsRemotely: Bool = true,
+        initialBrowserPreview: UIImage? = nil
     ) {
+        self.loadsRemotely = loadsRemotely
+        self.initialBrowserPreview = initialBrowserPreview
         self.session = session
         self.client = client
         self.offersAttachmentThumbnails = offersAttachmentThumbnails
         self.offersAttachmentVideoStreaming = offersAttachmentVideoStreaming
         _activity = ObservedObject(wrappedValue: activity)
         _workspace = State(initialValue: initialWorkspace)
-        _path = State(initialValue: SessionWorkspaceRoute.notificationDestination(
-            initialDestination
-        ).map { [$0] } ?? [])
+        let destination = SessionWorkspaceRoute.notificationDestination(initialDestination)
+        if case .browser(let tabID) = destination {
+            _path = State(initialValue: [])
+            _browserPresentation = State(initialValue: BrowserPresentation(tabID: tabID))
+        } else {
+            _path = State(initialValue: destination.map { [$0] } ?? [])
+            _browserPresentation = State(initialValue: nil)
+        }
     }
 
     var body: some View {
         NavigationStack(path: $path) {
             List(SessionWorkspaceItem.allCases) { item in
-                NavigationLink(value: item.route) {
-                    SessionWorkspaceItemRow(
-                        item: item,
-                        workspace: workspace,
-                        hasUnseenActivity: item == .browser && activity.hasUnseenBrowser
-                    )
+                Group {
+                    if item == .browser {
+                        Button {
+                            browserPresentation = BrowserPresentation(tabID: nil)
+                        } label: {
+                            workspaceRow(item)
+                        }
+                    } else {
+                        NavigationLink(value: item.route) {
+                            workspaceRow(item)
+                        }
+                    }
                 }
                 .themedSettingsRow(theme)
             }
@@ -132,9 +156,33 @@ struct SessionWorkspaceView: View {
             }
         }
         .background(theme.ground)
+        .fullScreenCover(item: $browserPresentation) { presentation in
+            NavigationStack {
+                RemoteBrowserFollowView(
+                    session: session,
+                    client: client,
+                    activity: activity,
+                    initialTabID: presentation.tabID,
+                    initialWorkspace: workspace ?? RemoteWorkspaceDTO(browserTabs: []),
+                    initialPreview: initialBrowserPreview,
+                    loadsRemotely: loadsRemotely,
+                    showsCloseButton: true
+                )
+            }
+            .mobileTheme(theme)
+        }
         .task(id: activity.changeSequence) {
+            guard loadsRemotely else { return }
             await refreshWorkspace()
         }
+    }
+
+    private func workspaceRow(_ item: SessionWorkspaceItem) -> some View {
+        SessionWorkspaceItemRow(
+            item: item,
+            workspace: workspace,
+            hasUnseenActivity: item == .browser && activity.hasUnseenBrowser
+        )
     }
 
     @ViewBuilder

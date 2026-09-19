@@ -3504,7 +3504,9 @@ enum MCPTools {
         it waits for the full load event; wait_until can return at commit or \
         DOMContentLoaded for streaming or resource-heavy pages. It reports the current \
         title, address, and semantic snapshot when available. Use this before the other \
-        browser tools to put the page on screen.
+        browser tools to put the page on screen. A paired iPhone can view this tab in \
+        Workspace > Browser through Mac-rendered snapshots, including localhost pages; \
+        no LAN address or publicly exposed development server is needed for that preview.
         """,
       inputSchema: MCPInputSchema(
         properties: [

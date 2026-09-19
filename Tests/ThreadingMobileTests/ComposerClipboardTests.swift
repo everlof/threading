@@ -527,7 +527,7 @@ final class ComposerTextViewPasteTests: XCTestCase {
     }
 
     func testAnUnclaimedPasteIsLeftToTheTextView() {
-        let textView = IntrinsicTextView()
+        let textView = PasteRoutingTextView()
         var asked = 0
         textView.pasteFiles = {
             asked += 1
@@ -537,6 +537,15 @@ final class ComposerTextViewPasteTests: XCTestCase {
         textView.paste(nil)
 
         XCTAssertEqual(asked, 1, "text keeps the text view's own paste, insertion point and all")
+        XCTAssertEqual(textView.textPasteCount, 1)
+    }
+
+    private final class PasteRoutingTextView: IntrinsicTextView {
+        var textPasteCount = 0
+
+        override func pasteText(_ sender: Any?) {
+            textPasteCount += 1
+        }
     }
 
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {

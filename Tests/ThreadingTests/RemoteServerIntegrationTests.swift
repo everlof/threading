@@ -4966,6 +4966,10 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
         store.renameSession(id: sessionID, to: title)
     }
 
+    func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
+        store.setProjectHidden(hidden, projectID: projectID)
+    }
+
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult {
         pinnedMutations.append(PinnedMutation(sessionID: sessionID, isPinned: pinned))
         if let pinnedMutationResultOverride { return pinnedMutationResultOverride }
@@ -5029,10 +5033,6 @@ private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
     private let appSettings: AppSettings
     private(set) var appThemeIDs: [AppThemeID] = []
     private(set) var appSettingMutations: [AppSettingMutation] = []
-    func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
-        store.setProjectHidden(hidden, projectID: projectID)
-    }
-
     var appliesAppThemesToHost = false
 
     init(appSettings: AppSettings) {

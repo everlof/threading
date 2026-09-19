@@ -818,7 +818,12 @@ asking costs the person the file.
 When an agent opens or navigates a browser
 tab, the phone never changes screens: the account disc takes one quiet breath (a scale phase,
 since a brand mark is not a symbol and takes no symbol effect) and an unread
-dot. Opening **Browser** follows the
+dot. Opening **Browser** presents a full-screen reader above the Workspace drawer, including
+when opened from a browser notification. The preview fills the available width without card
+padding; Close returns to Workspace. This remains a host-only surface: Threading owns tab
+identity, privacy, capture authorization and navigation, and the remote theme supplies chrome.
+The reader follows the active Mac tab until the user explicitly selects a tab. It retains one
+bounded preview, with no new polling or page-sized view tree. Browser follows the
 Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
 run only on the Mac and merely refresh an already visible follow view. The pixels are the Mac's
 own, so a page the phone could never reach, such as a dev server on the Mac's localhost or a host

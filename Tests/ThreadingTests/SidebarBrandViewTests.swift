@@ -588,15 +588,15 @@ final class SidebarBrandViewTests: XCTestCase {
         let footer = try XCTUnwrap(ancestor(of: settings, as: PaneFooterView.self))
         let triggers = try XCTUnwrap(
             descendants(of: sidebar.view)
-                .compactMap { $0 as? ThemedButton }
-                .first { $0.title == L10n.string("Triggers") },
-            "the footer has no titled Triggers destination"
+                .compactMap { $0 as? ThemedIconButton }
+                .first { $0.accessibilityTitle() == L10n.string("Triggers") },
+            "the footer has no accessible Triggers destination"
         )
         XCTAssertEqual(footer, ancestor(of: triggers, as: PaneFooterView.self))
-        XCTAssertLessThan(
+        XCTAssertGreaterThanOrEqual(
             footer.convert(triggers.frame, from: triggers.superview).minX,
-            footer.convert(settings.frame, from: settings.superview).minX,
-            "global destinations no longer read from the footer's leading edge"
+            footer.convert(settings.frame, from: settings.superview).maxX,
+            "the trailing icon actions must leave the leading Settings destination clear"
         )
     }
 
@@ -621,7 +621,8 @@ final class SidebarBrandViewTests: XCTestCase {
         )
 
         let settingsButton = try XCTUnwrap(buttons.first { $0.title == L10n.string("Settings") })
-        XCTAssertNotNil(buttons.first { $0.title == L10n.string("Triggers") })
+        XCTAssertNotNil(descendants(of: sidebar.view).compactMap { $0 as? ThemedIconButton }
+            .first { $0.accessibilityTitle() == L10n.string("Triggers") })
         let footer = try XCTUnwrap(ancestor(of: settingsButton, as: PaneFooterView.self))
         XCTAssertFalse(footer.isHidden)
         XCTAssertEqual(
@@ -650,7 +651,7 @@ final class SidebarBrandViewTests: XCTestCase {
         let firstDestination = try XCTUnwrap(
             descendants(of: sidebar.view)
                 .compactMap { $0 as? ThemedButton }
-                .first { $0.title == L10n.string("Triggers") }
+                .first { $0.title == L10n.string("Settings") }
         )
 
         let brandInk = sidebar.view.convert(brand.bounds, from: brand).minX

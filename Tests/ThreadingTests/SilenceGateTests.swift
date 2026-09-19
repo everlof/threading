@@ -361,7 +361,7 @@ final class SilenceGateFooterTests: XCTestCase {
 
     // MARK: - Where It Is
 
-    func testTheGateSitsInTheFooterBandAtItsTrailingEdge() throws {
+    func testTheGateSitsInTheFooterBandsTrailingControls() throws {
         AppSettings.shared.silencesAllSounds = false
         let sidebar = makeSidebar()
         let button = try XCTUnwrap(gateButton(in: sidebar), "the footer carries no silence gate")
@@ -371,10 +371,14 @@ final class SilenceGateFooterTests: XCTestCase {
             button.isDescendant(of: band),
             "the gate is somewhere in the sidebar but not in the band that states its margins"
         )
-        // Trailing: past the middle of the band, and its ink on the band's own stated margin.
+        // The hidden-projects toggle now follows mute. Both remain in the trailing run,
+        // and the final control's ink keeps the band's stated margin.
         XCTAssertGreaterThan(button.frame.midX, band.bounds.midX)
+        let hiddenProjects = try XCTUnwrap(band.subviews.compactMap { $0 as? ThemedIconButton }
+            .first { $0.accessibilityIdentifier() == "sidebar.show-hidden-projects" })
+        XCTAssertGreaterThanOrEqual(hiddenProjects.frame.minX, button.frame.maxX)
         XCTAssertEqual(
-            button.frame.maxX - button.opticalHorizontalInset,
+            hiddenProjects.frame.maxX - hiddenProjects.opticalHorizontalInset,
             band.contentGuide.frame.maxX - Design.Spacing.inset,
             accuracy: 0.5
         )

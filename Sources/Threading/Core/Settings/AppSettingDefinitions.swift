@@ -950,7 +950,7 @@ enum AppSettingDefinitions {
     static let unhidesProjectsOnWriting = AppSettingDescriptor<Bool>(
         identity: .unhidesProjectsOnWriting, persistenceKey: "unhidesProjectsOnWriting",
         absence: .falseValue,
-        presentations: [row("general", 0, "Sessions", "Unhide projects when writing in their chats",
+        presentations: [row("general", 37, "Sessions", "Unhide projects when writing in their chats",
                             ["hidden projects", "show hidden", "auto unhide"])]
     )
 
@@ -1414,7 +1414,7 @@ enum AppSettingDefinitions {
         persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
         absence: .registered(false),
         presentations: [row(
-            "general", 33, "Power", "Keep this Mac awake while agents work",
+            "general", 36, "Power", "Keep this Mac awake while agents work",
             ["sleep", "awake", "lid", "battery", "energy", "active turn"]
         )]
     )

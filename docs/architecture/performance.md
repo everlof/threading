@@ -5452,3 +5452,37 @@ The fixture attaches its window to the active `UIWindowScene` and asserts a real
 a legacy unattached window exercised echo delivery but never drew. Diagnostic-contract generation
 and its five tests, the main-actor latency gate and theme boundary gate passed. These checks do
 not replace installing updated phone/Mac builds and collecting a fresh physical-device sample.
+
+### iPhone Usage → Totals scroll, 2026-09-19
+
+The reported Neo Brutalism sheet now has a production scroll fixture through
+`profile_threading.sh ios-usage-scroll-stress` (see `usage-dashboard.md`). It covers 30/90 daily
+points per provider, a zero-cost local provider and a complete 64-row breakdown, with both
+programmatic and native-finger paths. Three timing passes run without `sample`; a fourth is
+sampled separately. All runs use the actual sheet, theme, chart and scroll owner.
+
+On iPhone 17 Pro / iOS 26.5 Simulator, optimized Debug, the original 30/90-day programmatic
+passes already had p95 frame gaps around 16.7 ms and no frames over 33.3 ms. Native 90-day
+passes were also steady after initial simulator/input bootstrap. The first diagnostic native
+run had a 1.26-second gap that did not recur in three unprofiled baselines; it is not evidence
+of a fixed product stall. Extracting an equatable daily plot alone did not materially improve
+scroll timings, and its CPU sample did not justify claiming a win.
+
+The separately measured production chart mount exposed avoidable work: four providers × 90
+days constructed 720 native chart marks. The daily plot now prepares one fill and cumulative
+edge per provider and paints them with one Canvas, retaining Swift Charts axes and bounded
+monotone curves. In the matched Debug hosted mount/layout/raster fixture, the original warm
+median/max were 83.54/84.59 ms and the first path-renderer run was 46.95/50.36 ms (cold
+123.76 → 88.95 ms). Those initial medians selected the upper middle of four warm samples;
+the retained test now averages the middle pair. DTO and path preparation are outside this timing;
+scrolling, chart mounting, and
+bootstrap are separate measurements. These are simulator regression measurements, not a claim
+about a physical iPhone's frame rate. `MobileUsageChartRenderingTests` retains the 360-point
+production mount workload and verifies cumulative fractional costs and zero-cost geometry.
+
+The final optimized scroll passes remained flat: 30-day programmatic work p95 was
+0.617–0.628 ms with frame-gap p95 16.681–16.688 ms; 90-day native swipes had frame-gap p95
+17.364–17.371 ms, max 33.099–34.356 ms and 0–1 gaps above 33.3 ms per 20-second pass.
+All three passes in each mode traversed content and returned to the top. Thus the supported
+improvement is the chart's mount cost, not a demonstrated simulator scrolling FPS increase.
+Real-shell Neo Brutalism and custom-dark evidence was inspected after the renderer change.

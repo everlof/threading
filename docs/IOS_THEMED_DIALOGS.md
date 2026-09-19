@@ -340,6 +340,13 @@ editors, Notifications, Diagnostics, Mac appearance, Ask for input and the issue
 
 ## Dashboard swipe lifecycle
 
+The dashboard's UIKit collection viewport extends through the bottom container safe area.
+Apply `ignoresSafeArea(.container, edges: .bottom)` to the scrolling content before adding the
+floating search/new-chat overlay, so the controls retain their safe-area placement. Extending
+only the background leaves the collection clipped above the home indicator. UIKit's automatic
+adjusted inset and the existing floating-control content inset let the last row scroll clear
+of both; no per-row layout or additional views are needed.
+
 The native dashboard cell owns the archive/restore gesture and its interruptible spring. The
 pan is attached to the stationary content container; row taps wait for it to fail. Layout sets
 `bounds` and `center`, never `frame` on the translated row. The current swipe offset survives
@@ -500,6 +507,16 @@ already has the theme's corners. A radius of exactly zero is read as no shape at
 the pill back — Editorial's five points came through, Swiss Minimalist's zero did not — so a
 square theme asks for one point, which is square to the eye and is the smallest radius the
 platter honours.
+
+The native dashboard cell must carry that same material in its `UITargetedPreview`. Its
+collection decoration owns the resting plate and outline, so snapshotting only the transparent
+row and asking UIKit for a panel-coloured background erases the border during a press. The
+native preview snapshots one visible row and adds the theme's panel, outline and radius;
+highlight and dismissal use the same construction. No section-sized snapshot or retained
+preview per catalogue item is created: work and image size are bounded by one viewport row,
+only when a context interaction asks for a preview. Menu actions and gesture routing remain
+host-owned. `MobileLiftedSessionRowTests` checks the native collection path at all three row
+positions, and the dashboard's pressed captures exercise a real long press in the product shell.
 
 ## The keyboard
 

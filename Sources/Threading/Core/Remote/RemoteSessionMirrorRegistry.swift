@@ -829,12 +829,12 @@ final class RemoteSessionMirrorRegistry {
         features.append(RemoteRESTFeature.attachmentVideoStreaming.rawValue)
         features.append(RemoteRESTFeature.sessionStartupHandshake.rawValue)
         if authorization.canManageHost {
+            features.append(RemoteRESTFeature.projectVisibility.rawValue)
             features.append(RemoteRESTFeature.reportSessionOpening.rawValue)
             features.append(RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue)
             features.append(RemoteRESTFeature.sessionContinuation.rawValue)
         }
         return features.isEmpty ? nil : features
-            features.append(RemoteRESTFeature.projectVisibility.rawValue)
     }
 
     private func summary(

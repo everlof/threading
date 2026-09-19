@@ -11,6 +11,7 @@ struct RemoteBrowserFollowView: View {
     let client: RemoteClient
     @ObservedObject var activity: MobileWorkspaceActivity
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteTheme) private var theme
     @State private var workspace = RemoteWorkspaceDTO(browserTabs: [])
     @State private var selectedTabID: String?
@@ -18,6 +19,7 @@ struct RemoteBrowserFollowView: View {
     @State private var loadError: String?
     @State private var isLoading = false
     private let loadsRemotely: Bool
+    private let showsCloseButton: Bool
 
     init(
         session: RemoteSessionSummaryDTO,
@@ -26,11 +28,13 @@ struct RemoteBrowserFollowView: View {
         initialTabID: String? = nil,
         initialWorkspace: RemoteWorkspaceDTO = RemoteWorkspaceDTO(browserTabs: []),
         initialPreview: UIImage? = nil,
-        loadsRemotely: Bool = true
+        loadsRemotely: Bool = true,
+        showsCloseButton: Bool = false
     ) {
         self.session = session
         self.client = client
         self.loadsRemotely = loadsRemotely
+        self.showsCloseButton = showsCloseButton
         _activity = ObservedObject(wrappedValue: activity)
         _workspace = State(initialValue: initialWorkspace)
         _selectedTabID = State(initialValue: initialTabID)
@@ -38,8 +42,16 @@ struct RemoteBrowserFollowView: View {
     }
 
     private var selectedTab: RemoteBrowserTabDTO? {
-        if let selectedTabID,
-           let selected = workspace.browserTabs.first(where: { $0.id == selectedTabID }) {
+        Self.resolveTab(in: workspace, preferredID: selectedTabID)
+    }
+
+    /// A nil preference follows the Mac; only an explicit choice pins a tab.
+    static func resolveTab(
+        in workspace: RemoteWorkspaceDTO,
+        preferredID: String?
+    ) -> RemoteBrowserTabDTO? {
+        if let preferredID,
+           let selected = workspace.browserTabs.first(where: { $0.id == preferredID }) {
             return selected
         }
         return workspace.browserTabs.first(where: { $0.isActive })
@@ -61,6 +73,14 @@ struct RemoteBrowserFollowView: View {
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
+            if showsCloseButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(MobileL10n.string("Close browser"))
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task { await refresh() }
@@ -154,18 +174,8 @@ struct RemoteBrowserFollowView: View {
                     .resizable()
                     .scaledToFit()
                     .background(theme.surface)
-                    .clipShape(RoundedRectangle(
-                        cornerRadius: theme.controlRadius,
-                        style: .continuous
-                    ))
-                    .overlay {
-                        RoundedRectangle(
-                            cornerRadius: theme.controlRadius,
-                            style: .continuous
-                        )
-                        .stroke(theme.border, lineWidth: theme.borderWidth)
-                    }
-                    .padding(MobileDesign.Spacing.inset)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel(selectedTitle)
             }
             .scrollIndicators(.hidden)
         } else if isLoading {
@@ -219,14 +229,18 @@ struct RemoteBrowserFollowView: View {
         do {
             let fetched = try await client.workspace(sessionID: session.id)
             guard !Task.isCancelled else { return }
+            let previousTabID = selectedTab?.id
             workspace = fetched
             activity.reconcile(fetched)
 
-            let selected = selectedTabID.flatMap { selectedID in
-                fetched.browserTabs.first(where: { $0.id == selectedID })
-            } ?? fetched.browserTabs.first(where: { $0.isActive })
-                ?? fetched.browserTabs.first
-            selectedTabID = selected?.id
+            let selected = selectedTab
+            if selected?.id != previousTabID {
+                preview = nil
+            }
+            if let selectedTabID,
+               !fetched.browserTabs.contains(where: { $0.id == selectedTabID }) {
+                self.selectedTabID = nil
+            }
 
             if let selected {
                 await refreshPreview(for: selected)
@@ -257,9 +271,9 @@ struct RemoteBrowserFollowView: View {
                 sessionID: session.id,
                 tabID: tab.id
             )
-            guard !Task.isCancelled, selectedTabID == tab.id,
+            guard !Task.isCancelled, selectedTab?.id == tab.id,
                   let image = UIImage(data: data) else {
-                if !Task.isCancelled, selectedTabID == tab.id {
+                if !Task.isCancelled, selectedTab?.id == tab.id {
                     loadError = MobileL10n.string("The Mac returned an unreadable preview.")
                 }
                 isLoading = false
@@ -270,7 +284,7 @@ struct RemoteBrowserFollowView: View {
             return
         } catch {
             MobileDiagnostics.logDegraded(.browserPreview, error: error)
-            if selectedTabID == tab.id {
+            if selectedTab?.id == tab.id {
                 preview = nil
                 loadError = error.localizedDescription
             }

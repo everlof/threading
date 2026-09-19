@@ -267,7 +267,6 @@ final class RemoteTerminalSelectionTests: XCTestCase {
     func testTheEditMenuOffersTheQuoteBesideCopyOnlyWhileTextIsSelected() {
         let view = makeView()
         view.configureSelectionMenu(quoteSelection: { _ in }, canPaste: true)
-        UIPasteboard.general.string = "pasted"
 
         XCTAssertEqual(
             titles(of: view.editMenuElements(suggested: [])),
@@ -300,7 +299,6 @@ final class RemoteTerminalSelectionTests: XCTestCase {
     func testAViewOnlyPhoneIsOfferedNoPaste() {
         let view = makeView()
         view.configureSelectionMenu(quoteSelection: nil, canPaste: false)
-        UIPasteboard.general.string = "pasted"
         select(row: Fixture.selectedRow, in: view)
 
         XCTAssertEqual(titles(of: view.editMenuElements(suggested: [])), ["Copy", "Select All"])

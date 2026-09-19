@@ -695,6 +695,39 @@ final class SessionDashboardTests: XCTestCase {
 /// Both are read off pixels here, since both passed every assertion anyone had written.
 @MainActor
 final class MobileLiftedSessionRowTests: XCTestCase {
+    func testNativeHighlightAndDismissalCarryTheBorderForEveryRowPosition() throws {
+        for radius in [0.0, 20.0] {
+            for index in 0..<3 {
+                let images = MobileDashboardHighlightProbe.capture(
+                    theme: RemoteThemePalette(theme(radius: radius, borderWidth: 4)), rowIndex: index
+                )
+                XCTAssertEqual(images.count, 2)
+                for image in images {
+                    for point in [CGPoint(x: image.size.width / 2, y: 0),
+                                  CGPoint(x: 0, y: image.size.height / 2),
+                                  CGPoint(x: image.size.width - 1, y: image.size.height / 2),
+                                  CGPoint(x: image.size.width / 2, y: image.size.height - 1)] {
+                        let ink = try rgb(at: point, in: image)
+                        XCTAssertLessThan(ink.red, 0.2, "Missing native preview border: \(point)")
+                        XCTAssertLessThan(ink.green, 0.2)
+                        XCTAssertLessThan(ink.blue, 0.2)
+                        XCTAssertGreaterThan(ink.alpha, 0.8)
+                    }
+                    let corner = try rgb(at: CGPoint(x: 1, y: 0), in: image)
+                    if radius == 0 {
+                        XCTAssertLessThan(corner.red, 0.2)
+                    } else {
+                        XCTAssertLessThan(corner.alpha, 0.2)
+                    }
+                    // The row's title survives lifting alongside its plate.
+                    XCTAssertLessThan(try darkestLuminance(
+                        in: CGRect(x: 54, y: 10, width: 130, height: 20), of: image
+                    ), 0.4)
+                }
+            }
+        }
+    }
+
     private enum Fixture {
         static let width: CGFloat = 362
         static let label = "#111111"
@@ -811,7 +844,7 @@ final class MobileLiftedSessionRowTests: XCTestCase {
         return Hosted(window: window, image: image)
     }
 
-    private func theme(radius: Double) -> RemoteThemeDTO {
+    private func theme(radius: Double, borderWidth: Double = Fixture.borderWidth) -> RemoteThemeDTO {
         RemoteThemeDTO(
             id: "lifted-row-test-\(Int(radius))",
             name: "Lifted row test",
@@ -831,7 +864,7 @@ final class MobileLiftedSessionRowTests: XCTestCase {
             material: RemoteThemeDTO.Material(
                 panelRadius: radius,
                 controlRadius: radius / 2,
-                borderWidth: Fixture.borderWidth
+                borderWidth: borderWidth
             )
         )
     }
@@ -850,6 +883,7 @@ final class MobileLiftedSessionRowTests: XCTestCase {
         let red: CGFloat
         let green: CGFloat
         let blue: CGFloat
+        let alpha: CGFloat
         var luminance: CGFloat { 0.2126 * red + 0.7152 * green + 0.0722 * blue }
     }
 
@@ -878,7 +912,8 @@ final class MobileLiftedSessionRowTests: XCTestCase {
             return RGB(
                 red: CGFloat(bytes[offset]) / 255,
                 green: CGFloat(bytes[offset + 1]) / 255,
-                blue: CGFloat(bytes[offset + 2]) / 255
+                blue: CGFloat(bytes[offset + 2]) / 255,
+                alpha: CGFloat(bytes[offset + 3]) / 255
             )
         }
     }
@@ -1237,6 +1272,7 @@ final class MobileDemoSceneTests: XCTestCase {
                     .projectTerminalOpening(.connecting)
                 )
             case .workspace: expected = ("workspace", .workspace)
+            case .browserPreview: expected = ("browser-preview", .browserPreview)
             case .browserPrivate: expected = ("browser-private", .browserPrivate)
             case .attachments: expected = ("attachments", .attachments)
             case .universalSearch: expected = ("universal-search", .universalSearch)

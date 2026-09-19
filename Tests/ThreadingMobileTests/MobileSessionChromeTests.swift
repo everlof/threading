@@ -8,6 +8,33 @@ import os
 @testable import ThreadingMobile
 
 final class MobileSessionChromeTests: XCTestCase {
+    @MainActor
+    func testBrowserFollowsActiveTabUnlessReaderExplicitlySelectsOne() {
+        func workspace(active: String) -> RemoteWorkspaceDTO {
+            RemoteWorkspaceDTO(browserTabs: ["first", "second"].map { id in
+                RemoteBrowserTabDTO(
+                    id: id, title: id, displayURL: "http://localhost:3000/" + id,
+                    isActive: id == active, isPrivate: false, canPreview: true
+                )
+            })
+        }
+        XCTAssertEqual(RemoteBrowserFollowView.resolveTab(
+            in: workspace(active: "first"), preferredID: nil
+        )?.id, "first")
+        XCTAssertEqual(RemoteBrowserFollowView.resolveTab(
+            in: workspace(active: "second"), preferredID: nil
+        )?.id, "second")
+        XCTAssertEqual(RemoteBrowserFollowView.resolveTab(
+            in: workspace(active: "second"), preferredID: "first"
+        )?.id, "first")
+        XCTAssertEqual(RemoteBrowserFollowView.resolveTab(
+            in: workspace(active: "second"), preferredID: "closed-tab"
+        )?.id, "second")
+        XCTAssertNil(RemoteBrowserFollowView.resolveTab(
+            in: RemoteWorkspaceDTO(browserTabs: []), preferredID: "closed-tab"
+        ))
+    }
+
     func testChangingASessionSurfacePreservesIndependentRuntimeAndRoutingFacts() throws {
         let session = RemoteSessionSummaryDTO(
             id: Fixture.sessionID,

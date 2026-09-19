@@ -36,6 +36,7 @@
 #   scripts/profile_threading.sh remote-catalogue-stress [sessions]
 #   scripts/profile_threading.sh remote-conversation-stress [rows]
 #   scripts/profile_threading.sh ios-conversation-stress [seconds] [rows] [booted|simulator-UDID]
+#   scripts/profile_threading.sh ios-usage-scroll-stress [seconds] [7|30|90] [booted|simulator-UDID] [theme] [programmatic|native]
 #   scripts/profile_threading.sh ios-dashboard-scroll-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh cross-device-conversation-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [booted|simulator-UDID] [admission-delay-ms]
@@ -2571,6 +2572,25 @@ case "${command}" in
     output_directory="$(new_run_directory ios-conversation-stress)"
     run_ios_conversation_stress \
       "${output_directory}" "${seconds}" "${rows}" "${simulator_udid}"
+    ;;
+
+  ios-usage-scroll-stress)
+    seconds="${2:-8}"
+    days="${3:-30}"
+    [[ "${seconds}" =~ ^[0-9]+$ && "${seconds}" -ge 2 && "${seconds}" -le 120 ]] || exit 2
+    [[ "${days}" == 7 || "${days}" == 30 || "${days}" == 90 ]] || exit 2
+    mode="${6:-programmatic}"
+    [[ "${mode}" == programmatic || "${mode}" == native ]] || exit 2
+    [[ "${mode}" != native || "${seconds}" -ge 20 ]] || {
+      echo "Native swipes require at least 20 seconds." >&2
+      exit 2
+    }
+    simulator_udid="$(resolve_booted_ios_simulator "${4:-booted}")"
+    output_directory="$(new_run_directory ios-usage-scroll-stress)"
+    build_ios_simulator_app "${simulator_udid}" "${output_directory}" Debug -O
+    bash "${script_directory}/profile_ios_usage_scroll.sh" \
+      "${output_directory}/derived-data/Build/Products/Debug-iphonesimulator/ThreadingMobile.app" \
+      "${output_directory}" "${seconds}" "${days}" "${simulator_udid}" "${5:-neo-brutalism}" "${6:-programmatic}"
     ;;
 
   ios-dashboard-scroll-stress)

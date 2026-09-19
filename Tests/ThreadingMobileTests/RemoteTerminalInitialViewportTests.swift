@@ -262,7 +262,27 @@ final class RemoteTerminalInitialViewportTests: XCTestCase {
         XCTAssertTrue(ready)
         let view = try XCTUnwrap(terminalLayout(in: host.controller.view)?.terminalView)
         view.feed(text: "\u{1b}[2J\u{1b}[H")
-        try await Task.sleep(for: .milliseconds(100))
+        // The probe intentionally cancels while hidden/inactive. A fixed 100 ms delay can
+        // race the test host's window transition under a full-suite build load; wait for
+        // the actual production visibility and first-draw prerequisites instead.
+        let presented = await eventually {
+            guard UIApplication.shared.applicationState == .active,
+                  view.diagnostics.renders > 0, view.window != nil else { return false }
+            var ancestor: UIView? = view
+            while let current = ancestor {
+                guard !current.isHidden, current.alpha > 0 else { return false }
+                ancestor = current.superview
+            }
+            return true
+        }
+        var visibility: [String] = []
+        var ancestor: UIView? = view
+        while let current = ancestor {
+            visibility.append("\(type(of: current)):hidden=\(current.isHidden),alpha=\(current.alpha)")
+            ancestor = current.superview
+        }
+        XCTAssertTrue(presented, "probe fixture state=\(UIApplication.shared.applicationState.rawValue) "
+                      + "renders=\(view.diagnostics.renders) \(visibility.joined(separator: "; "))")
         return (connection, host.window, view)
     }
 
