@@ -395,9 +395,15 @@ a remote session shows no branch and ignores a HEAD moving here; the status card
 `RemoteProjectGitTests` holds each against a real repository on a real branch with an uncommitted
 change, so a surface still reading it would have something to find.
 
-**Not yet.** A remote Git Review itself: the host's status, diffs and log, read in one batched `ssh`
-round trip per refresh (a `git status` there measured 150–280 ms). A host without git needs saying
-so; the spike's VM had none. Subagent transcripts, whose paths the hooks report on the host, are
+**Remote Git Review, Uncommitted, 2026-09-19.** The pane reads the host checkout's uncommitted
+changes in one `ssh` round trip and draws them with the local rows; see
+[`git.md`](../architecture/git.md#projects-on-a-remote-host). Measured on the spike's VM against
+200 committed files with 20 changed and one untracked: all 21 in one round trip (67 ms over Lima's
+multiplexed connection; a fresh one measured 150–280 ms). The VM had no git; it now has one, and a
+host without it gets a sentence saying so. The other modes — staged, branch, commit history, last
+turn — are not offered remotely yet.
+
+**Not yet.** The remaining review modes, staging and commit on the host. Subagent transcripts, whose paths the hooks report on the host, are
 not mirrored — so neither their navigator detail nor their usage reaches this Mac. Mid-turn readers (run
 progress, live attachment detection) see the transcript as of the last refresh.
 

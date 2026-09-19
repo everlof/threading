@@ -1134,10 +1134,13 @@ final class GitReviewViewController: NSViewController {
                Date().timeIntervalSince(last) < GitReviewDefaults.refreshDebounce { return }
         }
 
+        if let remoteHost {
+            loadRemote(remoteHost)
+            return
+        }
+
         let root: URL?
-        if remoteHost != nil {
-            root = nil
-        } else if mode == .lastTurn {
+        if mode == .lastTurn {
             let checkpoints = GitTurnBaselineStore.shared.checkpoints(forSessionID: sessionID)
             guard !checkpoints.isEmpty else {
                 setChangeRequestBarVisible(false)
@@ -1171,11 +1174,6 @@ final class GitReviewViewController: NSViewController {
             if mode == .lastTurn,
                GitTurnBaselineStore.shared.latestCheckpoint(forSessionID: sessionID) != nil {
                 show(.message(L10n.string("The checkpoint repository is no longer available.")))
-            } else if let remoteHost {
-                show(.message(L10n.format(
-                    "This project runs on %@, so its checkout is there.\nGit Review can’t read a remote checkout yet.",
-                    remoteHost.destination
-                )))
             } else {
                 show(.message("Not a git repository."))
             }
@@ -1764,5 +1762,50 @@ extension GitReviewViewController {
     /// The host this session's project runs on, if any.
     var remoteHost: ProjectExecutionHost? {
         ProjectStore.shared.project(forSessionID: sessionID)?.executionHost
+    }
+
+    /// A remote project's review: its host checkout's uncommitted changes, read in one `ssh` round
+    /// trip and drawn by the same rows as a local diff. Read-only — staging and committing are
+    /// `GitIndexWriter`'s, on this Mac — and refreshed when the pane is shown, at a turn's end and
+    /// on demand, since nothing here can watch a folder on another machine.
+    func loadRemote(_ host: ProjectExecutionHost) {
+        setChangeRequestBarVisible(false)
+        guard mode == .uncommitted else {
+            show(.message(L10n.format(
+                "This project runs on %@.\nOnly its uncommitted changes can be reviewed from here for now.",
+                host.destination
+            )))
+            return
+        }
+        generation += 1
+        let loadGeneration = generation
+        isLoading = true
+        RemoteGitReviewReader.shared.uncommitted(
+            destination: host.sshDestination,
+            remoteDirectory: host.remoteDirectory
+        ) { [weak self] outcome in
+            guard let self, loadGeneration == self.generation else { return }
+            self.isLoading = false
+            self.lastLoadedAt = Date()
+            switch outcome {
+            case .diffs(_, let files, let truncated):
+                if files.isEmpty {
+                    self.show(.message(L10n.format("No uncommitted changes on %@.", host.destination)))
+                } else {
+                    self.show(.files(files))
+                    if truncated {
+                        ThreadingLogger.git.info("Remote review truncated at its bound")
+                    }
+                }
+            case .noGit:
+                self.show(.message(L10n.format("%@ has no git installed, so its checkout can’t be reviewed.", host.destination)))
+            case .notRepository:
+                self.show(.message(L10n.format("The folder on %@ is not a git repository.", host.destination)))
+            case .missingDirectory:
+                self.show(.message(L10n.format("The project’s folder doesn’t exist on %@.", host.destination)))
+            case .failed(let detail):
+                self.show(.message(detail))
+            }
+        }
     }
 }

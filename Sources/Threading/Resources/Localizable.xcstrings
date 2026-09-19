@@ -716,6 +716,17 @@
         }
       }
     },
+    "%@ has no git installed, so its checkout can’t be reviewed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har inte git installerat, så dess utcheckning kan inte granskas."
+          }
+        }
+      }
+    },
     "%@ has this chat open" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29212,6 +29223,17 @@
         }
       }
     },
+    "No uncommitted changes on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga ändringar som inte är incheckade på %@."
+          }
+        }
+      }
+    },
     "No usage recorded yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47349,6 +47371,17 @@
         }
       }
     },
+    "The folder on %@ is not a git repository." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mappen på %@ är inte ett git-arkiv."
+          }
+        }
+      }
+    },
     "The folder on the host must be a full path, starting with /." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48320,6 +48353,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projektskriptet startade inte"
+          }
+        }
+      }
+    },
+    "The project’s folder doesn’t exist on %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektets mapp finns inte på %@."
           }
         }
       }
@@ -51229,13 +51273,13 @@
         }
       }
     },
-    "This project runs on %@, so its checkout is there.\nGit Review can’t read a remote checkout yet." : {
+    "This project runs on %@.\nOnly its uncommitted changes can be reviewed from here for now." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Det här projektet körs på %@, så dess utcheckning finns där.\nGit-granskning kan inte läsa en fjärrutcheckning än."
+            "value" : "Det här projektet körs på %@.\nBara dess ändringar som inte är incheckade kan granskas härifrån än så länge."
           }
         }
       }

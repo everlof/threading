@@ -1144,3 +1144,29 @@ and a wrapping field has no intrinsic *width* at all, which is what let Auto Lay
 `GitReviewRenderTests` is what found it: the same fixture-to-PNG idea as the conversation
 renders, for the same reason — a claim about colour on a coloured wash cannot be checked by
 reading assertions about token ranges.
+
+## Projects on a remote host
+
+A project that runs on a remote execution host (`Project.executionHost`) keeps the Mac folder it
+was created from, and that folder is often a real checkout on a real branch. It is **not** the
+agent's checkout — that one is on the host — so nothing here reads it for a remote project:
+
+- **No turn checkpoints.** `GitTurnBaselineStore.prepareTurn` answers nil for a remote session.
+  Snapshotting the Mac folder would record whatever changed on this Mac during the turn, a
+  person's own edits included, as the agent's work, and write refs into a repository the agent
+  never touched.
+- **No branch.** `refreshBranch` records none for a remote session, and `refreshBranches(forCheckoutAt:)`
+  skips remote projects, so a HEAD moving on this Mac cannot relabel a session running elsewhere.
+- **No status card**, and no watcher: `GitReviewViewController.repositoryRoot` is nil for a remote
+  project, and the watcher, every local load and staging all read it.
+
+What the review pane does instead is read the host (`RemoteGitReviewReader`): Uncommitted only, and
+read-only — writes stay `GitIndexWriter`'s, on this Mac. One `ssh` round trip carries the branch,
+the tracked diff against `HEAD` (or the empty tree before the first commit) and every untracked file
+synthesized with `git diff --no-index /dev/null <file>` under the same 256 KB per-file cap, bounded
+on the host with `head -c`. It is built from `GitReviewCommands.common` and `.diffFlags`, so the
+rules above — `--no-optional-locks`, no textconv or external diff — hold remotely too and cannot
+drift. A host without git, a folder that is not a repository and a folder that does not exist are
+each their own answer. Nothing can watch a folder on another machine, so the remote pane refreshes
+when shown, at a turn's end and on demand. The other modes say they are not offered remotely yet.
+

@@ -69,11 +69,13 @@ final class RemoteProjectGitTests: HostedStoreTestCase {
         XCTAssertTrue(GitTurnBaselineStore.shared.checkpoints(forSessionID: remote.id).isEmpty)
     }
 
-    /// The review pane reads nothing here for a remote project, and says where the checkout is.
+    /// The review pane reads nothing here for a remote project, and says where the checkout is — for
+    /// the modes a remote review does not offer yet, plainly.
     func testTheReviewPaneRefusesTheMacFolderAndNamesTheHost() throws {
         let checkout = try makeCheckout()
         let remote = try session(remote: true, in: checkout)
-        let controller = GitReviewViewController(sessionID: remote.id, folderPath: checkout.path, mode: .uncommitted)
+        // Staged, not Uncommitted: Uncommitted asks the host over ssh, and "pi" is no host.
+        let controller = GitReviewViewController(sessionID: remote.id, folderPath: checkout.path, mode: .staged)
         XCTAssertNil(controller.repositoryRoot, "the pane would read, watch and stage the Mac folder")
         controller.refresh(force: true)
         XCTAssertTrue(controller.placeholderLabel.stringValue.contains(host.destination),

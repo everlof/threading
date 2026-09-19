@@ -438,6 +438,46 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         XCTAssertEqual(localDigest, digest, "the mirror is not the host's file")
     }
 
+    /// A remote checkout's uncommitted changes, read over the real `ssh` path in one round trip.
+    /// Uses `~/threading-git-test` on the host — 200 committed files, 20 of them changed and one
+    /// untracked — and skips when the host has no such repository.
+    @MainActor
+    func testARemoteCheckoutsUncommittedChangesAreReadInOneRoundTrip() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let alias = environment[Key.destination] else {
+            throw XCTSkip("set \(Key.destination) to run against a real host")
+        }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let home = try SystemSSHCommandRunner().run(
+            on: destination, command: "printf %s \"$HOME\"", input: .none, extraOptions: [],
+            timeout: Fixture.childTimeout
+        ).output
+        let answered = expectation(description: "the host answered")
+        var outcome: RemoteGitReviewOutcome?
+        let started = Date()
+        RemoteGitReviewReader.shared.uncommitted(
+            destination: destination,
+            remoteDirectory: "\(home)/threading-git-test"
+        ) { result in
+            outcome = result
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: Fixture.childTimeout)
+        let elapsed = Date().timeIntervalSince(started)
+        switch outcome {
+        case .notRepository?, .missingDirectory?:
+            throw XCTSkip("the host has no ~/threading-git-test repository")
+        case .diffs(let branch, let files, let truncated)?:
+            XCTAssertNotNil(branch)
+            XCTAssertFalse(truncated)
+            XCTAssertEqual(files.count, 21, "\(files.map(\.path))")
+            XCTAssertTrue(files.contains { $0.path == "untracked.txt" })
+            XCTAssertLessThan(elapsed, 5, "one round trip took \(elapsed) s")
+        default:
+            XCTFail("unexpected answer: \(String(describing: outcome))")
+        }
+    }
+
     private func prepare(
         _ hosts: RemoteExecutionHosts,
         _ destination: RemoteHostDestination,
