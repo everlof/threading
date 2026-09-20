@@ -56,6 +56,8 @@ extension ControlRefusal {
             "Steering needs a running native chat turn. Send with the queue disposition instead."
         case .watcherAtCapacity(let limit):
             "This session already holds \(limit) watches; wait for one to settle or expire."
+        case .watchDependencyCycle:
+            "That watch would make the sessions wait on one another. Let the existing watch deliver its result instead."
         case .invalidWatchTimeout:
             "timeout_minutes must be a positive finite number, or omitted for this Threading run."
         case .steerUnavailable(let refusal):

@@ -172,6 +172,9 @@ enum ControlRefusal: Error, Equatable, Sendable {
     /// spends a turn of the watcher's own usage when it fires, so an agent cannot arm a
     /// notice for every session it can see and then be woken by all of them.
     case watcherAtCapacity(limit: Int)
+    /// The requested result wait would make two or more sessions wait on one another. Such a
+    /// graph has no first completion edge, so the plane refuses it before installing the watch.
+    case watchDependencyCycle
     /// A caller-supplied watch timeout must describe a future deadline. Omitting it is the
     /// distinct, valid request to keep the watch for the rest of this Threading run.
     case invalidWatchTimeout

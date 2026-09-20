@@ -133,16 +133,23 @@ enum ClaudeUsageFetcher {
     /// any — the status-line feed's case, which has the account's own windows and nothing
     /// scoped. A reading that brought its own scoped windows keeps them: it is fresher than
     /// the cache by construction.
-    private static func withModelWindows(
+    static func withModelWindows(
         from profile: AccountUsage?,
-        on usage: AccountUsage
+        on usage: AccountUsage,
+        at now: Date = Date()
     ) -> AccountUsage {
-        guard usage.modelWindows.isEmpty,
-              let profile, !profile.modelWindows.isEmpty
+        guard usage.modelWindows.isEmpty, let profile
         else { return usage }
 
+        // The status-line reading can be newer than the profile by an entire limit window.
+        // Carrying an already-reset scoped value onto it makes that previous window look like
+        // a current refusal to every fail-closed eligibility check. The account-wide windows
+        // are fresh; only scoped windows whose own reset is still ahead belong to that reading.
+        let currentModelWindows = profile.modelWindows.filter { !$0.isExpired(at: now) }
+        guard !currentModelWindows.isEmpty else { return usage }
+
         var merged = usage
-        merged.modelWindows = profile.modelWindows
+        merged.modelWindows = currentModelWindows
         return merged
     }
 

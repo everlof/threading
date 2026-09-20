@@ -100,6 +100,55 @@ final class SessionWatchCenterTests: XCTestCase {
         XCTAssertEqual(center.dependencyState(for: observer), .none)
     }
 
+    func testMutualResultWatchesAreRefusedBeforeTheyCanDeadlock() {
+        let center = makeCenter()
+        activities[watcher] = .working
+
+        XCTAssertEqual(
+            center.arm(watcher: watcher, target: target),
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
+        )
+        XCTAssertEqual(
+            center.arm(watcher: target, target: watcher),
+            .dependencyCycle
+        )
+        XCTAssertFalse(center.isWatching(watcher: target, target: watcher))
+        XCTAssertEqual(center.dependencyState(for: target), .none)
+    }
+
+    func testTransitiveResultWatchCycleIsRefused() {
+        let center = makeCenter()
+        let third = SessionID()
+        activities[watcher] = .working
+        activities[third] = .working
+
+        XCTAssertEqual(
+            center.arm(watcher: watcher, target: target),
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
+        )
+        XCTAssertEqual(
+            center.arm(watcher: target, target: third),
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
+        )
+        XCTAssertEqual(center.arm(watcher: third, target: watcher), .dependencyCycle)
+        XCTAssertEqual(center.dependencyState(for: third), .none)
+    }
+
+    func testFutureStartObservationDoesNotCreateAResultDependencyCycle() {
+        let center = makeCenter()
+        activities[target] = .idle
+        activities[watcher] = .working
+
+        XCTAssertEqual(
+            center.arm(watcher: watcher, target: target),
+            .armed(awaiting: .turnStarted, expiresAfter: nil)
+        )
+        XCTAssertEqual(
+            center.arm(watcher: target, target: watcher),
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
+        )
+    }
+
     func testResultRemainsPendingThroughHeldAndAcceptedNoticeUntilNextTurnStarts() {
         let center = makeCenter()
         center.arm(watcher: watcher, target: target)

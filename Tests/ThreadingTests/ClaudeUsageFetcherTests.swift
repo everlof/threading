@@ -147,6 +147,56 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         }
     }
 
+    // MARK: - Scoped-Window Backfill
+
+    /// The status-line feed owns the fresh account windows but has no scoped limits. A profile
+    /// snapshot from the previous Fable window must not poison that fresh reading: downstream
+    /// admission rejects any expired relevant window, which used to make an account at 8% / 36%
+    /// look as though it had no headroom at all.
+    func testExpiredProfileScopedWindowIsNotMergedIntoFreshStatusReading() {
+        let status = usage(
+            windows: [window(id: "5h", fraction: 0.08, resetsAt: now.addingTimeInterval(3600))]
+        )
+        var profile = usage(windows: [])
+        profile.modelWindows = [
+            window(
+                id: "Fable",
+                fraction: 0.64,
+                resetsAt: now.addingTimeInterval(-1),
+                scopeName: "Fable"
+            ),
+        ]
+
+        let merged = ClaudeUsageFetcher.withModelWindows(from: profile, on: status, at: now)
+
+        XCTAssertTrue(merged.modelWindows.isEmpty)
+        XCTAssertEqual(merged.windows, status.windows)
+    }
+
+    func testOnlyCurrentProfileScopedWindowsAreMerged() {
+        let status = usage(
+            windows: [window(id: "7d", fraction: 0.36, resetsAt: now.addingTimeInterval(7200))]
+        )
+        var profile = usage(windows: [])
+        let expired = window(
+            id: "Fable",
+            fraction: 0.64,
+            resetsAt: now.addingTimeInterval(-1),
+            scopeName: "Fable"
+        )
+        let current = window(
+            id: "Opus",
+            fraction: 0.12,
+            resetsAt: now.addingTimeInterval(3600),
+            scopeName: "Opus"
+        )
+        profile.modelWindows = [expired, current]
+
+        let merged = ClaudeUsageFetcher.withModelWindows(from: profile, on: status, at: now)
+
+        XCTAssertEqual(merged.modelWindows, [current])
+    }
+
     // MARK: - The Endpoint Document
 
     /// The usage endpoint serves the same utilization document the CLI caches, scoped limits
@@ -220,6 +270,31 @@ final class ClaudeUsageFetcherTests: XCTestCase {
             provider: .claude,
             handle: AccountHandle(storedName: "claude-usage-fixture"),
             configPath: configDirectory.path
+        )
+    }
+
+    private func usage(windows: [AccountUsage.Window]) -> AccountUsage {
+        AccountUsage(
+            windows: windows,
+            planLabel: "Max",
+            observedAt: now,
+            source: .localCache
+        )
+    }
+
+    private func window(
+        id: String,
+        fraction: Double,
+        resetsAt: Date,
+        scopeName: String? = nil
+    ) -> AccountUsage.Window {
+        AccountUsage.Window(
+            id: id,
+            label: id,
+            fraction: fraction,
+            resetsAt: resetsAt,
+            windowDuration: 7 * 24 * 60 * 60,
+            scopeName: scopeName
         )
     }
 

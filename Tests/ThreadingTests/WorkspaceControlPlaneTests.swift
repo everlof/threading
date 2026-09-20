@@ -717,6 +717,10 @@ final class WorkspaceControlPlaneTests: XCTestCase {
             "The budget is the plane's refusal to make, and it carries the limit it enforced"
         )
         XCTAssertEqual(
+            watch(when: .dependencyCycle),
+            .refused(.watchDependencyCycle)
+        )
+        XCTAssertEqual(
             watch(when: .invalidTimeout),
             .refused(.invalidWatchTimeout)
         )

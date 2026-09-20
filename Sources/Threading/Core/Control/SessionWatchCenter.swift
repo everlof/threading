@@ -55,6 +55,9 @@ final class SessionWatchCenter {
         /// on one edge would deliver the same notice twice, spending two of the watcher's turns
         /// on one fact.
         case alreadyWatching(awaiting: ControlWatchEdge)
+        /// Waiting on this target would close a path of result dependencies back to the
+        /// caller. Refused before insertion so every installed dependency graph stays acyclic.
+        case dependencyCycle
         case watcherAtCapacity(limit: Int)
         case invalidTimeout
     }
@@ -205,6 +208,15 @@ final class SessionWatchCenter {
             ? .awaitResult
             : .observeNextStart
 
+        // Observation does not hold a caller open and therefore cannot deadlock. A result
+        // dependency can: follow only the installed result-wait edges, and refuse this one if
+        // the target already reaches the watcher. This catches mutual watches and longer
+        // chains without scanning unrelated project sessions.
+        if case .awaitResult = intent,
+           wouldCreateDependencyCycle(watcher: watcher, target: target) {
+            return .dependencyCycle
+        }
+
         let timer = timeout.map { timeout in
             Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.expire(key) }
@@ -231,6 +243,22 @@ final class SessionWatchCenter {
     }
 
     // MARK: - Private Methods
+
+    private func wouldCreateDependencyCycle(watcher: SessionID, target: SessionID) -> Bool {
+        var pending = [target]
+        var visited: Set<SessionID> = []
+
+        while let session = pending.popLast() {
+            if session == watcher { return true }
+            guard visited.insert(session).inserted else { continue }
+
+            for key in keysByWatcher[session] ?? [] {
+                guard let watch = watches[key], case .awaitResult = watch.intent else { continue }
+                pending.append(key.target)
+            }
+        }
+        return false
+    }
 
     /// One session's activity moved. It may be a watched target — several watchers may hold a
     /// watch on it, each spent or retired on its own terms — and it may itself be a watcher

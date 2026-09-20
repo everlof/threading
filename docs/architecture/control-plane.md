@@ -274,6 +274,13 @@ watches, so `AgentRuntime` composes this independent fact with both terminal and
 A ready prompt with that dependency uses `readyWithBackgroundWork`, suppresses completed-result
 receipts and alerts, and still accepts input. Genuine questions and usage limits keep precedence.
 
+**Result dependencies are acyclic.** Before installing an `awaitResult` watch, the centre follows
+the active result-watch edges from the target and refuses the request if they lead back to the
+watcher. This covers both mutual watches and longer chains — the shape that otherwise leaves every
+session waiting for another session's completion signal. A future-start observation carries no
+dependency and is deliberately absent from that graph. The check visits active result watches
+only, never the project's session catalogue.
+
 `ResultPhase` transfers ownership from `awaitingTarget` through `noticeHeld`,
 `delivering(followupStarted:)` and `awaitingFollowupTurn` into the next foreground turn. Spending a watch, reaching its timeout,
 queueing its notice, or confirming the paste does **not** complete the caller's outcome. A held

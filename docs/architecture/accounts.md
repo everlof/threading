@@ -464,7 +464,9 @@ Sources, per provider:
   which is the status-line feed's case — that feed does not carry them. `parsedScopedLimits`
   in Claudex's bridge anticipates the same data arriving through the status line one day;
   until it does, `.claude.json` is what backfills it. A reading that brought its own scoped
-  windows keeps them: it is fresher than the cache by construction.
+  windows keeps them: it is fresher than the cache by construction. An already-reset scoped
+  window is not carried onto a fresher status-line reading: its percentage describes the prior
+  window and would otherwise make the whole login fail the control plane's fresh-headroom check.
 
   Scoped windows land in `modelWindows`, kept out of `windows` so the *account's* peak stays the
   account's — the rule Codex's per-model limits already follow.

@@ -400,6 +400,8 @@ final class WorkspaceControlPlane {
             return .armed(on: overview, awaiting: awaiting, expiresAfter: expiresAfter)
         case .alreadyWatching(let awaiting):
             return .alreadyWatching(on: overview, awaiting: awaiting)
+        case .dependencyCycle:
+            return .refused(.watchDependencyCycle)
         case .watcherAtCapacity(let limit):
             return .refused(.watcherAtCapacity(limit: limit))
         case .invalidTimeout:
