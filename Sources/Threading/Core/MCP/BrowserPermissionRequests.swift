@@ -38,12 +38,12 @@ final class BrowserPermissionRequests {
     private var queues: [SessionID: [String]] = [:]
     private let observations = AppEventObservations()
     private let now: () -> ContinuousClock.Instant
-    private let changed: (SessionID, Bool) -> Void
+    private let changed: @MainActor (SessionID, Bool) -> Void
 
     init(
         observesLifecycle: Bool = false,
         now: @escaping () -> ContinuousClock.Instant = { .now },
-        changed: @escaping (SessionID, Bool) -> Void = { _, _ in }
+        changed: @escaping @MainActor (SessionID, Bool) -> Void = { _, _ in }
     ) {
         self.now = now
         self.changed = changed

@@ -265,6 +265,11 @@ final class RemoteTerminalSelectionTests: XCTestCase {
     }
 
     func testTheEditMenuOffersTheQuoteBesideCopyOnlyWhileTextIsSelected() {
+        let pasteboard = UIPasteboard.general
+        let previousItems = pasteboard.items
+        pasteboard.string = "text ready to paste"
+        defer { pasteboard.items = previousItems }
+
         let view = makeView()
         view.configureSelectionMenu(quoteSelection: { _ in }, canPaste: true)
 

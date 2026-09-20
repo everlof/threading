@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Network
 import os
@@ -348,10 +349,14 @@ final class RemoteListenerSet: @unchecked Sendable {
                 self.publish()
                 self.finishStart(.listening(port: port.rawValue))
             case .waiting(let error) where Self.isAddressInUse(error):
-                self.retryLoopback(entry: entry, candidates: candidates, index: index)
+                self.resolveLoopbackCollision(entry: entry, candidates: candidates, index: index)
             case .failed(let error):
                 if Self.isAddressInUse(error) {
-                    self.retryLoopback(entry: entry, candidates: candidates, index: index)
+                    self.resolveLoopbackCollision(
+                        entry: entry,
+                        candidates: candidates,
+                        index: index
+                    )
                 } else {
                     ThreadingLogger.remote.error(
                         "Remote access listener failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -370,6 +375,36 @@ final class RemoteListenerSet: @unchecked Sendable {
             handler(connection)
         }
         listener.start(queue: queue)
+    }
+
+    /// Distinguishes a live owner of the port from Network.framework's stale listener state.
+    ///
+    /// A cancelled `NWListener` can leave its NECP registration behind after its BSD socket is
+    /// already gone. The next listener then reports `EADDRINUSE` even though the endpoint is
+    /// bindable, and walking the fallback range makes the advertised port move. A raw bind says
+    /// whether there is a real collision: real owners advance the plan; framework residue gets a
+    /// bounded retry on the same sticky port under the ordinary start deadline.
+    private func resolveLoopbackCollision(
+        entry: DoorListener,
+        candidates: [NWEndpoint.Port],
+        index: Int
+    ) {
+        guard listeners[.loopback]?[Self.loopbackAddress] === entry else { return }
+        if Self.canBindLoopback(port: entry.port) {
+            let generation = startGeneration
+            cancel(entry)
+            listeners[.loopback] = nil
+            queue.asyncAfter(deadline: .now() + RemoteAccessDefaults.listenerRebindRetryDelay) {
+                [weak self] in
+                guard let self,
+                      self.isRunning,
+                      self.startGeneration == generation,
+                      self.startCompletion != nil else { return }
+                self.bindLoopback(candidates: candidates, index: index)
+            }
+        } else {
+            retryLoopback(entry: entry, candidates: candidates, index: index)
+        }
     }
 
     private func retryLoopback(entry: DoorListener, candidates: [NWEndpoint.Port], index: Int) {
@@ -823,6 +858,37 @@ final class RemoteListenerSet: @unchecked Sendable {
     private static func isAddressInUse(_ error: NWError) -> Bool {
         guard case .posix(let code) = error else { return false }
         return code == .EADDRINUSE
+    }
+
+    /// Whether a fresh listener can take an endpoint Network.framework called occupied.
+    ///
+    /// This is a synchronous kernel probe, not a reachability check. SO_REUSEADDR ignores
+    /// accepted sockets in TIME_WAIT without allowing a second live listener to share this exact
+    /// address, and the un-listened probe closes before a retry owns the port normally.
+    private static func canBindLoopback(port: NWEndpoint.Port) -> Bool {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+
+        var reuseAddress: Int32 = 1
+        guard setsockopt(
+            descriptor,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &reuseAddress,
+            socklen_t(MemoryLayout.size(ofValue: reuseAddress))
+        ) == 0 else { return false }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.rawValue.bigEndian
+        address.sin_addr.s_addr = inet_addr(RemoteAccessDefaults.host)
+        return withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
     }
 
     private static func reason(

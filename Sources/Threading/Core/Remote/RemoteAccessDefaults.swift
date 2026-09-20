@@ -58,6 +58,11 @@ enum RemoteAccessDefaults {
     /// milliseconds in practice; the bound is here so a wedged listener cannot hold the caller.
     static let listenerCancelTimeout: TimeInterval = 2
 
+    /// How long a sticky-port retry yields after Network.framework reports a collision that the
+    /// kernel says is no longer real. Ten milliseconds keeps cancellation residue off the hot
+    /// loop while remaining invisible beside the listener's ordinary ready transition.
+    static let listenerRebindRetryDelay: TimeInterval = 0.01
+
     /// One interface change arrives as several path updates while the interface settles. The
     /// listener set rebuilds once per burst rather than once per callback.
     static let pathChangeCoalescing: TimeInterval = 0.5
