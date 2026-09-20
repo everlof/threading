@@ -1319,6 +1319,27 @@ measured-height caches for unchanged ids, invalidates changed retained rows, and
 ids. Reverting to unconditional reset makes an unchanged 5,000-row reconnect a roughly half-second
 animated rebuild; `ios-conversation-stress` rejects that behavior.
 
+**A changed row re-measures; it never un-measures.** `RemoteConversationLayout` keeps discovered
+heights by stable identifier and shifts the following cached origins through a Fenwick tree, so a
+row whose content changes has to be re-measured. Doing that by dropping the cached height and
+rebuilding is what shipped, and it is why a long streamed answer could leave the transcript blank:
+forgetting stands the row back up at `conversationEstimatedRowHeight`, which for a reply several
+times taller than the phone took thousands of points out of the content size on every chunk. A
+reader inside that row is then past the end of the content, a viewport past the end mounts no cell,
+and an unmounted cell cannot report the real height back — so the blank is permanent until the
+person drags. `remeasureMountedItems(at:)` instead measures the cells the timeline just wrote to
+and applies each delta incrementally, which also keeps a streaming chunk O(changed) rather than a
+rebuild of the whole history.
+
+Three rules follow from the same failure. Streaming ends by replacing the streaming row with the
+finished answer, which is a *different* diffable identity, so the incoming row adopts the outgoing
+row's measurement rather than starting at the estimate. A growing row moves the content offset only
+when it ends above the viewport: a row the viewport is inside grows below the visible text, and
+following that growth marches a streaming answer up off the screen. And the viewport may never come
+to rest past the end of the content — `targetContentOffset(forProposedContentOffset:)` clamps the
+batch-update path, and a content-size observation clamps the wholesale re-estimates that rotation
+and a Dynamic Type change still cause. `RemoteConversationLayoutTests` holds all of it.
+
 Remote tool calls are compact disclosures, not miniature transcript cards. Their collapsed header
 is one horizontal 44-point target: tool identity, a single truncating subject, exceptional outcome
 ink and a chevron. The result view is not materialized until expansion. This keeps a run of tools

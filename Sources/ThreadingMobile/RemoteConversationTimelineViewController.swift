@@ -164,9 +164,12 @@ private actor RemoteMarkdownDocumentCache {
 
 // MARK: - Collection controller
 
-private final class RemoteConversationLayoutInvalidationContext:
+final class RemoteConversationLayoutInvalidationContext:
     UICollectionViewLayoutInvalidationContext {
-    var isPreferredHeightUpdate = false
+    /// Set by the paths that have already corrected the cached geometry themselves. A full
+    /// rebuild stands every unmeasured row back up at the estimate, so those paths must keep
+    /// the map they just wrote rather than have `prepare()` throw it away.
+    var preservesCachedGeometry = false
     var clearsHeightCache = false
 }
 
@@ -174,7 +177,7 @@ private final class RemoteConversationLayoutInvalidationContext:
 /// revisit large internal preferred-size maps whenever a visible row discovers its height. This
 /// layout stores discovered heights by stable diffable identifier and shifts the following cached
 /// frames directly, so scrolling work is proportional to mounted rows rather than total history.
-private final class RemoteConversationLayout: UICollectionViewLayout {
+final class RemoteConversationLayout: UICollectionViewLayout {
     override class var invalidationContextClass: AnyClass {
         RemoteConversationLayoutInvalidationContext.self
     }
@@ -353,32 +356,11 @@ private final class RemoteConversationLayout: UICollectionViewLayout {
         guard let context = context as? RemoteConversationLayoutInvalidationContext else {
             return context
         }
-        context.isPreferredHeightUpdate = true
+        context.preservesCachedGeometry = true
         let index = originalAttributes.indexPath.item
-        guard itemAttributes.indices.contains(index) else { return context }
-        let newHeight = max(1, ceil(preferredAttributes.size.height))
-        let oldHeight = itemHeights[index]
-        let delta = newHeight - oldHeight
-        guard abs(delta) > 0.5 else { return context }
-
-        let identifier = identifiers[index]
-        heightByIdentifier[identifier] = newHeight
-        itemHeights[index] = newHeight
-        itemAttributes[index].frame = itemFrame(at: index)
-        addSuffixAdjustment(from: index + 1, delta: delta)
-        calculatedContentSize.height += delta
-        context.contentSizeAdjustment.height += delta
-        if let collectionView,
-           originalAttributes.frame.minY < collectionView.contentOffset.y {
-            context.contentOffsetAdjustment.y += delta
-        }
-        var invalidatedIndexPaths = [originalAttributes.indexPath]
-        if let collectionView {
-            invalidatedIndexPaths.append(contentsOf: collectionView.indexPathsForVisibleItems.filter {
-                $0.section == originalAttributes.indexPath.section && $0.item > index
-            })
-        }
-        context.invalidateItems(at: invalidatedIndexPaths)
+        guard applyMeasuredHeight(preferredAttributes.size.height, at: index, into: context)
+        else { return context }
+        context.invalidateItems(at: invalidatedIndexPaths(from: index))
         return context
     }
 
@@ -387,7 +369,7 @@ private final class RemoteConversationLayout: UICollectionViewLayout {
             if context.clearsHeightCache {
                 heightByIdentifier.removeAll(keepingCapacity: true)
             }
-            if !context.isPreferredHeightUpdate {
+            if !context.preservesCachedGeometry {
                 needsFullRebuild = true
             }
         } else {
@@ -407,13 +389,105 @@ private final class RemoteConversationLayout: UICollectionViewLayout {
         invalidateLayout()
     }
 
-    func invalidateHeights(for invalidatedIdentifiers: [AnyHashable]) {
-        guard !invalidatedIdentifiers.isEmpty else { return }
-        for identifier in invalidatedIdentifiers {
-            heightByIdentifier[identifier] = nil
+    /// Re-measures rows whose content just changed, from the cells still mounted for them.
+    ///
+    /// The obvious alternative — forget the cached heights and rebuild — is what shipped, and it
+    /// is why a streaming answer could leave the transcript blank. Forgetting stands the row back
+    /// up at `estimatedRowHeight`, so a reply taller than the viewport collapsed by thousands of
+    /// points on every chunk. A reader inside that row is then past the end of the content, where
+    /// no cell is mounted, so nothing is left on screen to measure its way back and the collapse
+    /// is permanent. Measuring here keeps a real height on the row at all times, and costs
+    /// O(changed) rather than a rebuild of the whole history per chunk.
+    func remeasureMountedItems(at indexPaths: [IndexPath]) {
+        guard let collectionView, !indexPaths.isEmpty else { return }
+        let context = RemoteConversationLayoutInvalidationContext()
+        context.preservesCachedGeometry = true
+        var invalidated: Set<IndexPath> = []
+        for indexPath in indexPaths.sorted() where indexPath.section == 0 {
+            let index = indexPath.item
+            guard itemAttributes.indices.contains(index),
+                  let cell = collectionView.cellForItem(at: indexPath) else { continue }
+            let probe = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+            probe.frame = itemFrame(at: index)
+            let measured = cell.preferredLayoutAttributesFitting(probe).size.height
+            guard applyMeasuredHeight(measured, at: index, into: context) else { continue }
+            invalidated.formUnion(invalidatedIndexPaths(from: index))
         }
-        needsFullRebuild = true
-        invalidateLayout()
+        guard !invalidated.isEmpty else { return }
+        context.invalidateItems(at: Array(invalidated))
+        invalidateLayout(with: context)
+    }
+
+    /// The row that replaces the streaming row starts from the height the streaming row was
+    /// measured at rather than from the estimate. Both draw the same answer, so the outgoing
+    /// measurement is the closest thing to the truth until the incoming cell mounts and reports
+    /// its own — and starting from the estimate would drop the content out from under a reader
+    /// sitting at the end of exactly that answer.
+    func adoptHeight(of source: AnyHashable, for identifier: AnyHashable) {
+        guard heightByIdentifier[identifier] == nil,
+              let height = heightByIdentifier[source] else { return }
+        heightByIdentifier[identifier] = height
+    }
+
+    /// A batch update that shrinks the content must not leave the viewport past the new end.
+    /// UIKit clamps an offset it invalidated itself; it takes this answer for one a custom
+    /// layout invalidated, and the default returns the proposal untouched.
+    override func targetContentOffset(
+        forProposedContentOffset proposedContentOffset: CGPoint
+    ) -> CGPoint {
+        guard let collectionView else { return proposedContentOffset }
+        let minimum = -collectionView.adjustedContentInset.top
+        let maximum = max(
+            minimum,
+            calculatedContentSize.height
+                - collectionView.bounds.height
+                + collectionView.adjustedContentInset.bottom
+        )
+        return CGPoint(
+            x: proposedContentOffset.x,
+            y: min(max(proposedContentOffset.y, minimum), maximum)
+        )
+    }
+
+    /// Writes one row's newly measured height into the cached geometry, shifting everything
+    /// below it. Returns whether the height actually moved.
+    private func applyMeasuredHeight(
+        _ measured: CGFloat,
+        at index: Int,
+        into context: RemoteConversationLayoutInvalidationContext
+    ) -> Bool {
+        guard itemAttributes.indices.contains(index) else { return false }
+        let newHeight = max(1, ceil(measured))
+        let oldFrame = itemFrame(at: index)
+        let delta = newHeight - itemHeights[index]
+        guard abs(delta) > 0.5 else { return false }
+
+        heightByIdentifier[identifiers[index]] = newHeight
+        itemHeights[index] = newHeight
+        itemAttributes[index].frame = itemFrame(at: index)
+        addSuffixAdjustment(from: index + 1, delta: delta)
+        calculatedContentSize.height += delta
+        context.contentSizeAdjustment.height += delta
+        // Only a row that ends above the viewport moves what the reader is looking at. A row
+        // the viewport is inside grows at its bottom, below the visible text, so following its
+        // growth with the offset would march a streaming answer up off the screen instead.
+        if let collectionView,
+           oldFrame.maxY <= collectionView.contentOffset.y
+               + collectionView.adjustedContentInset.top {
+            context.contentOffsetAdjustment.y += delta
+        }
+        return true
+    }
+
+    /// The changed row and the mounted rows after it, whose origins have just moved.
+    private func invalidatedIndexPaths(from index: Int) -> [IndexPath] {
+        var result = [IndexPath(item: index, section: 0)]
+        if let collectionView {
+            result.append(contentsOf: collectionView.indexPathsForVisibleItems.filter {
+                $0.section == 0 && $0.item > index
+            })
+        }
+        return result
     }
 
     private func stableIdentifier(for indexPath: IndexPath) -> AnyHashable {
@@ -507,6 +581,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private var isInitialBottomPositionScheduled = false
     private var hasTimelineAppeared = false
     private var contentSizeObserver: NSObjectProtocol?
+    private var contentHeightObservation: NSKeyValueObservation?
     private var viewportSaveWorkItem: DispatchWorkItem?
     private static let markdownPrefetchBatchSize = 64
 
@@ -541,6 +616,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
 #endif
         configureCollectionView()
         configureDataSource()
+        observeContentHeight()
         observeStoreIfNeeded()
         contentSizeObserver = NotificationCenter.default.addObserver(
             forName: UIContentSizeCategory.didChangeNotification,
@@ -563,6 +639,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         if let contentSizeObserver {
             NotificationCenter.default.removeObserver(contentSizeObserver)
         }
+        contentHeightObservation?.invalidate()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -601,6 +678,42 @@ final class RemoteConversationTimelineViewController: UIViewController {
         collectionView.backgroundColor = theme.uiGround
         applyLatestButtonTheme()
         reconfigureVisibleContent()
+    }
+
+    /// The viewport may never come to rest past the end of the content.
+    ///
+    /// Rotation and a Dynamic Type change both throw away every measured height, so a long
+    /// history re-estimates down to a fraction of its real length while the reader is somewhere
+    /// inside it. UIKit clamps a stale offset when it owns the shrink; a custom layout's shrink
+    /// leaves it, and a viewport past the end mounts no cell, so the transcript has nothing left
+    /// on screen to measure its way back with. The check is O(1) and steps aside for the offsets
+    /// a finger is legitimately holding out of bounds.
+    private func observeContentHeight() {
+        contentHeightObservation = collectionView.observe(
+            \.contentSize,
+            options: [.new]
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.clampViewportWithinContent() }
+        }
+    }
+
+    private func clampViewportWithinContent() {
+        guard hasAppliedInitialSnapshot, !needsInitialBottomPosition else { return }
+        guard !collectionView.isTracking,
+              !collectionView.isDragging,
+              !collectionView.isDecelerating else { return }
+        let minimum = -collectionView.adjustedContentInset.top
+        let maximum = max(
+            minimum,
+            collectionView.contentSize.height
+                - collectionView.bounds.height
+                + collectionView.adjustedContentInset.bottom
+        )
+        guard collectionView.contentOffset.y > maximum + 0.5 else { return }
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: maximum),
+            animated: false
+        )
     }
 
     private func observeStoreIfNeeded() {
@@ -769,9 +882,6 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 parsedDocuments[id] = nil
             }
             expandedRows.formIntersection(activeIDs)
-            conversationLayout.invalidateHeights(
-                for: updated.map { AnyHashable(Item.row($0)) }
-            )
             applySnapshot(
                 reconfiguring: Set(updated),
                 scrollToBottom: !hasAppliedInitialSnapshot || nearBottom
@@ -855,6 +965,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         scrollToBottom: Bool = false
     ) {
         var snapshot = makeSnapshot()
+        adoptStreamingHeightIfHandingOff()
 #if DEBUG
         let profilesInitialSnapshot = !hasAppliedInitialSnapshot
         if profilesInitialSnapshot {
@@ -895,6 +1006,23 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 }
             }
         }
+    }
+
+    /// Streaming ends by dropping the streaming row and leaving the finished answer as the last
+    /// row. Those are two identities, so the incoming row would otherwise begin at the estimate
+    /// and take the whole answer's height out of the content under a reader who is — by
+    /// construction, because they were watching it arrive — sitting at the end of it.
+    private func adoptStreamingHeightIfHandingOff() {
+        let state = connection.conversationStore.state
+        guard hasStreamingItem,
+              state.streamingText.isEmpty,
+              state.permission == nil,
+              state.questions.isEmpty,
+              let tailID = state.rows.last?.id else { return }
+        conversationLayout.adoptHeight(
+            of: AnyHashable(Item.streaming),
+            for: AnyHashable(Item.row(tailID))
+        )
     }
 
     private func applyPrependingSnapshot() {
@@ -1025,7 +1153,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
 
     @discardableResult
     private func reconfigure(_ items: [Item]) -> Bool {
-        var changedVisibleItems: [AnyHashable] = []
+        var changedVisibleItems: [IndexPath] = []
         for item in items {
             guard let indexPath = dataSource.indexPath(for: item),
                   let cell = collectionView.cellForItem(at: indexPath) else {
@@ -1051,7 +1179,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
                     theme: theme,
                     toggleExpansion: { [weak self] in self?.toggleRow(id) }
                 )
-                changedVisibleItems.append(AnyHashable(item))
+                changedVisibleItems.append(indexPath)
 
             case .streaming:
                 guard let cell = cell as? RemoteConversationRowCell else { continue }
@@ -1059,12 +1187,12 @@ final class RemoteConversationTimelineViewController: UIViewController {
                     connection.conversationStore.state.streamingText,
                     theme: theme
                 )
-                changedVisibleItems.append(AnyHashable(item))
+                changedVisibleItems.append(indexPath)
 
             case .question(let id):
                 guard let cell = cell as? RemoteConversationQuestionCell else { continue }
                 configureQuestion(cell, id: id)
-                changedVisibleItems.append(AnyHashable(item))
+                changedVisibleItems.append(indexPath)
 
             case .permission:
                 guard let cell = cell as? RemoteConversationPermissionCell,
@@ -1078,10 +1206,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
                         self?.connection.decidePermission(permission, allow: allow)
                     }
                 )
-                changedVisibleItems.append(AnyHashable(item))
+                changedVisibleItems.append(indexPath)
             }
         }
-        conversationLayout.invalidateHeights(for: changedVisibleItems)
+        conversationLayout.remeasureMountedItems(at: changedVisibleItems)
         return !changedVisibleItems.isEmpty
     }
 
@@ -1092,8 +1220,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
         cell.configure(request: request, draft: draft, theme: theme, answer: { [weak self] answers in
             self?.connection.answerQuestion(request, answers: answers)
         }, layoutChanged: { [weak self] in
-            guard let self else { return }
-            conversationLayout.invalidateHeights(for: [AnyHashable(Item.question(id))])
+            guard let self, let indexPath = dataSource.indexPath(for: .question(id)) else {
+                return
+            }
+            conversationLayout.remeasureMountedItems(at: [indexPath])
         })
     }
 
