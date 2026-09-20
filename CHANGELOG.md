@@ -16,6 +16,49 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.3.0]
+
+### Added
+
+- **Run a project's Claude terminal chats on a Linux host.** Add the machine once in Settings,
+  choose it on the project, and Threading installs verified, version-matched host components over
+  SSH. The chat keeps its hooks and Threading tools through the tunnel, its transcript is mirrored
+  back to the Mac, Usage is charged to the remote host, and Git Review reads that checkout without
+  copying the repository home. Dropped tunnels reconnect, existing remote sessions can be taken
+  back after a relaunch, and an old daemon cannot quietly return at boot.
+- **Approve an agent's browser request from a paired iPhone.** The pending request appears with the
+  browser workspace it belongs to, remains bound to that exact request while the phone refreshes,
+  and disappears everywhere as soon as it is answered. An approval grants only the browser action
+  being requested; it does not widen the chat's other permissions.
+- **Stop a chat before an account's allowance runs out.** A session curfew can now be stated as a
+  usage percentage as well as a time, with the same choice available when composing the chat and
+  while it is running.
+- Projects can be hidden from the sidebar and restored from Settings. Sidebar panel actions are
+  also available as commands, so the same destinations can be reached without hunting for their
+  buttons.
+
+### Changed
+
+- The Mac sidebar and iPhone now use the same project ordering, show a compact preview for up to
+  five chats under each project, and keep a remote worktree beside the checkout it grew from.
+- Remote Access keeps Hosted Direct connected more reliably, explains when a sleeping Mac is the
+  reason it cannot be reached, and collects remote-machine configuration in Settings.
+- iPhone Usage charts do less work while scrolling, Compose keeps a freshly typed draft when Back
+  is pressed immediately, and terminal input now carries permanent latency measurements for
+  diagnosing slow echo without recording what was typed.
+
+### Fixed
+
+- A failed worktree move no longer lets the chat resume in an ambiguous checkout after launch.
+  Threading keeps the refusal visible and offers an explicit retry or cancel instead.
+- A remote chat whose host says it is no longer running stops redialling forever, while one whose
+  tunnel merely dropped reconnects without allowing an older daemon or connection to take over.
+- Remote transcripts, usage totals and Git status now come from the machine that actually ran the
+  chat rather than being mixed with the Mac's checkout or account.
+- Repeated Remote Access listener restarts keep the configured port when Network.framework has
+  finished cancelling the previous listener, while a real port collision still uses the normal
+  fallback range.
+
 ## [0.2.0]
 
 ### Added
