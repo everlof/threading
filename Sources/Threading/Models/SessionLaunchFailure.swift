@@ -98,6 +98,23 @@ struct SessionLaunchFailure: Codable, Equatable {
 
     // MARK: - Public Methods
 
+    /// The stored record that will refuse a reopen of this session, if there is one.
+    ///
+    /// Asked in two places that must never disagree: the pane, where selecting a row is the
+    /// reopen gesture, and the remote resume route, where a phone tapping the row is. The Mac
+    /// answering "starting" to a resume it was never going to perform is what left a phone
+    /// holding an opening loader until the startup deadline ran out (2026-09-20).
+    ///
+    /// A session with a live surface is excluded for the same reason the pane excludes it: the
+    /// record describes an attempt that is over, and something is already running.
+    static func refusingReopen(
+        of session: AgentSession,
+        hasLiveSurface: Bool
+    ) -> SessionLaunchFailure? {
+        guard let failure = session.lastLaunchFailure, !hasLiveSurface else { return nil }
+        return failure
+    }
+
     /// Whether an exit looks like a failure to launch rather than an agent finishing.
     ///
     /// Two facts, both required. A non-zero status alone would catch every agent the user quits

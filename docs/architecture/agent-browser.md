@@ -15,6 +15,34 @@ The paired iPhone's Workspace Browser mirrors Mac-rendered snapshots, including 
 pages. Agents use `browser_navigate` with the same local URL they use on the Mac; they do not
 need to expose a development server on the LAN. The iPhone reader is full screen and read-only,
 and the Mac retains navigation, cookies and interaction (see `docs/REMOTE_ACCESS.md`).
+App-owned origin grants, sensitive-action confirmations and website-data clearing can also be
+answered from the paired owner's iPhone in an automatic themed prompt over the open chat,
+or in Workspace → Browser. `BrowserPermissionRequests`
+owns each immutable question and its exact action labels; the Mac sheet and authenticated phone
+settle that identity once. An unavailable remembered choice is refused by the host, not merely
+hidden on the phone. Page leases and origin checks still run after approval. OS-owned prompts
+(such as Keychain or macOS privacy permissions) remain on the Mac.
+
+Pending grants invalidate Workspace immediately, before the tool finishes, and publish an
+owner-only permission notification without the requested URL or page details. The phone fetches
+the question behind owner authentication, even before the first tab exists. POST decisions
+revalidate current owner authority, session visibility and request identity on the main actor.
+The existing mutation replay cache preserves a lost response without applying a grant twice.
+Mac dismissal, phone answers, turn end, process exit and expiry share the same retirement path;
+removal precedes callbacks, so dismissing the other presentation cannot turn an Allow into Deny.
+
+Session entry, reconnect, foreground return, notification taps and Workspace events refresh the
+phone prompt on both terminal and native conversation surfaces. One cancellable fetch per visible
+session invalidation replaces polling. A revision rejects reads begun before a phone answer, and
+an unsuccessful reply re-fetches the current request without retargeting the original decision.
+Notification taps use the existing authenticated chat route; answered questions do not reappear.
+
+This is deliberately host-only authorization UI. It retains at most eight requests per session
+and 128 process-wide (normally one), exposes only the next question to iOS, and refuses overflow.
+Question titles are capped at 512 UTF-8 bytes and bodies at 8 KiB before admission. Requests
+expire after five minutes; deadlines are checked on settlement as well as by a suspended timer.
+No polling, file work or per-frame scans are added. Cancellation clears the queue before callbacks
+and does not briefly announce each cancelled successor.
 
 Browser traces remain bounded diagnostics returned to the agent. They are not the user's execution
 history. The [Execution Audit](execution-audit.md) records the exact structured browser tool calls,

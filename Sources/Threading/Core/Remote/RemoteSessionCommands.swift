@@ -66,6 +66,14 @@ protocol RemoteSessionCommands: AnyObject {
     /// Returns false when the application cannot currently surface the existing session.
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool
 
+    /// Clears a stored launch failure and reopens the session, which is exactly what the Mac's
+    /// launch-failure surface does when somebody presses **Try Again**.
+    ///
+    /// Separate from `resumeRemoteSession` because the difference is the whole point: an
+    /// ordinary resume must not clear a record nobody has read, and a retry must not be refused
+    /// by the gate that record installs. Returns false when the application cannot surface it.
+    func retryRemoteSessionLaunch(_ sessionID: SessionID) -> Bool
+
     /// Returns false when the application cannot surface this standalone shell.
     func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool
 

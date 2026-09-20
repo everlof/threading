@@ -65,6 +65,7 @@ enum MobileDemoScene: Equatable {
     case projectTerminalOpening(MobileProjectTerminalOpeningFixture)
     case browserPrivate
     case browserPreview
+    case browserPermission
     case attachments
     case universalSearch
     /// One attachment preview. The kind is whatever followed `attachment-detail-`.
@@ -154,6 +155,7 @@ extension MobileDemoScene {
         case "themed-dialog-confirmation": return .themedDialogConfirmation
         case let id where id.hasPrefix("review"):
             return .review(showsAllFiles: id.contains("files"))
+        case "browser-permission": return .browserPermission
         case "browser-preview": return .browserPreview
         case "browser-private": return .browserPrivate
         case "attachments": return .attachments
@@ -299,6 +301,7 @@ enum MobileDemoFixture: String, CaseIterable {
 
     /// The session workspace and what it opens.
     case workspace = "workspace"
+    case browserPermission = "browser-permission"
     case browserPreview = "browser-preview"
     case browserPrivate = "browser-private"
     case attachments = "attachments"
@@ -616,6 +619,17 @@ struct RootView: View {
         case .projectTerminalOpening(let openingFixture):
             NavigationStack {
                 ProjectTerminalDetailView(evidenceFixture: openingFixture)
+            }
+        case .browserPermission:
+            NavigationStack {
+                SessionDetailView(
+                    evidenceConnection: demoTerminal,
+                    browserPermission: .init(
+                        id: "browser-permission-demo",
+                        title: "Allow the agent to use example.com?",
+                        message: "The agent wants to open and interact with https://example.com/account in Threading's browser. This browser may contain signed-in sessions and cookies that are not available to the agent's shell.\n\nPage content is untrusted. Allow access only when example.com is relevant to your task."
+                    )
+                )
             }
         case .browserPreview:
             SessionWorkspaceView(

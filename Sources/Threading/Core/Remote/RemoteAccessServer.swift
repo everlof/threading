@@ -783,6 +783,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "POST",
+           let sessionID = RemoteRouter.browserPermissionSessionID(forPath: path) {
+            handleBrowserPermission(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
         if request.method == "GET",
            let sessionID = RemoteRouter.browserPreviewSessionID(forPath: path)
         {
@@ -1345,6 +1351,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        // Decoded before the hop to the main queue: an empty body is the ordinary resume, and
+        // neither answer needs the project graph.
+        let retries = (try? JSONDecoder().decode(
+            RemoteResumeSessionRequestDTO.self,
+            from: request.body
+        ))?.retryFailedLaunch == true
+
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
                 self.services.sessionQueries.session(withID: sessionID)
@@ -1358,7 +1371,50 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     respond(.respond(self.persistenceRefusalResponse()))
                     return
                 }
-                let accepted = self.sessionCommands?.resumeRemoteSession(sessionID) == true
+                // A session whose last launch failed is not started by asking again: the Mac's
+                // pane refuses the identical gesture and shows what the agent said instead of
+                // spending another doomed process. Accepting it here was answering "starting"
+                // for a launch that never happened, which left the phone holding its opening
+                // loader for the whole startup deadline (2026-09-20). A person who has read the
+                // refusal can retry, and that clears the record first, exactly as the button on
+                // the Mac does.
+                let refusingFailure = self.services.sessionQueries
+                    .session(withID: sessionID)
+                    .flatMap {
+                        SessionLaunchFailure.refusingReopen(
+                            of: $0,
+                            hasLiveSurface: self.services.runtimeStatus.hasTerminal(
+                                sessionID: sessionID
+                            )
+                        )
+                    }
+                if let refusingFailure, !retries {
+                    // The Mac's journal said nothing at all about the second tap in the
+                    // incident above, which is why matching "it just spins" to a failed launch
+                    // took an archaeology pass over an unrelated log.
+                    self.services.eventLog.recordRemoteEvent("Remote resume refused", [
+                        .session: sessionID.uuidString,
+                        .share: authorization.shareID,
+                        .reason: RemoteRESTErrorCode.sessionLaunchFailed.rawValue,
+                    ])
+                    respond(.respond(RemoteRouter.error(
+                        409,
+                        "Session Launch Failed",
+                        code: .sessionLaunchFailed,
+                        detail: refusingFailure.knownCause
+                    )))
+                    return
+                }
+                let accepted: Bool
+                if refusingFailure == nil {
+                    accepted = self.sessionCommands?.resumeRemoteSession(sessionID) == true
+                } else {
+                    self.services.eventLog.recordRemoteEvent("Remote launch retried", [
+                        .session: sessionID.uuidString,
+                        .share: authorization.shareID,
+                    ])
+                    accepted = self.sessionCommands?.retryRemoteSessionLaunch(sessionID) == true
+                }
                 // A launch can discover a full disk after admission. Preserve that cause for
                 // the phone instead of accepting a startup that can never become ready.
                 guard self.services.sessionMutations.persistenceBlockReason == nil else {
@@ -3226,6 +3282,54 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             respond(.respond(RemoteRouter.json(workspace)))
+        }
+    }
+
+    private func handleBrowserPermission(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request, rawSessionID: rawSessionID, respond: respond
+        ) else { return }
+        guard authorization.canApprovePermissions else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let sessionID = SessionID(uuidString: rawSessionID),
+              let reply = try? JSONDecoder().decode(
+                RemoteBrowserPermissionReplyDTO.self, from: request.body
+              ), RemoteInboundPolicy.acceptsPermissionID(reply.id) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                respond(.respond(RemoteRouter.error(403, "Forbidden")))
+                return
+            }
+            guard RemoteSessionAccess.isVisible(
+                self.services.sessionQueries.session(withID: sessionID)
+            ) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard self.services.runtimeStatus.resolveRemoteBrowserPermission(
+                sessionID: sessionID, id: reply.id, decision: reply.decision
+            ) else {
+                respond(.respond(RemoteRouter.error(409, "Permission No Longer Pending")))
+                return
+            }
+            self.services.eventLog.recordRemoteEvent("Remote browser permission decision", [
+                .session: sessionID.uuidString,
+                .decision: reply.decision.rawValue,
+                .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
+            ])
+            respond(.respond(RemoteRouter.json(RemoteWorkspaceBridge.workspace(
+                for: sessionID,
+                latestActivityID: self.services.mirrors.latestWorkspaceActivityID(for: sessionID)
+            ) ?? RemoteWorkspaceDTO(browserTabs: []))))
         }
     }
 

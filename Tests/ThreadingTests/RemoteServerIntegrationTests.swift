@@ -1053,6 +1053,43 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertFalse(script.contains("console.error ="))
     }
 
+    func testBrowserPermissionRequiresOwnerAndExactLiveRequestAndReplaysOnce() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .claude))
+        defer { BrowserPermissionRequests.shared.cancel(sessionID: session.id) }
+        var decisions: [RemoteBrowserPermissionDecision] = []
+        let id = try XCTUnwrap(BrowserPermissionRequests.shared.enqueue(
+            sessionID: session.id, title: "Allow example.com?", message: "https://example.com",
+            dismiss: {}, settle: { decisions.append($0) }
+        ))
+        let snapshot = try XCTUnwrap(get("/api/session/\(session.id.uuidString)/workspace", bearer: "goodtoken"))
+        XCTAssertEqual(snapshot.status, 200)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteWorkspaceDTO.self, from: snapshot.body).browserPermission?.id, id)
+        let path = "/api/session/\(session.id.uuidString)/browser-permission"
+        let body = try JSONEncoder().encode(RemoteBrowserPermissionReplyDTO(id: id, decision: .allowOnce))
+        authority.set(RemoteAuthorization(
+            shareID: "guest", capability: .interact, scope: .session(session.id),
+            canApprovePermissions: true
+        ), forToken: "browserguest")
+        authority.set(RemoteAuthorization(
+            shareID: "viewer", capability: .view, scope: .allSessions
+        ), forToken: "browserviewer")
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "browserguest", body: body)).status, 403)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "browserviewer", body: body)).status, 403)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "wrong", body: body)).status, 401)
+        XCTAssertTrue(decisions.isEmpty)
+        let stale = try JSONEncoder().encode(RemoteBrowserPermissionReplyDTO(id: UUID().uuidString, decision: .allowOnce))
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: stale)).status, 409)
+        let replay = ["X-Threading-Request-ID": UUID().uuidString]
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: body, headers: replay)).status, 200)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: body, headers: replay)).status, 200)
+        XCTAssertEqual(decisions, [.allowOnce])
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: body)).status, 409)
+    }
+
     func testUnknownPathIs404() throws {
         XCTAssertEqual(try XCTUnwrap(get("/does-not-exist")).status, 404)
     }
@@ -2118,6 +2155,87 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(ended.reason, "sessionDormant")
     }
 
+    /// The other end of a retry that fails the same way: the socket waiting on that launch is
+    /// told the chat did not start, not that somebody closed it. "Session closed on Mac" for an
+    /// agent that died on the way up sends the reader looking for who closed the conversation.
+    func testASocketWaitingOnALaunchThatFailsAgainIsToldItDidNotStart() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-relaunch-failure-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            usesNativeUI: false,
+            title: "Retried and failed again"
+        ))
+        // The retry the phone sent: the Mac accepted it and holds the socket for the startup.
+        let accepted = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken", body: Data()
+        ))
+        XCTAssertEqual(accepted.status, 202)
+
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: URL(string: "http://127.0.0.1:\(port!)")!,
+            token: "goodtoken"
+        ))
+        let socketURL = try XCTUnwrap(link.webSocketURL(sessionID: session.id.uuidString))
+        let task = URLSession.shared.webSocketTask(with: socketURL)
+        task.resume()
+        let auth = RemoteClientMessage(
+            type: "auth",
+            token: "goodtoken",
+            device: "test-device",
+            protocolVersion: RemoteProtocol.current,
+            protocolMinimum: RemoteProtocol.minimumSupported
+        )
+        task.send(.string(String(decoding: try JSONEncoder().encode(auth), as: UTF8.self))) { _ in }
+
+        final class Frames: @unchecked Sendable { var texts: [String] = [] }
+        let received = Frames()
+        let closed = expectation(description: "the host closes the waiting socket")
+        @Sendable func receive() {
+            task.receive { result in
+                switch result {
+                case .success(.string(let text)):
+                    received.texts.append(text)
+                    receive()
+                case .success:
+                    receive()
+                case .failure:
+                    closed.fulfill()
+                }
+            }
+        }
+        receive()
+
+        // The relaunch dies on the way up: the record is written, then the runtime discards the
+        // session. That is the order `AgentSessionViewController` writes them in.
+        let waiting = expectation(description: "the socket reaches the startup transaction")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { waiting.fulfill() }
+        wait(for: [waiting], timeout: 2)
+        ProjectStore.shared.update(sessionID: session.id) { stored in
+            stored.lastLaunchFailure = SessionLaunchFailure(
+                origin: .processExit,
+                exitCode: 1,
+                ranFor: 0.3,
+                summary: "Claude Code stopped right after starting."
+            )
+        }
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(session.id)
+
+        wait(for: [closed], timeout: 5)
+        XCTAssertEqual(task.closeCode.rawValue, 4004)
+        let ended = try XCTUnwrap(received.texts.compactMap {
+            try? JSONDecoder().decode(RemoteEndedDTO.self, from: Data($0.utf8))
+        }.first { $0.type == "ended" })
+        XCTAssertEqual(ended.reason, "sessionLaunchFailed")
+    }
+
     func testStorageBlockedResumeReturnsItsCauseAndLeavesCatalogueReachable() throws {
         let project = try XCTUnwrap(ProjectStore.shared.addProject(
             folderURL: FileManager.default.temporaryDirectory
@@ -2160,6 +2278,87 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             try JSONDecoder().decode(RemoteErrorDTO.self, from: response.body),
             RemoteErrorDTO(code: .storageExhausted)
         )
+        XCTAssertEqual(sessionCommands.resumedSessionIDs, [session.id])
+    }
+
+    /// A phone tapping a chat whose agent died on the way up used to be told "starting" for a
+    /// launch the Mac was never going to perform: `show` refuses the identical gesture and puts
+    /// the failure surface up instead. The phone then held its opening loader until the startup
+    /// deadline ran out (2026-09-20 report: two taps, no Mac-side launch, twelve seconds of
+    /// "Opening chat…" before the person gave up and shook the phone).
+    func testResumeOfAFailedLaunchIsRefusedWithItsCauseRatherThanAcceptedAsStarting() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+        ))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, usesNativeUI: false, title: "Would not start"
+        ))
+        ProjectStore.shared.update(sessionID: session.id) { stored in
+            stored.lastLaunchFailure = SessionLaunchFailure(
+                origin: .processExit,
+                exitCode: 1,
+                ranFor: 0.3,
+                summary: "Claude Code stopped right after starting.",
+                knownCause: SessionLaunchDiagnosis.Cause.notSignedIn
+            )
+        }
+
+        let refusal = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken", body: Data()
+        ))
+        XCTAssertEqual(refusal.status, 409)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: refusal.body),
+            RemoteErrorDTO(
+                code: .sessionLaunchFailed,
+                detail: SessionLaunchDiagnosis.Cause.notSignedIn
+            )
+        )
+        XCTAssertTrue(sessionCommands.resumedSessionIDs.isEmpty)
+        XCTAssertTrue(sessionCommands.retriedSessionIDs.isEmpty)
+        // The record is the only account of what the agent said, so a refused resume must not
+        // consume it.
+        XCTAssertNotNil(ProjectStore.shared.session(withID: session.id)?.lastLaunchFailure)
+    }
+
+    /// The phone's **Try Again** is the same decision as the Mac's button, and takes the same
+    /// route: the stored record is cleared and a fresh attempt is made, rather than the resume
+    /// being refused again by the gate that sent the refusal.
+    func testRetryingAFailedLaunchClearsTheRecordAndStartsTheSession() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+        ))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, usesNativeUI: false, title: "Retried"
+        ))
+        ProjectStore.shared.update(sessionID: session.id) { stored in
+            stored.lastLaunchFailure = SessionLaunchFailure(
+                origin: .processExit,
+                exitCode: 1,
+                ranFor: 0.3,
+                summary: "Claude Code stopped right after starting."
+            )
+        }
+
+        let accepted = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(
+                RemoteResumeSessionRequestDTO(retryFailedLaunch: true)
+            )
+        ))
+        XCTAssertEqual(accepted.status, 202)
+        XCTAssertEqual(sessionCommands.retriedSessionIDs, [session.id])
+        XCTAssertTrue(sessionCommands.resumedSessionIDs.isEmpty)
+        XCTAssertNil(ProjectStore.shared.session(withID: session.id)?.lastLaunchFailure)
+
+        // And the next ordinary open is an ordinary resume again.
+        let reopened = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken", body: Data()
+        ))
+        XCTAssertEqual(reopened.status, 202)
         XCTAssertEqual(sessionCommands.resumedSessionIDs, [session.id])
     }
 
@@ -5010,8 +5209,20 @@ private final class RecordingRemoteRuntimeStatus: RemoteRuntimeStatus {
         return runtime.isRunning(sessionID: sessionID)
     }
 
+    func hasTerminal(sessionID: SessionID) -> Bool {
+        runtime.hasTerminal(sessionID: sessionID)
+    }
+
     func discard(sessionID: SessionID, preservingViewport: Bool) {
         runtime.discard(sessionID: sessionID, preservingViewport: preservingViewport)
+    }
+
+    func resolveRemoteBrowserPermission(
+        sessionID: SessionID,
+        id: String,
+        decision: RemoteBrowserPermissionDecision
+    ) -> Bool {
+        runtime.resolveRemoteBrowserPermission(sessionID: sessionID, id: id, decision: decision)
     }
 
     func resolveRemotePermission(
@@ -5106,6 +5317,7 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
     private(set) var launches: [RemoteSessionLaunch] = []
     private(set) var openingAttachmentPayloads: [[Data?]] = []
     private(set) var resumedSessionIDs: [SessionID] = []
+    private(set) var retriedSessionIDs: [SessionID] = []
     private(set) var resumedTerminalIDs: [TerminalID] = []
     private(set) var accountMoves: [(sessionID: SessionID, accountHandle: AccountHandle)] = []
     var continuationResult: Result<SessionID, RemoteSessionContinuationFailure> = .success(SessionID())
@@ -5117,6 +5329,15 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
 
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool {
         resumedSessionIDs.append(sessionID)
+        onResume?()
+        return resumeResult
+    }
+
+    func retryRemoteSessionLaunch(_ sessionID: SessionID) -> Bool {
+        retriedSessionIDs.append(sessionID)
+        // The application clears the stored record before relaunching; the transport's contract
+        // is only that it asked for that and not for an ordinary resume.
+        ProjectStore.shared.update(sessionID: sessionID) { $0.lastLaunchFailure = nil }
         onResume?()
         return resumeResult
     }

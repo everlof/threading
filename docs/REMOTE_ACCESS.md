@@ -832,6 +832,20 @@ moment it becomes the current page, and a page that already holds its bytes cost
 Two overlapping requests for one 24 MB-bounded file cost a duplicate GET; a page that stops
 asking costs the person the file.
 
+Browser approval requests appear automatically over the open iPhone chat as soon as the agent
+is waiting, and remain available in **Workspace → Browser**,
+even if it has not opened its first tab yet. The paired owner can allow or deny origin access,
+confirm sensitive actions and approve website-data clearing there, using the same choices and
+wording as the Mac. Answering on either device retires the shared request and closes the Mac
+sheet. Guest approval privileges do not extend to the Mac's browser. Requests are cancelled
+when the turn ends, the process exits or the session becomes unavailable, and expire after five
+minutes. Browser notifications use the existing permission preference and delivery channels;
+they name no URL or page content. Tapping one opens the chat and fetches the current question.
+Public builds provide live notification delivery; background APNs requires a configured
+development push provider. Native-tool and
+browser permission notifications have separate internal lifetimes. System-owned macOS and
+Keychain prompts are not remotely answerable.
+
 When an agent opens or navigates a browser
 tab, the phone never changes screens: the account disc takes one quiet breath (a scale phase,
 since a brand mark is not a symbol and takes no symbol effect) and an unread
@@ -1327,6 +1341,13 @@ than "Session closed on Mac". A shake report on 12 Sep 2026 is why: the phone cl
 closed on the Mac, and the same chat opened normally eight seconds later. The host had answered a
 warm resume through a bare attach, which fails identically for both, and had one word for both.
 
+A third word joins them at the other end of a session's life. `sessionDiscarded` used to tell
+every watcher `sessionClosed`, including the socket watching an agent die on the way up — and
+"Session closed on Mac" sends the reader looking for who closed the conversation. A session whose
+stored `SessionLaunchFailure` is standing answers `sessionLaunchFailed` instead, which the iPhone
+words as "Couldn’t start session". The record is retired once a launch outlives its young-process
+window, so one standing at a discard belongs to that exit.
+
 A fresh socket gets the same words. Until 2026-09-19 only a warm resume was told `sessionDormant`
 or `sessionClosed`; a new socket to a chat whose agent had exited got the 4004 close alone, which
 the phone read as a lost network and redialled every eight seconds for as long as that chat's
@@ -1340,6 +1361,34 @@ reuse hits and misses, hit rate, actual hold timing, holds that ended without re
 eviction reason, unsupported hosts, and fixed reuse/unused age buckets. These aggregates persist
 only on that iPhone and contain no Mac id, session id, title, prompt or per-connection history.
 Backgrounding or a memory warning drains the pool; lowering either setting applies immediately.
+
+**A resume the Mac will not perform is refused, not accepted as "starting".** A chat whose agent
+died on the way up keeps a `SessionLaunchFailure`, and the Mac's own pane refuses to relaunch it:
+selecting the row shows what the agent said rather than spending another doomed process (see
+[`launch-failure.md`](architecture/launch-failure.md)). `POST /api/session/<id>/resume` used to
+answer `202 starting` regardless, mark the session as starting, and hold the phone's socket in
+that transaction — so the phone showed "Opening chat…" for the whole 60-second startup deadline
+and then blamed the startup. A shake report on 20 Sep 2026 is the specimen: two taps at 06:40:08
+and 06:40:19, `Agent failed to launch` on the Mac after the first, and no launch of any kind after
+the second. The route now asks the same question the pane asks and answers
+`409 sessionLaunchFailed`, carrying the recognised cause slug as `detail` when there is one; the
+phone words that cause itself and shows it in place of the loader.
+
+**Retrying is a decision, and it travels as one.** The refusal's **Try Again** posts
+`{"retryFailedLaunch": true}` to the same route, which clears the stored record and launches —
+exactly what the button on the Mac's failure surface does, and for the same reason: the record is
+the gate, and it is also the only account of what the agent said, so opening a chat never clears
+it. An ordinary open still sends no body at all. Both halves are pinned by
+`RemoteServerIntegrationTests.testResumeOfAFailedLaunchIsRefusedWithItsCauseRatherThanAcceptedAsStarting`
+and `…testRetryingAFailedLaunchClearsTheRecordAndStartsTheSession`.
+
+**A connection the host ends is not an opening that succeeded.** The hold that keeps a terminal's
+first screen from arriving in pieces used to outlive the socket: the same 20 Sep report shows a
+chat whose `hello` arrived, whose Mac closed it 306 ms later with `sessionClosed`, and whose
+opening span was nevertheless journalled `succeeded` by `ceiling` four seconds afterwards, over an
+empty terminal still wearing the loader. An `ended` frame now ends the hold and the span together,
+so the screen shows what the Mac did send under the state that says why, and the one record a
+support reader uses to tell an opening that worked from one that did not says `failed`.
 
 The Mac and paired iPhone share one in-app appearance. Choose **Appearance** in the iPhone
 dashboard's `…` menu, use **Settings → Mac appearance**, or choose an app theme on the Mac; the

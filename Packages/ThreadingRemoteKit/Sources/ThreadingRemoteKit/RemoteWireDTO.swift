@@ -2239,6 +2239,22 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// What a resume asks for beyond "bring this session back".
+///
+/// The body is optional on the wire: a client that sends none, or a host that predates this
+/// type, keeps the original behaviour of an empty POST.
+public struct RemoteResumeSessionRequestDTO: Codable, Equatable, Sendable {
+    /// Clears a stored launch failure before resuming, which is what the Mac's own **Try Again**
+    /// button does. It is an explicit decision by a person, never part of opening a chat: an
+    /// automatic resume that cleared the record would spend a doomed process on every tap and
+    /// lose the account of the failure the user has not read yet.
+    public let retryFailedLaunch: Bool?
+
+    public init(retryFailedLaunch: Bool? = nil) {
+        self.retryFailedLaunch = retryFailedLaunch
+    }
+}
+
 public enum RemoteSessionStartupState: String, Codable, Equatable, Sendable {
     /// The durable row exists and its launch transaction owns bringing the live surface up.
     case starting
@@ -2761,14 +2777,59 @@ public struct RemoteBrowserTabDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// An app-owned browser grant, separate from a provider's tool permission.
+public struct RemoteBrowserPermissionDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let message: String
+    public let allowTitle: String
+    public let rememberTitle: String?
+    public let denyTitle: String
+
+    public init(
+        id: String, title: String, message: String,
+        allowTitle: String = "Allow Once",
+        rememberTitle: String? = "Always Allow This Host",
+        denyTitle: String = "Deny"
+    ) {
+        self.id = id
+        self.title = title
+        self.message = message
+        self.allowTitle = allowTitle
+        self.rememberTitle = rememberTitle
+        self.denyTitle = denyTitle
+    }
+}
+
+public enum RemoteBrowserPermissionDecision: String, Codable, Sendable {
+    case allowOnce, allowRemembered, deny
+}
+
+public struct RemoteBrowserPermissionReplyDTO: Codable, Sendable {
+    public let id: String
+    public let decision: RemoteBrowserPermissionDecision
+
+    public init(id: String, decision: RemoteBrowserPermissionDecision) {
+        self.id = id
+        self.decision = decision
+    }
+}
+
 /// Authoritative session Workspace state fetched after a live invalidation.
 public struct RemoteWorkspaceDTO: Codable, Equatable, Sendable {
     public let browserTabs: [RemoteBrowserTabDTO]
     public let latestActivityID: String?
 
-    public init(browserTabs: [RemoteBrowserTabDTO], latestActivityID: String? = nil) {
+    public let browserPermission: RemoteBrowserPermissionDTO?
+
+    public init(
+        browserTabs: [RemoteBrowserTabDTO],
+        latestActivityID: String? = nil,
+        browserPermission: RemoteBrowserPermissionDTO? = nil
+    ) {
         self.browserTabs = browserTabs
         self.latestActivityID = latestActivityID
+        self.browserPermission = browserPermission
     }
 }
 
@@ -3822,6 +3883,11 @@ public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
     case replayCacheBusy
     case responseTooLarge
     case hostNotReady
+    /// This session's last launch failed and the Mac has kept the record. Asking it to resume
+    /// again starts nothing — the Mac's own pane refuses the same gesture — so the refusal is
+    /// stated here instead of being accepted as a startup the client then waits out. `detail`
+    /// carries the recognised cause slug when there is one.
+    case sessionLaunchFailed
 
     case unknownLaunchChoice
     case unknownAccount

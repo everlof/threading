@@ -1911,13 +1911,22 @@ final class RemoteAppModel: ObservableObject {
         discardHostedConnection()
     }
 
-    func makeSessionReady(_ session: RemoteSessionSummaryDTO) async throws {
+    /// `retryingFailedLaunch` is a person answering a `sessionLaunchFailed` refusal: the Mac
+    /// clears its stored failure and starts a fresh attempt. Opening a chat never asks for it.
+    func makeSessionReady(
+        _ session: RemoteSessionSummaryDTO,
+        retryingFailedLaunch: Bool = false
+    ) async throws {
         guard !session.isAvailable, let host = activeHost else { return }
         // A demo session has no Mac to resume it; the canned connection opens regardless.
         if isDemo { return }
         let hostID = host.id
         let link = try await performMutation(for: hostID) { client, requestID in
-            try await client.resume(sessionID: session.id, requestID: requestID)
+            try await client.resume(
+                sessionID: session.id,
+                retryFailedLaunch: retryingFailedLaunch,
+                requestID: requestID
+            )
             return client.link
         }
         // Current hosts hold this session's authenticated socket until the resumed surface can

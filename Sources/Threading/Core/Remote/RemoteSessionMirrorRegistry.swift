@@ -1212,14 +1212,30 @@ final class RemoteSessionMirrorRegistry {
         }
     }
 
-    private func cancelSessionStartup(_ sessionID: SessionID, reason: String) {
+    private func cancelSessionStartup(
+        _ sessionID: SessionID,
+        reason: String,
+        endedReason: String = "sessionClosed"
+    ) {
         guard let starting = startingSessions.removeValue(forKey: sessionID) else { return }
         starting.expiry?.cancel()
         for (key, waiter) in starting.waiters {
             startupSessionByConnection[key] = nil
-            waiter.connection.sendText(encode(RemoteEndedDTO(reason: "sessionClosed")))
+            waiter.connection.sendText(encode(RemoteEndedDTO(reason: endedReason)))
             waiter.connection.sendClose(code: 4004, reason: reason)
         }
+    }
+
+    /// What a socket watching this session is told as its surface goes away.
+    ///
+    /// A chat whose agent died on the way up is not a chat that closed. The Mac keeps that
+    /// record — it is what refuses the next resume — and a client told "Session closed on Mac"
+    /// reads a launch failure as somebody having ended the conversation. The record is retired
+    /// once a launch outlives `youngProcessWindow`, so one standing here belongs to this exit.
+    private func discardEndedReason(for sessionID: SessionID) -> String {
+        ProjectStore.shared.session(withID: sessionID)?.lastLaunchFailure == nil
+            ? "sessionClosed"
+            : "sessionLaunchFailed"
     }
 
     /// Attaches a connection to a session's terminal mirror, sending it `hello` and the ring
@@ -3485,7 +3501,8 @@ final class RemoteSessionMirrorRegistry {
     /// Called by `AgentRuntime` when a session is discarded or the app is quitting: tells every
     /// watcher the mirror ended so the CLI is not left blocked and the client stops waiting.
     func sessionDiscarded(_ sessionID: SessionID) {
-        cancelSessionStartup(sessionID, reason: "Session closed")
+        let endedReason = discardEndedReason(for: sessionID)
+        cancelSessionStartup(sessionID, reason: "Session closed", endedReason: endedReason)
         pendingConversationBroadcasts.removeValue(forKey: sessionID)?.cancel()
         latestWorkspaceActivity.removeValue(forKey: sessionID)
         typingConnections.removeValue(forKey: sessionID)
@@ -3498,7 +3515,7 @@ final class RemoteSessionMirrorRegistry {
         guard let mirror = mirrors[sessionID] else { return }
         _ = terminalApplication?.setViewport(nil, for: sessionID)
         removeTap(sessionID: sessionID)
-        let ended = encode(RemoteEndedDTO(reason: "sessionClosed"))
+        let ended = encode(RemoteEndedDTO(reason: endedReason))
         for connection in mirror.subscribers.values {
             connection.sendText(ended)
             // `ended` is useful UI state, but it is not revocation. Closing the socket is what

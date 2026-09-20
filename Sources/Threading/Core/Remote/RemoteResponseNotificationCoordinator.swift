@@ -6,6 +6,8 @@ import ThreadingRemoteKit
 /// do no scans: a deadline reads the shared scalar activity timestamp and reschedules itself.
 @MainActor
 final class RemoteResponseNotificationCoordinator {
+    enum Scope: Hashable, CaseIterable { case session, browser }
+
     typealias Target = RemoteNotificationTargetIdentity
 
     /// Deliberately contains no notification title, body, tool arguments or response text.
@@ -20,6 +22,7 @@ final class RemoteResponseNotificationCoordinator {
     private struct Key: Hashable {
         let sessionID: String
         let kind: RemoteNotificationKind
+        let scope: Scope
         let target: Target
     }
 
@@ -77,9 +80,9 @@ final class RemoteResponseNotificationCoordinator {
 
     var count: Int { entries.count }
 
-    func requested(_ event: RemoteNotificationEventDTO, targets: [Target]) {
+    func requested(_ event: RemoteNotificationEventDTO, targets: [Target], scope: Scope = .session) {
         guard event.kind.lifecycle == .responseRequest else { return }
-        resolve(sessionID: event.sessionID, kind: event.kind)
+        resolve(sessionID: event.sessionID, kind: event.kind, scope: scope)
         for target in targets {
             guard entries.count < Self.maximumEntries, isAuthorized(event, target) else {
                 diagnose("refused", event, target: target, fields: [
@@ -88,7 +91,7 @@ final class RemoteResponseNotificationCoordinator {
                 continue
             }
             diagnose("created", event, target: target)
-            let key = Key(sessionID: event.sessionID, kind: event.kind, target: target)
+            let key = Key(sessionID: event.sessionID, kind: event.kind, scope: scope, target: target)
             let foreground = activity.isForeground(
                 participantID: target.participantID, deviceID: target.deviceID
             )
@@ -99,8 +102,9 @@ final class RemoteResponseNotificationCoordinator {
     }
 
     /// Called on semantic blocker removal, never on editing bytes or simply viewing a chat.
-    func resolve(sessionID: String, kind: RemoteNotificationKind? = nil) {
-        for key in entries.keys.filter({ $0.sessionID == sessionID && (kind == nil || $0.kind == kind) }) {
+    func resolve(sessionID: String, kind: RemoteNotificationKind? = nil, scope: Scope? = nil) {
+        for key in entries.keys.filter({ $0.sessionID == sessionID && (kind == nil || $0.kind == kind)
+            && (scope == nil || $0.scope == scope) }) {
             guard let entry = entries.removeValue(forKey: key) else { continue }
             entry.task?.cancel()
             diagnose("invalidated", entry.event, target: key.target, fields: [.reason: "resolved"])
@@ -137,8 +141,11 @@ final class RemoteResponseNotificationCoordinator {
 
     /// Rechecked by the asynchronous shipping sender immediately before beginning network I/O.
     func canSend(_ event: RemoteNotificationEventDTO, to target: Target) -> Bool {
-        let key = Key(sessionID: event.sessionID, kind: event.kind, target: target)
-        return entries[key]?.event.id == event.id
+        let isPending = Scope.allCases.contains { scope in
+            let key = Key(sessionID: event.sessionID, kind: event.kind, scope: scope, target: target)
+            return entries[key]?.event.id == event.id
+        }
+        return isPending
             && isAuthorized(event, target)
             && activity.activeReason(for: target.participantID, nowUptime: clock.uptime) == nil
     }

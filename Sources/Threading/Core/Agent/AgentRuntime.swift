@@ -1106,6 +1106,14 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         conversations[sessionID]
     }
 
+    func resolveRemoteBrowserPermission(
+        sessionID: SessionID,
+        id: String,
+        decision: RemoteBrowserPermissionDecision
+    ) -> Bool {
+        BrowserPermissionRequests.shared.resolve(sessionID: sessionID, id: id, decision: decision)
+    }
+
     func resolveRemotePermission(
         sessionID: SessionID,
         id: String,

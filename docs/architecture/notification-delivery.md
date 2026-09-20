@@ -41,7 +41,10 @@ an `agentQuestion`, and finishing off screen must resolve the previous question 
 an unread badge. Shipping-service tests exercise those transitions through `AgentRuntime`.
 The semantic transition out of `awaitingUser` resolves a terminal question. Native permission
 cards resolve their exact permission notification before promoting the next card; process exit
-clears both. Editing bytes and viewing a session do not claim to answer a request. Resolution
+clears both. App-owned browser questions use a separate internal browser scope of the same
+permission-request kind, delivered only to paired owners. Resolving a native card cannot retract
+an unanswered browser grant, and vice versa. Scope is internal delivery identity, not a new wire
+kind or a new notification preference. Editing bytes and viewing a session do not claim to answer a request. Resolution
 retracts live events and accepted pushes by exact event identity, and late APNs acceptance checks
 that identity again. Authorization and activity are rechecked immediately before network I/O.
 

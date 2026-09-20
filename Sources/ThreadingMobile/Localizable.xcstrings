@@ -2093,6 +2093,40 @@
         }
       }
     },
+    "Browser is waiting. Open the chat to review the request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browser is waiting. Open the chat to review the request."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsaren väntar. Öppna chatten för att granska begäran."
+          }
+        }
+      }
+    },
+    "Browser permission needed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browser permission needed"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsaren behöver tillåtelse"
+          }
+        }
+      }
+    },
     "Browser ready on your Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10905,6 +10939,17 @@
         }
       }
     },
+    "The agent couldn’t read this chat’s saved conversation on the Mac, so it stopped instead of resuming." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten kunde inte läsa den här chattens sparade konversation på Macen och stannade i stället för att återuppta den."
+          }
+        }
+      }
+    },
     "The agent is waiting for your answer." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10984,6 +11029,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten anger om den använde färskt eller cachelagrat underlag från telefonen."
+          }
+        }
+      }
+    },
+    "The agent’s command wasn’t found on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentens kommando hittades inte på Macen."
           }
         }
       }
@@ -11495,6 +11551,17 @@
         }
       }
     },
+    "This agent login on the Mac needs signing in again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här agentinloggningen på Macen behöver loggas in igen."
+          }
+        }
+      }
+    },
     "This animation plays on your Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11583,6 +11650,17 @@
         }
       }
     },
+    "This chat’s agent stopped right after starting the last time the Mac tried. Opening it again won’t start it; retrying asks the Mac for a fresh attempt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chattens agent stannade direkt efter starten förra gången Macen försökte. Att öppna den igen startar den inte – försök igen ber Macen om ett nytt försök."
+          }
+        }
+      }
+    },
     "This controls how this chat responds when an account limit is reached." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11590,6 +11668,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detta styr hur den här chatten reagerar när en kontogräns nås."
+          }
+        }
+      }
+    },
+    "This conversation is already open somewhere else on the Mac. Close it there first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här konversationen är redan öppen någon annanstans på Macen. Stäng den där först."
           }
         }
       }

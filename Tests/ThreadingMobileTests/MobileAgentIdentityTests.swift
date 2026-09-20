@@ -540,7 +540,73 @@ final class MobileAccountDiscRenderTests: XCTestCase {
 /// bounds even when the SwiftUI layout frame itself still reports the intended size.
 @MainActor
 final class MobileWorkspaceActivityTests: XCTestCase {
+    func testBrowserPromptAppearsOnFetchAndRetiresAfterAnswer() async {
+        let state = MobileBrowserPermissionPromptState()
+        let question = RemoteBrowserPermissionDTO(id: "one", title: "Host", message: "Page")
+        await state.refresh { RemoteWorkspaceDTO(browserTabs: [], browserPermission: question) }
+        XCTAssertTrue(state.isPresented)
+        var submitted: [String] = []
+        await state.decide(question, decision: .allowOnce, reload: {
+            XCTFail("Successful reply needs no second fetch")
+            return RemoteWorkspaceDTO(browserTabs: [])
+        }) { id, decision in
+            submitted.append(id)
+            XCTAssertEqual(decision, .allowOnce)
+            return RemoteWorkspaceDTO(browserTabs: [])
+        }
+        XCTAssertEqual(submitted, ["one"])
+        XCTAssertFalse(state.isPresented)
+        XCTAssertNil(state.request)
+        await state.decide(question, decision: .deny, reload: { RemoteWorkspaceDTO(browserTabs: []) }) { _, _ in
+            XCTFail("A retired prompt cannot answer twice")
+            return RemoteWorkspaceDTO(browserTabs: [])
+        }
+    }
+
+    func testBrowserPromptRefreshesStaleAnswerWithoutRetargetingIt() async {
+        let first = RemoteBrowserPermissionDTO(id: "one", title: "Host", message: "Page")
+        let next = RemoteBrowserPermissionDTO(id: "two", title: "Next host", message: "Page")
+        let state = MobileBrowserPermissionPromptState(request: first)
+        await state.decide(first, decision: .allowOnce, reload: {
+            RemoteWorkspaceDTO(browserTabs: [], browserPermission: next)
+        }) { id, _ in
+            XCTAssertEqual(id, "one")
+            throw URLError(.badServerResponse)
+        }
+        XCTAssertEqual(state.request?.id, "two")
+        XCTAssertTrue(state.isPresented)
+        XCTAssertNil(state.error)
+    }
+
+    func testLateBrowserReadCannotRestoreAnsweredPrompt() async {
+        let question = RemoteBrowserPermissionDTO(id: "one", title: "Host", message: "Page")
+        let state = MobileBrowserPermissionPromptState(request: question)
+        var resume: CheckedContinuation<RemoteWorkspaceDTO, Never>?
+        let read = Task { await state.refresh {
+            await withCheckedContinuation { resume = $0 }
+        } }
+        while resume == nil { await Task.yield() }
+        await state.decide(question, decision: .deny, reload: { RemoteWorkspaceDTO(browserTabs: []) }) { _, _ in
+            RemoteWorkspaceDTO(browserTabs: [])
+        }
+        resume?.resume(returning: RemoteWorkspaceDTO(browserTabs: [], browserPermission: question))
+        await read.value
+        XCTAssertNil(state.request)
+        XCTAssertFalse(state.isPresented)
+    }
+
     private let scale: CGFloat = 3
+
+    func testPendingPermissionStaysUnseenEvenBeforeTheFirstBrowserTabExists() {
+        let activity = makeActivity()
+        activity.reconcile(RemoteWorkspaceDTO(
+            browserTabs: [], latestActivityID: "permission-1",
+            browserPermission: .init(id: "request-1", title: "Host", message: "Page")
+        ))
+        XCTAssertTrue(activity.hasUnseenBrowser)
+        activity.markBrowserSeen()
+        XCTAssertFalse(activity.hasUnseenBrowser)
+    }
 
     func testBrowserActivityStaysUnseenUntilThisPhoneOpensBrowser() throws {
         let activity = makeActivity()

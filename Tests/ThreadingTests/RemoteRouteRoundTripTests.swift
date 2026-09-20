@@ -247,6 +247,9 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             case .workspace:
                 built = try wirePath(link.workspaceURL(sessionID: sessionID))
                 matched = RemoteRouter.workspaceSessionID(forPath: built)
+            case .browserPermission:
+                built = try wirePath(link.browserPermissionURL(sessionID: sessionID))
+                matched = RemoteRouter.browserPermissionSessionID(forPath: built)
             case .browserPreview:
                 built = try wirePath(
                     XCTUnwrap(link.browserPreviewURL(sessionID: sessionID, tabID: "tab-1"))

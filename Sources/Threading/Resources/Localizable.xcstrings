@@ -9509,6 +9509,23 @@
         }
       }
     },
+    "Browser is waiting. Open the chat to review the request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browser is waiting. Open the chat to review the request."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsaren väntar. Öppna chatten för att granska begäran."
+          }
+        }
+      }
+    },
     "Browser only" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9516,6 +9533,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Endast webbläsare"
+          }
+        }
+      }
+    },
+    "Browser permission needed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browser permission needed"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsaren behöver tillåtelse"
           }
         }
       }

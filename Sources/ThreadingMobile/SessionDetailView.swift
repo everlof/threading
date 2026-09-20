@@ -272,10 +272,14 @@ struct SessionDetailView: View {
     let installsPrincipalTitle: Bool
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
     @State private var connection: RemoteSessionConnection?
+    private var initialBrowserPermission: RemoteBrowserPermissionDTO? = nil
     /// The Mac `connection` was opened against, so a route move on another Mac is not adopted.
     @State private var connectedHostID: String?
     @State private var isShowingUsage = false
     @State private var launchError: String?
+    /// Whether the refusal on screen is the Mac's stored launch failure, which its **Try Again**
+    /// answers by asking for a fresh attempt rather than for the same refusal again.
+    @State private var launchErrorAllowsRetry = false
     @State private var themeError: String?
     @State private var isChangingTheme = false
     @State private var renameText = ""
@@ -314,7 +318,11 @@ struct SessionDetailView: View {
     #if DEBUG
         /// Installs an already-connected, local PTY fixture behind the shipping session chrome.
         /// Evidence can therefore exercise the real toolbar/menu without opening a socket.
-        init(evidenceConnection: RemoteSessionConnection) {
+        init(
+            evidenceConnection: RemoteSessionConnection,
+            browserPermission: RemoteBrowserPermissionDTO? = nil
+        ) {
+            initialBrowserPermission = browserPermission
             session = evidenceConnection.session
             openingStrategy = .resumeIfNeeded
             installsPrincipalTitle = true
@@ -345,8 +353,10 @@ struct SessionDetailView: View {
                     Text(launchError)
                 } actions: {
                     Button("Try Again") {
+                        let retriesFailedLaunch = launchErrorAllowsRetry
                         self.launchError = nil
-                        Task { await open() }
+                        self.launchErrorAllowsRetry = false
+                        Task { await open(retryingFailedLaunch: retriesFailedLaunch) }
                     }
                 }
             } else {
@@ -502,6 +512,20 @@ struct SessionDetailView: View {
             connection = nil
             Task { await open() }
         }
+        .modifier(MobileBrowserPermissionPrompt(
+            sessionID: session.id,
+            activity: workspaceActivity,
+            client: model.client,
+            isEnabled: canOpenWorkspace && !model.isDemo,
+            refresh: .init(
+                sequence: workspaceActivity.changeSequence,
+                route: model.routeIdentity,
+                notificationID: model.notificationOpenRequest?.eventID,
+                isConnected: connection?.phase == .connected,
+                isActive: notifications.scenePhase == .active
+            ),
+            initialRequest: initialBrowserPermission
+        ))
         .themedAlert(
             "Couldn’t change terminal theme",
             message: themeError ?? "",
@@ -888,7 +912,7 @@ struct SessionDetailView: View {
         model.consumeNotificationOpenRequest(eventID: request.eventID)
     }
 
-    private func open() async {
+    private func open(retryingFailedLaunch: Bool = false) async {
         #if DEBUG
             // The marketing terminal is a privacy-reviewed PTY resource already installed by the
             // DEBUG initializer above. Treating it as a dormant row would replace it with a socket.
@@ -932,7 +956,10 @@ struct SessionDetailView: View {
             // and a live chat — every warm hit there has ever been — still skips it.
             let needsWaking = openingStrategy == .resumeIfNeeded && !latest.isAvailable
             if needsWaking {
-                try await model.makeSessionReady(latest)
+                try await model.makeSessionReady(
+                    latest,
+                    retryingFailedLaunch: retryingFailedLaunch
+                )
                 span.path = .woken
                 span.reached(.wake)
             }
@@ -978,6 +1005,10 @@ struct SessionDetailView: View {
         } catch {
             span.failed(code: MobileDiagnostics.errorCode(error))
             MobileDiagnostics.logDegraded(.sessionAction, error: error)
+            // A launch the Mac has already refused is the one failure whose retry means
+            // something different from repeating this call: the Mac clears its record first.
+            launchErrorAllowsRetry = (error as? RemoteClientError)?.refusalCode
+                == RemoteRESTErrorCode.sessionLaunchFailed.rawValue
             launchError = error.localizedDescription
         }
     }
@@ -1042,6 +1073,7 @@ struct SessionDetailView: View {
             do {
                 try await model.setSurface(surface, for: currentSession)
                 launchError = nil
+                launchErrorAllowsRetry = false
                 await open()
             } catch is CancellationError {
                 return
@@ -1065,6 +1097,7 @@ struct SessionDetailView: View {
         connection?.disconnect(markEnded: false)
         connection = nil
         launchError = nil
+        launchErrorAllowsRetry = false
         Task { await open() }
     }
 

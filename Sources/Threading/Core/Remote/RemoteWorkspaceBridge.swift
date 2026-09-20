@@ -29,15 +29,17 @@ enum RemoteWorkspaceBridge {
         for sessionID: SessionID,
         latestActivityID: String?
     ) -> RemoteWorkspaceDTO? {
-        guard let provider,
-              RemoteSessionAccess.isVisible(
+        guard RemoteSessionAccess.isVisible(
                 ProjectStore.shared.session(withID: sessionID)
               ) else {
             return nil
         }
+        let permission = BrowserPermissionRequests.shared.pending(for: sessionID)
+        guard provider != nil || permission != nil else { return nil }
         return RemoteWorkspaceDTO(
-            browserTabs: provider.remoteBrowserTabs(for: sessionID),
-            latestActivityID: latestActivityID
+            browserTabs: provider?.remoteBrowserTabs(for: sessionID) ?? [],
+            latestActivityID: latestActivityID,
+            browserPermission: permission
         )
     }
 

@@ -1359,6 +1359,7 @@ final class MobileDemoSceneTests: XCTestCase {
                     .projectTerminalOpening(.connecting)
                 )
             case .workspace: expected = ("workspace", .workspace)
+            case .browserPermission: expected = ("browser-permission", .browserPermission)
             case .browserPreview: expected = ("browser-preview", .browserPreview)
             case .browserPrivate: expected = ("browser-private", .browserPrivate)
             case .attachments: expected = ("attachments", .attachments)

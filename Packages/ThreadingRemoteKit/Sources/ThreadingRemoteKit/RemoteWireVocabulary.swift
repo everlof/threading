@@ -626,6 +626,7 @@ public enum RemoteSessionRouteAction: String, CaseIterable, Codable, Equatable, 
     case attachmentThumbnail = "attachment-thumbnail"
     case attachmentUpload = "attachment-upload"
     case workspace
+    case browserPermission = "browser-permission"
     case browserPreview = "browser-preview"
     case extensionPanel = "extension-panel"
     case extensionPanelResource = "extension-panel-resource"

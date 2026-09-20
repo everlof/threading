@@ -1120,6 +1120,12 @@ Four things you can do with it:
 **Selecting a failed session no longer retries it.** Clicking a row used to re-run the same
 failing command every time; now it shows you what happened and waits for you to choose.
 
+**Opening it from your iPhone says the same thing.** A chat the Mac has already refused to
+relaunch is not started by tapping it there either, and the phone used to sit on "Opening chat…"
+for a full minute before giving up. It now says at once that the agent stopped right after
+starting — naming the cause when the Mac recognised one — and its **Try Again** is the same
+decision as the button on the Mac: the record is cleared and a fresh attempt made.
+
 Threading also checks a Codex conversation's saved file before reopening it. If the file is in a
 state Codex will refuse, the pane says so without spending a launch to find out.
 
@@ -3218,7 +3224,12 @@ follows the active Mac tab until you pick a specific tab from the menu. The Mac 
 navigation and interaction, and private
 tabs never send a preview. The picture is taken on the Mac, so a page only the Mac can reach, such
 as a dev server on its own localhost, shows on the phone like any other. Ask the agent to open
-its local URL using `browser_navigate`; no LAN address is needed for this preview. The Workspace is
+its local URL using `browser_navigate`; no LAN address is needed for this preview. If the agent
+needs browser permission, a prompt appears automatically over the open chat with the same
+approval choices as the Mac. Workspace → Browser also keeps the pending question available. You can approve or deny from your paired owner iPhone; answering there also dismisses
+the Mac's prompt. Sensitive browser actions and website-data clearing work the same way. Requests
+expire after five minutes and are cancelled when the turn ends. macOS and Keychain system prompts
+still require the Mac. The Workspace is
 available only to a paired owner device, not one-chat
 guest links. Attachment files are still fetched only when you choose one, and only if the file
 remains inside that session's checkout.

@@ -38,7 +38,17 @@ protocol RemoteSessionMutating: Sendable {
 @MainActor
 protocol RemoteRuntimeStatus: Sendable {
     func isRunning(sessionID: SessionID) -> Bool
+
+    /// Whether a live surface — a terminal or a rendered conversation — is already retained for
+    /// this session. Reopening such a session attaches rather than launching, which is the one
+    /// case where a stored launch failure says nothing about what a resume will do.
+    func hasTerminal(sessionID: SessionID) -> Bool
     func discard(sessionID: SessionID, preservingViewport: Bool)
+    func resolveRemoteBrowserPermission(
+        sessionID: SessionID,
+        id: String,
+        decision: RemoteBrowserPermissionDecision
+    ) -> Bool
     func resolveRemotePermission(
         sessionID: SessionID,
         id: String,

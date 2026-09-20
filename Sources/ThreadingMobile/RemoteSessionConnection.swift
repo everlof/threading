@@ -1285,6 +1285,41 @@ final class RemoteSessionConnection: ObservableObject {
         openSpan = nil
     }
 
+    /// A connection the host has ended is not still opening.
+    ///
+    /// The hold that keeps a terminal's first screen from arriving in pieces outlived the
+    /// socket: a chat the Mac closed 300 ms after its hello kept the opening loader over an
+    /// empty terminal until the hold's own ceiling, and the opening was then journalled as
+    /// `succeeded` — the one record a support reader uses to tell a chat that opened from one
+    /// that did not (2026-09-20). Ending the hold here reveals whatever the Mac did send,
+    /// under the ended state that says why, and the span records the truth.
+    ///
+    /// Unlike a socket failure, which retries inside the same opening, `ended` is terminal:
+    /// nothing is going to answer this hello later.
+    private func endOpeningForEndedConnection(reason: String?) {
+        if isTerminalHydrating {
+            terminalHydrationQuietTask?.cancel()
+            terminalHydrationQuietTask = nil
+            terminalHydrationMaximumTask?.cancel()
+            terminalHydrationMaximumTask = nil
+            isTerminalHydrating = false
+            // A held replay belonged to a connection that is now over, and `disconnect` already
+            // states what to do with one: drop it and leave the screen it was going to replace
+            // exactly as it is. Releasing it would reset a terminal to blank on the strength of
+            // a reconnect that never arrived. A first open holds nothing, so its buffered
+            // output is left alone for the renderer that is still mounting.
+            if holdsReplayForHydration {
+                holdsReplayForHydration = false
+                holdsPreviousScreen = false
+                pendingTerminalOutput.removeAll(keepingCapacity: true)
+            }
+        }
+        isAwaitingResume = false
+        guard let span = openSpan else { return }
+        span.failed(code: "ended.\(MobileDiagnostics.machineToken(reason ?? "server"))")
+        openSpan = nil
+    }
+
     private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
         guard isTerminalHydrating else { return }
         if capability == .interact {
@@ -2277,7 +2312,10 @@ final class RemoteSessionConnection: ObservableObject {
                 // The chat did not close: its agent is simply no longer running, and the Mac has
                 // no resume request in flight to wait for. Reopening the row asks for one.
                 phase = .ended(MobileL10n.string("Reopen to resume on your Mac"))
-            case "sessionStartupTimedOut":
+            case "sessionStartupTimedOut", "sessionLaunchFailed":
+                // A launch that died on the way up and a startup that never finished are the
+                // same sentence here: the chat did not start. Which one it was, and what the
+                // agent said, is the refusal the next open receives.
                 phase = .ended(MobileL10n.string("Couldn’t start session"))
             case "protocolMismatch":
                 phase = .ended(
@@ -2294,6 +2332,7 @@ final class RemoteSessionConnection: ObservableObject {
                 .result: "ended",
                 .reason: MobileDiagnostics.machineToken(ended?.reason ?? "server"),
             ]) { current, _ in current })
+            endOpeningForEndedConnection(reason: ended?.reason)
         case "error":
             let error = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
             if isOwnedByConnectionPool {

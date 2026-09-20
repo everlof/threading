@@ -40,6 +40,13 @@ struct ChoiceRequest {
     var accessory: NSView?
 }
 
+/// Lets another authenticated presentation retire this same question without choosing a button.
+@MainActor
+final class ConfirmationPresentation {
+    fileprivate weak var alert: ThemedAlert?
+    func dismiss() { alert?.dismiss() }
+}
+
 // MARK: - Confirmation Alert
 
 /// The only supported way to ask the user a question they can answer wrongly.
@@ -111,9 +118,11 @@ enum ConfirmationAlert {
     static func choose(
         _ request: ChoiceRequest,
         in window: NSWindow?,
+        presentation: ConfirmationPresentation? = nil,
         completion: @escaping @MainActor (Int?) -> Void
     ) {
         let alert = makeAlert(request)
+        presentation?.alert = alert
         present(alert, in: window) { completion(chosen($0, in: request)) }
     }
 

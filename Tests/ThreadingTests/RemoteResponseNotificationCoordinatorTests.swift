@@ -4,6 +4,22 @@ import ThreadingRemoteKit
 
 @MainActor
 final class RemoteResponseNotificationCoordinatorTests: XCTestCase {
+    func testBrowserAndNativePermissionLifetimesDoNotReplaceOrResolveEachOther() {
+        let h = Harness()
+        let native = h.event(id: "native", kind: .permissionRequest)
+        let browser = h.event(id: "browser", kind: .permissionRequest)
+        h.coordinator.requested(native, targets: [h.owner])
+        h.coordinator.requested(browser, targets: [h.owner], scope: .browser)
+        XCTAssertEqual(h.coordinator.count, 2)
+        XCTAssertTrue(h.coordinator.canSend(native, to: h.owner))
+        XCTAssertTrue(h.coordinator.canSend(browser, to: h.owner))
+        h.coordinator.resolve(sessionID: "session", kind: .permissionRequest, scope: .session)
+        XCTAssertEqual(h.coordinator.count, 1)
+        XCTAssertTrue(h.coordinator.canSend(browser, to: h.owner))
+        h.coordinator.resolve(sessionID: "session", kind: .permissionRequest, scope: .browser)
+        XCTAssertEqual(h.coordinator.count, 0)
+    }
+
     func testActiveMacDefersBothKindsAndAnswerCancelsEvenRacingTimer() {
         for kind in [RemoteNotificationKind.agentQuestion, .permissionRequest] {
             let h = Harness()

@@ -498,10 +498,7 @@ extension AgentToolCoordinator {
             style: .informational
         )
 
-        ConfirmationAlert.choose(
-            request,
-            in: browserPresentationWindow(for: sessionID)
-        ) { chosen in
+        BrowserPermissionPresenter.choose(request, for: sessionID, in: browserPresentationWindow(for: sessionID)) { chosen in
             switch chosen {
             case 0: applyDecision(.allowOnce)
             case 1: applyDecision(.allowPersistently)
@@ -668,8 +665,9 @@ extension AgentToolCoordinator {
                 cancelTitle: L10n.string("Deny")
             )
             return await withCheckedContinuation { continuation in
-                ConfirmationAlert.ask(
+                BrowserPermissionPresenter.confirm(
                     request,
+                    for: sessionID,
                     in: self.browserPresentationWindow(for: sessionID)
                 ) { allowed in
                     continuation.resume(returning: allowed)
@@ -684,8 +682,9 @@ extension AgentToolCoordinator {
         )
 
         return await withCheckedContinuation { continuation in
-            ConfirmationAlert.choose(
+            BrowserPermissionPresenter.choose(
                 request,
+                for: sessionID,
                 in: self.browserPresentationWindow(for: sessionID)
             ) { chosen in
                 switch chosen {

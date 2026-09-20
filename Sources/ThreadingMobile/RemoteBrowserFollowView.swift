@@ -18,6 +18,8 @@ struct RemoteBrowserFollowView: View {
     @State private var preview: UIImage?
     @State private var loadError: String?
     @State private var isLoading = false
+    @State private var isDeciding = false
+    @State private var permissionError: String?
     private let loadsRemotely: Bool
     private let showsCloseButton: Bool
 
@@ -60,7 +62,7 @@ struct RemoteBrowserFollowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !workspace.browserTabs.isEmpty {
+            if !workspace.browserTabs.isEmpty && workspace.browserPermission == nil {
                 browserHeader
                 Divider()
                     .overlay(theme.divider)
@@ -85,13 +87,13 @@ struct RemoteBrowserFollowView: View {
                 Button {
                     Task { await refresh() }
                 } label: {
-                    if isLoading {
+                    if isLoading || isDeciding {
                         ProgressView()
                     } else {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                .disabled(isLoading)
+                .disabled(isLoading || isDeciding)
                 .accessibilityLabel(MobileL10n.string("Refresh browser preview"))
             }
         }
@@ -154,7 +156,9 @@ struct RemoteBrowserFollowView: View {
 
     @ViewBuilder
     private var browserContent: some View {
-        if workspace.browserTabs.isEmpty {
+        if let permission = workspace.browserPermission {
+            permissionContent(permission)
+        } else if workspace.browserTabs.isEmpty {
             ContentUnavailableView {
                 Label("No Browser Tabs", systemImage: "globe")
             } description: {
@@ -198,6 +202,69 @@ struct RemoteBrowserFollowView: View {
                 Text("This tab has not loaded a previewable page yet.")
             }
             .foregroundStyle(theme.secondaryLabel)
+        }
+    }
+
+    private func permissionContent(_ permission: RemoteBrowserPermissionDTO) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.inset) {
+                Label("Browser permission needed", systemImage: "hand.raised")
+                    .font(.headline)
+                    .foregroundStyle(theme.label)
+                Text(permission.title)
+                    .font(.title2.bold())
+                    .foregroundStyle(theme.label)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(permission.message)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if let permissionError {
+                    Text(permissionError)
+                        .foregroundStyle(theme.secondaryLabel)
+                }
+                permissionButton(permission.allowTitle, decision: .allowOnce, request: permission)
+                if let rememberTitle = permission.rememberTitle {
+                    permissionButton(rememberTitle, decision: .allowRemembered, request: permission)
+                }
+                permissionButton(permission.denyTitle, decision: .deny, request: permission)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(MobileDesign.Spacing.inset)
+        }
+    }
+
+    private func permissionButton(
+        _ title: String,
+        decision: RemoteBrowserPermissionDecision,
+        request: RemoteBrowserPermissionDTO
+    ) -> some View {
+        Button(title) {
+            Task { await decide(request, decision: decision) }
+        }
+        .buttonStyle(MobileThemedActionButtonStyle(kind: .secondary, theme: theme))
+        .disabled(isDeciding)
+    }
+
+    private func decide(
+        _ permission: RemoteBrowserPermissionDTO,
+        decision: RemoteBrowserPermissionDecision
+    ) async {
+        guard loadsRemotely, !isDeciding else { return }
+        isDeciding = true
+        permissionError = nil
+        defer { isDeciding = false }
+        do {
+            workspace = try await client.decideBrowserPermission(
+                sessionID: session.id, id: permission.id, decision: decision
+            )
+            activity.reconcile(workspace)
+            await refresh()
+        } catch {
+            // Another device may have answered, or the turn may have ended. Read the current
+            // request before offering another action; never retarget this answer to its successor.
+            await refresh()
+            permissionError = error.localizedDescription
         }
     }
 

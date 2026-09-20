@@ -309,6 +309,9 @@ private struct SessionWorkspaceItemRow: View {
         guard let workspace else {
             return MobileL10n.string("Follow browser tabs opened on your Mac.")
         }
+        if workspace.browserPermission != nil {
+            return MobileL10n.string("Browser permission needed")
+        }
         guard !workspace.browserTabs.isEmpty else {
             return MobileL10n.string("No browser tabs are open on your Mac.")
         }

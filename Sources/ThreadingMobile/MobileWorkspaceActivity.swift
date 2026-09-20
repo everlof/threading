@@ -46,7 +46,7 @@ final class MobileWorkspaceActivity: ObservableObject {
         if let activityID = workspace.latestActivityID {
             latestBrowserActivityID = activityID
         }
-        if workspace.browserTabs.isEmpty {
+        if workspace.browserTabs.isEmpty && workspace.browserPermission == nil {
             markBrowserSeen()
         }
     }

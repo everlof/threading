@@ -182,6 +182,37 @@ on its margin rather than on the column.
 regression boundary, and it states its host's width at `.defaultLow` on purpose: a fixture that
 pins the host at `.required` cannot see this defect at all.
 
+## The same refusal reaches the phone
+
+The gate in `show` is the Mac's answer to "will reopening this start anything": no, and here is
+what the agent said. A paired iPhone asks the same question through
+`POST /api/session/<id>/resume`, and until 2026-09-20 got a different answer — `202 starting`,
+because `resumeRemoteSession` returns true whenever the row exists. Nothing then launched, the
+host opened a startup transaction for a surface that was never coming, and the phone held its
+opening loader for the whole 60-second deadline before reporting a startup timeout.
+
+The report that found it is the shape of the bug: two taps eleven seconds apart, the first one
+launching a Claude that exited 1 after 295 ms (`Agent failed to launch`), the second producing no
+Mac-side log line at all, and a person shaking the phone at "Öppnar chatten…" twelve seconds
+later to ask why opening was stuck.
+
+So `SessionLaunchFailure.refusingReopen(of:hasLiveSurface:)` is the one predicate, asked by the
+pane and by the resume route, and the route answers `409 sessionLaunchFailed` with the record's
+`knownCause` as its bounded `detail`. Two things follow from the design above rather than from the
+transport:
+
+- **The refusal does not consume the record.** It is still the only account of what the agent
+  said, and the person on the phone has not read it yet.
+- **Retrying is a separate, explicit request.** `{"retryFailedLaunch": true}` on the same route
+  reaches `retryRemoteSessionLaunch`, which clears the record and resumes — the same two steps,
+  in the same order, as `relaunchAfterFailure` behind the button on the Mac. An automatic open
+  never sets it, because clearing on navigation is exactly the "selecting the row retries it"
+  behaviour this subsystem exists to remove.
+
+The refusal and the retry are both journalled (`Remote resume refused`, `Remote launch retried`).
+The Mac's journal said nothing whatsoever about the second tap in that report, which is what made
+matching "it just spins" to a failed launch an archaeology exercise.
+
 ## Reporting
 
 **Report a Problem…** prefills the existing sheet (`ReportProblemViewController` →

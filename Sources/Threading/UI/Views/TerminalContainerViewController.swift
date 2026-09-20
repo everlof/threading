@@ -1118,9 +1118,10 @@ final class TerminalContainerViewController: NSViewController {
         // second of the user's attention to reproduce a failure they have already read. The
         // retry is a button on the surface below instead, which is a decision rather than a
         // side effect of navigating.
-        if let failure = agentSession.lastLaunchFailure,
-           !AgentRuntime.shared.hasTerminal(sessionID: sessionID)
-        {
+        if let failure = SessionLaunchFailure.refusingReopen(
+            of: agentSession,
+            hasLiveSurface: AgentRuntime.shared.hasTerminal(sessionID: sessionID)
+        ) {
             applyDrawer(for: nil)
             showLaunchFailureState(failure, session: agentSession)
             return

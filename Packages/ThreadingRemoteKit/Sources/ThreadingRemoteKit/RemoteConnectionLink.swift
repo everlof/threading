@@ -410,6 +410,10 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         sessionActionURL(sessionID: sessionID, action: .workspace)
     }
 
+    public func browserPermissionURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: .browserPermission)
+    }
+
     public func browserPreviewURL(sessionID: String, tabID: String) -> URL? {
         var components = URLComponents(
             url: sessionActionURL(sessionID: sessionID, action: .browserPreview),

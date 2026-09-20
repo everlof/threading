@@ -601,8 +601,36 @@ final class RemoteNotificationService {
         deliverResponseRequest(event)
     }
 
+    func browserPermissionRequested(sessionID: SessionID) {
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        let event = RemoteNotificationEventDTO(
+            kind: .permissionRequest,
+            hostID: RemoteHostIdentity.current.id,
+            sessionID: sessionID.uuidString,
+            title: Self.safeText(
+                "\(session.displayTitle) needs permission",
+                bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+            ),
+            body: "Browser is waiting. Open the chat to review the request.",
+            titleLocalization: .init(
+                key: "%@ needs permission",
+                arguments: [Self.safeText(session.displayTitle, bytes: RemoteAccessDefaults.maximumNotificationTitleBytes)]
+            ),
+            bodyLocalization: .init(
+                key: "Browser is waiting. Open the chat to review the request."
+            )
+        )
+        deliverResponseRequest(event, ownerOnly: true, scope: .browser)
+    }
+
+    func browserPermissionResolved(sessionID: SessionID) {
+        responseDeliveryCoordinator.resolve(
+            sessionID: sessionID.uuidString, kind: .permissionRequest, scope: .browser
+        )
+    }
+
     func permissionResolved(sessionID: SessionID) {
-        responseDeliveryCoordinator.resolve(sessionID: sessionID.uuidString, kind: .permissionRequest)
+        responseDeliveryCoordinator.resolve(sessionID: sessionID.uuidString, kind: .permissionRequest, scope: .session)
     }
 
     /// Turns provider-neutral lifecycle edges into completion or response-needed notifications.
@@ -693,14 +721,20 @@ final class RemoteNotificationService {
         deliverResponseRequest(event)
     }
 
-    private func deliverResponseRequest(_ event: RemoteNotificationEventDTO) {
-        let targets = subscriptions.map { key, subscription in
+    private func deliverResponseRequest(
+        _ event: RemoteNotificationEventDTO,
+        ownerOnly: Bool = false,
+        scope: RemoteResponseNotificationCoordinator.Scope = .session
+    ) {
+        let targets = subscriptions.filter { _, subscription in
+            !ownerOnly || subscription.authorization.canManageHost
+        }.map { key, subscription in
             RemoteResponseNotificationCoordinator.Target(
                 shareID: key.shareID, deviceID: key.deviceID,
                 participantID: Self.participantID(for: subscription.authorization)
             )
         }.filter { responseTargetIsAuthorized(event, target: $0) }
-        responseDeliveryCoordinator.requested(event, targets: targets)
+        responseDeliveryCoordinator.requested(event, targets: targets, scope: scope)
     }
 
     private func responseTargetIsAuthorized(

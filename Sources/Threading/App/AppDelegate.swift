@@ -1379,6 +1379,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return true
     }
 
+    /// The phone's **Try Again**, taking the same route as the Mac's own: the stored failure is
+    /// cleared first, because it is the gate that would otherwise refuse this launch.
+    @MainActor
+    func retryRemoteSessionLaunch(_ sessionID: SessionID) -> Bool {
+        guard ownsSingleInstanceLock,
+              ProjectStore.shared.session(withID: sessionID) != nil,
+              let mainWindowController else {
+            return false
+        }
+        mainWindowController.retryRemoteSessionLaunch(sessionID)
+        return true
+    }
+
     @MainActor
     func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool {
         guard ownsSingleInstanceLock,

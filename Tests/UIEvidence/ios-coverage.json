@@ -153,6 +153,7 @@
     {"id": "git-review-files-keyboard-open-custom-dark", "entryID": "ios-git-review", "demo": "review-files", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "git-review-files-keyboard-dismissed-custom-dark", "entryID": "ios-git-review", "demo": "review-files", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorFrameRestored"]},
     {"id": "workspace-custom-dark", "entryID": "ios-workspace", "demo": "workspace", "appearance": "dark", "theme": "custom"},
+    {"id": "browser-permission-custom-dark", "entryID": "ios-browser-follow", "demo": "browser-permission", "appearance": "dark", "theme": "custom"},
     {"id": "browser-preview-custom-dark", "entryID": "ios-browser-follow", "demo": "browser-preview", "appearance": "dark", "theme": "custom"},
     {"id": "browser-private-custom-dark", "entryID": "ios-browser-follow", "demo": "browser-private", "appearance": "dark", "theme": "custom"},
     {"id": "attachments-custom-dark", "entryID": "ios-attachments", "demo": "attachments", "appearance": "dark", "theme": "custom"},
@@ -504,7 +505,7 @@
       "priority": "important",
       "title": "Browser follow",
       "description": "The read-only Mac browser projection, including the private-tab boundary where pixels intentionally remain on the Mac.",
-      "states": ["Full-screen localhost preview", "Full-width image", "Private tab", "Tab inventory", "Read-only explanation"],
+      "states": ["Owner browser permission", "Full-screen localhost preview", "Full-width image", "Private tab", "Tab inventory", "Read-only explanation"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/browser-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

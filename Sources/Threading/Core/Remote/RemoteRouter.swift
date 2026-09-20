@@ -271,6 +271,10 @@ struct RemoteRouter {
         sessionID(forPath: path, action: .workspace)
     }
 
+    static func browserPermissionSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: .browserPermission)
+    }
+
     static func browserPreviewSessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: .browserPreview)
     }

@@ -344,9 +344,8 @@ extension AgentToolCoordinator {
             message: message,
             confirmTitle: L10n.string("Clear Website Data")
         )
-        ConfirmationAlert.ask(
-            request,
-            in: browserPresentationWindow(for: sessionID),
+        BrowserPermissionPresenter.confirm(
+            request, for: sessionID, in: browserPresentationWindow(for: sessionID),
             completion: completion
         )
     }

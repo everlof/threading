@@ -91,6 +91,44 @@ final class MobileSessionOpenSpanTests: XCTestCase {
         XCTAssertEqual(records.filter { $0.event == .sessionOpenEnded }.count, 1)
     }
 
+    /// A chat the Mac closes moments after its hello is not an opening that succeeded.
+    ///
+    /// The hold that keeps a terminal's first screen from arriving in pieces used to outlive the
+    /// socket: the loader stayed over an empty terminal until the hold's own ceiling, and the
+    /// span then recorded `succeeded` by `ceiling` — which is what the 2026-09-20 report's
+    /// journal says about a chat whose agent had failed to launch 300 ms earlier.
+    func testAHostThatEndsTheSessionEndsTheOpeningInsteadOfHoldingItToTheCeiling() async throws {
+        let session = Self.session(surface: .terminal, agentKind: "claude")
+        let connection = Self.connection(for: session)
+        connection.onTerminalOutput = { _ in }
+        connection.openSpan = MobileSessionOpenSpan(session: session)
+
+        connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
+            surface: .terminal,
+            capability: .interact,
+            cols: 80,
+            rows: 24,
+            title: "Terminal"
+        )))
+        XCTAssertTrue(connection.isTerminalHydrating)
+
+        connection.receiveServerTextForTesting(#"{"type":"ended","reason":"sessionClosed"}"#)
+
+        XCTAssertFalse(
+            connection.isTerminalHydrating,
+            "the opening loader must not outlive the connection it was opening"
+        )
+        let records = try await Self.openRecords(for: session)
+        let ended = try XCTUnwrap(records.last { $0.event == .sessionOpenEnded })
+        XCTAssertEqual(ended.fields[RemoteDiagnosticField.result.rawValue], "failed")
+        XCTAssertEqual(
+            ended.fields[RemoteDiagnosticField.code.rawValue],
+            "ended.sessionClosed"
+        )
+        XCTAssertEqual(records.filter { $0.event == .sessionOpenEnded }.count, 1)
+        XCTAssertNil(connection.openSpan)
+    }
+
     /// A runtime this build does not know is recorded as `other`, never as the wire's string.
     func testAnUnknownRuntimeIsNotCopiedIntoTheJournal() async throws {
         let session = Self.session(surface: .conversation, agentKind: "someone-elses-agent")

@@ -211,6 +211,8 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string("The Mac couldn’t return that result safely.")
         case .hostNotReady:
             return MobileL10n.string("The Mac isn’t ready for that action yet. Try again.")
+        case .sessionLaunchFailed:
+            return launchFailedMessage(detail: detail)
         case .storageExhausted:
             return MobileL10n.string(
                 "The Mac is out of storage space. Free up space on the Mac, then try again."
@@ -263,6 +265,35 @@ enum RemoteClientError: LocalizedError {
     /// The Mac's bounded refusal reasons, worded for a phone. An unrecognised or absent detail
     /// is the honest general sentence rather than a guessed cause — a capture failure sends no
     /// code, and a newer Mac may name one this build has never heard of.
+    /// A chat whose last launch died on the way up, worded from the Mac's own recognised cause
+    /// where it has one.
+    ///
+    /// The Mac keeps the record until somebody acts on it, so reopening the chat cannot start
+    /// anything — which is the sentence this has to carry. Before the Mac said so, a phone held
+    /// its opening loader until the startup deadline ran out and then blamed the startup
+    /// (2026-09-20). The button beside this text is the retry, and the Mac clears its record
+    /// when it arrives.
+    private static func launchFailedMessage(detail: String?) -> String {
+        switch detail {
+        case "transcript-unreadable":
+            return MobileL10n.string(
+                "The agent couldn’t read this chat’s saved conversation on the Mac, so it stopped instead of resuming."
+            )
+        case "executable-missing":
+            return MobileL10n.string("The agent’s command wasn’t found on the Mac.")
+        case "identifier-in-use":
+            return MobileL10n.string(
+                "This conversation is already open somewhere else on the Mac. Close it there first."
+            )
+        case "not-signed-in":
+            return MobileL10n.string("This agent login on the Mac needs signing in again.")
+        default:
+            return MobileL10n.string(
+                "This chat’s agent stopped right after starting the last time the Mac tried. Opening it again won’t start it; retrying asks the Mac for a fresh attempt."
+            )
+        }
+    }
+
     private static func continuationMessage(detail: String?) -> String {
         switch detail {
         case "missingSource":
@@ -1067,12 +1098,25 @@ struct RemoteClient {
         )
     }
 
+    /// Asks the Mac to bring a dormant session back.
+    ///
+    /// `retryFailedLaunch` is the person's answer to a `sessionLaunchFailed` refusal, and is
+    /// carried only then: the Mac clears its stored failure before launching, which is what its
+    /// own **Try Again** button does. Opening a chat never sets it, so a record nobody has read
+    /// is never cleared by navigation. An ordinary resume keeps sending no body at all.
     func resume(
         sessionID: String,
+        retryFailedLaunch: Bool = false,
         requestID: String = UUID().uuidString.lowercased()
     ) async throws {
         var request = request(url: link.resumeURL(sessionID: sessionID))
         request.httpMethod = "POST"
+        if retryFailedLaunch {
+            request.httpBody = try Self.encodeMutationBody(
+                RemoteResumeSessionRequestDTO(retryFailedLaunch: true)
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200 ... 299)
@@ -1483,6 +1527,18 @@ struct RemoteClient {
         try await get(
             RemoteWorkspaceDTO.self,
             from: link.workspaceURL(sessionID: sessionID)
+        )
+    }
+
+    func decideBrowserPermission(
+        sessionID: String,
+        id: String,
+        decision: RemoteBrowserPermissionDecision
+    ) async throws -> RemoteWorkspaceDTO {
+        try await postResponse(
+            RemoteBrowserPermissionReplyDTO(id: id, decision: decision),
+            to: link.browserPermissionURL(sessionID: sessionID),
+            requestID: UUID().uuidString
         )
     }
 

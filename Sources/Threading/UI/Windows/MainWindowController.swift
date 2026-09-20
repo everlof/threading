@@ -2435,6 +2435,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.select(sessionID: sessionID)
     }
 
+    /// Reopens a session whose last launch failed, from a paired device.
+    ///
+    /// The record is cleared first for the reason the pane's own retry clears it: it is the gate
+    /// that sent the phone the refusal, and a relaunch behind it would be refused again. A second
+    /// failure writes a second record, so nothing is lost by clearing one somebody has decided to
+    /// act on. Everything after that is the ordinary remote resume, including staying in the
+    /// background.
+    func retryRemoteSessionLaunch(_ sessionID: SessionID) {
+        environment.projectStore.update(sessionID: sessionID) { stored in
+            stored.lastLaunchFailure = nil
+        }
+        resumeRemoteSession(sessionID)
+    }
+
     /// Starts a standalone shell through its ordinary sidebar selection path without making
     /// Threading key on the Mac.
     func resumeRemoteTerminal(_ terminalID: TerminalID) {

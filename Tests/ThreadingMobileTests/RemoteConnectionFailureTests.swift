@@ -902,6 +902,38 @@ final class RemoteRESTErrorTests: XCTestCase {
         XCTAssertEqual(error.refusalDetail, "missingTranscript")
     }
 
+    /// The refusal that replaced a silent wait. A chat whose agent died on the way up is not
+    /// started by opening it again, and the Mac now says so instead of answering "starting" and
+    /// leaving the phone to time the startup out (2026-09-20).
+    func testFailedLaunchRefusalIsWordedFromTheMacsRecognisedCause() throws {
+        let known = RemoteClientError.decodedRefusal(
+            status: 409,
+            data: try JSONEncoder().encode(RemoteErrorDTO(
+                code: .sessionLaunchFailed,
+                detail: "not-signed-in"
+            ))
+        )
+        XCTAssertEqual(known.refusalCode, RemoteRESTErrorCode.sessionLaunchFailed.rawValue)
+        XCTAssertEqual(
+            known.localizedDescription,
+            MobileL10n.string("This agent login on the Mac needs signing in again.")
+        )
+
+        // The common case is a launch with no recognised cause at all, which must still say what
+        // happened rather than falling through to "The Mac returned HTTP 409."
+        let unnamed = RemoteClientError.decodedRefusal(
+            status: 409,
+            data: try JSONEncoder().encode(RemoteErrorDTO(code: .sessionLaunchFailed))
+        )
+        XCTAssertEqual(
+            unnamed.localizedDescription,
+            MobileL10n.string(
+                "This chat’s agent stopped right after starting the last time the Mac tried. Opening it again won’t start it; retrying asks the Mac for a fresh attempt."
+            )
+        )
+        XCTAssertFalse(unnamed.allowsMutationRouteFailover)
+    }
+
     func testStructuredPersistenceRefusalStopsMutationRouteFailover() throws {
         let body = try JSONEncoder().encode(RemoteErrorDTO(code: .persistenceUnavailable))
         let refusal = RemoteClientError.decodedRefusal(status: 503, data: body)

@@ -477,6 +477,7 @@
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAccountImages.swift,
 				ThreadingMobile/MobileAgentIdentity.swift,
+				ThreadingMobile/MobileBrowserPermissionPrompt.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
 				ThreadingMobile/MobileClipboardWriter.swift,
 				ThreadingMobile/MobileProjectDisclosureStore.swift,
