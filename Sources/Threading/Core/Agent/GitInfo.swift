@@ -217,6 +217,24 @@ enum GitInfo {
         worktreeLocation(for: path)?.repositoryIdentity
     }
 
+    /// Whether a path is a repository's own working tree, rather than a linked worktree or a
+    /// directory inside one.
+    ///
+    /// Both halves are load-bearing. Without the first, a linked worktree would answer for the
+    /// repository. Without the second, a monorepo package — `mono/packages/api`, which resolves
+    /// to `mono`'s git directory and has no worktree name — would answer for it too, and name
+    /// the whole repository after itself.
+    ///
+    /// One memoized `worktreeLocation` read: every caller here has already asked this path for
+    /// its branch or its identity, so this is a cache hit rather than a second walk.
+    static func isMainWorkingTree(_ path: String) -> Bool {
+        guard let location = worktreeLocation(for: path) else { return false }
+
+        return location.worktreeName == nil
+            && location.root.standardizedFileURL.path
+                == URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
     /// The URL of the repository's `origin` remote, or nil when there is none.
     ///
     /// Read from the *shared* git directory's config — remotes belong to the repository,

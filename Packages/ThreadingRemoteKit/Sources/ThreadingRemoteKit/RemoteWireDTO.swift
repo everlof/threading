@@ -735,6 +735,9 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
     public let reportLaunch: RemoteReportLaunchDTO?
     /// Absent on older hosts; visibility is presentation state, never access control.
     public let isHidden: Bool?
+    /// The repository this checkout belongs to, when it is in one. Absent on older hosts and
+    /// for a folder outside any repository.
+    public let repository: RemoteRepositoryDTO?
 
     public init(
         id: String,
@@ -742,7 +745,8 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
         branch: String?,
         checkoutLabel: String,
         reportLaunch: RemoteReportLaunchDTO? = nil,
-        isHidden: Bool? = nil
+        isHidden: Bool? = nil,
+        repository: RemoteRepositoryDTO? = nil
     ) {
         self.id = id
         self.name = name
@@ -750,6 +754,33 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
         self.checkoutLabel = checkoutLabel
         self.reportLaunch = reportLaunch
         self.isHidden = isHidden
+        self.repository = repository
+    }
+}
+
+/// The repository several added checkouts share.
+///
+/// A client cannot work this out for itself: it never learns a checkout path, and two projects
+/// called similar things are not evidence of anything. The Mac already answers the question for
+/// its own sidebar, where every checkout of one repository sits under that repository's row;
+/// this is the same answer, sent, so a phone can keep a worktree beside the checkout it grew
+/// from instead of filing it alphabetically among unrelated projects.
+public struct RemoteRepositoryDTO: Codable, Equatable, Sendable {
+    /// Opaque and stable for one host: equality is the whole contract. Deliberately not the
+    /// repository's path, which the owner catalogue does not publish.
+    public let id: String
+    /// What the repository is called — the name of its main working tree's project, which is
+    /// what the Mac's own repository row shows, so renaming that project renames this too.
+    public let name: String
+    /// Whether this checkout *is* the repository's main working tree, rather than a linked
+    /// worktree. The one row that answers for the repository, and so the one that sorts first
+    /// among its checkouts.
+    public let isMainCheckout: Bool
+
+    public init(id: String, name: String, isMainCheckout: Bool) {
+        self.id = id
+        self.name = name
+        self.isMainCheckout = isMainCheckout
     }
 }
 

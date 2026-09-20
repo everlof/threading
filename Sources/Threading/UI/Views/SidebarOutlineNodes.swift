@@ -640,21 +640,13 @@ enum SidebarTreeBuilder {
     }
 
     /// Whether this project is the repository's own working tree, rather than a linked worktree
-    /// or a directory inside one.
+    /// or a directory inside one — the row that answers for the repository.
     ///
-    /// Both halves are load-bearing. Without the first, a linked worktree would answer for the
-    /// repository. Without the second, a monorepo package — `mono/packages/api`, which resolves
-    /// to `mono`'s git directory and has no worktree name — would answer for it too, and name
-    /// the whole repository's root row `api`.
+    /// The rule itself is `GitInfo.isMainWorkingTree`, because the paired phone has to reach the
+    /// same verdict for a repository it can only see over the wire, and two spellings of "which
+    /// checkout speaks for this repository" would be two chances to disagree.
     private static func isTheRepositoriesMainWorkingTree(_ path: String) -> Bool {
-        guard let location = NativeSidebarParity.host(
-            .localRepositoryContext,
-            GitInfo.worktreeLocation(for: path)
-        ) else { return false }
-
-        return location.worktreeName == nil
-            && location.root.standardizedFileURL.path
-                == URL(fileURLWithPath: path).standardizedFileURL.path
+        NativeSidebarParity.host(.localRepositoryContext, GitInfo.isMainWorkingTree(path))
     }
 
     /// The branch a checkout row states about itself, or nil for a folder outside a repository.

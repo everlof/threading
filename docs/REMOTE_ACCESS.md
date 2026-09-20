@@ -465,6 +465,23 @@ title or project. Archive/Restore removes a row at the press edge while the Mac 
 durable provider transaction, so several sessions can be filed without serial UI stalls; a
 refusal restores the row. Archive is available from the dashboard and an open owner chat.
 
+Project sections are ordered by repository rather than by name alone. `RemoteProjectChoiceDTO`
+carries an optional `repository`: the identity every checkout of one repository shares, that
+repository's name, and whether this checkout is its main working tree.
+`RemoteRepositoryGrouping.describe` computes all three once per catalogue from the rules the Mac
+sidebar already groups by — `git rev-parse --git-common-dir` for the identity,
+`GitInfo.isMainWorkingTree` for the checkout that answers for it, that checkout's project name for
+the group's name, and the scratchpad exempt so it cannot drag a project added inside it into a
+group. The identity is a digest of the shared git directory, not its path: the owner catalogue
+publishes a project's name and never its location. `MobileProjectSectionOrdering` sorts by the
+repository's name, then main working tree first, then title and id, so a worktree sits directly
+beneath the checkout it grew from instead of filing itself under its own directory name — a
+`Threading` checkout whose worktree directory is `AnotherTerminal-experiment-jev` kept the two
+three screens apart. Grouping rides the offline dashboard cache; a Mac too old to send it, a cache
+written before it existed, and a project outside any repository all order by name exactly as
+before. `RemoteRepositoryGroupingTests` covers the host rules, `SessionDashboardTests` the
+ordering, and `MobileDashboardCacheStoreTests` the cached and legacy paths.
+
 The project overview previews three chats per expanded project. `MobileProjectChatPreview`
 caps the ordered value models before collection rows are made; pins count toward the cap, with
 stable ID ordering breaking equal activity timestamps. A stable project disclosure row reveals

@@ -238,6 +238,64 @@ final class MobileDashboardCacheStoreTests: XCTestCase {
         ))
     }
 
+    /// The phone orders its project sections by repository, so the grouping has to survive the
+    /// disconnect that the rows themselves survive — otherwise a cold offline start files every
+    /// worktree alphabetically and then moves it again the moment the Mac answers.
+    func testRepositoryGroupingSurvivesOfflineCacheAndLegacyPayloads() throws {
+        let base = response()
+        let repository = RemoteRepositoryDTO(id: "repo-1", name: "Threading", isMainCheckout: true)
+        let worktree = RemoteRepositoryDTO(id: "repo-1", name: "Threading", isMainCheckout: false)
+        let catalogue = RemoteMeDTO(serverProtocol: base.serverProtocol, share: base.share,
+            sessions: base.sessions, terminals: base.terminals,
+            newSessionCatalog: .init(projects: [
+                .init(id: "main", name: "Threading", branch: "master", checkoutLabel: "AnotherTerminal",
+                    repository: repository),
+                .init(id: "linked", name: "AnotherTerminal-experiment-jev", branch: "experiment/jev",
+                    checkoutLabel: "AnotherTerminal-experiment-jev", repository: worktree),
+                .init(id: "plain", name: "autokor", branch: nil, checkoutLabel: "autokor"),
+            ], agents: []))
+
+        let live = try XCTUnwrap(MobileDashboardCatalogue.current(live: catalogue, cached: nil))
+        XCTAssertEqual(live.repository(projectKey: "id:main"), repository)
+        XCTAssertEqual(live.repository(projectKey: "id:linked"), worktree)
+        XCTAssertEqual(live.repository(projectKey: "name:AnotherTerminal-experiment-jev"), worktree)
+        XCTAssertNil(live.repository(projectKey: "id:plain"))
+
+        let snapshot = try XCTUnwrap(MobileDashboardCacheSnapshot.make(from: catalogue))
+        let cached = try XCTUnwrap(MobileDashboardCatalogue.current(live: nil, cached: snapshot))
+        XCTAssertEqual(cached.repository(projectKey: "id:main"), repository)
+        XCTAssertEqual(cached.repository(projectKey: "id:linked"), worktree)
+
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any]
+        )
+        json.removeValue(forKey: "projectRepositories")
+        let legacy = try JSONDecoder().decode(MobileDashboardCacheSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(
+            MobileDashboardCatalogue.current(live: nil, cached: legacy)?
+                .repository(projectKey: "id:main"),
+            "a cache written before grouping existed must decode, not invent a repository"
+        )
+    }
+
+    /// A name shared by two projects identifies neither, so it lends neither its repository —
+    /// the rule `uniqueProjectsByName` already follows for everything else keyed by name.
+    func testASharedProjectNameLendsNeitherProjectItsRepository() {
+        let projects: [RemoteProjectChoiceDTO] = [
+            .init(id: "a", name: "Same name", branch: nil, checkoutLabel: "a",
+                repository: .init(id: "repo-a", name: "Same name", isMainCheckout: true)),
+            .init(id: "b", name: "Same name", branch: nil, checkoutLabel: "b",
+                repository: .init(id: "repo-b", name: "Same name", isMainCheckout: true)),
+        ]
+
+        let byKey = MobileDashboardCatalogue.repositoriesByProjectKey(projects)
+
+        XCTAssertEqual(byKey["id:a"]?.id, "repo-a")
+        XCTAssertEqual(byKey["id:b"]?.id, "repo-b")
+        XCTAssertNil(byKey["name:Same name"])
+    }
+
     private func response(
         sessionTitle: String = "Last good session",
         expiresAt: Double? = nil

@@ -81,7 +81,7 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case projectNodeFactSnapshot = "SidebarTreeBuilder.projectNode.factSnapshot"
     case repositoryIdentity = "GitInfo.repositoryIdentity"
     case repositoryName = "GitInfo.repositoryName"
-    case worktreeLocation = "GitInfo.worktreeLocation"
+    case mainWorkingTree = "GitInfo.isMainWorkingTree"
     case checkoutBranch = "GitInfo.currentBranch"
 }
 
@@ -141,7 +141,7 @@ enum NativeSidebarParity {
         .projectNodeFactSnapshot: .registeredFactResolution,
         .repositoryIdentity: .localRepositoryContext,
         .repositoryName: .localRepositoryContext,
-        .worktreeLocation: .localRepositoryContext,
+        .mainWorkingTree: .localRepositoryContext,
         .checkoutBranch: .localRepositoryContext,
     ]
 

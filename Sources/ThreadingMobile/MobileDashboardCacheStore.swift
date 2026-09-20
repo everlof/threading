@@ -87,8 +87,20 @@ struct MobileDashboardCacheSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// One project's repository, flattened for storage under the key the dashboard groups by.
+    struct ProjectRepository: Codable, Equatable, Sendable {
+        let projectKey: String
+        let id: String
+        let name: String
+        let isMainCheckout: Bool
+    }
+
     /// Optional for caches written before project visibility was mirrored.
     var hiddenProjectIDs: Set<String>? = nil
+    /// Optional for caches written before repository grouping was mirrored. Without it a cold
+    /// offline start would re-file every worktree alphabetically and then move them again the
+    /// moment the Mac answered — the ordering has to survive the disconnect that the rows do.
+    var projectRepositories: [ProjectRepository]? = nil
     let capturedAt: Double
     let shareExpiresAt: Double?
     let sessions: [Session]
@@ -103,7 +115,16 @@ struct MobileDashboardCacheSnapshot: Codable, Equatable, Sendable {
         let archived = response.archivedSessions ?? []
         let terminals = response.terminals ?? []
         let hidden = Set(response.newSessionCatalog?.projects.filter { $0.isHidden == true }.map(\.id) ?? [])
+        let repositories = MobileDashboardCatalogue
+            .repositoriesByProjectKey(response.newSessionCatalog?.projects ?? [])
+            .map { ProjectRepository(
+                projectKey: $0.key,
+                id: $0.value.id,
+                name: $0.value.name,
+                isMainCheckout: $0.value.isMainCheckout
+            ) }
         guard hidden.count <= MobileDashboardCacheStore.maximumRows,
+              repositories.count <= MobileDashboardCacheStore.maximumRows,
               active.count <= MobileDashboardCacheStore.maximumSessionsPerList,
               archived.count <= MobileDashboardCacheStore.maximumSessionsPerList,
               terminals.count <= MobileDashboardCacheStore.maximumTerminals,
@@ -111,6 +132,7 @@ struct MobileDashboardCacheSnapshot: Codable, Equatable, Sendable {
                   <= MobileDashboardCacheStore.maximumRows else { return nil }
         return Self(
             hiddenProjectIDs: hidden,
+            projectRepositories: repositories,
             capturedAt: capturedAt.timeIntervalSince1970,
             shareExpiresAt: response.share.expiresAt,
             sessions: active.map(Session.init),
@@ -135,6 +157,9 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
     let hiddenProjectIDs: Set<String>
     private let projectsByID: [String: RemoteProjectChoiceDTO]
     private let uniqueProjectsByName: [String: RemoteProjectChoiceDTO]
+    /// Keyed the way the dashboard groups its sections, so asking which repository a section
+    /// belongs to is one lookup rather than a second pass over the project list per section.
+    private let repositoriesByProjectKey: [String: RemoteRepositoryDTO]
     let source: Source
     let sessions: [RemoteSessionSummaryDTO]
     let terminals: [RemoteProjectTerminalSummaryDTO]
@@ -164,6 +189,7 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
                 projectsByID: projects.reduce(into: [:]) { $0[$1.id] = $1 },
                 uniqueProjectsByName: Dictionary(grouping: projects, by: \.name)
                     .compactMapValues { $0.count == 1 ? $0.first : nil },
+                repositoriesByProjectKey: repositoriesByProjectKey(projects),
                 source: .live,
                 sessions: live.sessions,
                 terminals: live.terminals ?? [],
@@ -176,6 +202,13 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
             hiddenProjectIDs: cached.hiddenProjectIDs ?? [],
             projectsByID: [:],
             uniqueProjectsByName: [:],
+            repositoriesByProjectKey: (cached.projectRepositories ?? []).reduce(into: [:]) {
+                $0[$1.projectKey] = RemoteRepositoryDTO(
+                    id: $1.id,
+                    name: $1.name,
+                    isMainCheckout: $1.isMainCheckout
+                )
+            },
             source: .cached(capturedAt: Date(timeIntervalSince1970: cached.capturedAt)),
             sessions: cached.sessions.map(\.presentation),
             terminals: cached.terminals.map(\.presentation),
@@ -187,6 +220,35 @@ struct MobileDashboardCatalogue: Equatable, Sendable {
     func project(id: String?, name: String) -> RemoteProjectChoiceDTO? {
         if let id { return projectsByID[id] }
         return uniqueProjectsByName[name]
+    }
+
+    /// The repository one dashboard section's project belongs to, or nil for a folder outside a
+    /// repository — and for every project on a Mac too old to say.
+    func repository(projectKey: String) -> RemoteRepositoryDTO? {
+        repositoriesByProjectKey[projectKey]
+    }
+
+    /// The grouping, keyed by the dashboard's own section key.
+    ///
+    /// Both spellings of that key are recorded, because a row from an older Mac carries no
+    /// project id and is grouped by name instead. A name shared by two projects identifies
+    /// neither, so it records nothing rather than lending one project's repository to another's
+    /// rows — the same rule `uniqueProjectsByName` follows.
+    static func repositoriesByProjectKey(
+        _ projects: [RemoteProjectChoiceDTO]
+    ) -> [String: RemoteRepositoryDTO] {
+        var byKey: [String: RemoteRepositoryDTO] = [:]
+        let ambiguousNames = Set(
+            Dictionary(grouping: projects, by: \.name).filter { $0.value.count > 1 }.keys
+        )
+        for project in projects {
+            guard let repository = project.repository else { continue }
+            byKey[MobileProjectDisclosureStore.projectKey(id: project.id, name: project.name)] =
+                repository
+            guard !ambiguousNames.contains(project.name) else { continue }
+            byKey[MobileProjectDisclosureStore.projectKey(id: nil, name: project.name)] = repository
+        }
+        return byKey
     }
 
     func visibleSessions(archived: Bool, showHiddenProjects: Bool) -> [RemoteSessionSummaryDTO] {

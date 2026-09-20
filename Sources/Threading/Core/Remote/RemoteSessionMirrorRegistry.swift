@@ -923,14 +923,19 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func newSessionCatalog() -> RemoteNewSessionCatalogDTO {
-        let projects = ProjectStore.shared.projects.map { project in
+        let addedProjects = ProjectStore.shared.projects
+        // Computed once for the whole list rather than per project: which checkout answers for a
+        // repository is a fact about the list, not about any one row in it.
+        let repositories = RemoteRepositoryGrouping.describe(addedProjects)
+        let projects = addedProjects.map { project in
             RemoteProjectChoiceDTO(
                 id: project.id.uuidString,
                 name: project.name,
                 branch: GitInfo.currentBranch(for: project.folderPath),
                 checkoutLabel: project.folderURL.lastPathComponent,
                 reportLaunch: reportLaunch(for: project),
-                isHidden: project.isHidden
+                isHidden: project.isHidden,
+                repository: repositories[project.id]
             )
         }
 

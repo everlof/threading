@@ -618,6 +618,55 @@ private struct DashboardProjectSection {
     let terminals: [RemoteProjectTerminalSummaryDTO]
 }
 
+/// Where one project's section sits in the dashboard.
+///
+/// Sections used to be ordered by name alone, which is right for unrelated projects and wrong
+/// for the checkouts of one repository: a worktree is named after its directory, so
+/// `AnotherTerminal-experiment-jev` filed itself under A while the project it grew from, renamed
+/// `Threading`, sat under T with nothing to say they were the same repository. The Mac's sidebar
+/// never had the problem — it puts every checkout under the repository's own row. This is that
+/// grouping applied to a flat list: a repository is ordered by its name, its main working tree
+/// leads, and its worktrees follow immediately after it.
+enum MobileProjectSectionOrdering {
+    struct Key: Equatable {
+        let id: String
+        let title: String
+        let repository: RemoteRepositoryDTO?
+    }
+
+    /// Decorated once rather than sorted through the key closure: a comparator is called
+    /// O(n log n) times and the key behind it is a lookup, not a stored property.
+    static func sorted<Section>(_ sections: [Section], key: (Section) -> Key) -> [Section] {
+        sections.map { (key($0), $0) }
+            .sorted { precedes($0.0, $1.0) }
+            .map(\.1)
+    }
+
+    static func precedes(_ lhs: Key, _ rhs: Key) -> Bool {
+        // A project outside a repository stands for its own group, so one rule orders both.
+        let group = (lhs.repository?.name ?? lhs.title)
+            .localizedCaseInsensitiveCompare(rhs.repository?.name ?? rhs.title)
+        if group != .orderedSame { return group == .orderedAscending }
+
+        // Two repositories can be called the same thing, and a folder outside any repository can
+        // be called what a repository is called. Keeping each group contiguous matters more than
+        // which of the two goes first, so their identities break the tie.
+        let lhsRepository = lhs.repository?.id ?? ""
+        let rhsRepository = rhs.repository?.id ?? ""
+        if lhsRepository != rhsRepository { return lhsRepository < rhsRepository }
+
+        if lhs.repository?.isMainCheckout != rhs.repository?.isMainCheckout {
+            return lhs.repository?.isMainCheckout == true
+        }
+
+        let title = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+        if title != .orderedSame { return title == .orderedAscending }
+        // Swift's sort is not stable, so the order has to be total: two checkouts of one
+        // repository standing on the same name must not swap places between publications.
+        return lhs.id < rhs.id
+    }
+}
+
 enum MobileSessionOrdering {
     static func sorted(
         _ sessions: [RemoteSessionSummaryDTO],
@@ -3245,7 +3294,7 @@ struct SessionDashboard: View {
         let terminalsByProject = Dictionary(grouping: terminals) {
             MobileProjectDisclosureStore.projectKey(id: $0.projectID, name: $0.projectName)
         }
-        return Set(sessionsByProject.keys).union(terminalsByProject.keys)
+        let sections = Set(sessionsByProject.keys).union(terminalsByProject.keys)
             .map { key in
                 let projectSessions = sessionsByProject[key] ?? []
                 let projectTerminals = terminalsByProject[key] ?? []
@@ -3258,10 +3307,14 @@ struct SessionDashboard: View {
                     terminals: projectTerminals
                 )
             }
-            .sorted {
-                let comparison = $0.title.localizedCaseInsensitiveCompare($1.title)
-                return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
-            }
+        let catalogue = model.dashboardCatalogue
+        return MobileProjectSectionOrdering.sorted(sections) { section in
+            MobileProjectSectionOrdering.Key(
+                id: section.id,
+                title: section.title,
+                repository: catalogue?.repository(projectKey: section.id)
+            )
+        }
     }
 
     var body: some View {

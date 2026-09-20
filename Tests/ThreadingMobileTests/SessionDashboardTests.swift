@@ -681,6 +681,93 @@ final class SessionDashboardTests: XCTestCase {
             pinnedFingerprint: fingerprint.hex
         )
     }
+
+    // MARK: - Project section ordering
+
+    private func key(
+        _ title: String,
+        id: String? = nil,
+        repository: RemoteRepositoryDTO? = nil
+    ) -> MobileProjectSectionOrdering.Key {
+        MobileProjectSectionOrdering.Key(
+            id: id ?? "id:\(title)",
+            title: title,
+            repository: repository
+        )
+    }
+
+    /// The bug this ordering exists for: a worktree is named after its directory, so once the
+    /// project it grew from has been renamed the two sort nowhere near each other. The Mac never
+    /// showed it, because its sidebar puts every checkout under the repository's own row.
+    func testAWorktreeSectionFollowsTheCheckoutItGrewFrom() {
+        let repository = RemoteRepositoryDTO(id: "repo-1", name: "Threading", isMainCheckout: true)
+        let worktree = RemoteRepositoryDTO(id: "repo-1", name: "Threading", isMainCheckout: false)
+        let sections = [
+            key("AnotherTerminal-experiment-jev", repository: worktree),
+            key("autokor"),
+            key("Threading", repository: repository),
+            key("app-mono"),
+            key("AnotherTerminal-linux-appkit", repository: worktree),
+        ]
+
+        let ordered = MobileProjectSectionOrdering.sorted(sections) { $0 }.map(\.title)
+
+        XCTAssertEqual(ordered, [
+            "app-mono",
+            "autokor",
+            "Threading",
+            "AnotherTerminal-experiment-jev",
+            "AnotherTerminal-linux-appkit",
+        ])
+    }
+
+    /// A Mac too old to describe its repositories still sends its projects, and they are still
+    /// ordered — by name, exactly as before.
+    func testProjectsWithoutARepositoryKeepAlphabeticalOrder() {
+        let sections = [key("Threading"), key("app-mono"), key("AnotherTerminal-experiment-jev")]
+
+        let ordered = MobileProjectSectionOrdering.sorted(sections) { $0 }.map(\.title)
+
+        XCTAssertEqual(ordered, ["AnotherTerminal-experiment-jev", "app-mono", "Threading"])
+    }
+
+    /// Two repositories can be called the same thing, and a folder outside any repository can be
+    /// called what a repository is called. Which group goes first matters less than each group
+    /// staying in one piece.
+    func testGroupsSharingANameStayContiguous() {
+        let left = RemoteRepositoryDTO(id: "repo-a", name: "Tools", isMainCheckout: false)
+        let right = RemoteRepositoryDTO(id: "repo-b", name: "Tools", isMainCheckout: false)
+        let sections = [
+            key("a-one", repository: left),
+            key("b-one", repository: right),
+            key("a-two", repository: left),
+            key("b-two", repository: right),
+        ]
+
+        let ordered = MobileProjectSectionOrdering.sorted(sections) { $0 }.map(\.title)
+
+        XCTAssertEqual(ordered, ["a-one", "a-two", "b-one", "b-two"])
+    }
+
+    /// Swift's sort is not stable, so two checkouts standing on the same name must still have a
+    /// fixed order — otherwise they swap places on every publication.
+    func testCheckoutsSharingATitleKeepAFixedOrder() {
+        let repository = RemoteRepositoryDTO(id: "repo-1", name: "Threading", isMainCheckout: false)
+        let sections = [
+            key("master", id: "id:second", repository: repository),
+            key("master", id: "id:first", repository: repository),
+        ]
+
+        XCTAssertEqual(
+            MobileProjectSectionOrdering.sorted(sections) { $0 }.map(\.id),
+            ["id:first", "id:second"]
+        )
+        XCTAssertEqual(
+            MobileProjectSectionOrdering.sorted(sections.reversed()) { $0 }.map(\.id),
+            ["id:first", "id:second"]
+        )
+    }
+
 }
 
 /// The row a long press lifts out of the dashboard, hosted the way UIKit hosts a context-menu

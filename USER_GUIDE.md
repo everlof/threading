@@ -209,6 +209,12 @@ same repository, which is the only place in the sidebar it can be done from.
 That stays folded the next time you open Threading; the row then says how many checkouts it is
 hiding.
 
+**On a paired iPhone** the list is flat — there is no repository row — so the checkouts of one
+repository are ordered together instead: the repository's main checkout first, under the name you
+gave it, then its worktrees directly beneath. A worktree is named after its directory, so without
+this a checkout of a project you renamed would file itself somewhere else in the alphabet
+entirely. Projects outside a repository keep sorting by name among them.
+
 Other cases:
 - **Monorepo package** — adding `mono/packages/api` names the project `api`.
 - **Submodule** — treated as its own repository, since that is what it is. Submodules are
