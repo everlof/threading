@@ -18,7 +18,7 @@ final class RemoteHostsSettingsTests: HostedStoreTestCase {
         static let size = NSSize(width: 760, height: 420)
     }
 
-    private var directory: URL!
+    private nonisolated(unsafe) var directory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()

@@ -8,7 +8,7 @@ import XCTest
 @MainActor
 final class RemoteHostStoreTests: HostedStoreTestCase {
 
-    private var directory: URL!
+    private nonisolated(unsafe) var directory: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()

@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class RemoteHostUsageTests: XCTestCase {
 
-    private var root: URL!
+    private nonisolated(unsafe) var root: URL!
 
     override func setUpWithError() throws {
         root = URL(fileURLWithPath: "/tmp/threading-remote-usage-\(UUID().uuidString.prefix(8))", isDirectory: true)

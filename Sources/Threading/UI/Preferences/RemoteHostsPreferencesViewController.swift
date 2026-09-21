@@ -27,7 +27,6 @@ final class RemoteHostsPreferencesViewController: NSViewController {
     private var presentationRows: [PresentationRow] = []
     private var pageView: SettingsPageView?
     private let appEvents = AppEventObservations()
-    private var coordinatorObserver: NSObjectProtocol?
 
     private lazy var tableView: ThemedGroupedTableView = {
         let table = ThemedGroupedTableView()
@@ -114,18 +113,8 @@ final class RemoteHostsPreferencesViewController: NSViewController {
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in self?.reload() }
         // The coordinator posts through the ordinary centre rather than as an `AppEvent`: it runs
         // off the main actor and predates the event types.
-        coordinatorObserver = NotificationCenter.default.addObserver(
-            forName: RemoteExecutionHosts.didChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload() }
-        }
-    }
-
-    deinit {
-        if let coordinatorObserver {
-            NotificationCenter.default.removeObserver(coordinatorObserver)
+        appEvents.observe(RemoteExecutionHosts.didChangeNotification) { [weak self] in
+            self?.reload()
         }
     }
 

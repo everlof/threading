@@ -407,7 +407,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
         let localSocketPath = try localSocketPath(for: destination)
         var toolRoute: RemoteHostToolRoute?
-        if let appSocketPath {
+        if appSocketPath != nil {
             try runScript(destination, RemoteHostInstallScripts.prepareBridgeRendezvousScript,
                           token: "bridgeRendezvousFailed")
             toolRoute = RemoteHostToolRoute(

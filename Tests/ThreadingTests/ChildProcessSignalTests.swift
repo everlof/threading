@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import Threading
 
 /// A child spawned from a libdispatch worker thread still receives the signals its supervisor
@@ -17,29 +18,27 @@ final class ChildProcessSignalTests: XCTestCase {
 
     func testAChildSpawnedFromADispatchWorkerEndsOnTerminate() throws {
         let spawned = XCTestExpectation(description: "spawned")
-        var child: SpawnedChildProcess?
-        var spawnError: Error?
+        let outcome = OSAllocatedUnfairLock<Result<SpawnedChildProcess, Error>?>(initialState: nil)
         DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                child = try ChildProcessSpawn.spawn(
-                    executableURL: URL(fileURLWithPath: "/bin/sleep"),
-                    arguments: [Fixture.sleepSeconds],
-                    environment: [:],
-                    workingDirectory: nil,
-                    descriptors: [
-                        AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,
-                        AgentChildProcessDefaults.standardOutputDescriptor: .nullDevice,
-                        AgentChildProcessDefaults.standardErrorDescriptor: .nullDevice
-                    ]
-                )
-            } catch {
-                spawnError = error
+            outcome.withLock { result in
+                result = Result {
+                    try ChildProcessSpawn.spawn(
+                        executableURL: URL(fileURLWithPath: "/bin/sleep"),
+                        arguments: [Fixture.sleepSeconds],
+                        environment: [:],
+                        workingDirectory: nil,
+                        descriptors: [
+                            AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,
+                            AgentChildProcessDefaults.standardOutputDescriptor: .nullDevice,
+                            AgentChildProcessDefaults.standardErrorDescriptor: .nullDevice
+                        ]
+                    )
+                }
             }
             spawned.fulfill()
         }
         wait(for: [spawned], timeout: Fixture.childTimeout)
-        if let spawnError { throw spawnError }
-        let process = try XCTUnwrap(child)
+        let process = try XCTUnwrap(outcome.withLock { $0 }).get()
 
         process.terminate()
         let deadline = Date().addingTimeInterval(Fixture.childTimeout)

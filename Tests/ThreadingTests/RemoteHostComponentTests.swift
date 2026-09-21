@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import XCTest
+import os
 @testable import Threading
 
 /// The Linux binaries a host is given: fetched once, verified against digests this build was
@@ -40,12 +41,13 @@ final class RemoteHostComponentTests: XCTestCase {
         let server = StubComponentServer(assets: [asset.name: asset.assetBytes])
         let components = RemoteHostPublishedComponents(session: server.session, root: root)
 
-        var reported: [Double] = []
+        let reportedValues = OSAllocatedUnfairLock<[Double]>(initialState: [])
         let binary = try components.fetch(
             component,
             from: server.url(for: asset.name),
-            progress: { reported.append($0) }
+            progress: { value in reportedValues.withLock { $0.append(value) } }
         )
+        let reported = reportedValues.withLock { $0 }
         XCTAssertEqual(binary.sha256, asset.binaryDigest)
         XCTAssertEqual(binary.kind, .daemon)
         XCTAssertEqual(try Data(contentsOf: binary.url), Fixture.binary)

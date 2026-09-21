@@ -10,7 +10,7 @@ import XCTest
 final class RemoteProjectGitTests: HostedStoreTestCase {
 
     private let host = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/app")
-    private var checkouts: [URL] = []
+    private nonisolated(unsafe) var checkouts: [URL] = []
 
     override func tearDownWithError() throws {
         for checkout in checkouts { try? FileManager.default.removeItem(at: checkout) }

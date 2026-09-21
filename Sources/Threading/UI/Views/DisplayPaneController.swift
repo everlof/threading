@@ -548,7 +548,7 @@ final class DisplayPaneController: NSViewController {
   func performPanelCommand(_ target: PanelCommandTarget, title: String, for sessionID: SessionID) -> Bool {
     guard panelCommandRefusal(target, for: sessionID) == nil else { return false }
     switch target {
-    case .simulator: return activateSimulator(for: sessionID) != nil
+    case .simulator: activateSimulator(for: sessionID); return true
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
     case .browser: return addBrowserTab(for: sessionID) != nil
@@ -558,8 +558,9 @@ final class DisplayPaneController: NSViewController {
     case .supervision: return activateSupervision(for: sessionID) != nil
     case .nativePlugin(let url): return activateNativePlugin(bundleURL: url, for: sessionID) != nil
     case .extensionPanel(let identifier, let panelID):
-      return activateExtensionPanel(extensionIdentifier: identifier, panelID: panelID,
-                                    title: title, for: sessionID) != nil
+      activateExtensionPanel(extensionIdentifier: identifier, panelID: panelID,
+                             title: title, for: sessionID)
+      return true
     }
   }
 

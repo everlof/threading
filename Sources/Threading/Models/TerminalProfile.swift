@@ -2,7 +2,9 @@ import Foundation
 import AppKit
 
 /// User preferences for a terminal session.
-public struct TerminalProfile: Codable, Equatable {
+/// A profile is a value snapshot. Its only AppKit-bearing values are the immutable colours held by
+/// `TerminalTheme`; the computed `NSFont` is created on demand and is never part of the snapshot.
+public struct TerminalProfile: Codable, Equatable, @unchecked Sendable {
 
     // MARK: - Properties
 

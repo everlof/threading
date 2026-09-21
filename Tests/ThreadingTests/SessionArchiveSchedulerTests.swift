@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import os
 @testable import Threading
 
 /// The wait between an agent asking to be archived and the archive happening.
@@ -17,27 +18,44 @@ final class SessionArchiveSchedulerTests: XCTestCase {
 
     // MARK: - Fixture
 
-    private var center: NotificationCenter!
-    private var session: AgentSession!
-    private var activity: SessionActivity = .working
-    private var continuation: SessionContinuationState?
-    private var due: [SessionArchiveRequestDidBecomeDue] = []
-    private var observations: AppEventObservations!
+    // XCTest invokes the synchronous lifecycle overrides outside the class's actor annotation.
+    // Each property is nevertheless owned by one serial test-case lifecycle; the notification
+    // callback is the sole concurrent writer and therefore gets its own synchronized storage.
+    private nonisolated(unsafe) var center: NotificationCenter!
+    private nonisolated(unsafe) var session: AgentSession!
+    private nonisolated(unsafe) var activity: SessionActivity = .working
+    private nonisolated(unsafe) var continuation: SessionContinuationState?
+    private nonisolated(unsafe) var observation: NSObjectProtocol?
+    private let dueEvents = OSAllocatedUnfairLock<[SessionArchiveRequestDidBecomeDue]>(initialState: [])
+
+    private var due: [SessionArchiveRequestDidBecomeDue] {
+        get { dueEvents.withLock { $0 } }
+        set { dueEvents.withLock { $0 = newValue } }
+    }
 
     override func setUp() {
         super.setUp()
         center = NotificationCenter()
         session = AgentSession(kind: .claude, title: "Refactor the parser")
         activity = .working
-        due = []
-        observations = AppEventObservations(center: center)
-        observations.observe(SessionArchiveRequestDidBecomeDue.self) { [weak self] event in
-            self?.due.append(event)
+        continuation = nil
+        dueEvents.withLock { $0 = [] }
+        observation = center.addObserver(
+            forName: SessionArchiveRequestDidBecomeDue.name,
+            object: nil,
+            queue: .main
+        ) { [dueEvents] notification in
+            if let event = notification.object as? SessionArchiveRequestDidBecomeDue {
+                dueEvents.withLock { $0.append(event) }
+            }
         }
     }
 
     override func tearDown() {
-        observations = nil
+        if let observation {
+            center.removeObserver(observation)
+        }
+        observation = nil
         center = nil
         super.tearDown()
     }
