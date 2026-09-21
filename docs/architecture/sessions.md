@@ -71,6 +71,15 @@ rather than as a switch in the store. A rejection there means one of exactly two
 enum has no case that can represent the request, or the runtime lacks the capability the
 request needs. Nothing in it is a rule about a runtime by name.
 
+Fresh record assembly lives in the Foundation-only `AgentSessionCreation.makeRecord` factory.
+It applies configuration admission and validates the handoff destination before reaching the
+record initializer's preconditions, then sets the unnamed-title policy, launch options and
+managed-workspace branch. `ProjectStore.addSession` uses it. The store still admits project/identity
+ownership and account/model catalogue values, resolves any
+fallback git branch, persists the record and emits presentation notifications. Imports and forks
+keep their distinct resume/provenance paths. The factory works on one record and the existing
+bounded handoff chain; it performs no discovery, I/O or catalogue scan.
+
 Reasoning effort has a second, narrower admission check in `ProjectStore.addSession`: an
 explicit value must be one of the resolved model's `reasoningLevels`. Claude attaches the
 installed CLI's documented session set (`low`, `medium`, `high`, `xhigh`, `max`) to every model
@@ -974,6 +983,11 @@ Cursor's is in the system keychain, and pointing either `CURSOR_DATA_DIR` or `XD
 an empty directory still reports `authenticated`. Nil is the honest answer there, and it keeps an
 inert invented name out of the one place this filter reads to decide what *not* to strip. What the terminal path adds on top of this — the colour and pager claims,
 which are about a stream rather than a run — is in [`themes.md`](themes.md).
+
+The filter itself is the pure `AgentEnvironment.removingInheritedIdentity(from:)` operation,
+shared by macOS terminal and headless launches. `AgentEnvironmentHost.swift` resolves macOS process
+values and command-line-tool preferences; the portable policy performs no process lookup,
+filesystem work or preference access.
 
 The MCP routing variables are the deliberate exception to stripping an inherited agent
 identity: `AgentLauncher` creates them for the new child after filtering. They are per-process
@@ -2094,6 +2108,13 @@ including stable Threading session ids and title snapshots. `continuedFrom` and
 `continuationSourceKind` remain computed compatibility views of the direct source, and the encoder
 continues to write their old keys so older builds can still read a new two-hop record.
 
+Creating a continuation is a runtime operation: `ConversationHandoffRuntime.swift` owns
+`ConversationHandoff.continuing` and `AgentSession.handoffModelSnapshot`, including live account
+and configured-model lookup. The persisted endpoint/path records, validation and Codable behavior
+stay in `Models/AgentSession.swift`. This keeps loading a session record from requiring account
+discovery, filesystem scans or account preferences in its compilation dependency set; the handoff
+API and its snapshot precedence remain unchanged.
+
 Repeated handoffs extend the path rather than replacing it. It is capped at sixteen endpoints;
 compaction retains the origin and newest suffix and records the exact omitted count. The native
 conversation renders a compact **Context handoff** divider, the sidebar hover card wraps the
@@ -2319,3 +2340,18 @@ Verify against disk rather than by eye — `~/.codex/sessions/**/*.jsonl` and
 `<claude config>/projects/<slug>/` are the ground truth, and both are cheap to count. The
 worktree rules resist real data (no subdirectory-launched chats exist here) so they are proven
 against a built layout — main + nested + sibling worktrees — rather than only observed.
+
+
+### Portable launch command composition
+
+`Core/Agent/ShellCommand.swift` owns quoting and trailing-operand placement;
+`Core/Agent/AgentLaunchPlan.swift` owns executable/arguments/resume state/environment overrides
+and the pure `inLoginShell` factory. `AgentLauncher` supplies its resolved login shell and keeps
+provider flags, account routing, permissions and host environment resolution. This separation
+allows a Linux host to compile and execute the same command representation without claiming that
+its account discovery or provider policy has already been ported.
+
+`CodexLaunchCommand` owns portable Codex invocation and terminal command composition. The host
+supplies resolved model/conversation overrides, permission mode, hook flags and resume state.
+`AgentLauncher` still resolves those values and performs hook maintenance; resume preflight stays
+at its existing caller. The builder does not read credentials or fall back from resume to fresh.

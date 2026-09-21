@@ -534,6 +534,7 @@ final class PTYHostDaemonTests: XCTestCase {
         let budget = 32 * 1024
         let attached = try attach(on: rejoined, id: id, budget: budget)
         XCTAssertEqual(attached.replay, .cut)
+        XCTAssertEqual(attached.replayByteCount, budget + 1)
         XCTAssertGreaterThan(
             attached.totalBytesWritten,
             UInt64(Fixture.overflowBytes),
@@ -580,6 +581,7 @@ final class PTYHostDaemonTests: XCTestCase {
         let rejoined = try connect(to: daemon)
         let attached = try attach(on: rejoined, id: id)
         XCTAssertEqual(attached.replay, .exact(fromOffset: applied))
+        XCTAssertEqual(attached.replayByteCount, Data("<SEED>BETA<MODES>".utf8).count)
 
         try rejoined.waitForOutput(containing: "<MODES>", timeout: Fixture.childTimeout)
         let replay = rejoined.text

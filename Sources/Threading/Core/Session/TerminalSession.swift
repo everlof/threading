@@ -1035,14 +1035,7 @@ final class TerminalSession: NSObject {
     }
 
     func buildEnvironment() -> [String] {
-        var env = ProcessInfo.processInfo.environment
-
-        // Drop the launching process's own agent identity. These describe whoever started
-        // Threading — if that was itself an agent session, every session spawned here would
-        // inherit its identifiers and believe it was a nested child of that conversation.
-        for key in env.keys where AgentEnvironment.isInheritedAgentIdentity(key) {
-            env.removeValue(forKey: key)
-        }
+        var env = AgentEnvironment.removingInheritedIdentity(from: ProcessInfo.processInfo.environment)
 
         env[EnvironmentKeys.term] = TerminalDefaults.terminalType
         env[EnvironmentKeys.colorTerm] = TerminalDefaults.colorTerm

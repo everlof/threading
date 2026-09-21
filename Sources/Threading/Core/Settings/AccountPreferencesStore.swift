@@ -1,5 +1,5 @@
 import Foundation
-import ThreadingRemoteKit
+import ThreadingDomain
 
 // MARK: - New-Session Run Choice
 

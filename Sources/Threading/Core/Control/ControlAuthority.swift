@@ -1,5 +1,30 @@
 import Foundation
 
+/// Who is asking the control plane to act.
+///
+/// Never something the caller typed: for an agent session the id is the one its MCP URL token
+/// resolved to, so a caller cannot claim to be a session it is not.
+enum ControlActor: Codable, Equatable, Hashable, Sendable {
+    /// An agent session, calling through Threading's own MCP server.
+    case agentSession(SessionID)
+}
+
+/// What one actor may see and touch.
+///
+/// Slice one grants every actor exactly its own project. The cases this enum is missing —
+/// a session subtree, an explicit project set, the whole workspace — are the point of it being
+/// an enum: a broader grant is a new case with its own membership rule, not a loosened check.
+enum ControlScope: Codable, Equatable, Hashable, Sendable {
+    /// Every unarchived session in one project.
+    case project(ProjectID)
+    /// An explicit bounded set of sessions. Used for the implicit self grant today and for
+    /// deliberately narrow delegated authority later.
+    case sessions(Set<SessionID>)
+    /// Several explicit projects. No manager template creates this; it is available only to a
+    /// future user-authored grant so cross-project reach never arrives by implication.
+    case projects(Set<ProjectID>)
+}
+
 enum SessionRole: String, Codable, CaseIterable, Sendable {
     case chat
     case manager

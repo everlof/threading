@@ -280,3 +280,9 @@ struct SystemSSHCommandRunner: RemoteHostCommandRunning {
         )
     }
 }
+
+extension RemoteHostRecord {
+    var sshDestination: RemoteHostDestination {
+        RemoteHostDestination(alias: destination, configFile: sshConfigFile)
+    }
+}

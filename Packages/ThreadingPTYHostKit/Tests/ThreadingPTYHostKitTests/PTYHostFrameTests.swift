@@ -7,6 +7,19 @@ import ThreadingDomain
 /// discriminator exists to prevent.
 final class PTYHostFrameTests: XCTestCase {
 
+    func testAttachedReplayBoundaryIsAdditiveAndDistinguishesMissingFromEmpty() throws {
+        for count: Int? in [nil, 0, 524_289] {
+            let attached = PTYHostAttached(id: identity, pid: 1, grid: grid, replay: .cut,
+                                          totalBytesWritten: 900_000, replayByteCount: count)
+            let bytes = try encoder.encode(attached)
+            let decoded = try decoder.decode(PTYHostAttached.self, from: bytes)
+            XCTAssertEqual(decoded, attached)
+            let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+            XCTAssertEqual(fields["replayByteCount"] as? Int, count)
+            if count == nil { XCTAssertNil(fields["replayByteCount"]) }
+        }
+    }
+
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 

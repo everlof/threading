@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 
 @main
 struct BuildInfoGenerator {
@@ -252,6 +253,8 @@ private struct GitCommand {
 
         let process = Process()
         let standardOutput = Pipe()
+        let terminated = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in terminated.signal() }
         process.executableURL = gitURL
         process.arguments = ["-C", repositoryPath] + arguments
         process.environment = ProcessInfo.processInfo.environment.merging(
@@ -264,7 +267,10 @@ private struct GitCommand {
         do {
             try process.run()
             let data = standardOutput.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+            // Linux Foundation's waitUntilExit can remain in its run loop after Git has
+            // already been reaped (including an unavailable worktree's exit 128). Register
+            // completion before launch and wait on that notification instead.
+            terminated.wait()
 
             guard process.terminationStatus == 0 else {
                 return nil

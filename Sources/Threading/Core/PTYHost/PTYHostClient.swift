@@ -1,84 +1,11 @@
+#if os(Linux)
+import Glibc
+#else
 import Darwin
+#endif
 import Dispatch
 import Foundation
 import ThreadingPTYHostKit
-
-// MARK: - Errors
-
-/// Why a link to the background PTY host could not be made, or could not be kept.
-///
-/// Structural tokens rather than sentences, and typed rather than a `Bool` or an `NSError`,
-/// because every one names a different cause: some mean the daemon is unavailable, two expose a
-/// caller bug, and the rest mean the peer is not a daemon this app can talk to. The launch layer
-/// preserves that distinction when it surfaces a selected host's refusal.
-enum PTYHostClientError: Error, Equatable, Sendable {
-
-    /// The rendezvous path does not fit `sockaddr_un.sun_path`.
-    case pathTooLong(bytes: Int)
-    case socketUnavailable(errno: Int32)
-    case connectFailed(errno: Int32)
-    case connectTimedOut
-    /// The daemon did not say `hello` inside `PTYHostDefaults.helloTimeout`.
-    case handshakeTimedOut
-    /// The peer closed before the handshake finished.
-    case closedEarly
-    case readFailed(errno: Int32)
-    case writeFailed(errno: Int32)
-
-    /// The version gate refused, from **this app's** perspective — `selfTooOld` means the app is
-    /// behind, whichever side did the evaluating. See `PTYHostClient.connect()`.
-    case incompatible(PTYHostCompatibility)
-
-    /// The stream stopped being a conversation. Terminal: there is no resynchronisation point in
-    /// a length-prefixed stream.
-    case framing(PTYHostFramingRefusal)
-
-    /// A frame this build would have sent is larger than the wire allows.
-    case oversizeFrame
-
-    /// The daemon stopped reading and the unwritten bytes reached
-    /// `PTYHostDefaults.maximumQueuedWriteBytes`. The connection is closed rather than grown.
-    case writeQueueOverflow(queuedBytes: Int)
-
-    /// A send before `connect()` returned, or after the link closed.
-    case notReady
-
-    /// A second `spawn` or `attach` on a connection that is already bound to a session.
-    case alreadyBound(PTYHostSessionIdentity)
-
-    /// Raw input on a connection that has not been bound to a session. Input carries no id, so
-    /// there is nothing else to say who it is for.
-    case notBound
-
-    /// A frame naming a session this connection is not bound to.
-    case sessionMismatch(bound: PTYHostSessionIdentity, frame: PTYHostSessionIdentity)
-
-    /// The journal token. A cause, never a path.
-    var token: String {
-        switch self {
-        case .pathTooLong: return "pathTooLong"
-        case .socketUnavailable: return "socketUnavailable"
-        case .connectFailed: return "connectFailed"
-        case .connectTimedOut: return "connectTimedOut"
-        case .handshakeTimedOut: return "handshakeTimedOut"
-        case .closedEarly: return "closedEarly"
-        case .readFailed: return "readFailed"
-        case .writeFailed: return "writeFailed"
-        case .incompatible(let compatibility): return "incompatible.\(compatibility.rawValue)"
-        case .framing(let refusal):
-            switch refusal {
-            case .oversizePayload: return "framing.oversizePayload"
-            case .unknownKind: return "framing.unknownKind"
-            }
-        case .oversizeFrame: return "oversizeFrame"
-        case .writeQueueOverflow: return "writeQueueOverflow"
-        case .notReady: return "notReady"
-        case .alreadyBound: return "alreadyBound"
-        case .notBound: return "notBound"
-        case .sessionMismatch: return "sessionMismatch"
-        }
-    }
-}
 
 // MARK: - Client
 
@@ -173,10 +100,7 @@ final class PTYHostClient: @unchecked Sendable {
     /// The handshake must finish draining that already-decoded batch before handing the
     /// descriptor to `DispatchIO`. Keeping output and control in one sequence preserves wire
     /// order, including the standard-error bit that a pair of payload-only arrays would lose.
-    private enum PendingDelivery {
-        case control(PTYHostFrame)
-        case output(Data, standardError: Bool)
-    }
+    private typealias PendingDelivery = PTYHostHandshake.Delivery
 
     // MARK: - Properties
 
@@ -186,7 +110,8 @@ final class PTYHostClient: @unchecked Sendable {
     private let socketPath: String
     private let build: String
     private let events: Events
-    private let eventLog: EventLog
+    typealias Journal = @Sendable (String, [String: String]) -> Void
+    private let journal: Journal
     private let connectTimeout: TimeInterval
     private let helloTimeout: TimeInterval
     private let maximumQueuedWriteBytes: Int
@@ -199,9 +124,12 @@ final class PTYHostClient: @unchecked Sendable {
     private var state: State = .idle
     private var descriptor: Int32 = -1
     private var channel: DispatchIO?
+    #if os(Linux)
+    private var writer: PTYHostSocketWriter?
+    #endif
     private var decoder = PTYHostFrameDecoder()
     private var queuedWriteBytes = 0
-    private var boundSessionStorage: PTYHostSessionIdentity?
+    private var binding = PTYHostConnectionBinding()
     private var peerHelloStorage: PTYHostHello?
     private var reportedLossStorage: PTYHostLost?
     private var didReportClosed = false
@@ -216,19 +144,19 @@ final class PTYHostClient: @unchecked Sendable {
         socketPath: String,
         build: String,
         events: Events,
-        eventLog: EventLog = .shared,
+        journal: @escaping Journal,
         queue: DispatchQueue? = nil,
-        connectTimeout: TimeInterval = PTYHostDefaults.connectTimeout,
-        helloTimeout: TimeInterval = PTYHostDefaults.helloTimeout,
-        maximumQueuedWriteBytes: Int = PTYHostDefaults.maximumQueuedWriteBytes
+        connectTimeout: TimeInterval = PTYHostClientDefaults.connectTimeout,
+        helloTimeout: TimeInterval = PTYHostClientDefaults.helloTimeout,
+        maximumQueuedWriteBytes: Int = PTYHostClientDefaults.maximumQueuedWriteBytes
     ) {
         self.socketPath = socketPath
         self.build = build
         self.events = events
-        self.eventLog = eventLog
+        self.journal = journal
         self.queue = queue ?? DispatchQueue(
-            label: PTYHostDefaults.clientQueueLabel,
-            qos: PTYHostDefaults.clientQueueQoS
+            label: PTYHostClientDefaults.clientQueueLabel,
+            qos: PTYHostClientDefaults.clientQueueQoS
         )
         self.connectTimeout = connectTimeout
         self.helloTimeout = helloTimeout
@@ -242,7 +170,7 @@ final class PTYHostClient: @unchecked Sendable {
         let orphan = channel == nil ? descriptor : -1
         descriptor = -1
         lock.unlock()
-        if orphan >= 0 { Darwin.close(orphan) }
+        if orphan >= 0 { PTYHostSocket.close(orphan) }
     }
 
     // MARK: - Public Properties
@@ -271,7 +199,7 @@ final class PTYHostClient: @unchecked Sendable {
     var boundSession: PTYHostSessionIdentity? {
         lock.lock()
         defer { lock.unlock() }
-        return boundSessionStorage
+        return binding.session
     }
 
     var isReady: Bool {
@@ -284,7 +212,7 @@ final class PTYHostClient: @unchecked Sendable {
 
     /// Connects, says `hello`, waits for the daemon's, and runs the version gate.
     ///
-    /// Blocking, bounded by `connectTimeout + helloTimeout`, and therefore **never on the main
+    /// Blocking, bounded by the connect, hello and frame-write deadlines, and therefore **never on the main
     /// actor**. On success the read pump is running and every later frame arrives on `queue`.
     ///
     /// The gate's three answers, per D2:
@@ -303,9 +231,9 @@ final class PTYHostClient: @unchecked Sendable {
     func connect() throws -> PTYHostHello {
         try beginHandshake()
         do {
-            let hello = try performHandshake()
-            startPump()
-            return hello
+            let completion = try performHandshake()
+            try startPump(pending: completion.pending)
+            return completion.peer
         } catch {
             let refusal = (error as? PTYHostClientError) ?? .connectFailed(errno: 0)
             abandonHandshake(refusal)
@@ -318,27 +246,12 @@ final class PTYHostClient: @unchecked Sendable {
     /// The binding rules are enforced here rather than at each convenience method, so there is
     /// one place that decides what this connection is allowed to say.
     func send(_ frame: PTYHostFrame) throws {
-        switch frame {
-        case .spawn(let request):
-            try bind(to: request.id)
-        case .attach(let request):
-            try bind(to: request.id)
-        case .resize(let request):
-            try requireBinding(matches: request.id)
-        case .detach(let request):
-            try requireBinding(matches: request.id)
-        case .closeInput(let request):
-            try requireBinding(matches: request.id)
-        case .kill(let request):
-            try requireBinding(matches: request.id)
-        default:
-            break
-        }
+        let reservation = try prepareToSend(frame)
 
         do {
             try enqueue(PTYHostFraming.framed(kind: .control, payload: try encode(frame)))
         } catch {
-            unbindIfNeeded(after: frame)
+            unbindIfNeeded(reservation)
             throw error
         }
     }
@@ -369,10 +282,7 @@ final class PTYHostClient: @unchecked Sendable {
     /// bound has nothing to say who it is for, and guessing would type into somebody else's
     /// agent.
     func sendInput(_ bytes: Data) throws {
-        lock.lock()
-        let bound = boundSessionStorage
-        lock.unlock()
-        guard bound != nil else { throw PTYHostClientError.notBound }
+        try requireInputBinding()
         try enqueue(PTYHostFraming.framed(kind: .input, payload: bytes))
     }
 
@@ -408,39 +318,6 @@ final class PTYHostClient: @unchecked Sendable {
         close(with: nil)
     }
 
-    // MARK: - Probing
-
-    /// One connect-`hello`-close round trip, for `PTYHostAvailability`.
-    ///
-    /// The full client rather than a simplified dialect on purpose: a probe that spoke less than
-    /// the link does could admit a daemon the link then refuses, moving the failure from the
-    /// decision boundary into the launch itself.
-    static func probe(
-        socketPath: String,
-        build: String,
-        eventLog: EventLog = .shared
-    ) -> PTYHostProbeOutcome {
-        let client = PTYHostClient(
-            socketPath: socketPath,
-            build: build,
-            events: .ignored,
-            eventLog: eventLog
-        )
-        do {
-            _ = try client.connect()
-            client.close()
-            return .ready
-        } catch PTYHostClientError.incompatible(let compatibility) {
-            return .mismatched(compatibility)
-        } catch {
-            let cause = (error as? PTYHostClientError)?.token ?? "unknown"
-            ThreadingLogger.ptyHost.info(
-                "PTY host probe found no usable daemon: \(cause, privacy: .public)"
-            )
-            return .notRunning
-        }
-    }
-
     // MARK: - Private Methods — Handshake
 
     private func beginHandshake() throws {
@@ -450,8 +327,8 @@ final class PTYHostClient: @unchecked Sendable {
         state = .handshaking
     }
 
-    private func performHandshake() throws -> PTYHostHello {
-        let connected = try Self.connectedDescriptor(
+    private func performHandshake() throws -> PTYHostHandshake.Completion {
+        let connected = try PTYHostSocket.connect(
             to: socketPath,
             timeout: connectTimeout
         )
@@ -471,7 +348,7 @@ final class PTYHostClient: @unchecked Sendable {
         )
 
         let deadline = Date().addingTimeInterval(helloTimeout)
-        var pending: [PendingDelivery] = []
+        var handshake = PTYHostHandshake()
 
         while true {
             let bytes = try Self.read(descriptor: connected, until: deadline)
@@ -486,46 +363,13 @@ final class PTYHostClient: @unchecked Sendable {
                 wire = frames
             }
 
-            var admittedPeer: PTYHostHello?
-            for frame in wire {
-                switch frame.kind {
-                case .output:
-                    pending.append(.output(
-                        frame.payload,
-                        standardError: frame.flags
-                            & PTYHostFramingDefaults.standardErrorFlag != 0
-                    ))
-                    continue
-                case .input:
-                    // The daemon never sends input. Ignore it rather than close: the framing is
-                    // still in step, and a peer saying something meaningless is not a peer whose
-                    // stream cannot be read.
-                    ThreadingLogger.ptyHost.error("PTY host sent an input frame; ignored")
-                    continue
-                case .control:
-                    break
-                }
-
-                guard let control = decodeControl(frame.payload) else { continue }
-                switch control {
-                case .hello(let peer):
-                    guard admittedPeer == nil else { continue }
-                    let compatibility = PTYHostCompatibility.evaluate(peer: peer)
-                    try admit(peer, compatibility: compatibility, descriptor: connected)
-                    admittedPeer = peer
-                case .helloRefused(let refusal):
-                    guard admittedPeer == nil else { continue }
-                    // The daemon evaluated us. Its answer names *us* as the peer, so it is the
-                    // mirror of ours.
-                    throw PTYHostClientError.incompatible(Self.flipped(refusal.compatibility))
-                default:
-                    pending.append(.control(control))
-                }
-            }
-
-            if let admittedPeer {
-                deliver(pending)
-                return admittedPeer
+            if let completion = try handshake.accept(
+                wire,
+                decodeControl: decodeControl,
+                admit: { try admit($0, compatibility: $1, descriptor: connected) },
+                unexpectedInput: { ThreadingLogger.ptyHost.error("PTY host sent an input frame; ignored") }
+            ) {
+                return completion
             }
         }
     }
@@ -542,8 +386,7 @@ final class PTYHostClient: @unchecked Sendable {
             peerHelloStorage = peer
             state = .ready
             lock.unlock()
-            eventLog.record(
-                .session,
+            journal(
                 "PTY host connected",
                 ["build": peer.build, "protocol": String(peer.protocolVersion)]
             )
@@ -561,7 +404,7 @@ final class PTYHostClient: @unchecked Sendable {
             ) {
                 try? Self.writeAll(descriptor: descriptor, retirement)
             }
-            _ = Darwin.shutdown(descriptor, SHUT_WR)
+            _ = PTYHostSocket.shutdown(descriptor, Int32(SHUT_WR))
             journalMismatch(peer, compatibility: compatibility, retired: true)
             throw PTYHostClientError.incompatible(compatibility)
 
@@ -579,8 +422,7 @@ final class PTYHostClient: @unchecked Sendable {
         retired: Bool
     ) {
         let update = compatibility.updateTarget(evaluatedBy: .app)?.rawValue ?? "none"
-        eventLog.record(
-            .session,
+        journal(
             "PTY host protocol mismatch",
             [
                 "compatibility": compatibility.rawValue,
@@ -629,51 +471,48 @@ final class PTYHostClient: @unchecked Sendable {
         didReportClosed = true
         lock.unlock()
         if orphan >= 0 {
-            _ = Darwin.shutdown(orphan, SHUT_RDWR)
-            Darwin.close(orphan)
+            _ = PTYHostSocket.shutdown(orphan, Int32(SHUT_RDWR))
+            PTYHostSocket.close(orphan)
         }
         if case .framing(let refusal) = error {
-            eventLog.record(.session, "PTY host framing refused", ["cause": error.token])
+            journal("PTY host framing refused", ["cause": error.token])
             ThreadingLogger.ptyHost.error(
                 "PTY host framing refused during handshake: \(String(describing: refusal), privacy: .public)"
             )
         }
     }
 
-    /// The daemon's compatibility answer, restated from this app's side.
-    ///
-    /// `peerTooOld` from the daemon means *the app* is too old, which from here is `selfTooOld`.
-    /// A fixed mapping would be right on one side and exactly backwards on the other, which is
-    /// the same trap `PTYHostCompatibility.updateTarget(evaluatedBy:)` exists to avoid.
-    private static func flipped(_ compatibility: PTYHostCompatibility) -> PTYHostCompatibility {
-        switch compatibility {
-        case .compatible: return .compatible
-        case .peerTooOld: return .selfTooOld
-        case .selfTooOld: return .peerTooOld
-        }
-    }
-
     // MARK: - Private Methods — The pump
 
-    private func startPump() {
+    private func startPump(pending: [PendingDelivery]) throws {
         lock.lock()
         let connected = descriptor
         lock.unlock()
         guard connected >= 0 else { return }
+
+        #if os(Linux)
+        let writer = try PTYHostSocketWriter(descriptor: connected)
+        #endif
 
         let channel = DispatchIO(
             type: .stream,
             fileDescriptor: connected,
             queue: queue
         ) { _ in
-            Darwin.close(connected)
+            PTYHostSocket.close(connected)
         }
         channel.setLimit(lowWater: 1)
 
         lock.lock()
         self.channel = channel
+        #if os(Linux)
+        self.writer = writer
+        #endif
         lock.unlock()
 
+        // Queue retained handshake deliveries before starting live reads, after every descriptor
+        // owner has been allocated successfully. A failed writer allocation delivers nothing.
+        deliver(pending)
         channel.read(offset: 0, length: Int.max, queue: queue) { [weak self] done, data, error in
             self?.received(data, done: done, error: error)
         }
@@ -689,7 +528,7 @@ final class PTYHostClient: @unchecked Sendable {
 
             switch outcome {
             case .refused(let refusal):
-                eventLog.record(.session, "PTY host framing refused", ["cause": "framing"])
+                journal("PTY host framing refused", ["cause": "framing"])
                 ThreadingLogger.ptyHost.error(
                     "PTY host framing refused: \(String(describing: refusal), privacy: .public)"
                 )
@@ -730,20 +569,19 @@ final class PTYHostClient: @unchecked Sendable {
             lock.lock()
             reportedLossStorage = lost
             lock.unlock()
-            eventLog.record(
-                .session,
+            journal(
                 "PTY host reported lost sessions",
                 ["count": String(lost.ids.count)]
             )
             ThreadingLogger.ptyHost.warning(
                 "PTY host lost \(lost.ids.count, privacy: .public) session(s) across a restart"
             )
-        case .spawnRefused(let refused):
+        case .spawnRefused:
             // The binding was taken optimistically when the request went out. A refusal releases
             // it, so the caller may try another session on this connection rather than having to
             // build a second one.
             lock.lock()
-            if boundSessionStorage == refused.id { boundSessionStorage = nil }
+            binding.received(frame)
             lock.unlock()
         default:
             break
@@ -777,34 +615,23 @@ final class PTYHostClient: @unchecked Sendable {
 
     // MARK: - Private Methods — Binding
 
-    private func bind(to session: PTYHostSessionIdentity) throws {
+    private func prepareToSend(_ frame: PTYHostFrame) throws -> PTYHostConnectionBinding.Reservation? {
         lock.lock()
         defer { lock.unlock() }
-        if let bound = boundSessionStorage {
-            throw PTYHostClientError.alreadyBound(bound)
-        }
-        boundSessionStorage = session
+        return try binding.prepare(frame)
     }
 
-    private func requireBinding(matches session: PTYHostSessionIdentity) throws {
+    private func requireInputBinding() throws {
         lock.lock()
         defer { lock.unlock() }
-        guard let bound = boundSessionStorage else { throw PTYHostClientError.notBound }
-        guard bound == session else {
-            throw PTYHostClientError.sessionMismatch(bound: bound, frame: session)
-        }
+        try binding.requireInputBinding()
     }
 
-    /// A `spawn` or `attach` whose bytes never left releases the binding it took.
-    private func unbindIfNeeded(after frame: PTYHostFrame) {
-        switch frame {
-        case .spawn, .attach:
-            lock.lock()
-            boundSessionStorage = nil
-            lock.unlock()
-        default:
-            break
-        }
+    /// A failed send releases only its own binding, even if a newer one was admitted meanwhile.
+    private func unbindIfNeeded(_ reservation: PTYHostConnectionBinding.Reservation?) {
+        lock.lock()
+        defer { lock.unlock() }
+        binding.sendingFailed(reservation)
     }
 
     // MARK: - Private Methods — Writing
@@ -829,13 +656,18 @@ final class PTYHostClient: @unchecked Sendable {
             lock.unlock()
             throw PTYHostClientError.notReady
         }
+        #if os(Linux)
+        guard let writer = self.writer else {
+            lock.unlock()
+            throw PTYHostClientError.notReady
+        }
+        #endif
         let bound = maximumQueuedWriteBytes
         let queued = queuedWriteBytes + framed.count
         guard queued <= bound else {
             lock.unlock()
             let overflow = PTYHostClientError.writeQueueOverflow(queuedBytes: queued)
-            eventLog.record(
-                .session,
+            journal(
                 "PTY host write queue overflowed",
                 ["queuedBytes": String(queued)]
             )
@@ -852,11 +684,15 @@ final class PTYHostClient: @unchecked Sendable {
         lock.unlock()
 
         let count = framed.count
+        #if os(Linux)
+        writer.write(framed) { [weak self] error in self?.finishedWrite(count, error: error) }
+        #else
         let payload = framed.withUnsafeBytes { DispatchData(bytes: $0) }
         channel.write(offset: 0, data: payload, queue: queue) { [weak self] done, _, error in
             guard done else { return }
             self?.finishedWrite(count, error: error)
         }
+        #endif
     }
 
     private func finishedWrite(_ count: Int, error: Int32) {
@@ -888,27 +724,34 @@ final class PTYHostClient: @unchecked Sendable {
         }
         state = .closed
         let openChannel = channel
+        #if os(Linux)
+        let openWriter = writer
+        writer = nil
+        #endif
         let openDescriptor = descriptor
         let shouldReport = !didReportClosed
         didReportClosed = true
         channel = nil
         descriptor = -1
-        boundSessionStorage = nil
+        binding.reset()
         let waiters = takeDrainWaitersLocked()
         lock.unlock()
         for waiter in waiters { waiter.signal() }
 
-        if openDescriptor >= 0 { _ = Darwin.shutdown(openDescriptor, SHUT_RDWR) }
+        if openDescriptor >= 0 { _ = PTYHostSocket.shutdown(openDescriptor, Int32(SHUT_RDWR)) }
+        #if os(Linux)
+        openWriter?.close()
+        #endif
         if let openChannel {
             // The channel's cleanup handler owns the descriptor once the pump started.
             openChannel.close(flags: .stop)
         } else if openDescriptor >= 0 {
-            Darwin.close(openDescriptor)
+            PTYHostSocket.close(openDescriptor)
         }
 
         if shouldReport {
             if let cause = error?.token {
-                eventLog.record(.session, "PTY host link closed", ["cause": cause])
+                journal("PTY host link closed", ["cause": cause])
             }
             queue.async { [events] in events.closed(error) }
         }
@@ -916,126 +759,9 @@ final class PTYHostClient: @unchecked Sendable {
 
     // MARK: - Private Methods — POSIX
 
-    private static func connectedDescriptor(
-        to path: String,
-        timeout: TimeInterval
-    ) throws -> Int32 {
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
-
-        let pathBytes = Array(path.utf8)
-        let capacity = MemoryLayout.size(ofValue: address.sun_path)
-        guard pathBytes.count < capacity else {
-            throw PTYHostClientError.pathTooLong(bytes: pathBytes.count)
-        }
-        withUnsafeMutablePointer(to: &address.sun_path) { tuple in
-            tuple.withMemoryRebound(to: CChar.self, capacity: capacity) { destination in
-                for (index, byte) in pathBytes.enumerated() {
-                    destination[index] = CChar(bitPattern: byte)
-                }
-                destination[pathBytes.count] = 0
-            }
-        }
-
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard descriptor >= 0 else {
-            throw PTYHostClientError.socketUnavailable(errno: errno)
-        }
-
-        // Writing to a socket the daemon has already closed must be an error, not a signal.
-        // Without this the app dies of SIGPIPE when a daemon exits mid-write — which is exactly
-        // the moment the feature is supposed to report one session's link failure safely.
-        var suppressSignal: Int32 = 1
-        _ = setsockopt(
-            descriptor,
-            SOL_SOCKET,
-            SO_NOSIGPIPE,
-            &suppressSignal,
-            socklen_t(MemoryLayout<Int32>.size)
-        )
-
-        do {
-            try connect(descriptor: descriptor, to: &address, timeout: timeout)
-        } catch {
-            Darwin.close(descriptor)
-            throw error
-        }
-        return descriptor
-    }
-
-    /// Connects with a deadline, by asking for a non-blocking connect and polling it.
-    ///
-    /// `SO_SNDTIMEO` does not bound a blocking `connect`, so the deadline has to be expressed
-    /// this way — the same shape `Targets/MCPBridge/UnixHTTPClient.swift` uses. The descriptor
-    /// goes back into blocking mode afterwards, because the handshake reads with its own `poll`
-    /// deadline and the pump sets whatever it needs.
-    private static func connect(
-        descriptor: Int32,
-        to address: inout sockaddr_un,
-        timeout: TimeInterval
-    ) throws {
-        let flags = fcntl(descriptor, F_GETFL, 0)
-        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
-            throw PTYHostClientError.connectFailed(errno: errno)
-        }
-
-        let started = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                Darwin.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-
-        if started != 0 {
-            guard errno == EINPROGRESS else {
-                throw PTYHostClientError.connectFailed(errno: errno)
-            }
-            try waitForConnect(descriptor: descriptor, timeout: timeout)
-        }
-
-        guard fcntl(descriptor, F_SETFL, flags) >= 0 else {
-            throw PTYHostClientError.connectFailed(errno: errno)
-        }
-    }
-
-    private static func waitForConnect(descriptor: Int32, timeout: TimeInterval) throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while true {
-            let remaining = deadline.timeIntervalSinceNow
-            guard remaining > 0 else { throw PTYHostClientError.connectTimedOut }
-
-            var event = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
-            let ready = poll(&event, 1, Int32((remaining * 1000).rounded(.up)))
-            if ready < 0 {
-                if errno == EINTR { continue }
-                throw PTYHostClientError.connectFailed(errno: errno)
-            }
-            guard ready > 0 else { throw PTYHostClientError.connectTimedOut }
-
-            var failure: Int32 = 0
-            var size = socklen_t(MemoryLayout<Int32>.size)
-            guard getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &failure, &size) == 0 else {
-                throw PTYHostClientError.connectFailed(errno: errno)
-            }
-            guard failure == 0 else { throw PTYHostClientError.connectFailed(errno: failure) }
-            return
-        }
-    }
-
     private static func writeAll(descriptor: Int32, _ data: Data) throws {
-        try data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            var offset = 0
-            while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
-                if written > 0 {
-                    offset += written
-                    continue
-                }
-                if written < 0 && errno == EINTR { continue }
-                throw PTYHostClientError.writeFailed(errno: errno)
-            }
-        }
+        try PTYHostSocket.writeAll(descriptor: descriptor, data: data,
+                                   timeout: PTYHostClientDefaults.helloTimeout)
     }
 
     private static func read(descriptor: Int32, until deadline: Date) throws -> Data {
@@ -1053,10 +779,10 @@ final class PTYHostClient: @unchecked Sendable {
 
             var chunk = [UInt8](
                 repeating: 0,
-                count: PTYHostDefaults.handshakeReadChunkBytes
+                count: PTYHostClientDefaults.handshakeReadChunkBytes
             )
             let count = chunk.withUnsafeMutableBytes { raw -> Int in
-                Darwin.read(descriptor, raw.baseAddress, raw.count)
+                PTYHostSocket.read(descriptor, raw.baseAddress, raw.count)
             }
             if count > 0 { return Data(chunk[0..<count]) }
             if count == 0 { throw PTYHostClientError.closedEarly }

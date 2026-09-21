@@ -1,54 +1,5 @@
 import Foundation
 
-// MARK: - Agent Launch Plan
-
-/// A fully resolved command line for starting or resuming an agent session.
-struct AgentLaunchPlan {
-    let executable: String
-    let arguments: [String]
-
-    /// The conversation state this launch establishes.
-    ///
-    /// Claude launches and all resumes carry an identifier. Fresh Codex/OpenCode launches
-    /// await the identifier assigned by the CLI; fresh Grok launches await confirmation that
-    /// its caller-supplied UUID was persisted. Research runs and shells have none.
-    let resumeState: ResumeState
-
-    /// Environment entries this launch needs that the shared launch environment does not carry.
-    ///
-    /// A terminal launch states its environment as `env NAME=value` words inside the login-shell
-    /// command, which a native launch has no room for: it spawns the child directly and hands it
-    /// a dictionary. Empty for every plan that has nothing to add, so the mechanism costs the
-    /// other runtimes nothing — the first user is Cursor, whose CLI opens a browser to
-    /// authenticate unless `BROWSER` and `NO_OPEN_BROWSER` say otherwise.
-    ///
-    /// Read through `launchEnvironment()` rather than merged at each call site, so a transport
-    /// cannot pick up the plan and silently drop what it asked for.
-    let environmentOverrides: [String: String]
-
-    init(
-        executable: String,
-        arguments: [String],
-        resumeState: ResumeState,
-        environmentOverrides: [String: String] = [:]
-    ) {
-        self.executable = executable
-        self.arguments = arguments
-        self.resumeState = resumeState
-        self.environmentOverrides = environmentOverrides
-    }
-
-    /// The environment this plan's child is spawned with: the shared one, then this plan's own
-    /// entries on top.
-    func launchEnvironment() -> [String: String] {
-        var environment = AgentEnvironment.launchEnvironment()
-        for (key, value) in environmentOverrides {
-            environment[key] = value
-        }
-        return environment
-    }
-}
-
 enum AgentLaunchPlanningError: LocalizedError, Equatable {
     case unsupportedNativeConversation(AgentKind)
     case unsupportedTerminalConversation(AgentKind)
@@ -60,111 +11,6 @@ enum AgentLaunchPlanningError: LocalizedError, Equatable {
         case .unsupportedTerminalConversation(let kind):
             return "\(kind.displayName) conversations cannot be opened in a terminal."
         }
-    }
-}
-
-// MARK: - Shell Command
-
-/// A shell command assembled from arguments rather than source-code fragments.
-///
-/// Every caller-provided word is single-quoted as it enters the command. The only syntax that
-/// can be emitted raw is one of the fixed operators below, so interpolating a title, branch,
-/// model, prompt, environment value, or path into `sh -c` is not an available operation.
-struct ShellCommand: Equatable, Sendable {
-    enum Operator {
-        case and
-        case endOfOptions
-
-        fileprivate var source: String {
-            switch self {
-            case .and: return "&&"
-            case .endOfOptions: return "--"
-            }
-        }
-    }
-
-    private var components: [String] = []
-
-    /// The command's trailing operand — for an agent launch, the opening prompt.
-    ///
-    /// Kept apart from the flags because the operand-taking CLIs reject a positional argument that begins
-    /// with `-`, and both reject it *before* the session exists: Claude's parser answers
-    /// `error: unknown option '- Make sure all tests are green'` and exits 1, Codex answers
-    /// `unexpected argument '- ' found`. A bulleted opening — a list of things to do, one per
-    /// line — is an ordinary thing to type into the composer, and it killed the launch a
-    /// third of a second after it started.
-    ///
-    /// Two rules together make it safe, and each is needed: the operand is emitted **last**,
-    /// after the MCP flags `routed` appends around the command, and it is separated by `--`,
-    /// the terminator both parsers honour. Appending `--` where the prompt used to sit would
-    /// have handed `--mcp-config` to the CLI as prompt text instead.
-    private var operand: String?
-
-    init() {}
-
-    init(word: String) {
-        append(word: word)
-    }
-
-    mutating func append(word: String) {
-        components.append(Self.quote(word))
-    }
-
-    mutating func append(words: [String]) {
-        for word in words {
-            append(word: word)
-        }
-    }
-
-    mutating func append(flag: String) {
-        precondition(flag.hasPrefix("-"), "A shell flag must start with '-'")
-        append(word: flag)
-    }
-
-    mutating func append(flag: String, value: String) {
-        append(flag: flag)
-        append(word: value)
-    }
-
-    mutating func append(operator shellOperator: Operator) {
-        components.append(shellOperator.source)
-    }
-
-    /// Sets the trailing operand. A command has at most one — the opening prompt.
-    mutating func append(operand value: String) {
-        precondition(operand == nil, "A command carries one trailing operand")
-        operand = value
-    }
-
-    /// Composing commands carries the operand along, so it stays last however the outer
-    /// command is built up afterwards.
-    mutating func append(contentsOf command: ShellCommand) {
-        components.append(contentsOf: command.components)
-        if let inner = command.operand {
-            append(operand: inner)
-        }
-    }
-
-    var source: String {
-        guard let operand else { return components.joined(separator: " ") }
-        return (components + [Operator.endOfOptions.source, Self.quote(operand)])
-            .joined(separator: " ")
-    }
-
-    /// Produces the fixed `cd <directory> && exec <command>` wrapper used by login-shell and
-    /// interactive-shell launches. Only `&&` is syntax; both commands and the directory remain
-    /// ordinary quoted words.
-    static func executing(_ command: ShellCommand, in directory: String) -> ShellCommand {
-        var source = ShellCommand(word: "cd")
-        source.append(word: directory)
-        source.append(operator: .and)
-        source.append(word: "exec")
-        source.append(contentsOf: command)
-        return source
-    }
-
-    private static func quote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
 
@@ -943,12 +789,7 @@ enum AgentLauncher {
     /// keeps the user's `config.toml` untouched and also covers native and headless processes,
     /// whose protocol streams must never acquire unsolicited startup output.
     private static func appendManagedCodexInvocation(to command: inout ShellCommand) {
-        command.append(word: AgentDefaults.codexExecutable)
-        appendCodexConfigOverride(
-            AgentDefaults.codexCheckForUpdateOnStartupKey,
-            tomlValue: "false",
-            to: &command
-        )
+        command.append(contentsOf: CodexLaunchCommand.invocation())
     }
 
     /// A TOML array of basic strings, for the two list-valued `mcp_servers` keys.
@@ -1346,31 +1187,19 @@ enum AgentLauncher {
         for session: AgentSession,
         prompt: String?
     ) -> (ShellCommand, ResumeState) {
-        var command = ShellCommand()
-        appendManagedCodexInvocation(to: &command)
-        // Threading mirrors and remotely scrolls the terminal's retained buffer. Codex's
-        // alternate buffer has no terminal history, and DEC alternate-scroll translates a wheel
-        // into Up/Down keys that Codex assigns to composer history rather than its transcript.
-        // The CLI's supported inline mode gives scrollback one owner on Mac and iPhone alike.
-        command.append(flag: AgentDefaults.codexNoAlternateScreenFlag)
-        appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
-        appendCodexConversationOverrides(for: session, to: &command)
-        appendPermissionMode(for: session, to: &command)
-        appendCodexHookFlags(for: session, to: &command)
-
-        // No preflight branch here on purpose. `codexResumeRefusal` is asked *before* a plan is
-        // built, by the surface that can show the answer — because the only thing this function
-        // could do with a refusal is fall through to a fresh launch, and silently starting a new
-        // conversation in place of the one the user asked to reopen is worse than any failure it
-        // would be avoiding.
-        if let existingID = session.resumeState.transcriptID {
-            command.append(word: "resume")
-            command.append(word: existingID.rawValue)
-            return (command, .resumable(existingID))
-        }
-
-        appendPrompt(prompt, to: &command)
-        return (command, .awaitingIdentifier)
+        var overrides = ShellCommand()
+        appendCodexConversationOverrides(for: session, to: &overrides)
+        let mode = permissionMode(for: session)
+        var hooks = ShellCommand()
+        appendCodexHookFlags(for: session, to: &hooks)
+        return CodexLaunchCommand.terminal(
+            model: session.model,
+            conversationOverrides: overrides,
+            permissionMode: mode,
+            hookFlags: hooks,
+            resumeState: session.resumeState,
+            prompt: prompt
+        )
     }
 
     /// Why this session's conversation must not be reopened, or nil to go ahead.
@@ -1548,11 +1377,10 @@ enum AgentLauncher {
         resumeState: ResumeState,
         environmentOverrides: [String: String] = [:]
     ) -> AgentLaunchPlan {
-        let source = ShellCommand.executing(command, in: folder)
-
-        return AgentLaunchPlan(
-            executable: loginShellPath,
-            arguments: ["-l", "-c", source.source],
+        AgentLaunchPlan.inLoginShell(
+            command: command,
+            in: folder,
+            shellPath: loginShellPath,
             resumeState: resumeState,
             environmentOverrides: environmentOverrides
         )
@@ -1568,4 +1396,17 @@ enum AgentLauncher {
             ?? ProfileStorage.shared.defaultProfile.shellPath
     }
 
+}
+
+// Host environment resolution stays outside the portable command-plan value.
+extension AgentLaunchPlan {
+    /// The environment this plan's child is spawned with: the shared one, then this plan's own
+    /// entries on top.
+    func launchEnvironment() -> [String: String] {
+        var environment = AgentEnvironment.launchEnvironment()
+        for (key, value) in environmentOverrides {
+            environment[key] = value
+        }
+        return environment
+    }
 }

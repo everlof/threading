@@ -443,19 +443,25 @@ public struct PTYHostAttached: Codable, Equatable, Sendable {
     /// The ring's monotonic write count as of this frame. The watcher records it and sends it
     /// back in `detach`, which is the whole mechanism behind `.exact`.
     public let totalBytesWritten: UInt64
+    /// Output bytes following this frame that belong to replay, including seeds and CAN.
+    /// Nil means an older daemon did not state a boundary; zero explicitly means no replay.
+    /// Emulator hosts use this boundary to suppress replies to historical terminal queries.
+    public let replayByteCount: Int?
 
     public init(
         id: PTYHostSessionIdentity,
         pid: Int32,
         grid: PTYHostGrid,
         replay: PTYHostReplay,
-        totalBytesWritten: UInt64
+        totalBytesWritten: UInt64,
+        replayByteCount: Int? = nil
     ) {
         self.id = id
         self.pid = pid
         self.grid = grid
         self.replay = replay
         self.totalBytesWritten = totalBytesWritten
+        self.replayByteCount = replayByteCount
     }
 }
 

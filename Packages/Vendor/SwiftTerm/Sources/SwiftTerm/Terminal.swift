@@ -1029,6 +1029,13 @@ open class Terminal {
         TinyAtom.release(codes: payloadCodes)
     }
 
+    /// Returns the current indexed color, including OSC 4 changes. Renderer callers hold
+    /// `terminalLock`, just as when reading the screen cells that refer to this palette.
+    public func ansiColor(at index: Int) -> Color? {
+        guard ansiColors.indices.contains(index) else { return nil }
+        return ansiColors[index]
+    }
+
     /// Installs the new colors as the default colors and recomputes the
     /// current and ansi palette.   This will not change the UI layer, for that it is better
     /// to call the `installColors` method on `TerminalView`, which will

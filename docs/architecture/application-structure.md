@@ -46,11 +46,60 @@ those is linked by a process that is not the app at all, so its allowed imports 
 and `ThreadingDomain` and nothing else; `scripts/check_module_boundaries.py` holds that floor.
 
 `ThreadingDomain` owns typed project, session, terminal, transcript, and account identities plus
-their storage-safe encoding behavior. Its package has no dependencies. The same directory-wide
+their storage-safe encoding behavior. Persisted account appearance values also live here;
+`ThreadingRemoteKit` keeps public aliases while local preferences depend directly on Domain,
+so storing presentation choices cannot pull in the remote transport's TLS adapters. Domain has
+no dependencies. The same directory-wide
 `scripts/check_module_boundaries.py` rule rejects every Domain import except Foundation and every
 Application import except Foundation plus the explicitly approved lower-level contract modules.
 The app target exposes migration aliases so contracts can move without a repository-wide
 mechanical rewrite.
+
+Persisted records do not own runtime discovery or presentation policy. Launch environment
+policy lives in `Core/Agent/AgentEnvironment.swift`, with process/preference resolution in
+`AgentEnvironmentHost.swift`; session title policy lives in
+`Core/Session/AgentSessionPresentation.swift`; terminal creation's git lookup lives in
+`Core/Project/ProjectTerminalCreation.swift`. `RemoteHostRecord.sshDestination` belongs to the
+SSH adapter. Read-receipt state is a model; its store and remote participant projection stay in
+Core. Outbox capacity is a separate shared default, so scheduled records do not import the live
+queue's delivery vocabulary. Durable control actors and scopes live beside grants in
+`ControlAuthority.swift`, separate from runtime outcomes in `ControlContract.swift`.
+
+`EnvironmentKeys` is a Foundation-only vocabulary, separate from AppKit terminal constants.
+`AgentEnvironment` receives an environment dictionary and explicit tool-path settings; both the
+terminal and headless macOS paths use the same inherited-identity filter. Terminal colour/pager claims
+remain with the frontend that can state what its terminal renders.
+
+`AgentLaunchPlan` and `ShellCommand` are portable values under `Core/Agent/`. The plan's
+`inLoginShell` factory takes an already-resolved shell path and composes the same quoted
+`cd && exec` invocation for every host. `AgentLauncher` retains account discovery, provider
+flags, permission/default resolution and `launchEnvironment()`; compiling a command plan must
+not import those host services or silently replace their policy. `CodexLaunchCommand` composes
+the provider's invocation and terminal flags from resolved values; the macOS launcher still owns
+model metadata, account/hook setup, permission defaults and resume preflight.
+
+`AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
+store and UI. Host adapters retain account/model admission,
+project/identity checks, fallback branch lookup, persistence and notification delivery. This is
+not yet a shared session-creation transaction or runtime coordinator.
+
+`PTYHostSocket` is the shared Unix connection leaf: it receives a path, deadline and desired
+blocking mode, then returns an owned descriptor or a portable `PTYHostClientError`. It does not
+import host registration, diagnostics, stores or UI. `PTYHostConnectionBinding` carries shared typed-session admission and attempt-scoped rollback;
+hosts synchronize the value rather than putting locks or event delivery into the policy.
+`PTYHostHandshake` owns bounded hello-batch retention and compatibility perspective. Hosts inject
+control diagnostics and admission effects; handshake I/O, event pumping and write queue ownership
+remain above these values in the client.
+
+`PTYHostClient` itself now compiles on Darwin and Linux. Its journal callback is injected;
+`PTYHostClientHost` preserves macOS EventLog defaults and the availability probe. Client bounds
+live apart from registration paths. A Linux socket writer owns its descriptor and per-send signal
+policy, while the shared client owns queue admission, protocol state and event delivery.
+
+The session record's runtime handoff helpers live in `Core/Agent/ConversationHandoffRuntime.swift`.
+Its stored provenance and validation remain in `Models/AgentSession.swift`, so compiling those
+records does not pull in live account discovery and model-catalogue lookup. Other model/runtime
+couplings remain migration debt; this is not yet a separately compiled persistence module.
 
 The application target currently approximates the other layers:
 

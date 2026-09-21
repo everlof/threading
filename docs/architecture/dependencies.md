@@ -91,6 +91,13 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     wheel-routing and recent-buffer changes still proposed upstream in
     [#657](https://github.com/migueldeicaza/SwiftTerm/pull/657) and
     [#654](https://github.com/migueldeicaza/SwiftTerm/pull/654).
+  - **The build-info generator waits for its termination callback.** In the Swift 6.3.2 Linux
+    container, `Process.waitUntilExit()` remained in its run loop after Git exited 128 and was
+    reaped (the copied worktree pointed to metadata outside the mount). Registering a semaphore
+    notification before launch avoids that wait path while preserving exit-status checks. The
+    Linux spike fixture checked unavailable metadata, a clean tagged repository and a dirty
+    repository on Linux and macOS; metadata failure must remain an unavailable value rather
+    than holding the build indefinitely after process exit.
   - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
     replace only the visible `NSScroller`; SwiftTerm immediately restates its target, action,
     geometry and current scroll position and continues updating that instance. Threading uses

@@ -1347,6 +1347,13 @@ Two defects the render caught and no assertion would have, both now asserted dir
 
 ## Account appearance resolution
 
+`AccountAppearance`, `AccountAppearanceSurface` and `AccountAppearancePreferences` are persisted,
+Foundation-only values owned by `ThreadingDomain`. `ThreadingRemoteKit` exposes public aliases for
+source compatibility with existing Mac/iPhone clients. Local account preference storage imports
+Domain directly: encoding a badge choice must not require the remote kit's certificate-pinning
+and TLS adapters. Moving the types preserves their Codable keys, optional-field inheritance,
+explicit false values, normalization, and stable surface identifiers.
+
 `AccountPresentation` is the host's presentation value for sidebar, chooser, details, usage
 and notification surfaces. Resolution overlays shared defaults, the shared surface override,
 the account's shared override, then its surface override. Optional booleans distinguish inherit

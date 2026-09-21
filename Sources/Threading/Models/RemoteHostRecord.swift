@@ -93,10 +93,6 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
         destination == other.destination && sshConfigFile == other.sshConfigFile
     }
 
-    var sshDestination: RemoteHostDestination {
-        RemoteHostDestination(alias: destination, configFile: sshConfigFile)
-    }
-
     /// Why this host cannot be used, in the words its editor shows. Nil when it can.
     var problem: ProjectExecutionHost.Problem? {
         // The machine's half of the same validation: a destination `ssh` would read as an option,

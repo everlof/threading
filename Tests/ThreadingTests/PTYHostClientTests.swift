@@ -559,6 +559,38 @@ final class PTYHostClientTests: XCTestCase {
         XCTAssertEqual(daemon.receivedControl.count, 1)
     }
 
+    func testSharedSocketConnectorPreservesModeAndDoesNotLeakAcrossExec() throws {
+        let daemon = try FakePTYHostDaemon { _, _ in }
+        let descriptor = try PTYHostSocket.connect(to: daemon.socketPath, timeout: 1)
+        defer { Darwin.close(descriptor) }
+        XCTAssertNotEqual(fcntl(descriptor, F_GETFD) & FD_CLOEXEC, 0)
+        XCTAssertEqual(fcntl(descriptor, F_GETFL) & O_NONBLOCK, 0)
+    }
+
+    func testSocketPathWithEmbeddedNULIsRefusedBeforeConnectingToItsPrefix() throws {
+        let daemon = try FakePTYHostDaemon { _, _ in }
+        XCTAssertThrowsError(try PTYHostSocket.connect(to: daemon.socketPath + "\0suffix", timeout: 1)) {
+            XCTAssertEqual($0 as? PTYHostClientError, .connectFailed(errno: EINVAL))
+        }
+    }
+
+    func testPreHelloOutputCannotGrowAnUnboundedPendingQueue() throws {
+        let daemon = try makeDaemon { frame, daemon in
+            guard frame.kind == .control else { return }
+            let payload = Data(repeating: 65, count: PTYHostFramingDefaults.maximumPayloadBytes)
+            guard let output = try? PTYHostFraming.encode(kind: .output, payload: payload) else { return }
+            for _ in 0..<5 { daemon.sendRaw(output) }
+        }
+        let client = makeClient(socketPath: daemon.socketPath, events: .ignored)
+        XCTAssertThrowsError(try client.connect()) { error in
+            guard case PTYHostClientError.handshakeBufferOverflow(let bytes) = error else {
+                return XCTFail("unexpected refusal: \(error)")
+            }
+            XCTAssertGreaterThan(bytes, PTYHostHandshake.maximumBufferedBytes)
+        }
+        XCTAssertFalse(client.isReady)
+    }
+
     func testConnectingWhereNothingIsListeningFails() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("no-such-ptyd-\(UUID().uuidString.prefix(8)).sock").path

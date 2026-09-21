@@ -45,7 +45,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `spawned` | ← | 0 | `id`, `pid`, `startTime` |
 | `spawnRefused` | ← | 0 | `id`, `reason` (`alreadyExists`, `executableUnavailable`, `retiring`, `capacity`, `unsupportedChannel`) |
 | `attach` | → | 0 | `id`, `replayBudget` |
-| `attached` | ← | 0 | `id`, `pid`, `grid`, `replay` (`.exact(fromOffset:)` \| `.cut` \| `.none`), `totalBytesWritten` |
+| `attached` | ← | 0 | `id`, `pid`, `grid`, `replay` (`.exact(fromOffset:)` \| `.cut` \| `.none`), `totalBytesWritten`, optional `replayByteCount` |
 | *(replay bytes)* | ← | 1 | screen seed ‖ ring slice ‖ mode seed, in that order |
 | `output` | ← | 1 | raw bytes, no envelope |
 | `input` | → | 2 | raw bytes, no envelope |
@@ -106,6 +106,54 @@ value, so the agent's TUI boots into a two-column window.
 *launchd's* environment, not the user's, and the composition rules — the measured leakage list in
 [`sessions.md`](sessions.md), `AgentEnvironment.inheritedIdentityPrefixes`, `AgentLauncher`'s
 login-shell command line — are one decision that stays in one place in the app.
+
+## Client socket boundary
+
+`PTYHostSocket.connect` owns Unix socket address construction, close-on-exec setup, nonblocking
+connect and its monotonic deadline, kernel `SO_ERROR` inspection, and requested post-connect mode.
+The macOS client uses it. Darwin retains socket-local `SO_NOSIGPIPE`; the Linux writer uses
+`MSG_NOSIGNAL`. The connector installs no process-global signal disposition. Embedded NUL is
+refused before the kernel can interpret a path prefix. `PTYHostClientError` is a portable error
+vocabulary in its own file.
+
+`PTYHostConnectionBinding` owns the portable one-connection/one-session admission policy. It
+refuses input without a binding, a second spawn/attach, and controls whose full typed identity
+does not match. Each accepted spawn/attach returns an opaque reservation; failed-send rollback
+can release only that attempt, including when a newer retry uses the same session ID. A matching
+spawn refusal releases the binding; an unrelated refusal does not. Hosts retain synchronization
+and readiness checks around the value.
+
+`PTYHostHandshake` retains deliveries in wire order across reads and through the complete read
+containing hello, including stderr flags and controls following hello. Its aggregate pending
+budget is 4 MiB of payload plus frame headers, so empty frames cannot create an unbounded queue.
+Overflow refuses the handshake with `handshakeBufferOverflow`; nothing pending is delivered.
+Control decoding diagnostics and admission effects are injected by the host. The shared policy
+reverses daemon-authored compatibility refusals into the client's perspective; retirement I/O
+stays with the host. The shared client delivers the retained batch before live reads and uses one total hello
+deadline, including while additive frames arrive.
+
+`PTYHostClient` owns handshake I/O and admission effects, connection readiness, bounded
+asynchronous writes, diagnostics and event delivery.
+
+### Portable client and host adapter
+
+`PTYHostClient` now compiles on Darwin and Linux. `PTYHostClientHost` supplies the macOS EventLog
+adapter and availability probe; `PTYHostClientDefaults` owns connection, handshake and queue bounds
+without depending on registration paths. Existing app call sites keep their journal-backed API.
+The core still uses the platform logging adapter for diagnostic messages.
+
+macOS retains its DispatchIO reader/writer. Linux retains the DispatchIO reader and uses
+`PTYHostSocketWriter` for ordered writes through `MSG_NOSIGNAL`; the library installs no global
+signal disposition. That writer owns a close-on-exec duplicate, so read-channel cleanup cannot
+reassign a descriptor beneath a send. Client shutdown wakes socket work before writer close;
+queued work observes cancellation rather than each starting another deadline. Queue byte
+admission remains in the shared client. Blocking writes use one monotonic whole-frame deadline
+and `MSG_DONTWAIT` to keep a readiness race from becoming an unbounded syscall.
+
+Pending hello deliveries enter the event queue only after all channel owners were allocated,
+and before live reads start. A failed Linux writer allocation therefore cannot deliver a
+half-connected event sequence. Many-client Linux throughput and shutdown latency remain
+unmeasured.
 
 ## Framing
 
@@ -178,6 +226,16 @@ package. `RemoteProtocol` is reused in *shape* only, as `PTYHostProtocol`. Every
 stays where it is.
 
 ## The ring, and the exact rejoin
+
+`attached.replayByteCount` states how many subsequent output bytes are historical, including
+screen/mode seeds and the cut marker. The daemon computes it from the same payload array it sends,
+on the same serial queue before any live output. Hosts can therefore suppress terminal-query
+responses during replay and resume them at the exact byte boundary, even if an adapter combines
+historical and live bytes in one callback. `totalBytesWritten` cannot serve this purpose: it is
+the ring offset, excludes seeds and markers, and includes history that may no longer be retained.
+The field is additive and optional for wire compatibility. Nil means the peer did not state a
+boundary; zero explicitly means empty replay. A host requiring replay suppression must not guess
+that nil means zero. Existing Mac attachment consumers remain unchanged by this added metadata.
 
 `RemoteRingBuffer` keeps its header claim — replaying the raw byte stream "is the only
 representation guaranteed to reproduce what SwiftTerm itself rendered" — and gains two members:

@@ -39,7 +39,9 @@ cleanup, and a publicly reachable HTTP server as the first interface.
 
 ## The contract
 
-`ControlContract.swift` states three independent axes, none inferable from another:
+`ControlAuthority.swift` owns the durable actor, scope and grant vocabulary;
+`ControlContract.swift` owns live overviews and outcomes. The contract keeps these axes
+independent, none inferable from another:
 
 - **`ControlActor`** — who is asking. For an agent session the id comes from the MCP URL token
   (`MCPSessionRegistry`), never from an argument, so a caller cannot claim to be a session it

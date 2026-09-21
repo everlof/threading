@@ -437,32 +437,21 @@ final class ProjectStore {
         guard validEffort,
               let index = index(ofProject: projectID),
               sessionLocationsByID[id] == nil,
-              let configuration = AgentSessionConfiguration(
+              var session = AgentSessionCreation.makeRecord(
                 kind: kind,
-                reasoningEffort: reasoningEffort,
                 accountHandle: accountHandle,
-                permissionMode: permissionMode
-              ),
-              handoff == nil || handoff?.isValid(destinationID: id, destinationKind: kind) == true
+                model: model,
+                reasoningEffort: reasoningEffort,
+                fastMode: fastMode,
+                usesNativeUI: usesNativeUI,
+                permissionMode: permissionMode,
+                title: title,
+                handoff: handoff,
+                managedWorkspace: managedWorkspace,
+                id: id
+              )
         else { return nil }
-
-        // No title means unnamed, not named after the agent: the display falls back to a
-        // generic label until the first prompt supplies a name (`applyPromptTitle`). The
-        // agent and account are the row's icon slot's job, not the name's.
-        var session = AgentSession(
-            configuration: configuration,
-            title: title ?? "",
-            accountHandle: accountHandle,
-            model: model,
-            usesNativeUI: usesNativeUI,
-            handoff: handoff,
-            id: id
-        )
-        session.managedWorkspace = managedWorkspace
-        session.fastMode = fastMode
-        session.branch = managedWorkspace?.targetBranch
-            ?? GitInfo.currentBranch(for: projects[index].folderPath)
-        session.permissionMode = permissionMode
+        session.branch = session.branch ?? GitInfo.currentBranch(for: projects[index].folderPath)
 
         // Preserve any coalesced title/turn observations before changing row positions. They are
         // exact row writes too, so this does not reintroduce the whole-graph creation pause.

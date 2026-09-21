@@ -8,6 +8,11 @@ Projects and sessions live in **SQLite** (`threading.db`), not in `projects.json
 `libsqlite3` — macOS ships 3.51 with FTS5 — so `import SQLite3` keeps the one-dependency rule
 intact, and there is no ORM: a dozen queries are fewer lines than a query builder.
 
+The persistence dependency slice compiles stored records independently of launch environment,
+account discovery, SSH transport and title preferences. `SessionReadReceiptState` lives under
+`Models/`; its participant-aware runtime store remains in `Core/Session/SessionReadReceipts.swift`.
+This extraction does not establish portability of `StateManager` or application recovery.
+
 **Thin rows, JSON payloads**, which is opencode's own shape (they made this same move, from
 per-file JSON to `opencode.db`, and their schema keeps `message.data` and `event.data` as
 `TEXT`). Columns exist to be ordered by, filtered on or joined — `position`, `kind`,

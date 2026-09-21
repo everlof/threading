@@ -13,16 +13,17 @@ let package = Package(
         .library(name: "ThreadingRemoteKit", targets: ["ThreadingRemoteKit"])
     ],
     dependencies: [
-        .package(path: "../ThreadingExtensionKit")
+        .package(path: "../ThreadingExtensionKit"),
+        .package(path: "../ThreadingDomain")
     ],
     targets: [
         .target(
             name: "ThreadingRemoteKit",
-            dependencies: ["ThreadingExtensionKit"]
+            dependencies: ["ThreadingExtensionKit", "ThreadingDomain"]
         ),
         .testTarget(
             name: "ThreadingRemoteKitTests",
-            dependencies: ["ThreadingRemoteKit", "ThreadingExtensionKit"]
+            dependencies: ["ThreadingRemoteKit", "ThreadingExtensionKit", "ThreadingDomain"]
         )
     ]
 )
