@@ -42,7 +42,7 @@ public struct LogFocus: Equatable, Sendable {
     /// Whether this row is one of the ones being looked for — which is also what gets highlighted.
     /// Context rows are shown but are not matches, so the eye still lands on the reason.
     public func matches(_ row: DeviceLogRow) -> Bool {
-        guard row.severity >= minimumSeverity else { return false }
+        guard minimumSeverity == 0 || row.severity >= minimumSeverity else { return false }
         guard !pattern.isEmpty else { return true }
         return Self.contains(row.message, needle)
             || Self.contains(row.process, needle)
@@ -58,11 +58,11 @@ public struct LogFocus: Equatable, Sendable {
     @inline(__always)
     static func contains(_ haystack: String, _ needle: [UInt8]) -> Bool {
         guard !needle.isEmpty else { return true }
-        var found = false
-        haystack.utf8.withContiguousStorageIfAvailable { buffer in
-            found = search(buffer, needle)
+        if let result = haystack.utf8.withContiguousStorageIfAvailable({ buffer in
+            search(buffer, needle)
+        }) {
+            return result
         }
-        if found { return true }
         // A String without contiguous UTF-8 storage is rare; fall back rather than miss a match.
         return haystack.utf8.count >= needle.count && Array(haystack.utf8).withUnsafeBufferPointer {
             search($0, needle)
@@ -123,33 +123,40 @@ public enum LogFocusLayout {
             return rows.indices.map { .row($0) }
         }
 
-        var kept = [Bool](repeating: false, count: rows.count)
+        // Matches arrive in row order, so their context windows can be merged as they are found.
+        // Keeping intervals avoids allocating and then walking a full-ring bitmap on every drain.
+        let context = max(0, focus.context)
+        var keptRanges: [Range<Int>] = []
+        keptRanges.reserveCapacity(min(rows.count, 1_024))
         for (index, row) in rows.enumerated() where focus.matches(row) {
-            let lower = max(0, index - focus.context)
-            let upper = min(rows.count - 1, index + focus.context)
-            for neighbour in lower...upper { kept[neighbour] = true }
+            let lower = max(0, index - context)
+            let upper = min(rows.count, index + context + 1)
+            if let previous = keptRanges.last, lower <= previous.upperBound {
+                keptRanges[keptRanges.count - 1] = previous.lowerBound..<max(previous.upperBound, upper)
+            } else {
+                keptRanges.append(lower..<upper)
+            }
         }
 
         var entries: [LogDisplayEntry] = []
-        var index = 0
-        while index < rows.count {
-            if kept[index] {
-                entries.append(.row(index))
-                index += 1
-                continue
-            }
-            var end = index
-            while end < rows.count, !kept[end] { end += 1 }
-            let range = index..<end
+        func appendGap(_ range: Range<Int>) {
+            guard !range.isEmpty else { return }
             // An opened fold shows its rows and keeps its place, so closing it again is where the
             // reader left off rather than wherever the list settled.
             if expanded.contains(range.lowerBound) {
-                entries.append(contentsOf: range.map { .row($0) })
+                for index in range { entries.append(.row(index)) }
             } else {
                 entries.append(.gap(range))
             }
-            index = end
         }
+
+        var cursor = 0
+        for range in keptRanges {
+            appendGap(cursor..<range.lowerBound)
+            for index in range { entries.append(.row(index)) }
+            cursor = range.upperBound
+        }
+        appendGap(cursor..<rows.count)
         return entries
     }
 }
