@@ -15,6 +15,13 @@ checker = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
 
+PROFILE_SCRIPT = REPOSITORY / "scripts/profile_backed_entitlements.py"
+PROFILE_SPEC = importlib.util.spec_from_file_location("profile_backed_entitlements", PROFILE_SCRIPT)
+assert PROFILE_SPEC is not None and PROFILE_SPEC.loader is not None
+profile_backing = importlib.util.module_from_spec(PROFILE_SPEC)
+sys.modules[PROFILE_SPEC.name] = profile_backing
+PROFILE_SPEC.loader.exec_module(profile_backing)
+
 
 class BundleEntitlementTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -54,6 +61,30 @@ class BundleEntitlementTests(unittest.TestCase):
             checker.verify_bundle(self.bundle, self.root, self.signed_reader),
             [],
         )
+
+    def test_profile_prefix_is_expanded_before_comparing_signed_values(self) -> None:
+        declaration = self.root / checker.HELPER_ENTITLEMENTS["threading-triggerd"]
+        declaration.write_bytes(
+            plistlib.dumps(
+                {
+                    "keychain-access-groups": [
+                        "$(AppIdentifierPrefix)codes.threading.triggers"
+                    ]
+                }
+            )
+        )
+        self.observed["threading-triggerd"] = {
+            "keychain-access-groups": ["SMQ3E8Y57T.codes.threading.triggers"]
+        }
+
+        problems = checker.verify_bundle(
+            self.bundle,
+            self.root,
+            self.signed_reader,
+            {"AppIdentifierPrefix": "SMQ3E8Y57T."},
+        )
+
+        self.assertEqual(problems, [])
 
     def test_app_entitlements_on_a_sandboxed_helper_fail(self) -> None:
         self.observed["threading-extension-helper"] = {
@@ -112,6 +143,29 @@ class BundleEntitlementTests(unittest.TestCase):
         self.assertNotIn("CODE_SIGN_ENTITLEMENTS=", autoinstall)
         self.assertIn("check_bundle_entitlements.py", autoinstall)
         self.assertIn("check_bundle_entitlements.py", release)
+
+    def test_all_profile_backed_entitlement_families_share_one_rule(self) -> None:
+        declarations = {
+            "com.apple.developer.aps-environment": "production",
+            "keychain-access-groups": ["SMQ3E8Y57T.codes.threading.triggers"],
+            "com.apple.security.application-groups": ["group.codes.threading"],
+            "com.apple.security.cs.disable-library-validation": True,
+            "com.apple.security.app-sandbox": True,
+        }
+
+        self.assertEqual(
+            profile_backing.profile_backed_entitlements(declarations),
+            {
+                "com.apple.developer.aps-environment",
+                "keychain-access-groups",
+                "com.apple.security.application-groups",
+            },
+        )
+
+        autoinstall = (REPOSITORY / "scripts/autoinstall.sh").read_text(encoding="utf-8")
+        release = (REPOSITORY / "scripts/release.sh").read_text(encoding="utf-8")
+        self.assertIn("from profile_backed_entitlements import", autoinstall)
+        self.assertIn("from profile_backed_entitlements import", release)
 
 
 if __name__ == "__main__":

@@ -114,6 +114,14 @@ class LocalReleaseDriverTests(unittest.TestCase):
         self.assertIn('all|mac-all) test_plan="Threading-All"', test_runner)
         self.assertIn('if [[ "${level}" == "all"', test_runner)
 
+    def test_shipping_archive_forces_hardened_runtime_on_every_target(self) -> None:
+        release = (REPOSITORY / "scripts/release.sh").read_text()
+        archive = release[
+            release.index('run_xcodebuild "archive"') : release.index('[[ -d "$ARCHIVE" ]]')
+        ]
+
+        self.assertIn("ENABLE_HARDENED_RUNTIME=YES", archive)
+
     def test_the_tested_commit_cannot_be_replaced_during_the_long_gate(self) -> None:
         source = DRIVER.read_text()
         function = source[source.index("assert_release_snapshot() {") :]

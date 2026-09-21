@@ -48,14 +48,15 @@ as what Xcode considers it to be: an **export** concern.
 
 ```
 xcodebuild archive        -configuration Release -destination 'generic/platform=macOS'
-xcodebuild -exportArchive -exportOptionsPlist (method: developer-id, signingStyle: automatic)
+xcodebuild -exportArchive -exportOptionsPlist (method: developer-id, signingStyle: manual,
+                                               provisioningProfiles: codes.threading → profile)
 ```
 
-Both invocations allow provisioning updates. That is load-bearing once the shipping app carries
-managed capabilities such as Sign in with Apple: automatic signing cannot create or download the
-matching profile from a command-line archive unless `-allowProvisioningUpdates` is present. The
-release machine therefore needs the team signed in through Xcode; an unattended runner must
-install the matching provisioning profile before invoking the same script.
+The archive allows provisioning updates for Xcode's development-signed intermediate. Export is
+manual: it names the installed Developer ID profile explicitly and therefore does not depend on
+whichever Apple ID happens to be signed into Xcode. The release machine and unattended runner must
+install that profile before invoking the same script. Its `keychain-access-groups` authorization
+is required even though that key does not have the familiar `com.apple.developer.*` prefix.
 
 The consequence to keep in mind: `xcodebuild build -configuration Release` still produces a
 development-signed bundle carrying `get-task-allow`. That is fine — it is not the artefact
@@ -199,7 +200,8 @@ feature's own notes: a locally auto-installed build cannot share a Keychain acce
 processes, so trigger source credentials work only in a profile-signed release.
 
 `scripts/check_bundle_entitlements.py` then reads the signed product and requires all seven
-first-party helpers to match those files exactly. The auto-installer runs it before accepting a
+first-party helpers to match those files exactly after resolving the embedded profile's standard
+`$(AppIdentifierPrefix)` expansion. The auto-installer runs it before accepting a
 build, the release script runs it over the exported bundle, and an executable newly added under
 `Contents/Helpers` fails closed until its declaration joins the verifier. The checked-in `scc`
 binary is the sole exception: it is not an Xcode target and its checksum and architecture have a

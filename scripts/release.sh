@@ -141,8 +141,10 @@ if [[ $NOTARIZE -eq 1 ]]; then
         || fail "notarytool profile '$NOTARY_PROFILE' not found — see the header of this script"
 fi
 
-# The provisioning profile, checked against the entitlements it has to authorise — and, today,
-# confirming there are none, so no profile is needed and none is named in ExportOptions.plist.
+# The provisioning profile, checked against every entitlement it has to authorise. The rule is
+# shared with autoinstall.sh: com.apple.developer.* plus the named families Apple left outside that
+# prefix, including keychain-access-groups. Keeping the classification in one module prevents the
+# export and local-install paths from drifting apart again.
 #
 # Same bargain as the embedded-binary sweep below: exportArchive only reports this after the
 # archive is built, so an unauthorised entitlement costs a full release build to discover. It is
@@ -151,29 +153,21 @@ fi
 # profile — a snapshot of the moment it was issued — does not carry it, so signing refuses.
 say "Checking the provisioning profile"
 profile_directory="$HOME/Library/MobileDevice/Provisioning Profiles"
-if ! python3 - "$profile_directory" "$PROVISIONING_PROFILE" "$TEAM_ID.$BUNDLE_ID" \
-    "$ROOT/Sources/Threading/Resources/Threading.entitlements"; then
-    fail "the provisioning profile cannot sign this app — see above"
-fi <<'PYTHON'
+if ! resolved_provisioning_profile="$(python3 - "$profile_directory" "$PROVISIONING_PROFILE" \
+    "$TEAM_ID.$BUNDLE_ID" "$ROOT/Sources/Threading/Resources/Threading.entitlements" \
+    "$ROOT/scripts" <<'PYTHON'
 import plistlib
 import subprocess
 import sys
 from pathlib import Path
 
-directory, wanted_name, wanted_app_id, entitlements_path = sys.argv[1:5]
+directory, wanted_name, wanted_app_id, entitlements_path, scripts_directory = sys.argv[1:6]
+sys.path.insert(0, scripts_directory)
+from profile_backed_entitlements import profile_backed_entitlements
 
-# Only com.apple.developer.* needs a profile's blessing; com.apple.security.cs.* are hardened
-# runtime flags the profile never mentions, and demanding them here would fail every build.
-required = {
-    key for key in plistlib.loads(Path(entitlements_path).read_bytes())
-    if key.startswith("com.apple.developer.")
-}
+required = profile_backed_entitlements(plistlib.loads(Path(entitlements_path).read_bytes()))
 
-# Nothing restricted, nothing to authorise. Developer ID needs no profile in that case, and
-# demanding one would fail a release that is correct — which is the state this app is in since
-# Sign in with Apple was dropped: it cannot cross into a Developer ID profile at all.
 if not required:
-    print("  no restricted entitlements — Developer ID needs no profile")
     sys.exit(0)
 
 candidates = sorted(Path(directory).glob("*.provisionprofile")) if Path(directory).is_dir() else []
@@ -201,13 +195,22 @@ for path in candidates:
         print("  Re-issue it in the portal: a profile is a snapshot of the App ID's", file=sys.stderr)
         print("  capabilities when it was generated and cannot gain one afterwards.", file=sys.stderr)
         sys.exit(1)
-    print(f"  {wanted_name!r} authorises {', '.join(sorted(required)) or 'no restricted entitlements'}")
+    print(wanted_name)
     sys.exit(0)
 
 print(f"  no installed profile named {wanted_name!r} for {wanted_app_id}", file=sys.stderr)
 print(f"  looked in {directory}", file=sys.stderr)
 sys.exit(1)
 PYTHON
+)"; then
+    fail "the provisioning profile cannot sign this app — see above"
+fi
+if [[ -n "$resolved_provisioning_profile" ]]; then
+    echo "  '$resolved_provisioning_profile' authorises the profile-backed entitlements"
+else
+    echo "  no profile-backed entitlements — Developer ID needs no profile"
+fi
+readonly resolved_provisioning_profile
 
 # MARK: - Version
 #
@@ -297,6 +300,7 @@ run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
     THREADING_CHANNEL="$CHANNEL" \
     THREADING_SOURCE_REVISION= \
     THREADING_REPORT_INTAKE_URL="$REPORT_INTAKE_URL" \
+    ENABLE_HARDENED_RUNTIME=YES \
     -archivePath "$ARCHIVE"
 
 [[ -d "$ARCHIVE" ]] || fail "the archive was not produced"
@@ -312,7 +316,8 @@ say "Thinning embedded binaries to $ARCHITECTURE"
 
 # MARK: - Export
 
-# Manual signing against the Developer ID certificate alone.
+# Manual signing against the Developer ID certificate and, when the entitlements require one, the
+# exact installed profile that passed the preflight above.
 #
 # `automatic` cannot work on a CI runner: automatic signing asks the Apple ID signed into Xcode for
 # a profile, and a runner has the certificate and no account, so a tagged release would spend a
@@ -321,35 +326,31 @@ say "Thinning embedded binaries to $ARCHITECTURE"
 #     error: exportArchive Cannot create a Developer ID provisioning profile for "codes.threading".
 #     error: exportArchive No profiles for 'codes.threading' were found
 #
-# No profile is named because none is needed: the entitlements file carries no
-# `com.apple.developer.*` key. `com.apple.developer.applesignin` was removed because a Developer ID
-# profile never carries it, so Hosted Direct — the one feature that needed it — is offered only by
-# development builds (`BuildChannel.offersHostedDirect`; see releasing.md, "Sign in with Apple
-# cannot be shipped by Developer ID"). The entitlement preflight above fails in seconds if a
-# restricted key comes back, and a profile is a snapshot of the App ID's capabilities when it was
-# issued, so that key would also mean re-issuing one.
+# The mapping is explicit so exportArchive never depends on whichever Apple ID happens to be signed
+# into Xcode. `com.apple.developer.applesignin` remains deliberately absent because the Developer ID
+# profile cannot carry it; see releasing.md, "Sign in with Apple cannot be shipped by Developer ID".
 say "Exporting with Developer ID"
-cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>method</key>
-	<string>developer-id</string>
-	<key>teamID</key>
-	<string>$TEAM_ID</string>
-	<key>signingStyle</key>
-	<string>manual</string>
-	<key>signingCertificate</key>
-	<string>Developer ID Application</string>
-</dict>
-</plist>
-PLIST
+python3 - "$BUILD_DIR/ExportOptions.plist" "$TEAM_ID" "$BUNDLE_ID" \
+    "$resolved_provisioning_profile" <<'PYTHON'
+import plistlib
+import sys
+from pathlib import Path
+
+output, team_id, bundle_id, profile_name = sys.argv[1:5]
+options = {
+    "method": "developer-id",
+    "teamID": team_id,
+    "signingStyle": "manual",
+    "signingCertificate": "Developer ID Application",
+}
+if profile_name:
+    options["provisioningProfiles"] = {bundle_id: profile_name}
+Path(output).write_bytes(plistlib.dumps(options))
+PYTHON
 
 run_xcodebuild "export" "$BUILD_DIR/export.log" -exportArchive \
     -archivePath "$ARCHIVE" \
     -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
-    -allowProvisioningUpdates \
     -exportPath "$EXPORT_DIR"
 
 [[ -d "$APP" ]] || fail "the export produced no app bundle"

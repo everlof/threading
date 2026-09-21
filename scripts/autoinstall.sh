@@ -291,17 +291,8 @@ from pathlib import Path
 
 checkout = Path(sys.argv[1])
 declarations = [checkout / sys.argv[2]] + sorted(checkout.glob("Targets/*/*.entitlements"))
-
-# Two families need a profile. `com.apple.developer.*` is matched by prefix, so a capability added
-# later is handled without an edit here. The rest have no shared prefix and have to be named: a
-# bare `keychain-access-groups` on 2026-09-12 failed four consecutive auto-installs with
-# "requires a provisioning profile" precisely because the prefix rule read as the whole rule.
-# `com.apple.security.*` is otherwise the hardened-runtime family, which needs no profile.
-NAMED_PROFILE_BACKED = {"keychain-access-groups", "com.apple.security.application-groups"}
-
-
-def is_profile_backed(key: str) -> bool:
-    return key.startswith("com.apple.developer.") or key in NAMED_PROFILE_BACKED
+sys.path.insert(0, str(checkout / "scripts"))
+from profile_backed_entitlements import is_profile_backed_entitlement
 
 
 report = []
@@ -309,7 +300,7 @@ for source in declarations:
     with source.open("rb") as handle:
         entitlements = plistlib.load(handle)
 
-    dropped = sorted(key for key in entitlements if is_profile_backed(key))
+    dropped = sorted(key for key in entitlements if is_profile_backed_entitlement(key))
     if not dropped:
         continue
     for key in dropped:

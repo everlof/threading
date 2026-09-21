@@ -62,6 +62,40 @@ def read_signed_entitlements(binary: Path) -> Dict[str, object]:
     return value
 
 
+def embedded_profile_build_settings(bundle: Path) -> Dict[str, str]:
+    """Read build-setting prefixes from the profile Xcode embedded during export."""
+    profile = bundle / "Contents/embedded.provisionprofile"
+    if not profile.is_file():
+        return {}
+    result = subprocess.run(
+        ["/usr/bin/security", "cms", "-D", "-i", str(profile)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(detail or f"security cms exited {result.returncode}")
+    value = plistlib.loads(result.stdout)
+    prefixes = value.get("ApplicationIdentifierPrefix", [])
+    if not isinstance(prefixes, list) or len(prefixes) != 1 or not isinstance(prefixes[0], str):
+        raise ValueError("embedded profile has no unambiguous ApplicationIdentifierPrefix")
+    return {"AppIdentifierPrefix": prefixes[0] + "."}
+
+
+def expand_build_settings(value: object, build_settings: Mapping[str, str]) -> object:
+    """Expand the plist build settings that Xcode resolves before codesigning."""
+    if isinstance(value, str):
+        for name, replacement in build_settings.items():
+            value = value.replace(f"$({name})", replacement)
+        return value
+    if isinstance(value, list):
+        return [expand_build_settings(item, build_settings) for item in value]
+    if isinstance(value, dict):
+        return {key: expand_build_settings(item, build_settings) for key, item in value.items()}
+    return value
+
+
 def entitlement_differences(
     expected: Mapping[str, object],
     observed: Mapping[str, object],
@@ -87,6 +121,7 @@ def verify_bundle(
     bundle: Path,
     repository: Path,
     signed_reader: Callable[[Path], Mapping[str, object]] = read_signed_entitlements,
+    build_settings: Mapping[str, str] | None = None,
 ) -> List[str]:
     helper_directory = bundle / "Contents/Helpers"
     if not helper_directory.is_dir():
@@ -102,6 +137,12 @@ def verify_bundle(
         for name in sorted(executable_names - set(HELPER_ENTITLEMENTS) - UNMANAGED_EXECUTABLES)
     ]
 
+    if build_settings is None:
+        try:
+            build_settings = embedded_profile_build_settings(bundle)
+        except (OSError, ValueError, plistlib.InvalidFileException) as error:
+            return problems + [f"could not inspect embedded provisioning profile: {error}"]
+
     for name, declaration in HELPER_ENTITLEMENTS.items():
         binary = helper_directory / name
         entitlement_file = repository / declaration
@@ -109,7 +150,7 @@ def verify_bundle(
             problems.append(f"{name}: declared helper executable is missing")
             continue
         try:
-            expected = load_entitlements(entitlement_file)
+            expected = expand_build_settings(load_entitlements(entitlement_file), build_settings)
             observed = signed_reader(binary)
             differences = entitlement_differences(expected, observed)
         except (OSError, ValueError, plistlib.InvalidFileException) as error:
