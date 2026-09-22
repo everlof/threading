@@ -23,7 +23,57 @@ final class SessionProcessRetentionTests: XCTestCase {
         XCTAssertEqual(plan.retire, Set(candidates.suffix(2).map(\.sessionID)))
         XCTAssertEqual(
             plan.nextEvaluationAt,
-            candidates[3].lastUsedAt.addingTimeInterval(SessionRestoreDefaults.secondsPerDay)
+            candidates[3].lastWarmUseAt.addingTimeInterval(
+                SessionRestoreDefaults.secondsPerDay
+            )
+        )
+    }
+
+    func testLocalViewRefreshesWarmAgeAndRankingWithoutChangingConversationRecency() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let viewedID = SessionID()
+        let oldConversationUse = now.addingTimeInterval(
+            -2 * SessionRestoreDefaults.secondsPerDay
+        )
+        var recency = SessionProcessResidencyRecency()
+        recency.noteLocalView(of: viewedID, at: now.addingTimeInterval(-30))
+
+        let viewed = candidate(
+            lastUsedAt: recency.lastWarmUseAt(
+                for: viewedID,
+                conversationUseAt: oldConversationUse
+            ),
+            id: viewedID
+        )
+        let other = (1 ... 4).map { offset in
+            candidate(
+                lastUsedAt: now.addingTimeInterval(-TimeInterval(offset * 60)),
+                id: SessionID()
+            )
+        }
+
+        let plan = SessionProcessRetentionPolicy.plan(
+            candidates: [viewed] + other,
+            windowDays: 1,
+            limit: 4,
+            now: now
+        )
+
+        XCTAssertEqual(
+            viewed.lastWarmUseAt,
+            now.addingTimeInterval(-30),
+            "viewing affects process residency without mutating the durable work timestamp"
+        )
+        XCTAssertEqual(plan.retire, Set([other[3].sessionID]))
+        XCTAssertEqual(
+            plan.warmIdleExpirations[viewedID],
+            now.addingTimeInterval(-30 + SessionRestoreDefaults.secondsPerDay)
+        )
+
+        recency.forget(viewedID)
+        XCTAssertEqual(
+            recency.lastWarmUseAt(for: viewedID, conversationUseAt: oldConversationUse),
+            oldConversationUse
         )
     }
 
@@ -180,7 +230,7 @@ final class SessionProcessRetentionTests: XCTestCase {
         XCTAssertEqual(disposition.warmHostSessionIDs, Set([warm.sessionID]))
         XCTAssertEqual(
             disposition.hostIdleExpirations[warm.sessionID],
-            warm.lastUsedAt.addingTimeInterval(SessionRestoreDefaults.secondsPerDay)
+            warm.lastWarmUseAt.addingTimeInterval(SessionRestoreDefaults.secondsPerDay)
         )
         XCTAssertNil(disposition.hostIdleExpirations[remotelyViewed.sessionID])
     }
@@ -198,7 +248,7 @@ final class SessionProcessRetentionTests: XCTestCase {
     ) -> SessionProcessRetentionCandidate {
         SessionProcessRetentionCandidate(
             sessionID: id,
-            lastUsedAt: lastUsedAt,
+            lastWarmUseAt: lastUsedAt,
             isResumable: isResumable,
             isHostBacked: isHostBacked,
             runtime: runtime ?? Self.snapshot(),

@@ -554,8 +554,8 @@ final class GeneralPreferencesViewController: NSViewController {
             ),
             SettingsUI.row(
                 title: "Stop idle agents after",
-                subtitle: "A settled conversation becomes dormant after this long without a "
-                    + "submitted turn. Opening it resumes it.",
+                subtitle: "Counts from the latest submitted turn or local view. Opening a "
+                    + "dormant conversation resumes it and refreshes this timer.",
                 control: restoreWindowPopUp
             ),
             SettingsUI.row(

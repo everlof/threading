@@ -1377,6 +1377,15 @@ visibility, remote-viewer, relevant project-row, and settings edges. It keeps on
 earliest absolute expiry. There is no polling, transcript read, dormant-surface construction, or
 timer per session, so one decision is O(live runtimes) and the steady-state cost is O(1).
 
+**Local viewing is process-residency use, not conversation work.** `AgentRuntime` records one
+in-memory timestamp when a live session becomes visible, before publishing the visibility edge
+that makes the previous session eligible for retirement. The policy takes the later of that
+timestamp and `AgentSession.lastUsedAt` for its warm ordering and age deadline. A chat opened
+often therefore does not get discarded on every switch merely because its latest submitted turn
+is old. The timestamp leaves with the runtime, costs one O(1) write per selection, and is never
+persisted: it cannot reorder the sidebar, refresh search, or feed the **Recently used** launch
+policy with background process activity. Durable work recency keeps those responsibilities.
+
 Retirement is fail-closed. A candidate must be resumable, process-ready, and report its own turn
 boundaries; it must have no in-flight turn or continuation, no awaiting-user blocker, no pending
 turn-start waiter or checkout-move input, no pending checkout move, and no local or remote viewer.

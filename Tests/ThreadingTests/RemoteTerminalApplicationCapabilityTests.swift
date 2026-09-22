@@ -350,6 +350,47 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
 
 @MainActor
 final class AgentTerminalRuntimeCapabilityTests: XCTestCase {
+    func testOpeningLiveSessionRefreshesItsWarmProcessRecency() throws {
+        let oldUse = Date(timeIntervalSince1970: 100)
+        var session = AgentSession(kind: .claude, title: "Frequently read")
+        let sessionID = session.id
+        session.lastActiveAt = oldUse
+        session.lastTurnAt = oldUse
+        session.lastWorkAt = oldUse
+        session.resumeState = .resumable(TranscriptID("frequently-read"))
+        let runtime = AgentRuntime(
+            currentSessionProjection: CurrentSessionProjection { requestedID in
+                requestedID == sessionID ? session : nil
+            },
+            sessionDependency: { _ in .none },
+            remotelyViewingParticipantIDs: { _ in [] },
+            ownerAlertWasAcknowledged: { _ in },
+            localSessionVisibilityChanged: { _ in }
+        )
+        let surface = RecordingRuntimeSurface(isRunning: true)
+        surface.activityTracker.noteTranscriptBoundarySourceAdopted()
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(surface, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+
+        let before = try XCTUnwrap(
+            runtime.processRetentionCandidates { _ in session }.first
+        )
+        XCTAssertEqual(before.lastWarmUseAt, oldUse)
+
+        runtime.setVisibleSession(sessionID)
+        runtime.setVisibleSession(nil)
+
+        let after = try XCTUnwrap(
+            runtime.processRetentionCandidates { _ in session }.first
+        )
+        XCTAssertGreaterThan(after.lastWarmUseAt, oldUse)
+        XCTAssertEqual(
+            session.lastUsedAt,
+            oldUse,
+            "opening changes runtime residency, not the durable conversation clock"
+        )
+    }
+
     func testRuntimePublishesTheLocalViewportOwnerWhenMacSelectionChanges() {
         let sessionID = SessionID()
         var changes: [SessionID?] = []

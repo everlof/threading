@@ -1160,12 +1160,15 @@ as before, and the rest come up behind it, one per second. Their sidebar rows sh
 ready, and opening one attaches a session that is already running instead of resuming it on the
 click. Archived sessions never come back, and after a crash nothing relaunches automatically.
 
-**Settled agents do not stay running forever.** By default, Threading keeps the four most recently
-used idle agents warm and stops one after a day without a submitted turn. The conversation and its
-transcript remain in the sidebar; opening it resumes the same conversation. A process is never
-stopped by this housekeeping while a turn or continuation is unfinished, it is awaiting you, it
-cannot be resumed safely, it has unsent input, it is visible, or somebody is viewing it remotely.
-Protected work can therefore make the live process count exceed four until it becomes safe.
+**Settled agents do not stay running forever.** By default, Threading keeps the four idle agents
+you most recently worked in or opened warm and stops one after a day without either. The
+conversation and its transcript remain in the sidebar; opening it resumes the same conversation
+and refreshes its warm-process age. Viewing is an in-memory residency signal only: it does not
+reorder the sidebar or make the **Recently used** launch policy restore a conversation you only
+read. A process is never stopped by this housekeeping while a turn or continuation is unfinished,
+it is awaiting you, it cannot be resumed safely, it has unsent input, it is visible, or somebody
+is viewing it remotely. Protected work can therefore make the live process count exceed four
+until it becomes safe.
 
 **A dormant session says why it is dormant.** Hovering a greyed-out row shows the usual card,
 and under **Dormant · resumable** it names the reason this launch did not bring that session

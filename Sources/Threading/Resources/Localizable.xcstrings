@@ -4628,17 +4628,6 @@
         }
       }
     },
-    "A settled conversation becomes dormant after this long without a submitted turn. Opening it resumes it." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "En avslutad konversation blir vilande efter så lång tid utan ett skickat meddelande. När du öppnar den återupptas den."
-          }
-        }
-      }
-    },
     "A standing cleanup report at half progress. Its determinate bar is content, not the dwell countdown on the card edge; completion updates this same band and starts the ordinary receipt clock." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15688,6 +15677,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Räknas som nyligen använd"
+          }
+        }
+      }
+    },
+    "Counts from the latest submitted turn or local view. Opening a dormant conversation resumes it and refreshes this timer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Räknas från det senaste skickade meddelandet eller den senaste lokala visningen. När du öppnar en vilande konversation återupptas den och tidsgränsen börjar om."
           }
         }
       }

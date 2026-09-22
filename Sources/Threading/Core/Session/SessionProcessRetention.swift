@@ -9,7 +9,7 @@ import Foundation
 /// runtimes is the bound, and lifecycle owners hand their facts in here.
 struct SessionProcessRetentionCandidate: Equatable {
     let sessionID: SessionID
-    let lastUsedAt: Date
+    let lastWarmUseAt: Date
     let isResumable: Bool
     let isHostBacked: Bool
     let runtime: SessionRuntimeSnapshot
@@ -65,14 +65,16 @@ enum SessionProcessRetentionPolicy {
             }
             return !protectsLocalVisibility || !candidate.isLocallyVisible
         }.sorted {
-            if $0.lastUsedAt != $1.lastUsedAt { return $0.lastUsedAt > $1.lastUsedAt }
+            if $0.lastWarmUseAt != $1.lastWarmUseAt {
+                return $0.lastWarmUseAt > $1.lastWarmUseAt
+            }
             return $0.sessionID.uuidString < $1.sessionID.uuidString
         }
 
         var warm: [SessionID: Date] = [:]
         var retire: Set<SessionID> = []
         for (index, candidate) in eligible.enumerated() {
-            let expiration = candidate.lastUsedAt.addingTimeInterval(lifetime)
+            let expiration = candidate.lastWarmUseAt.addingTimeInterval(lifetime)
             if index < capacity, expiration > now {
                 warm[candidate.sessionID] = expiration
             } else {
@@ -80,6 +82,35 @@ enum SessionProcessRetentionPolicy {
             }
         }
         return SessionProcessRetentionPlan(retire: retire, warmIdleExpirations: warm)
+    }
+}
+
+// MARK: - Residency recency
+
+/// The local-view half of process residency, deliberately separate from durable conversation
+/// recency. Opening a chat is enough reason to keep its already-running process warm, but it must
+/// not reorder the sidebar, refresh search results, or make the next launch restore a conversation
+/// in which no work ran.
+///
+/// The map is bounded by live runtime ownership: `AgentRuntime.discard` forgets an entry when the
+/// corresponding process/controller leaves its cache. Selection and lookup are both O(1).
+struct SessionProcessResidencyRecency: Equatable {
+    private var localViews: [SessionID: Date] = [:]
+
+    mutating func noteLocalView(of sessionID: SessionID, at date: Date = Date()) {
+        localViews[sessionID] = max(localViews[sessionID] ?? .distantPast, date)
+    }
+
+    func lastWarmUseAt(for sessionID: SessionID, conversationUseAt: Date) -> Date {
+        max(conversationUseAt, localViews[sessionID] ?? .distantPast)
+    }
+
+    mutating func forget(_ sessionID: SessionID) {
+        localViews.removeValue(forKey: sessionID)
+    }
+
+    mutating func retainOnly(_ sessionIDs: Set<SessionID>) {
+        localViews = localViews.filter { sessionIDs.contains($0.key) }
     }
 }
 

@@ -232,6 +232,11 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     private var conversations: [SessionID: any AgentConversationRuntimeSurface] = [:]
     private var runtimeSnapshots: [SessionID: SessionRuntimeSnapshot] = [:]
 
+    /// Local selection is residency use, not conversation work. Keeping the clocks separate lets
+    /// the warm-process policy honor chats somebody reads often without feeding sidebar order,
+    /// search recency, or the next launch's Recently Used plan.
+    private var processResidencyRecency = SessionProcessResidencyRecency()
+
     /// Provider-neutral child timelines outlive either renderer.
     ///
     /// A native/terminal switch deliberately discards its controller and process. Keeping this
@@ -585,7 +590,10 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                 || conversations[sessionID]?.hasPendingInputForRetirement == true
             return SessionProcessRetentionCandidate(
                 sessionID: sessionID,
-                lastUsedAt: session.lastUsedAt,
+                lastWarmUseAt: processResidencyRecency.lastWarmUseAt(
+                    for: sessionID,
+                    conversationUseAt: session.lastUsedAt
+                ),
                 isResumable: session.resumeState.isResumable,
                 isHostBacked: hosted.contains(sessionID),
                 runtime: runtimeSnapshot(sessionID: sessionID),
@@ -993,6 +1001,11 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// Marks which session is on screen, so only the others flag finished work.
     func setVisibleSession(_ sessionID: SessionID?) {
         let previousSessionID = visibleSessionID
+        if sessionID != previousSessionID,
+           let sessionID,
+           controllers[sessionID] != nil || conversations[sessionID] != nil {
+            processResidencyRecency.noteLocalView(of: sessionID)
+        }
         visibleSessionID = sessionID
         // Selection is a viewport owner as well as attention state. A disconnected phone may
         // keep its grid only while no local renderer is looking at this session; publishing the
@@ -1195,6 +1208,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
     func discard(sessionID: SessionID, preservingViewport: Bool = true) {
+        processResidencyRecency.forget(sessionID)
         terminalOwnerships.removeValue(forKey: sessionID)
         ClaudeTranscriptLocations.shared.forget(sessionID)
 #if DEBUG
@@ -1285,6 +1299,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     /// Drops memory and disk state for sessions that no longer exist.
     func retainOnly(sessionIDs: Set<SessionID>) {
+        processResidencyRecency.retainOnly(sessionIDs)
         for (sessionID, state) in subagentStates where !sessionIDs.contains(sessionID) {
             state.invalidate()
         }
