@@ -93,7 +93,8 @@ final class RemoteNotificationService {
                 return "The phone’s push registration belongs to another hosted service. Open "
                     + "Threading on the phone to refresh it."
             case .none, .noRegistration:
-                return "No opted-in device is currently reachable."
+                return "No opted-in phone has a live connection or usable push registration. "
+                    + "Open Threading on the phone to refresh notification delivery."
             }
         }
     }
@@ -459,14 +460,36 @@ final class RemoteNotificationService {
         )
         let capabilities = Set(registration.capabilities ?? [])
         let includesResponsePreviews = registration.includesResponsePreviews ?? false
+        let activeHostedServiceURL = RemoteNotificationSubscriptionDefaults
+            .normalizedHostedServiceURL(hostedPushServiceURL?())
+        let previous = persistedSubscriptions[RemoteNotificationSubscriptionKey(
+            shareID: authorization.shareID,
+            deviceID: deviceID
+        )]
+        let retainedHostedRegistrationID: String?
+        if registration.preserveHostedRegistration == true,
+           registration.hostedRegistrationID == nil,
+           let previous,
+           previous.deviceToken == deviceToken,
+           previous.environment == registration.environment,
+           previous.hostedServiceURL != nil,
+           previous.hostedServiceURL == activeHostedServiceURL {
+            retainedHostedRegistrationID = previous.hostedRegistrationID
+        } else {
+            retainedHostedRegistrationID = nil
+        }
+        let hostedRegistrationID = registration.hostedRegistrationID
+            ?? retainedHostedRegistrationID
         guard let environment = RemoteAPNSPushSender.Environment(
             rawValue: registration.environment.rawValue
         ), !authorization.isExpired,
+           !(registration.preserveHostedRegistration == true
+             && registration.hostedRegistrationID != nil),
            authorization.boundDeviceID == deviceID,
            RemoteInboundPolicy.normalizedDeviceID(deviceID) == deviceID,
            RemoteNotificationSubscriptionDefaults.acceptsDeviceToken(deviceToken),
            RemoteNotificationSubscriptionDefaults.acceptsHostedRegistrationID(
-               registration.hostedRegistrationID
+               hostedRegistrationID
            ),
            enabledKinds.count == registration.enabledKinds.count,
            capabilities.count == (registration.capabilities ?? []).count,
@@ -479,12 +502,10 @@ final class RemoteNotificationService {
             shareID: authorization.shareID,
             deviceID: deviceID,
             deviceToken: deviceToken,
-            hostedRegistrationID: registration.hostedRegistrationID,
-            hostedServiceURL: registration.hostedRegistrationID == nil
+            hostedRegistrationID: hostedRegistrationID,
+            hostedServiceURL: hostedRegistrationID == nil
                 ? nil
-                : RemoteNotificationSubscriptionDefaults.normalizedHostedServiceURL(
-                    hostedPushServiceURL?()
-                ),
+                : activeHostedServiceURL,
             environment: registration.environment,
             enabledKinds: enabledKinds.sorted { $0.rawValue < $1.rawValue },
             soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue },
@@ -560,7 +581,7 @@ final class RemoteNotificationService {
         }
 
         let registrationSupportsPush = localPushSender != nil
-            || (registration.hostedRegistrationID != nil
+            || (hostedRegistrationID != nil
                 && record.hostedServiceURL != nil
                 && hostedPushAvailability?() == true
                 && hostedPushSender != nil)

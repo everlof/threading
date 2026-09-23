@@ -103,6 +103,16 @@ This is host-owned behavior exposed through the existing MCP catalogue, not an e
 presentation component. Threading owns authorization, destination selection, overwrite semantics,
 limits and receipt truth. There is no additional UI surface or replaceable clipboard authority.
 
+## Requested notification preview
+
+Every `notify_user` attempt seeds one ephemeral Push Test tab in its own session, including a
+failed attempt. The tab selects and reveals the display pane only when that session is already
+on screen; it does not activate Threading. A user edit resends through the same validated
+notification command, with a new event identity and a fresh target-reference lookup. The tab is
+also available from the panel's **+** menu and is excluded from durable layout persistence so
+notification text and opaque target references do not gain another copy on disk. Delivery and
+registration rules live in [notification-delivery.md](notification-delivery.md).
+
 ## The stdio bridge
 
 `--mcp-config` names an endpoint the CLI resolves **once, at startup**. Everything above survives

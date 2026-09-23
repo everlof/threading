@@ -337,6 +337,27 @@
       }
     },
     {
+      "id": "notification-test-pane",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Push Test pane",
+      "description": "The prefilled notification draft and queued result in the real conversation, window chrome, and display-panel shell.",
+      "states": ["MCP-prefilled draft", "Queued result", "Unavailable result", "Editable delivery and recipient"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["System light", "System dark", "Authored appearance for fixed themes"],
+        "sizes": ["420-point right panel"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SimulatorPaneRenderTests.swift",
+        "test": "ThreadingTests/SimulatorPaneRenderTests/testRendersNotificationTestInRightPanel"
+      },
+      "capture": {
+        "glob": "notification-test-*.png"
+      }
+    },
+    {
       "id": "session-status-card",
       "kind": "component",
       "status": "implemented",

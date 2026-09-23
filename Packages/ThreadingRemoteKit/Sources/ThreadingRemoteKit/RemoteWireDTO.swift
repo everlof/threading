@@ -2241,8 +2241,10 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
 
 /// What a resume asks for beyond "bring this session back".
 ///
-/// The body is optional on the wire: a client that sends none, or a host that predates this
-/// type, keeps the original behaviour of an empty POST.
+/// The body is optional on the wire for clients that predate explicit launch-failure retry.
+/// Current clients always send the Boolean: `false` identifies an ordinary open that must
+/// preserve and surface a stored failure, while `true` is the person's explicit retry. A host
+/// that predates this type ignores either body and keeps the original resume behaviour.
 public struct RemoteResumeSessionRequestDTO: Codable, Equatable, Sendable {
     /// Clears a stored launch failure before resuming, which is what the Mac's own **Try Again**
     /// button does. It is an explicit decision by a person, never part of opening a chat: an
@@ -3783,6 +3785,9 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     /// Opaque recipient binding minted by the hosted service under this phone's device
     /// credential. The Mac never needs the corresponding APNs token for hosted delivery.
     public let hostedRegistrationID: String?
+    /// A hosted refresh failed. Keep the Mac's existing binding only when its device token,
+    /// environment and hosted service still match. Missing is false for older clients.
+    public let preserveHostedRegistration: Bool?
     public let environment: RemoteNotificationEnvironment
     public let enabledKinds: [RemoteNotificationKind]
     /// Kinds that may make sound on this device. Nil preserves the behavior of an older client;
@@ -3796,6 +3801,7 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     public init(
         deviceToken: String,
         hostedRegistrationID: String? = nil,
+        preserveHostedRegistration: Bool? = nil,
         environment: RemoteNotificationEnvironment,
         enabledKinds: [RemoteNotificationKind],
         soundEnabledKinds: [RemoteNotificationKind]? = nil,
@@ -3804,6 +3810,7 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     ) {
         self.deviceToken = deviceToken
         self.hostedRegistrationID = hostedRegistrationID
+        self.preserveHostedRegistration = preserveHostedRegistration
         self.environment = environment
         self.enabledKinds = enabledKinds
         self.soundEnabledKinds = soundEnabledKinds

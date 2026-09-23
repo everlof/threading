@@ -1612,6 +1612,7 @@ final class RemoteNotificationManager: ObservableObject {
             let baselineRegistration = RemoteNotificationRegistrationDTO(
                 deviceToken: deviceToken,
                 hostedRegistrationID: hostedRegistrationID,
+                preserveHostedRegistration: hostedRegistrationSucceeded ? nil : true,
                 environment: pushEnvironment,
                 enabledKinds: baselineKinds,
                 soundEnabledKinds: soundKinds.filter { baselineKinds.contains($0) }
@@ -1625,6 +1626,7 @@ final class RemoteNotificationManager: ObservableObject {
                     let extendedRegistration = RemoteNotificationRegistrationDTO(
                         deviceToken: deviceToken,
                         hostedRegistrationID: hostedRegistrationID,
+                        preserveHostedRegistration: hostedRegistrationSucceeded ? nil : true,
                         environment: pushEnvironment,
                         enabledKinds: kinds,
                         soundEnabledKinds: soundKinds,

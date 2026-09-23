@@ -3238,7 +3238,8 @@ enum MCPTools {
         owner, everyone in this chat, or one member by exact display name. It cannot \
         target another chat or replace the normal final response in the conversation. Pass \
         target_ref from a display, Browser, or panel tool to make a tap open that attachment or \
-        live surface; omit it to open the chat itself.
+        live surface; omit it to open the chat itself. Each call fills this chat's Push Test \
+        pane with the request and result so the user can edit and resend it.
         """,
       inputSchema: MCPInputSchema(
         properties: [

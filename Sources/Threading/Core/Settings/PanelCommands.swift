@@ -4,6 +4,7 @@ import Foundation
 /// with a separate implementation. Dynamic targets retain values, not constructed controllers.
 enum PanelCommandTarget: Equatable {
     case simulator, deviceLogs, audit, browser, privateBrowser, overview, compare, supervision
+    case notificationTest
     case nativePlugin(URL)
     case extensionPanel(identifier: String, panelID: String)
 }
@@ -20,6 +21,7 @@ enum PanelCommands {
         Entry(id: AppCommands.ID.newTerminalTab, title: "Terminal", icon: "terminal", target: nil),
         Entry(id: "panel.simulator", title: "iOS Simulator", icon: "iphone", target: .simulator),
         Entry(id: "panel.deviceLogs", title: "Device logs", icon: "list.bullet.rectangle", target: .deviceLogs),
+        Entry(id: "panel.notificationTest", title: "Push Test", icon: "bell.badge", target: .notificationTest),
         Entry(id: "panel.audit", title: "Execution audit", icon: "checklist.checked", target: .audit),
         Entry(id: "panel.browser", title: "New Browser", icon: "globe", target: .browser),
         Entry(id: "panel.privateBrowser", title: "Private Browser", icon: "hand.raised.fill", target: .privateBrowser),

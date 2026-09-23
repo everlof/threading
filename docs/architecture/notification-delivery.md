@@ -82,6 +82,23 @@ of the mutable facts as recipient identity. It snapshots current targets once at
 and the sender re-reads the authoritative subscription immediately before beginning network I/O.
 An APNs result is revalidated again before it enters the accepted-delivery ledger.
 
+A phone refreshes its hosted APNs recipient before registering notification preferences with the
+Mac. If that hosted refresh fails, the preference registration asks the Mac to retain a previous
+hosted binding only for the same authorized device, APNs token, environment and active hosted
+service. This lets opt-outs and sound changes take effect without replacing a working push target
+with a Live-only target during a transient service failure. A changed token or service, an explicit
+Live-only registration, or a revoked pairing cannot reuse the old binding. Older clients omit the
+preservation request and retain their original registration behavior.
+
+`notify_user` also seeds a session-scoped Push Test tab with the attempted request and result,
+including refusals. Resending from the tab calls the coordinator's same validation and delivery
+path, allocating a fresh event identity and rechecking current recipient permissions, remote
+access, and live or push targets. An opaque `target_ref` is resolved again on every send, so an
+expired reference fails rather than silently falling back to the chat. The tab is ephemeral:
+notification text and references are not written to the display-pane layout. A background chat
+gets its draft without opening the visible chat's pane; tool use in the visible chat reveals it
+without activating the app.
+
 Activity is participant-scoped. Authenticated foreground-device counts cover that participant
 across this Mac's sessions. Only the owner also inherits Mac presence, bounded by the configured
 Off/1/2/5/10-minute window. Presence is whether the Mac is in use, not whether Threading is in

@@ -3257,6 +3257,16 @@ this chat, or a named member. Open sessions show the device-aware live roster an
 typing…** without locking anyone out of a composer; the iPhone exposes separate switches for
 both indicators.
 
+When an agent uses `notify_user`, Threading opens **Push Test** in that chat's display pane and
+fills in the title, message, recipient, delivery choice and optional target reference from the
+tool call. You can edit them and choose **Send test** to send another notification. The **+** menu
+in the display pane also opens a blank Push Test tab set to the owner's iPhone. It shows the send
+result, including
+reasons a destination is unavailable. “Queued” means Threading found a usable route; it does not
+confirm that iOS displayed the notification or that a watch reacted. The draft stays in the open
+tab only; closing it or restarting Threading discards the text and target reference. Threading
+keeps notification permissions and recipient checks in force for test sends.
+
 Routine completion alerts are activity-aware per participant. A foreground authenticated phone,
 a follow-up from any authorized device, or another accepted remote interaction suppresses or
 cancels that participant's obsolete completion across this Mac's shared chats without affecting
@@ -3286,6 +3296,8 @@ The opaque hosted registration is bound to the service that issued it, so develo
 production registrations cannot accidentally cross brokers. If the Mac changes service, opening
 the iPhone refreshes that registration; until then an explicit notification request says that the
 registration belongs to another hosted service rather than suggesting that pairing was lost.
+A temporary hosted registration failure keeps the last working push registration for the same
+phone token and service, while changes to notification preferences still take effect.
 
 The iPhone and browser keep their own bounded, content-free connection history; it is not sent to
 the Mac by default. From **Diagnostics** on iPhone, or beside the Mac on the browser dashboard, a

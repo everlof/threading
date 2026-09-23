@@ -10720,6 +10720,17 @@
         }
       }
     },
+    "Chat if left empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten om fältet lämnas tomt"
+          }
+        }
+      }
+    },
     "Chat in %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10760,6 +10771,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chat delad med dig"
+          }
+        }
+      }
+    },
+    "Chat title if left empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chattens titel om fältet lämnas tomt"
           }
         }
       }
@@ -16860,6 +16882,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Levererar ett meddelande till en syskonsession i projektet, märkt som skickat från den här."
+          }
+        }
+      }
+    },
+    "Delivery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leverans"
           }
         }
       }
@@ -26027,6 +26060,17 @@
         }
       }
     },
+    "Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac"
+          }
+        }
+      }
+    },
     "Mac activity window" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26782,6 +26826,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "God jul — trådar under granen."
+          }
+        }
+      }
+    },
+    "Message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelande"
           }
         }
       }
@@ -34247,6 +34302,17 @@
         }
       }
     },
+    "Push Test" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testa notiser"
+          }
+        }
+      }
+    },
     "Push a React design system to claude.ai/design" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35338,6 +35404,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nyligen använda"
+          }
+        }
+      }
+    },
+    "Recipient" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mottagare"
           }
         }
       }
@@ -36819,6 +36896,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Begärd"
+          }
+        }
+      }
+    },
+    "Requester (current turn)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågeställaren (aktuellt meddelande)"
           }
         }
       }
@@ -39972,6 +40060,17 @@
         }
       }
     },
+    "Send a test notification for this chat. A queued result does not confirm delivery to the phone or watch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka en testnotis för den här chatten. Ett köat resultat bekräftar inte att notisen nått telefonen eller klockan."
+          }
+        }
+      }
+    },
     "Send a wrap-up before the curfew" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40101,6 +40200,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka väntande kommentarer (⌘Retur)"
+          }
+        }
+      }
+    },
+    "Send test" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka test"
           }
         }
       }
@@ -45007,6 +45117,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tryck, dra eller skriv för att styra simulatorn."
+          }
+        }
+      }
+    },
+    "Target reference" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Målreferens"
           }
         }
       }

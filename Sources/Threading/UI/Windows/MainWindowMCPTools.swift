@@ -298,6 +298,10 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
     self.playwrightRunner = playwrightRunner
     self.chromeAutomationProfile = chromeAutomationProfile
     self.dependencies = dependencies
+    displayPaneController.onSendNotificationTest = { [weak self] arguments, sessionID in
+      self?.sendRequestedNotification(arguments, for: sessionID)
+        ?? .failure("Notification sender is unavailable.")
+    }
   }
 
   var presentationWindow: NSWindow? { windowProvider() }
@@ -483,115 +487,24 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
     _ arguments: NotifyUserArguments,
     for sessionID: SessionID
   ) -> MCPToolResult {
-    guard
-      let message = arguments.message?
-        .trimmingCharacters(in: .whitespacesAndNewlines),
-      !message.isEmpty
-    else {
-      return .failure("message is required.")
-    }
-    guard message.utf8.count <= RemoteAccessDefaults.maximumNotificationBodyBytes else {
-      return .failure("message is too long for a notification.")
-    }
-    if let title = arguments.title,
-      title.utf8.count > RemoteAccessDefaults.maximumNotificationTitleBytes
-    {
-      return .failure("title is too long for a notification.")
-    }
-    let delivery = RequestedNotificationDelivery(arguments.delivery)
-    guard let delivery else {
-      return .failure("delivery must be auto, mac, ios, or both.")
-    }
-
-    let destination: RemoteNotificationDestinationDTO
-    if let rawReference = arguments.targetRef?
-      .trimmingCharacters(in: .whitespacesAndNewlines), !rawReference.isEmpty {
-      guard let resolved = dependencies.notificationTargets.resolve(
-        rawReference,
-        for: sessionID
-      ) else {
-        return .failure(
-          "target_ref is unknown, expired, or belongs to another session. "
-            + "Use the reference returned by the display or browser tool in this chat."
-        )
+    let result = sendRequestedNotification(arguments, for: sessionID)
+    if let pane = displayPaneController.activateNotificationTest(for: sessionID) {
+      pane.prefill(arguments, result: result)
+      if sessionID == visibleSessionID() {
+        displayPaneController.showSessionTabs(sessionID)
       }
-      destination = resolved
-    } else {
-      destination = .session
+      revealDisplayPane(for: sessionID)
     }
-
-    let eventID = UUID().uuidString.lowercased()
-    var receipts: [String] = []
-    var failures: [String] = []
-
-    if delivery.includesMac {
-      if dependencies.notifications.requestedRecipientIncludesOwner(
-        sessionID: sessionID,
-        recipient: arguments.recipient
-      ) {
-        let queued = AttentionAlertCenter.shared.postRequestedUpdate(
-          eventID: eventID,
-          sessionID: sessionID,
-          title: arguments.title,
-          body: message,
-          destination: destination
-        )
-        if queued {
-          receipts.append("the Mac")
-        } else {
-          failures.append("Mac notifications are disabled or this chat is muted")
-        }
-      } else {
-        failures.append("the selected recipient is not the Mac owner")
-      }
-    }
-
-    if delivery.includesIOS {
-      guard dependencies.settings.remoteAccessEnabled else {
-        failures.append("Remote Access is off")
-        if receipts.isEmpty { return .failure(failures.joined(separator: "; ") + ".") }
-        return .success(
-          "Notification queued for \(receipts.joined(separator: " and ")); "
-            + failures.joined(separator: "; ") + "."
-        )
-      }
-      switch dependencies.notifications.notifyRequested(
-        sessionID: sessionID,
-        title: arguments.title,
-        body: message,
-        recipient: arguments.recipient,
-        destination: destination
-      ) {
-      case .delivered(let recipient):
-        receipts.append(recipient)
-      case .unavailable(let reason):
-        failures.append(reason)
-      }
-    }
-
-    guard !receipts.isEmpty else {
-      return .failure(failures.joined(separator: "; "))
-    }
-    let partial = failures.isEmpty ? "" : "; " + failures.joined(separator: "; ")
-    return .success("Notification queued for \(receipts.joined(separator: " and "))\(partial).")
+    return result
   }
 
-}
-
-private enum RequestedNotificationDelivery: Equatable {
-  case mac
-  case ios
-  case both
-
-  init?(_ rawValue: String?) {
-    switch rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-    case nil, "", "auto", "both": self = .both
-    case "mac": self = .mac
-    case "ios", "iphone", "phone": self = .ios
-    default: return nil
-    }
+  private func sendRequestedNotification(
+    _ arguments: NotifyUserArguments,
+    for sessionID: SessionID
+  ) -> MCPToolResult {
+    RequestedNotificationCommandService.send(
+      arguments, for: sessionID, dependencies: dependencies
+    )
   }
 
-  var includesMac: Bool { self == .mac || self == .both }
-  var includesIOS: Bool { self == .ios || self == .both }
 }

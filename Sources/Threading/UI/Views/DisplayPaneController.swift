@@ -501,6 +501,7 @@ final class DisplayPaneController: NSViewController {
   /// The real window routes through the host plane; standalone fixtures use the same panel
   /// operation without needing to construct an application delegate.
   var onInvokePanelCommand: ((String) -> Void)?
+  var onSendNotificationTest: ((NotifyUserArguments, SessionID) -> MCPToolResult)?
 
   private func panelCommandEntry(
     id: String, title: String, icon: String, target: PanelCommandTarget?,
@@ -550,6 +551,7 @@ final class DisplayPaneController: NSViewController {
     switch target {
     case .simulator: activateSimulator(for: sessionID); return true
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
+    case .notificationTest: return activateNotificationTest(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
     case .browser: return addBrowserTab(for: sessionID) != nil
     case .privateBrowser: return addBrowserTab(for: sessionID, contextKind: .private) != nil
@@ -1625,6 +1627,38 @@ final class DisplayPaneController: NSViewController {
     advanceContentRevision(for: sessionID)
   }
 
+  // MARK: - Public — Notification Test Tab
+
+  /// A session-scoped draft. It is intentionally ephemeral: notification text and opaque target
+  /// references must not be copied into the durable display layout.
+  @discardableResult
+  func activateNotificationTest(for sessionID: SessionID) -> NotificationTestViewController? {
+    restoreIfNeeded(sessionID)
+    if let existing = tabsBySession[sessionID]?.first(where: { $0.notificationTest != nil }),
+      let controller = existing.notificationTest
+    {
+      controller.onSend = { [weak self] arguments in
+        self?.onSendNotificationTest?(arguments, sessionID)
+          ?? .failure("Notification sender is unavailable.")
+      }
+      activeTabIDBySession[sessionID] = existing.id
+      if sessionID == currentSessionID { render() }
+      return controller
+    }
+
+    let controller = NotificationTestViewController(sessionID: sessionID)
+    controller.onSend = { [weak self] arguments in
+      self?.onSendNotificationTest?(arguments, sessionID)
+        ?? .failure("Notification sender is unavailable.")
+    }
+    addChild(controller)
+    let tab = DisplayTab(body: .notificationTest(controller), owningSessionID: sessionID)
+    tabsBySession[sessionID, default: []].append(tab)
+    activeTabIDBySession[sessionID] = tab.id
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
   // MARK: - Public — Subagents Tab
 
   /// Opens the session's ephemeral child-agent transcript surface and selects one child.
@@ -2450,6 +2484,14 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(simulator)
 
+    case .notificationTest(let controller):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(controller)
+
     case .nativePlugin(let plugin):
       imageView.image = nil
       imageView.isHidden = true
@@ -2596,6 +2638,7 @@ final class DisplayPaneController: NSViewController {
     case .sharing: return "sharing"
     case .supervision: return "supervision"
     case .simulator: return "simulator"
+    case .notificationTest: return "notification-test"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"

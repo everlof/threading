@@ -129,6 +129,70 @@ final class SimulatorPaneRenderTests: XCTestCase {
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
     }
 
+    func testRendersNotificationTestInRightPanel() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory, withIntermediateDirectories: true
+        )
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        let frame = try makeDeviceFramePNG()
+        let variants: [(name: String, theme: AppTheme, appearance: NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("cyberpunk", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Cyberpunk" }), .darkAqua),
+            ("swiss", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Swiss Minimalist" }), .aqua)
+        ]
+
+        for variant in variants {
+            AppThemePalette.set(variant.theme)
+            let fixture = try makeFixture(appearance: variant.appearance, deviceFrame: frame)
+            defer { fixture.tearDown() }
+            let sessionID = try XCTUnwrap(fixture.panel.currentSessionID)
+            let form = try XCTUnwrap(fixture.panel.activateNotificationTest(for: sessionID))
+            form.prefill(
+                NotifyUserArguments(
+                    title: "BT001 watch test",
+                    message: "Check whether your Kronaby moves its hands and vibrates.",
+                    recipient: "owner", delivery: "ios"
+                ),
+                result: .success("Notification queued for the iPhone.")
+            )
+            AppThemeRefresh.repaint(fixture.window.contentView!)
+            settle(fixture.window)
+            let content = try XCTUnwrap(fixture.window.contentView)
+            let representation = try XCTUnwrap(
+                content.bitmapImageRepForCachingDisplay(in: content.bounds)
+            )
+            content.cacheDisplay(in: content.bounds, to: representation)
+            let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+            try png.write(
+                to: Render.directory.appendingPathComponent(
+                    "notification-test-\(variant.name).png"
+                )
+            )
+            if variant.name == "system-light" {
+                form.prefill(
+                    form.draft,
+                    result: .failure(
+                        "No opted-in phone has a live connection or usable push registration. Open Threading on the phone to refresh notification delivery."
+                    )
+                )
+                settle(fixture.window)
+                let unavailable = try XCTUnwrap(
+                    content.bitmapImageRepForCachingDisplay(in: content.bounds)
+                )
+                content.cacheDisplay(in: content.bounds, to: unavailable)
+                try XCTUnwrap(
+                    unavailable.representation(using: .png, properties: [:])
+                ).write(
+                    to: Render.directory.appendingPathComponent(
+                        "notification-test-unavailable-system-light.png"
+                    )
+                )
+            }
+        }
+    }
+
     private func sendModifiers(_ modifiers: NSEvent.ModifierFlags, to window: NSWindow) {
         let event = NSEvent.keyEvent(
             with: .flagsChanged, location: .zero, modifierFlags: modifiers,
