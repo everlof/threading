@@ -3257,15 +3257,25 @@ this chat, or a named member. Open sessions show the device-aware live roster an
 typing…** without locking anyone out of a composer; the iPhone exposes separate switches for
 both indicators.
 
-When an agent uses `notify_user`, Threading opens **Push Test** in that chat's display pane and
-fills in the title, message, recipient, delivery choice and optional target reference from the
-tool call. You can edit them and choose **Send test** to send another notification. The **+** menu
-in the display pane also opens a blank Push Test tab set to the owner's iPhone. It shows the send
-result, including
-reasons a destination is unavailable. “Queued” means Threading found a usable route; it does not
-confirm that iOS displayed the notification or that a watch reacted. The draft stays in the open
-tab only; closing it or restarting Threading discards the text and target reference. Threading
-keeps notification permissions and recipient checks in force for test sends.
+**Test Notification** sends a notification from a chat so you can see how it arrives. Open it
+from the **+** in the chat's display panel, from **View**, or by searching the command palette for
+“notification”; **Settings → Remote Access → Notification Delivery** points to it too. It starts
+from the chat's latest request — an agent's `notify_user` call or your own last test — with its
+title, message and delivery (**iPhone**, **This Mac** or **iPhone and Mac**), and shows how that
+request ended. Edit anything and choose **Send Test**, or press **⌘↩** anywhere in the form. A
+blank tab is set to your iPhone.
+
+Two rows appear only when they have something to ask. **Recipient** appears in a chat shared with
+other people: you, whoever wrote the current turn, everyone, or a member by name. **When tapped**
+appears when the agent linked an attachment, browser tab or panel; it says what the link opens,
+and a link that has expired can no longer be chosen, so a resend opens the chat instead.
+
+An agent's `notify_user` never opens, selects or reveals the tab, so the panel stays on whatever
+you were looking at. If the tab is already open it updates in place, and if you are part-way
+through editing it keeps your draft and only reports the agent's result. “Queued” means Threading
+found a usable route; it does not confirm that iOS displayed the notification or that a watch
+reacted. The latest request is kept in memory only, so quitting Threading or deleting the chat
+discards its text and link. Test sends go through the same permission and recipient checks as an agent's request.
 
 Routine completion alerts are activity-aware per participant. A foreground authenticated phone,
 a follow-up from any authorized device, or another accepted remote interaction suppresses or
@@ -3296,8 +3306,11 @@ The opaque hosted registration is bound to the service that issued it, so develo
 production registrations cannot accidentally cross brokers. If the Mac changes service, opening
 the iPhone refreshes that registration; until then an explicit notification request says that the
 registration belongs to another hosted service rather than suggesting that pairing was lost.
-A temporary hosted registration failure keeps the last working push registration for the same
-phone token and service, while changes to notification preferences still take effect.
+A temporary hosted registration failure — the network, a timeout, a rate limit or a server
+error — keeps the last working push registration for the same phone token and service, while
+changes to notification preferences still take effect. A refusal from the service, or a phone
+whose hosted credential is missing or expired, falls back to Live only rather than claiming push
+delivery it can no longer refresh.
 
 The iPhone and browser keep their own bounded, content-free connection history; it is not sent to
 the Mac by default. From **Diagnostics** on iPhone, or beside the Mac on the browser dashboard, a
@@ -5803,8 +5816,8 @@ At the top of the same page, **Composer** holds the one key that is not a comman
 a prompt, press Return to*. It is here because "what is this key already doing" is most of why a
 shortcuts page gets opened, and Return is the key people most often mean.
 
-| Choice | Return in a reply to a running chat | Return in a new session's brief, or a note attached to a report |
-|--------|------------------------------------|----------------------------------------------------------------|
+| Choice | Return in a reply to a running chat | Return in a new session's brief, a note attached to a report, or a test notification's message |
+|--------|------------------------------------|-----------------------------------------------------------------------------------------------|
 | **Do What the Composer Expects** (default) | sends | breaks the line |
 | **Send** | sends | sends |
 | **Start a New Line** | breaks the line | breaks the line |

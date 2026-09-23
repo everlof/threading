@@ -10720,17 +10720,6 @@
         }
       }
     },
-    "Chat if left empty" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chatten om fältet lämnas tomt"
-          }
-        }
-      }
-    },
     "Chat in %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10771,17 +10760,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chat delad med dig"
-          }
-        }
-      }
-    },
-    "Chat title if left empty" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chattens titel om fältet lämnas tomt"
           }
         }
       }
@@ -11151,6 +11129,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj simulator"
+          }
+        }
+      }
+    },
+    "Choose Test Notification from the + in a chat’s panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj Testnotis från + i en chatts panel."
           }
         }
       }
@@ -16886,13 +16875,13 @@
         }
       }
     },
-    "Delivery" : {
+    "Deliver to" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Leverans"
+            "value" : "Leverera till"
           }
         }
       }
@@ -18946,6 +18935,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Varje spårad fil visas som en markering: läsningar lyser i sekundärfärgen och redigeringar i accentfärgen. Båda tonas ned till en restmarkering. Håll pekaren över en markering för att se filnamnet."
+          }
+        }
+      }
+    },
+    "Everyone in this chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla i den här chatten"
           }
         }
       }
@@ -23981,6 +23981,17 @@
         }
       }
     },
+    "It sends from that chat to this Mac, your iPhone or both, and shows the chat’s latest agent request so you can send it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den skickar från chatten till den här Macen, din iPhone eller båda, och visar chattens senaste begäran från agenten så att du kan skicka den igen."
+          }
+        }
+      }
+    },
     "It then prefers a direct encrypted connection. TURN is used only when direct network traversal cannot connect." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26056,17 +26067,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MCP"
-          }
-        }
-      }
-    },
-    "Mac" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mac"
           }
         }
       }
@@ -30022,6 +30022,17 @@
         }
       }
     },
+    "Notifications cannot be sent from here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notiser kan inte skickas härifrån."
+          }
+        }
+      }
+    },
     "Notifications muted" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31507,6 +31518,39 @@
         }
       }
     },
+    "Open the attachment the agent linked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna bilagan som agenten länkade"
+          }
+        }
+      }
+    },
+    "Open the browser tab the agent linked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna webbläsarfliken som agenten länkade"
+          }
+        }
+      }
+    },
+    "Open the chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna chatten"
+          }
+        }
+      }
+    },
     "Open the day's window when your day starts, not when you get to it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31536,6 +31580,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna hjälpdialogen"
+          }
+        }
+      }
+    },
+    "Open the panel the agent linked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna panelen som agenten länkade"
           }
         }
       }
@@ -34302,17 +34357,6 @@
         }
       }
     },
-    "Push Test" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Testa notiser"
-          }
-        }
-      }
-    },
     "Push a React design system to claude.ai/design" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36896,17 +36940,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Begärd"
-          }
-        }
-      }
-    },
-    "Requester (current turn)" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Frågeställaren (aktuellt meddelande)"
           }
         }
       }
@@ -40049,6 +40082,50 @@
         }
       }
     },
+    "Send Test" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka test"
+          }
+        }
+      }
+    },
+    "Send Test (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka test (%@)"
+          }
+        }
+      }
+    },
+    "Send a notification from this chat to see how it arrives. Queued means Threading found a route; it cannot confirm that the phone or watch showed it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka en notis från den här chatten för att se hur den kommer fram. Köad betyder att Threading hittade en väg; det bekräftar inte att telefonen eller klockan visade den."
+          }
+        }
+      }
+    },
+    "Send a notification from this chat to the Mac or iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka en notis från den här chatten till Macen eller iPhonen"
+          }
+        }
+      }
+    },
     "Send a subagent off with your full context" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40056,17 +40133,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka i väg en underagent med hela ditt sammanhang"
-          }
-        }
-      }
-    },
-    "Send a test notification for this chat. A queued result does not confirm delivery to the phone or watch." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skicka en testnotis för den här chatten. Ett köat resultat bekräftar inte att notisen nått telefonen eller klockan."
           }
         }
       }
@@ -40200,17 +40266,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka väntande kommentarer (⌘Retur)"
-          }
-        }
-      }
-    },
-    "Send test" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skicka test"
           }
         }
       }
@@ -45121,17 +45176,6 @@
         }
       }
     },
-    "Target reference" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Målreferens"
-          }
-        }
-      }
-    },
     "Tell me when I reach my own limits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45315,6 +45359,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Testa villkor"
+          }
+        }
+      }
+    },
+    "Test Notification" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testnotis"
+          }
+        }
+      }
+    },
+    "Test a notification" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testa en notis"
           }
         }
       }
@@ -46145,6 +46211,28 @@
         }
       }
     },
+    "The agent’s link has expired" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentens länk har gått ut"
+          }
+        }
+      }
+    },
+    "The agent’s request at %@: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentens begäran kl. %@: %@"
+          }
+        }
+      }
+    },
     "The anatomy inside a hover popover: a bounded preview, one group rule, and full-cell action rows." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46741,6 +46829,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chatten skapades, men dess agent startade inte."
+          }
+        }
+      }
+    },
+    "The chat’s name when empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chattens namn om fältet är tomt"
           }
         }
       }
@@ -50604,6 +50703,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chatten hör inte till något projekt"
+          }
+        }
+      }
+    },
+    "This Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här Macen"
           }
         }
       }
@@ -56267,6 +56377,17 @@
         }
       }
     },
+    "What the notification says" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vad notisen säger"
+          }
+        }
+      }
+    },
     "What was done" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56373,6 +56494,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När funktionen är på skickar Threading en SHA-256-hash av inloggningsadressen till Gravatar. Om ingen avatar hittas skickas adressen till GitHubs offentliga användarsökning och en returnerad avatar kan hämtas. En vald emoji har fortfarande företräde. Stäng av funktionen i Allmänt för att stoppa uppslagningarna."
+          }
+        }
+      }
+    },
+    "When tapped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid tryck"
           }
         }
       }
@@ -56516,6 +56648,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vem kan se trafiken"
+          }
+        }
+      }
+    },
+    "Whoever wrote the current turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den som skrev det aktuella meddelandet"
           }
         }
       }
@@ -57486,6 +57629,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Telefonen når den här Mac-datorn när båda är på samma Wi-Fi."
+          }
+        }
+      }
+    },
+    "Your test at %@: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ditt test kl. %@: %@"
           }
         }
       }
@@ -59125,6 +59279,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iPhone SE"
+          }
+        }
+      }
+    },
+    "iPhone and Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone och Mac"
           }
         }
       }

@@ -549,12 +549,14 @@ Before adding a component:
 
 ## Notification testing
 
-The session-scoped Push Test tab is deliberately host-only. Its entity is the current chat and
-its ephemeral draft of a `notify_user` request. Threading owns recipient resolution, consent,
-notification preferences, target-reference scope and expiry, event identity, and delivery. Those
-rules cannot be replaced by extension presentation. The native themed tab remains available when
-extensions are disabled, invalid or reloaded; no extension contribution or conflict resolution is
-involved. Its text and target reference are not durable host data or public component properties.
+The session-scoped Test Notification tab is deliberately host-only. Its entity is the current
+chat and the chat's latest `notify_user` request, held in memory. Threading owns recipient
+resolution, consent, notification preferences, target-reference scope and expiry, event identity,
+and delivery. Those rules cannot be replaced by extension presentation. The native themed tab is
+built from the shared form parts — `ThemedTextField`, `PromptView` in its `.outside` placement,
+`ThemedPopUp`, `SubmissionStatusView` — and remains available when extensions are disabled,
+invalid or reloaded; no extension contribution or conflict resolution is involved. Its text and
+target reference are not durable host data or public component properties.
 
 ## Agent extension installation trust
 

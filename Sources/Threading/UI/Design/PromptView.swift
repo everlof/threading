@@ -233,6 +233,13 @@ final class PromptView: NSView, ThemedComponent {
         didSet { textView.placeholder = placeholder }
     }
 
+    /// What assistive technology calls the editor. The placeholder is drawn rather than
+    /// exposed, so a form field states the caption it sits under.
+    var textAccessibilityLabel: String? {
+        get { textView.accessibilityLabel() }
+        set { textView.setAccessibilityLabel(newValue) }
+    }
+
     /// Where the control that sends this prompt lives — and therefore what Return does *by
     /// default*, until `DesignSettings.current.promptReturnKey` says otherwise.
     enum SubmitPlacement {

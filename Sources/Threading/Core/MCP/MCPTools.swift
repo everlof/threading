@@ -1520,7 +1520,7 @@ struct SuggestReclaimableLocationArguments: Codable, Sendable {
   let reason: String?
 }
 
-struct NotifyUserArguments: Codable, Sendable {
+struct NotifyUserArguments: Codable, Equatable, Sendable {
   let title: String?
   let message: String?
   let recipient: String?
@@ -3238,8 +3238,8 @@ enum MCPTools {
         owner, everyone in this chat, or one member by exact display name. It cannot \
         target another chat or replace the normal final response in the conversation. Pass \
         target_ref from a display, Browser, or panel tool to make a tap open that attachment or \
-        live surface; omit it to open the chat itself. Each call fills this chat's Push Test \
-        pane with the request and result so the user can edit and resend it.
+        live surface; omit it to open the chat itself. The user can review and resend the \
+        latest request from Test Notification in this chat's panel.
         """,
       inputSchema: MCPInputSchema(
         properties: [

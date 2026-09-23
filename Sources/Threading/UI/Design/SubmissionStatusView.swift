@@ -63,6 +63,34 @@ final class SubmissionStatusView: NSView, ThemedComponent {
         show("", tone: .working)
     }
 
+    /// How many lines a long outcome may take before it is cut. A sheet keeps the default; a
+    /// pane with room to spare may allow more, so a refusal's reason is read to its end.
+    var maximumNumberOfLines: Int {
+        get { label.maximumNumberOfLines }
+        set {
+            label.maximumNumberOfLines = newValue
+            label.invalidateIntrinsicContentSize()
+        }
+    }
+
+    // MARK: - Layout
+
+    /// The line wraps at the width it is given, never at the width its words would like.
+    ///
+    /// A label with no stated width reports its whole sentence as one line of intrinsic width,
+    /// and at the default compression resistance that outranks a window keeping its size. A
+    /// refusal beside a chat in the display panel — "No opted-in phone has a live connection or
+    /// usable push registration…" — pushed the panel across half the window and squeezed the
+    /// conversation to make room for one unwrapped line. So the label yields its width, and each
+    /// pass tells it the column it actually got.
+    override func layout() {
+        super.layout()
+        let width = max(0, bounds.width - SubmissionStatusDefaults.glyphSize - Design.Spacing.small)
+        guard width > 0, abs(label.preferredMaxLayoutWidth - width) > 0.5 else { return }
+        label.preferredMaxLayoutWidth = width
+        label.invalidateIntrinsicContentSize()
+    }
+
     // MARK: - Private Methods
 
     private func setupViews() {
@@ -74,6 +102,7 @@ final class SubmissionStatusView: NSView, ThemedComponent {
         label.applyFont(.caption)
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = SubmissionStatusDefaults.maximumLines
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setAccessibilityIdentifier(SubmissionStatusDefaults.labelIdentifier)
 

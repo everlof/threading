@@ -1065,6 +1065,23 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     + "the screen ends that at once. Off never uses Mac activity to suppress "
                     + "them.",
                 control: macActivityWindowPopUp
+            ),
+            // Sending needs a chat — the recipient, the tap target and consent are all a chat's
+            // — so the page points at the tab rather than growing a second sender of its own.
+            SettingsUI.detailRow(
+                symbol: "bell.badge",
+                title: "Test a notification",
+                detail: "Choose Test Notification from the + in a chat’s panel.",
+                help: HelpTopic(
+                    title: L10n.string("Test a notification"),
+                    paragraphs: [
+                        L10n.string(
+                            "It sends from that chat to this Mac, your iPhone or both, and "
+                                + "shows the chat’s latest agent request so you can send it "
+                                + "again."
+                        )
+                    ]
+                )
             )
         ])
     }

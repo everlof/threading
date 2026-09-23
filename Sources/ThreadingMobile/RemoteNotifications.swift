@@ -220,6 +220,33 @@ enum RemoteNotificationRemovalPolicy {
     }
 }
 
+/// Whether a failed hosted push refresh should leave the Mac's existing push binding in place.
+///
+/// The phone refreshes its hosted APNs recipient before it registers notification preferences
+/// with a Mac, and a failure there used to make that registration Live-only: a service outage
+/// replaced a working push target with none. Asking the Mac to keep the old binding is right
+/// only while nothing says the binding is dead — a network fault, a timeout, a rate limit or a
+/// server error. A missing or expired device credential, a request the service refused, or an
+/// endpoint that is not valid is a standing answer; keeping the binding then would report push
+/// delivery the phone can no longer refresh.
+enum HostedPushRefreshFailurePolicy {
+    static func preservesExistingRegistration(after error: Error) -> Bool {
+        if error is URLError || error is CancellationError { return true }
+        guard let failure = error as? PeerControlPlaneError else { return false }
+        switch failure {
+        case .transport, .invalidResponse, .responseTooLarge:
+            return true
+        case .rejected(let status, _):
+            return retryableStatuses.contains(status) || (500...599).contains(status)
+        case .invalidEndpoint, .invalidRequest, .invalidCredential:
+            return false
+        }
+    }
+
+    /// Request Timeout, Too Early and Too Many Requests: the service asked to be tried again.
+    private static let retryableStatuses: Set<Int> = [408, 425, 429]
+}
+
 /// Live delivery and APNs must make the same foreground decision or one transport can show a
 /// banner that the other suppresses. Only a milestone explicitly requested from an agent is
 /// worth interrupting while the app itself is already on screen; ordinary state changes already
@@ -1581,6 +1608,7 @@ final class RemoteNotificationManager: ObservableObject {
 
             var hostedRegistrationID: String?
             var hostedRegistrationSucceeded = true
+            var preservesHostedRegistration = false
             if host.hostedServiceURL != nil || host.hostedCredential != nil {
                 do {
                     hostedRegistrationID = try await registerHostedPushRecipient(
@@ -1590,6 +1618,8 @@ final class RemoteNotificationManager: ObservableObject {
                     )
                 } catch {
                     hostedRegistrationSucceeded = false
+                    preservesHostedRegistration = HostedPushRefreshFailurePolicy
+                        .preservesExistingRegistration(after: error)
                     MobileDiagnostics.record(
                         .notificationRegistrationFailed,
                         level: .warning,
@@ -1612,7 +1642,7 @@ final class RemoteNotificationManager: ObservableObject {
             let baselineRegistration = RemoteNotificationRegistrationDTO(
                 deviceToken: deviceToken,
                 hostedRegistrationID: hostedRegistrationID,
-                preserveHostedRegistration: hostedRegistrationSucceeded ? nil : true,
+                preserveHostedRegistration: preservesHostedRegistration ? true : nil,
                 environment: pushEnvironment,
                 enabledKinds: baselineKinds,
                 soundEnabledKinds: soundKinds.filter { baselineKinds.contains($0) }
@@ -1626,7 +1656,7 @@ final class RemoteNotificationManager: ObservableObject {
                     let extendedRegistration = RemoteNotificationRegistrationDTO(
                         deviceToken: deviceToken,
                         hostedRegistrationID: hostedRegistrationID,
-                        preserveHostedRegistration: hostedRegistrationSucceeded ? nil : true,
+                        preserveHostedRegistration: preservesHostedRegistration ? true : nil,
                         environment: pushEnvironment,
                         enabledKinds: kinds,
                         soundEnabledKinds: soundKinds,

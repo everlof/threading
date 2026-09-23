@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 import ThreadingSimulatorKit
 import XCTest
 @testable import Threading
@@ -129,6 +130,9 @@ final class SimulatorPaneRenderTests: XCTestCase {
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
     }
 
+    /// The Test Notification tab beside the same conversation, in the states a person meets:
+    /// filled in from an agent's request in each theme, a refused request, and a shared chat
+    /// whose agent linked an attachment — the one case that shows the recipient and tap rows.
     func testRendersNotificationTestInRightPanel() throws {
         try FileManager.default.createDirectory(
             at: Render.directory, withIntermediateDirectories: true
@@ -142,54 +146,77 @@ final class SimulatorPaneRenderTests: XCTestCase {
             ("cyberpunk", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Cyberpunk" }), .darkAqua),
             ("swiss", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Swiss Minimalist" }), .aqua)
         ]
+        let request = NotifyUserArguments(
+            title: "BT001 watch test",
+            message: "Check whether your Kronaby moves its hands and vibrates.",
+            recipient: "owner",
+            delivery: "ios"
+        )
 
-        for variant in variants {
-            AppThemePalette.set(variant.theme)
-            let fixture = try makeFixture(appearance: variant.appearance, deviceFrame: frame)
-            defer { fixture.tearDown() }
-            let sessionID = try XCTUnwrap(fixture.panel.currentSessionID)
-            let form = try XCTUnwrap(fixture.panel.activateNotificationTest(for: sessionID))
-            form.prefill(
-                NotifyUserArguments(
-                    title: "BT001 watch test",
-                    message: "Check whether your Kronaby moves its hands and vibrates.",
-                    recipient: "owner", delivery: "ios"
-                ),
-                result: .success("Notification queued for the iPhone.")
-            )
-            AppThemeRefresh.repaint(fixture.window.contentView!)
+        func capture(_ fixture: SimulatorPaneRenderFixture, as name: String) throws {
             settle(fixture.window)
             let content = try XCTUnwrap(fixture.window.contentView)
             let representation = try XCTUnwrap(
                 content.bitmapImageRepForCachingDisplay(in: content.bounds)
             )
             content.cacheDisplay(in: content.bounds, to: representation)
-            let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
-            try png.write(
-                to: Render.directory.appendingPathComponent(
-                    "notification-test-\(variant.name).png"
-                )
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("notification-test-\(name).png")
             )
-            if variant.name == "system-light" {
-                form.prefill(
-                    form.draft,
-                    result: .failure(
-                        "No opted-in phone has a live connection or usable push registration. Open Threading on the phone to refresh notification delivery."
-                    )
-                )
-                settle(fixture.window)
-                let unavailable = try XCTUnwrap(
-                    content.bitmapImageRepForCachingDisplay(in: content.bounds)
-                )
-                content.cacheDisplay(in: content.bounds, to: unavailable)
-                try XCTUnwrap(
-                    unavailable.representation(using: .png, properties: [:])
-                ).write(
-                    to: Render.directory.appendingPathComponent(
-                        "notification-test-unavailable-system-light.png"
-                    )
-                )
-            }
+            // A long refusal once pushed the panel across half the window to keep its status on
+            // one line; the form wraps inside the width the panel was given.
+            XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2, name)
+            XCTAssertEqual(content.bounds.width, Render.size.width, accuracy: 1, name)
+        }
+
+        for variant in variants {
+            AppThemePalette.set(variant.theme)
+            let fixture = try makeFixture(appearance: variant.appearance, deviceFrame: frame)
+            defer { fixture.tearDown() }
+            let sessionID = try XCTUnwrap(fixture.panel.currentSessionID)
+            let host = RenderNotificationTestHost()
+            host.notificationTests.record(
+                request,
+                outcome: .queued("Notification queued for the owner."),
+                origin: .agent,
+                for: sessionID
+            )
+            fixture.panel.notificationTestHost = host
+            let form = try XCTUnwrap(fixture.panel.activateNotificationTest(for: sessionID))
+            XCTAssertFalse(form.showsRecipientChoice)
+            XCTAssertFalse(form.showsTargetChoice)
+            AppThemeRefresh.repaint(fixture.window.contentView!)
+            try capture(fixture, as: variant.name)
+
+            guard variant.name == "system-light" else { continue }
+            host.notificationTests.record(
+                request,
+                outcome: .refused(
+                    "No opted-in phone has a live connection or usable push registration. "
+                        + "Open Threading on the phone to refresh notification delivery."
+                ),
+                origin: .agent,
+                for: sessionID
+            )
+            try capture(fixture, as: "unavailable-system-light")
+
+            host.memberNames = ["Anna", "Ben"]
+            host.targetKinds = ["report": .attachment]
+            host.notificationTests.record(
+                NotifyUserArguments(
+                    title: "Report ready",
+                    message: "The accessibility report is attached.",
+                    recipient: "Anna",
+                    delivery: "both",
+                    targetRef: "report"
+                ),
+                outcome: .queued("Notification queued for the Mac and Anna."),
+                origin: .agent,
+                for: sessionID
+            )
+            XCTAssertTrue(form.showsRecipientChoice)
+            XCTAssertTrue(form.showsTargetChoice)
+            try capture(fixture, as: "shared-system-light")
         }
     }
 
@@ -602,4 +629,29 @@ private final class SimulatorPaneRenderStreamSession:
     func setVisible(_ visible: Bool) {}
     func sendInput(_ input: SimulatorBridgeInput) async throws {}
     func stop() { continuation.finish() }
+}
+
+/// Answers the Test Notification tab for a render: who is in the chat and what a link opens are
+/// the fixture's choice, and nothing is sent.
+@MainActor
+private final class RenderNotificationTestHost: NotificationTestHosting {
+    let notificationTests = NotificationTestLedger()
+    var memberNames: [String] = []
+    var targetKinds: [String: RemoteNotificationDestinationDTO.Kind] = [:]
+
+    func sendTestNotification(
+        _ arguments: NotifyUserArguments,
+        for sessionID: SessionID
+    ) -> RequestedNotificationOutcome {
+        .queued("Notification queued for the owner.")
+    }
+
+    func notificationRecipientNames(for sessionID: SessionID) -> [String] { memberNames }
+
+    func notificationTargetKind(
+        _ reference: String,
+        for sessionID: SessionID
+    ) -> RemoteNotificationDestinationDTO.Kind? {
+        targetKinds[reference]
+    }
 }

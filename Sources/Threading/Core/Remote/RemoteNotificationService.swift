@@ -448,6 +448,17 @@ final class RemoteNotificationService {
         }
     }
 
+    /// Members of this chat who could receive a requested notification now, by display name.
+    ///
+    /// The owner is not among them: every chat has one, so a chooser offers the owner itself.
+    func requestedRecipientMemberNames(for sessionID: SessionID) -> [String] {
+        let available = matchingSubscriptions(kind: .agentMessage) {
+            $0.authorization.scope.covers(sessionID)
+        }
+        let names = Set(available.compactMap { $0.authorization.member?.displayName })
+        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
     func register(
         _ registration: RemoteNotificationRegistrationDTO,
         deviceID: String,

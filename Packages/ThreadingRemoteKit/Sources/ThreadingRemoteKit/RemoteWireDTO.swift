@@ -3785,8 +3785,10 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     /// Opaque recipient binding minted by the hosted service under this phone's device
     /// credential. The Mac never needs the corresponding APNs token for hosted delivery.
     public let hostedRegistrationID: String?
-    /// A hosted refresh failed. Keep the Mac's existing binding only when its device token,
-    /// environment and hosted service still match. Missing is false for older clients.
+    /// The phone's hosted refresh failed temporarily — a network fault, timeout, rate limit or
+    /// server error — so the Mac should keep its existing binding, but only while the device
+    /// token, environment and hosted service still match. A refresh the service refused, or one
+    /// the phone could not attempt, never sends this. Missing is false for older clients.
     public let preserveHostedRegistration: Bool?
     public let environment: RemoteNotificationEnvironment
     public let enabledKinds: [RemoteNotificationKind]

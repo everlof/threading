@@ -83,21 +83,25 @@ and the sender re-reads the authoritative subscription immediately before beginn
 An APNs result is revalidated again before it enters the accepted-delivery ledger.
 
 A phone refreshes its hosted APNs recipient before registering notification preferences with the
-Mac. If that hosted refresh fails, the preference registration asks the Mac to retain a previous
-hosted binding only for the same authorized device, APNs token, environment and active hosted
-service. This lets opt-outs and sound changes take effect without replacing a working push target
-with a Live-only target during a transient service failure. A changed token or service, an explicit
-Live-only registration, or a revoked pairing cannot reuse the old binding. Older clients omit the
-preservation request and retain their original registration behavior.
+Mac. If that refresh fails **temporarily** — a transport fault, a timeout, 408/425/429, a 5xx, or
+a malformed response (`HostedPushRefreshFailurePolicy`) — the preference registration asks the Mac
+to retain a previous hosted binding, and the Mac does so only for the same authorized device, APNs
+token, environment and active hosted service. This lets opt-outs and sound changes take effect
+without replacing a working push target with a Live-only target during an outage. A refusal from
+the service, or a refresh the phone could not attempt (missing or expiring device credential,
+invalid endpoint), sends no preservation request: nothing then refreshes the binding, and claiming
+push delivery on it would be a receipt the phone cannot stand behind. A changed token or service,
+an explicit Live-only registration, a revoked pairing, or a request that both preserves and
+carries a new registration cannot reuse the old binding. Older clients omit the preservation
+request and retain their original registration behavior.
 
-`notify_user` also seeds a session-scoped Push Test tab with the attempted request and result,
-including refusals. Resending from the tab calls the coordinator's same validation and delivery
-path, allocating a fresh event identity and rechecking current recipient permissions, remote
-access, and live or push targets. An opaque `target_ref` is resolved again on every send, so an
-expired reference fails rather than silently falling back to the chat. The tab is ephemeral:
-notification text and references are not written to the display-pane layout. A background chat
-gets its draft without opening the visible chat's pane; tool use in the visible chat reveals it
-without activating the app.
+`notify_user` and the Test Notification tab share `RequestedNotificationCommandService`. A send
+from the tab is a new request: it allocates a fresh event identity and rechecks current recipient
+permissions, Remote Access, and live or push targets. An opaque `target_ref` is resolved again on
+every send, so an expired reference fails rather than silently falling back to the chat; the tab
+shows such a link as expired and cannot choose it. The latest attempt per chat is kept in memory
+only, and an agent's request never opens or reveals the tab — see
+[mcp-and-display.md](mcp-and-display.md#requested-notification-preview).
 
 Activity is participant-scoped. Authenticated foreground-device counts cover that participant
 across this Mac's sessions. Only the owner also inherits Mac presence, bounded by the configured

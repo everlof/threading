@@ -15,13 +15,17 @@ enum PanelCommands {
         let title: String
         let icon: String
         let target: PanelCommandTarget?
+        /// What the command palette shows under the title, and searches.
+        var detail: String? = nil
     }
 
     static let entries: [Entry] = [
         Entry(id: AppCommands.ID.newTerminalTab, title: "Terminal", icon: "terminal", target: nil),
         Entry(id: "panel.simulator", title: "iOS Simulator", icon: "iphone", target: .simulator),
         Entry(id: "panel.deviceLogs", title: "Device logs", icon: "list.bullet.rectangle", target: .deviceLogs),
-        Entry(id: "panel.notificationTest", title: "Push Test", icon: "bell.badge", target: .notificationTest),
+        Entry(id: "panel.notificationTest", title: "Test Notification", icon: "bell.badge",
+              target: .notificationTest,
+              detail: "Send a notification from this chat to the Mac or iPhone"),
         Entry(id: "panel.audit", title: "Execution audit", icon: "checklist.checked", target: .audit),
         Entry(id: "panel.browser", title: "New Browser", icon: "globe", target: .browser),
         Entry(id: "panel.privateBrowser", title: "Private Browser", icon: "hand.raised.fill", target: .privateBrowser),
@@ -34,7 +38,7 @@ enum PanelCommands {
 
     static let additionalCommands: [AppCommand] = (entries + [supervision]).compactMap { entry in
         guard let target = entry.target else { return nil }
-        return AppCommand(id: entry.id, group: .view, title: entry.title,
+        return AppCommand(id: entry.id, group: .view, title: entry.title, detail: entry.detail,
                           defaultShortcut: nil, isEditable: true, scope: .session,
                           iconName: entry.icon, panelTarget: target)
     }

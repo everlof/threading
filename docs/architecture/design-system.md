@@ -3796,3 +3796,17 @@ rules make it hold:
 `SettingsRowLayoutTests` pins both arrangements, the round trip across widths, and that a preferred
 measure alone does not stack a row. A page that wants the stacked shape at every width still asks
 for `stackedControlRow`.
+
+## 2026-09-23 — A status line wraps at the column it is given
+
+`SubmissionStatusView` reported its sentence as one line of intrinsic width at the label's default
+horizontal compression resistance, which outranks a window holding its size (priority 500). In a
+sheet sized to its content nobody noticed; in the display panel a Test Notification refusal —
+"No opted-in phone has a live connection or usable push registration…" — widened the panel from
+420pt to about 1,100pt and squeezed the conversation beside it, in a render whose every other
+assertion passed. The label now yields its width (`.defaultLow`) and `layout()` states the column
+it got as `preferredMaxLayoutWidth`, the same wrap-at-the-width-you-have rule
+`AgentWorkSummaryView` and `ScheduledSessionPlaceholderView` follow. `maximumNumberOfLines` lets a
+pane with room allow more than a sheet's three lines. `SubmissionStatusViewTests` fails without
+the change (728pt in a 320pt column, one line), and the notification render asserts the panel
+keeps its width.

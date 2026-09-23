@@ -1,4 +1,5 @@
 import XCTest
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 @testable import ThreadingMobile
 
@@ -22,6 +23,44 @@ final class RemoteNotificationPresentationPolicyTests: XCTestCase {
         first.includesResponsePreviews = true
         XCTAssertTrue(RemoteNotificationManager(defaults: firstDefaults).includesResponsePreviews)
         XCTAssertFalse(second.includesResponsePreviews)
+    }
+
+    /// Only a failure that says nothing about the binding may keep it; a refusal or a refresh
+    /// the phone could not even attempt must let the Mac fall back to Live-only honestly.
+    func testOnlyTransientHostedRefreshFailuresPreserveThePushBinding() {
+        let transient: [Error] = [
+            URLError(.timedOut),
+            URLError(.notConnectedToInternet),
+            CancellationError(),
+            PeerControlPlaneError.transport("offline"),
+            PeerControlPlaneError.invalidResponse,
+            PeerControlPlaneError.responseTooLarge(actual: 2, limit: 1),
+            PeerControlPlaneError.rejected(status: 408, code: "timeout"),
+            PeerControlPlaneError.rejected(status: 429, code: "rate_limited"),
+            PeerControlPlaneError.rejected(status: 503, code: "unavailable"),
+        ]
+        for error in transient {
+            XCTAssertTrue(
+                HostedPushRefreshFailurePolicy.preservesExistingRegistration(after: error),
+                "\(error)"
+            )
+        }
+
+        let standing: [Error] = [
+            PeerControlPlaneError.invalidCredential,
+            PeerControlPlaneError.invalidEndpoint,
+            PeerControlPlaneError.invalidRequest,
+            PeerControlPlaneError.rejected(status: 401, code: "unauthorized"),
+            PeerControlPlaneError.rejected(status: 403, code: "revoked"),
+            PeerControlPlaneError.rejected(status: 410, code: "gone"),
+            RemoteClientError.invalidResponse,
+        ]
+        for error in standing {
+            XCTAssertFalse(
+                HostedPushRefreshFailurePolicy.preservesExistingRegistration(after: error),
+                "\(error)"
+            )
+        }
     }
 
     func testOnlyAnExplicitlyRequestedAgentUpdatePresentsInForeground() {

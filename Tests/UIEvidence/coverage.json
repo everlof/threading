@@ -341,9 +341,9 @@
       "kind": "surface",
       "status": "implemented",
       "priority": "important",
-      "title": "Push Test pane",
-      "description": "The prefilled notification draft and queued result in the real conversation, window chrome, and display-panel shell.",
-      "states": ["MCP-prefilled draft", "Queued result", "Unavailable result", "Editable delivery and recipient"],
+      "title": "Test Notification pane",
+      "description": "The chat's latest notify_user request and its result beside the real conversation, window chrome, and display-panel shell.",
+      "states": ["Filled in from an agent's request", "Queued result", "Refused result wrapped at panel width", "Shared chat with recipient and tap-target rows"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["System light", "System dark", "Authored appearance for fixed themes"],

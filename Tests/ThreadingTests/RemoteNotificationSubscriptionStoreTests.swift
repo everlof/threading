@@ -239,6 +239,80 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
         XCTAssertNil(store.subscriptions.first?.hostedRegistrationID)
     }
 
+    func testFailedHostedRefreshDoesNotReuseBindingAcrossEnvironments() {
+        let store = ControllableNotificationSubscriptionStore()
+        let service = RemoteNotificationService(subscriptionStore: store)
+        service.configureHostedPushSender(
+            serviceURL: { self.developmentServiceURL },
+            isAvailable: { true }
+        ) { _, _, _ in
+            RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
+        }
+        let authorization = ownerAuthorization()
+        _ = service.register(
+            registration(hostedRegistrationID: "th_push_" + String(repeating: "a", count: 43)),
+            deviceID: "phone-1",
+            authorization: authorization
+        )
+
+        let productionRefresh = RemoteNotificationRegistrationDTO(
+            deviceToken: String(repeating: "ab", count: 32),
+            preserveHostedRegistration: true,
+            environment: .production,
+            enabledKinds: [.agentMessage]
+        )
+        XCTAssertEqual(
+            service.register(productionRefresh, deviceID: "phone-1", authorization: authorization),
+            .registered(.init(delivery: .live))
+        )
+        XCTAssertNil(store.subscriptions.first?.hostedRegistrationID)
+    }
+
+    /// A phone that just minted a registration has nothing to preserve, so a request asking for
+    /// both is malformed rather than a choice the Mac should make on its behalf.
+    func testPreservationRequestCarryingANewRegistrationIsRefused() {
+        let store = ControllableNotificationSubscriptionStore()
+        let service = RemoteNotificationService(subscriptionStore: store)
+        let contradictory = RemoteNotificationRegistrationDTO(
+            deviceToken: String(repeating: "ab", count: 32),
+            hostedRegistrationID: "th_push_" + String(repeating: "a", count: 43),
+            preserveHostedRegistration: true,
+            environment: .sandbox,
+            enabledKinds: [.agentMessage]
+        )
+        XCTAssertEqual(
+            service.register(contradictory, deviceID: "phone-1", authorization: ownerAuthorization()),
+            .invalid
+        )
+        XCTAssertTrue(store.subscriptions.isEmpty)
+    }
+
+    func testRequestedRecipientMemberNamesAreThatChatsMembersOnly() {
+        let service = RemoteNotificationService(
+            subscriptionStore: ControllableNotificationSubscriptionStore()
+        )
+        let chat = SessionID()
+        let otherChat = SessionID()
+        _ = service.register(registration(), deviceID: "phone-1", authorization: ownerAuthorization())
+        XCTAssertEqual(service.requestedRecipientMemberNames(for: chat), [])
+
+        for (id, name, session) in [("anna", "Anna", chat), ("ben", "Ben", otherChat)] {
+            let authorization = RemoteAuthorization(
+                shareID: "share-\(id)",
+                capability: .interact,
+                scope: .session(session),
+                member: RemoteMember(id: id, displayName: name, deviceID: "phone-\(id)")
+            )
+            XCTAssertEqual(
+                service.register(registration(), deviceID: "phone-\(id)", authorization: authorization),
+                .registered(.init(delivery: .live))
+            )
+        }
+
+        XCTAssertEqual(service.requestedRecipientMemberNames(for: chat), ["Anna"])
+        XCTAssertEqual(service.requestedRecipientMemberNames(for: otherChat), ["Ben"])
+    }
+
     func testHostedBrokerDoesNotClaimPushWithoutValidOpaqueRecipient() {
         let store = ControllableNotificationSubscriptionStore()
         let service = RemoteNotificationService(subscriptionStore: store)

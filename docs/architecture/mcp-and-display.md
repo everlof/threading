@@ -105,13 +105,25 @@ limits and receipt truth. There is no additional UI surface or replaceable clipb
 
 ## Requested notification preview
 
-Every `notify_user` attempt seeds one ephemeral Push Test tab in its own session, including a
-failed attempt. The tab selects and reveals the display pane only when that session is already
-on screen; it does not activate Threading. A user edit resends through the same validated
-notification command, with a new event identity and a fresh target-reference lookup. The tab is
-also available from the panel's **+** menu and is excluded from durable layout persistence so
-notification text and opaque target references do not gain another copy on disk. Delivery and
-registration rules live in [notification-delivery.md](notification-delivery.md).
+`notify_user` records each attempt — refusals included — in the window's in-memory
+`NotificationTestLedger`, one record per chat, and does nothing else to the interface. The first
+version selected and revealed a Push Test tab on every call; because `notify_user` is the ordinary
+"tell me when it is done" tool, that moved the panel off the Simulator, browser or theme document
+the person was using each time an agent finished. So an agent's request never opens, selects or
+reveals anything. A **Test Notification** tab that is already open refreshes in place, and one
+with unsent edits keeps them and only reports the result.
+
+A person opens the tab through the panel command (`panel.notificationTest`: the **+** menu, View,
+the command palette, whose detail line makes it findable as "notification"); Remote Access
+settings point at it rather than growing a second sender. It starts from the ledger's latest
+record. `NotificationTestHosting` is the tab's only dependency, implemented by the tool
+coordinator, so a send goes through `RequestedNotificationCommandService` exactly as
+`notify_user` does — fresh event identity, fresh `target_ref` lookup, current consent. Recipient
+and tap-target rows appear only when there is a choice: another participant to reach, or a link
+the agent attached, shown as what it opens and disabled once expired. The tab is excluded from
+durable layout persistence (`persisted(_:)` has no case for it), so notification text and opaque
+references gain no copy on disk, and removing a chat's panel state forgets its ledger record. Delivery and registration rules live in
+[notification-delivery.md](notification-delivery.md).
 
 ## The stdio bridge
 

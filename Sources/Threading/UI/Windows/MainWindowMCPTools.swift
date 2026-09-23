@@ -237,6 +237,8 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
   var extensionInstallDecision: ((ChoiceRequest, @escaping @MainActor (Int?) -> Void) -> Void)?
   let browserAccessStore = BrowserAccessStore()
   var temporaryBrowserOrigins: [SessionID: Set<BrowserOrigin>] = [:]
+  /// Each chat's latest requested notification, for its Test Notification tab.
+  let notificationTests = NotificationTestLedger()
 
   convenience init(
     displayPaneController: DisplayPaneController,
@@ -298,10 +300,7 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
     self.playwrightRunner = playwrightRunner
     self.chromeAutomationProfile = chromeAutomationProfile
     self.dependencies = dependencies
-    displayPaneController.onSendNotificationTest = { [weak self] arguments, sessionID in
-      self?.sendRequestedNotification(arguments, for: sessionID)
-        ?? .failure("Notification sender is unavailable.")
-    }
+    displayPaneController.notificationTestHost = self
   }
 
   var presentationWindow: NSWindow? { windowProvider() }
@@ -482,29 +481,4 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
       completion: completion
     )
   }
-
-  func notifyUser(
-    _ arguments: NotifyUserArguments,
-    for sessionID: SessionID
-  ) -> MCPToolResult {
-    let result = sendRequestedNotification(arguments, for: sessionID)
-    if let pane = displayPaneController.activateNotificationTest(for: sessionID) {
-      pane.prefill(arguments, result: result)
-      if sessionID == visibleSessionID() {
-        displayPaneController.showSessionTabs(sessionID)
-      }
-      revealDisplayPane(for: sessionID)
-    }
-    return result
-  }
-
-  private func sendRequestedNotification(
-    _ arguments: NotifyUserArguments,
-    for sessionID: SessionID
-  ) -> MCPToolResult {
-    RequestedNotificationCommandService.send(
-      arguments, for: sessionID, dependencies: dependencies
-    )
-  }
-
 }
