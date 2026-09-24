@@ -270,6 +270,12 @@ action together. The button freezes the chosen action at mouse-down. Right-click
 the capture menu, and recording always takes precedence. Hidden/terminated panes remove
 the event monitor. Clipboard and recording behavior remain host-owned.
 
+**Touch-inclusive video keeps the framebuffer's row order.** The recorder composites live frames
+and touch marks in one bitmap, then draws that image directly into the H.264 writer's BGRA pixel
+buffer. A second vertical transform at that copy step turned both the screen and its touch trail
+upside down in saved movies. The recorder test decodes the finished movie and checks its top and
+bottom pixels and a touch mark near the device top.
+
 **Keyboard follows Apple Simulator.** The pane root is a `KeyEquivalentScopeView`, so chords apply
 only while focus is inside the pane: ⇧⌘H Home, ⌘L Lock, ⇧⌘B Side Button, ⌘↑/⌘↓ volume and
 ⇧⌘A Toggle Appearance, taken from Simulator.app's own menus (`SimulatorPaneShortcuts`). A chord

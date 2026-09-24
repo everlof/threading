@@ -6,7 +6,7 @@ import AppKit
 ///
 /// Fidelity equals the live stream: it encodes the frames we already decode. Each frame is drawn
 /// upright with its overlay into a bitmap (the same path the live view uses), then blitted into the
-/// writer's pixel buffer with the standard vertical flip.
+/// writer's pixel buffer.
 @MainActor
 final class SimulatorStreamRecorder {
     let outputURL: URL
@@ -76,10 +76,8 @@ final class SimulatorStreamRecorder {
                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                     | CGBitmapInfo.byteOrder32Little.rawValue
               ) else { return }
-        // CVPixelBuffer row 0 is the top; CGContext is bottom-left — flip so the upright composite
-        // lands upright in the buffer.
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: 1, y: -1)
+        // The composited CGImage and bitmap context use the same image orientation here. Flipping
+        // this draw turns the entire recorded frame, including touch marks, upside down.
         context.draw(composited, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         adaptor.append(buffer, withPresentationTime: CMTime(seconds: elapsed, preferredTimescale: 600))
