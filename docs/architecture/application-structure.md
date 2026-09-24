@@ -68,7 +68,8 @@ queue's delivery vocabulary. Durable control actors and scopes live beside grant
 
 `EnvironmentKeys` is a Foundation-only vocabulary, separate from AppKit terminal constants.
 `AgentEnvironment` receives an environment dictionary and explicit tool-path settings; both the
-terminal and headless macOS paths use the same inherited-identity filter. Terminal colour/pager claims
+terminal and headless macOS paths use the same inherited-identity filter. The Linux host compiles
+that policy unchanged and resolves only its own host environment. Terminal colour/pager claims
 remain with the frontend that can state what its terminal renders.
 
 `AgentLaunchPlan` and `ShellCommand` are portable values under `Core/Agent/`. The plan's
@@ -83,7 +84,7 @@ values and host-supplied integration flags. The macOS remote launcher uses it wh
 routing, local hooks, fork handling and transcript existence checks remain host-owned.
 
 `AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
-store and UI. Host adapters retain account/model admission,
+store and UI. macOS and the Linux host share it; host adapters retain account/model admission,
 project/identity checks, fallback branch lookup, persistence and notification delivery. This is
 not yet a shared session-creation transaction or runtime coordinator. `AgentLaunchRecording`
 applies the resolved plan to one durable session before persistence and spawn; admission,
@@ -109,6 +110,29 @@ journal and typed diagnostic callbacks are injected; `PTYHostClientHost` preserv
 EventLog/OSLog defaults and the availability probe. Client bounds
 live apart from registration paths. A Linux socket writer owns its descriptor and per-send signal
 policy, while the shared client owns queue admission, protocol state and event delivery.
+
+The experimental Linux `WindowHarness --app` connects its project snapshot to that client through
+`GraphicalTerminal`. Fresh runtimes are keyed by project and attached runtimes by persisted terminal
+identity, with an eight-entry combined ceiling. The native window switches between projects, a
+selected project's saved-terminal list, and the visible terminal. Navigation does not create a
+new child or detach an existing one. The snapshot keeps at most the newest 512 saved identities per
+project and the UI mounts only viewport rows. Only the visible terminal requests rendered frames;
+store work and terminal processing stay on workers. This remains a host-only diagnostic frontend,
+not the shipping Mac sidebar or a public extension surface. Graphical restoration across app
+restarts is available through explicit `--attach STORE SOCKET TERMINAL_UUID` and through selection
+in the project browser; automatic restoration is still missing. Attach validates
+store membership on a worker, adopts the daemon grid without resizing the child, suppresses query
+responses for the announced replay byte prefix and marks cut history. Input and frames remain
+gated until replay completes; old or invalid peers fail explicitly under an attach deadline.
+An integrated terminal failure stops only its client and remains navigable as a failed entry;
+returning to projects preserves other runtimes. Revisiting does not silently retry. The failed
+view waits on native events and bounds its diagnostic text before drawing. The standalone
+terminal diagnostic still exits nonzero on failure.
+Explicit replacement is a separate project action. Once a spawn send is attempted, the runtime
+assumes a child may exist until a matching exit or definitive refusal proves otherwise. A missing
+reply, disconnect, write failure or `alreadyExists` refusal cannot authorize a replacement. The
+host creates a fresh durable record only after admission and preserves prior record counts while
+replacing one cache entry; it never kills a child as a side effect of this action.
 
 The session record's runtime handoff helpers live in `Core/Agent/ConversationHandoffRuntime.swift`.
 Its stored provenance and validation remain in `Models/AgentSession.swift`, so compiling those
