@@ -1620,3 +1620,25 @@ title deadline after the daemon had spawned it. Inspected `out/project-terminal-
 saved rows, the newest selected terminal, shortcut hint and persisted-ID prefixes are visible in
 the real X11 window. Automatic restoration, live store updates, exact graphical detach seeds and
 full scrollback reconstruction remain unfinished. No Linux test process remains active.
+
+## 59. A saved agent session can reopen in the native terminal window
+
+`WindowHarness --attach-agent STORE SOCKET SESSION_UUID` now resolves a persisted `AgentSession`
+under the store lock and attaches its `agentSession` daemon identity. The existing graphical
+terminal pipeline handles bounded replay, renderer activation, input, resize and exit; it does
+not create another durable record. The previous `--attach` path still resolves only project
+terminals. This is a host-only diagnostic entry point, not a public extension component or a
+shipping agent-session browser. The host owns store validation, process and PTY authority, and
+the window remains presentation only.
+
+The real-daemon/Xvfb fixture launches a managed Codex session through the shared login-shell
+plan using an explicit test executable, stops the CLI client, then opens the saved identity in
+the native window. It checks the original child PID, cut-history title, adopted 80×24 grid,
+no attachment resize, live keyboard input, exit status 9 and unchanged persisted listing. An
+unknown valid session UUID is refused. The focused fixture passed. `WindowHarness` and the daemon
+built on Linux; the existing focused project-terminal reattachment fixture also passed its
+same-child, grid, replay-query, live-input, exit and malformed-peer checks. The vendored
+production files remained byte-identical. The complete window suite
+passed its earlier native window, keyboard and terminal checks but stopped in the pre-existing
+project-navigation fixture before reaching this new case: the fixture missed the return-to-projects
+title deadline after the terminal frame had rendered. No Mac source changed in this slice.

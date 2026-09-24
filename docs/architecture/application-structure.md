@@ -120,7 +120,9 @@ project and the UI mounts only viewport rows. Only the visible terminal requests
 store work and terminal processing stay on workers. This remains a host-only diagnostic frontend,
 not the shipping Mac sidebar or a public extension surface. Graphical restoration across app
 restarts is available through explicit `--attach STORE SOCKET TERMINAL_UUID` and through selection
-in the project browser; automatic restoration is still missing. Attach validates
+in the project browser. A saved agent session has the same terminal renderer through explicit
+`--attach-agent STORE SOCKET SESSION_UUID`; the host validates the agent record and keeps its typed
+daemon identity. Automatic restoration is still missing. Attach validates
 store membership on a worker, adopts the daemon grid without resizing the child, suppresses query
 responses for the announced replay byte prefix and marks cut history. Input and frames remain
 gated until replay completes; old or invalid peers fail explicitly under an attach deadline.

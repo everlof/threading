@@ -53,6 +53,12 @@ struct WindowHarness {
                 try showAttachment(args)
                 return
             }
+            if CommandLine.arguments.dropFirst().first == "--attach-agent" {
+                let args = Array(CommandLine.arguments.dropFirst(2))
+                guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach-agent STORE SOCKET SESSION_UUID") }
+                try showAttachment(args, agent: true)
+                return
+            }
             if CommandLine.arguments.dropFirst().first == "--terminal" {
                 try showTerminal(Array(CommandLine.arguments.dropFirst(2)))
                 return
@@ -158,14 +164,15 @@ struct WindowHarness {
         _ = try runTerminal(session, window: window, width: 800, height: 528, allowsProjects: false)
     }
 
-    @MainActor static func showAttachment(_ args: [String]) throws {
+    @MainActor static func showAttachment(_ args: [String], agent: Bool = false) throws {
         guard let window = tw_open("Threading terminal - attaching", 800, 528) else {
             throw WindowFailure(String(cString: tw_error()))
         }
         defer { tw_close(window) }
         let session = GraphicalTerminal()
         defer { session.stop() }
-        session.attach(store: args[0], socket: args[1], terminalID: args[2])
+        if agent { session.attachAgent(store: args[0], socket: args[1], sessionID: args[2]) }
+        else { session.attach(store: args[0], socket: args[1], terminalID: args[2]) }
         _ = try runTerminal(session, window: window, width: 800, height: 528, allowsProjects: false)
     }
 

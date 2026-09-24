@@ -88,11 +88,18 @@ final class GraphicalTerminal: @unchecked Sendable {
         return link
     }
     func attach(store: String, socket: String, terminalID: String) {
+        attach(store: store, socket: socket, savedID: terminalID, kind: .terminal)
+    }
+    func attachAgent(store: String, socket: String, sessionID: String) {
+        attach(store: store, socket: socket, savedID: sessionID, kind: .agent)
+    }
+    private enum SavedKind { case terminal, agent }
+    private func attach(store: String, socket: String, savedID: String, kind: SavedKind) {
         worker.async { [self] in
             do {
                 attaching = true
                 lock.lock(); spawnMayBeLive = true; lock.unlock()
-                let id = try Self.storedTerminal(store: store, terminalID: terminalID)
+                let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind)
                 identity = id
                 let link = try connect(socket: socket)
                 try link.attach(PTYHostAttach(id: id))
@@ -103,8 +110,10 @@ final class GraphicalTerminal: @unchecked Sendable {
             } catch { fail(error) }
         }
     }
-    private static func storedTerminal(store: String, terminalID: String) throws -> PTYHostSessionIdentity {
-        guard let uuid = UUID(uuidString: terminalID) else { throw WindowFailure("invalid terminal identity") }
+    private static func storedIdentity(store: String, savedID: String, kind: SavedKind) throws -> PTYHostSessionIdentity {
+        guard let uuid = UUID(uuidString: savedID) else {
+            throw WindowFailure(kind == .agent ? "invalid session UUID" : "invalid terminal identity")
+        }
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
         guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
@@ -114,11 +123,21 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
-        let id = TerminalID(uuid)
-        guard try database.load().state.projects.contains(where: { $0.terminals.contains(where: { $0.id == id }) }) else {
-            throw WindowFailure("terminal is not in this store")
+        let projects = try database.load().state.projects
+        switch kind {
+        case .terminal:
+            let id = TerminalID(uuid)
+            guard projects.contains(where: { $0.terminals.contains(where: { $0.id == id }) }) else {
+                throw WindowFailure("terminal is not in this store")
+            }
+            return PTYHostSessionIdentity(.projectTerminal(id))
+        case .agent:
+            let id = SessionID(uuid)
+            guard projects.contains(where: { $0.sessions.contains(where: { $0.id == id }) }) else {
+                throw WindowFailure("session is not in this store")
+            }
+            return .agentSession(id)
         }
-        return PTYHostSessionIdentity(.projectTerminal(id))
     }
     private func receiveOutput(_ data: Data) {
         if attaching {

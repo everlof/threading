@@ -364,14 +364,18 @@ uncertain child ownership refuse replacement; a lost connection is not proof of 
 
 ### Reopen a graphical terminal by its saved identity
 
-After closing its original window, obtain the terminal UUID with `LinuxHost STORE SOCKET list`:
+After closing its original window or CLI client, obtain the saved terminal or agent-session UUID
+with `LinuxHost STORE SOCKET list`:
 
 ```bash
 WindowHarness --attach /path/to/experimental-store /path/to/ptyd.sock TERMINAL_UUID
+WindowHarness --attach-agent /path/to/experimental-store /path/to/ptyd.sock SESSION_UUID
 ```
 
-This validates that the terminal belongs to the store, attaches the existing daemon child and
-adopts its grid by sizing the window. It creates no terminal record and sends no initial resize.
+The second command opens a saved agent session created by `LinuxHost codex` in the same native
+terminal window. Each command validates that its typed identity belongs to the store, attaches
+the existing daemon child and adopts its grid by sizing the window. Neither command creates a
+record or sends an initial resize.
 Historical terminal queries are parsed without sending replies; input and rendering begin only
 after the announced replay bytes have arrived. A cut replay remains marked `[history cut]` in
 the window title. A missing/invalid boundary or incomplete replay fails explicitly, with a
