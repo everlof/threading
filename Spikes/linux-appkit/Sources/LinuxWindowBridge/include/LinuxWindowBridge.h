@@ -14,7 +14,7 @@ void tw_close(TWWindow *);
 // Terminal mode keeps Escape/arrows as input. Timed waits let the UI present coalesced frames.
 void tw_terminal_mode(TWWindow *);
 // Optional host navigation: kind 8 activates/returns, 9 requests a fresh terminal,
-// 10/11 drill in/back, and 12 is keyboard cancel.
+// 10/11 drill in/back, 12 is keyboard cancel, 13 requests a fresh managed agent.
 void tw_project_navigation(TWWindow *, int enabled);
 void tw_project_mode(TWWindow *);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);

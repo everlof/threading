@@ -36,6 +36,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var running = false
     private var closed = false
     private var createdTerminal = false
+    private var createdAgent = false
     private var spawnMayBeLive = false
     private var finished = false
     private var initialViewport: (Int, Int)?
@@ -59,20 +60,42 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let id = try Self.createTerminal(store: store, directory: directory, executable: executable)
                 identity = id
                 lock.lock(); createdTerminal = true; lock.unlock()
-                var environment = AgentEnvironment.removingInheritedIdentity(from: ProcessInfo.processInfo.environment)
-                environment["TERM"] = "xterm-256color"
-                environment["COLORTERM"] = "truecolor"
-                environment["LANG"] = environment["LANG"] ?? "C.UTF-8"
                 // Once send is attempted, failure cannot prove that the daemon did not spawn.
                 lock.lock(); spawnMayBeLive = true; lock.unlock()
                 try link.spawn(PTYHostSpawnRequest(id: id, channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24)),
                     executable: executable, arguments: arguments,
-                    environment: environment.map { "\($0.key)=\($0.value)" }, cwd: directory))
+                    environment: Self.launchEnvironment(), cwd: directory))
             } catch { fail(error) }
         }
     }
-    private func connect(socket: String) throws -> PTYHostClient {
-        emulator = try PTYEmulator(columns: 80, rows: 24) { [weak self] data in
+    func startAgent(store: String, socket: String, directory: String, shell: String,
+                    codex: String, id: SessionID, width: Int, height: Int) {
+        worker.async { [self] in
+            do {
+                let columns = max(2, width / 10), rows = max(1, height / 22)
+                let link = try connect(socket: socket, columns: columns, rows: rows)
+                let plan = try Self.createAgent(store: store, directory: directory,
+                                                shell: shell, codex: codex, id: id)
+                let identity = PTYHostSessionIdentity.agentSession(id)
+                self.identity = identity
+                lastWidth = width; lastHeight = height
+                lock.lock(); createdAgent = true; spawnMayBeLive = true; lock.unlock()
+                try link.spawn(PTYHostSpawnRequest(id: identity,
+                    channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
+                    executable: plan.executable, arguments: plan.arguments,
+                    environment: Self.launchEnvironment(), cwd: directory))
+            } catch { fail(error) }
+        }
+    }
+    private static func launchEnvironment() -> [String] {
+        var environment = AgentEnvironment.removingInheritedIdentity(from: ProcessInfo.processInfo.environment)
+        environment["TERM"] = "xterm-256color"
+        environment["COLORTERM"] = "truecolor"
+        environment["LANG"] = environment["LANG"] ?? "C.UTF-8"
+        return environment.map { "\($0.key)=\($0.value)" }
+    }
+    private func connect(socket: String, columns: Int = 80, rows: Int = 24) throws -> PTYHostClient {
+        emulator = try PTYEmulator(columns: columns, rows: rows) { [weak self] data in
             do { try self?.client?.sendInput(data) } catch { self?.fail(error) }
         }
         let link = PTYHostClient(socketPath: socket, build: "linux-native-window", events: .init(
@@ -173,6 +196,46 @@ final class GraphicalTerminal: @unchecked Sendable {
         try database.save(state)
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
+    private static func createAgent(store: String, directory: String, shell: String,
+                                    codex: String, id: SessionID) throws -> AgentLaunchPlan {
+        guard shell.hasPrefix("/"), codex.hasPrefix("/") else {
+            throw WindowFailure("shell and Codex executable must be absolute paths")
+        }
+        let folder = URL(fileURLWithPath: directory).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw WindowFailure("project directory does not exist")
+        }
+        let root = URL(fileURLWithPath: store, isDirectory: true)
+        let file = root.appendingPathComponent("threading.db")
+        guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
+        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
+        defer { Glibc.close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let database = try ProjectDatabase(url: file)
+        defer { database.close() }
+        var state = try database.load().state
+        guard let projectIndex = state.projects.firstIndex(where: { $0.folderPath == folder.path }) else {
+            throw WindowFailure("project is not in this store")
+        }
+        guard !state.projects.contains(where: { $0.sessions.contains(where: { $0.id == id }) }) else {
+            throw WindowFailure("session identity already exists")
+        }
+        guard var session = AgentSessionCreation.makeRecord(kind: .codex,
+                                                            permissionMode: .manual, id: id) else {
+            throw WindowFailure("unsupported session configuration")
+        }
+        let (command, resumeState) = CodexLaunchCommand.terminal(executable: codex, model: nil,
+            permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: nil)
+        session.resumeState = resumeState
+        let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
+            shellPath: shell, resumeState: resumeState)
+        state.projects[projectIndex].sessions.append(session)
+        state.selectedSessionID = session.id
+        try database.save(state)
+        return plan
+    }
     private func received(_ frame: PTYHostFrame) {
         switch frame {
         case .attached(let value):
@@ -271,6 +334,10 @@ final class GraphicalTerminal: @unchecked Sendable {
     var hasCreatedTerminal: Bool {
         lock.lock(); defer { lock.unlock() }
         return createdTerminal
+    }
+    var hasCreatedAgent: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return createdAgent
     }
     var canReplace: Bool {
         lock.lock(); defer { lock.unlock() }

@@ -18,9 +18,9 @@ struct ProjectSnapshot: Sendable {
     let id: String
     let name: String
     let path: String
-    let sessions: Int
+    var sessions: Int
     let terminalCount: Int
-    let recentAgents: [SavedRuntime]
+    var recentAgents: [SavedRuntime]
     let recentTerminals: [SavedRuntime]
 }
 struct WindowFailure: Error, CustomStringConvertible {
@@ -41,7 +41,7 @@ func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: St
 
 @main
 struct WindowHarness {
-    private static let maximumOpenTerminals = 8
+    private static let maximumOpenRuntimes = 8
     private static let maximumSelectableAgentsPerProject = 512
     private static let maximumSelectableTerminalsPerProject = 512
     private static let maximumPersistedRuntimeTitleScalars = 256
@@ -90,6 +90,15 @@ struct WindowHarness {
                 }
                 let projects = try await Task.detached { try loadSnapshot(args[0]) }.value
                 try show(projects, launch: args)
+                return
+            }
+            if CommandLine.arguments.dropFirst().first == "--app-codex" {
+                let args = Array(CommandLine.arguments.dropFirst(2))
+                guard args.count == 4, args[2].hasPrefix("/"), args[3].hasPrefix("/") else {
+                    throw WindowFailure("usage: WindowHarness --app-codex EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX")
+                }
+                let projects = try await Task.detached { try loadSnapshot(args[0]) }.value
+                try show(projects, launch: Array(args.prefix(3)), agentExecutable: args[3])
                 return
             }
             guard CommandLine.arguments.count == 2 else { throw WindowFailure("usage: WindowHarness EXISTING_STORE") }
@@ -284,13 +293,45 @@ struct WindowHarness {
         print("FAILURE_FRAME \(width)x\(height)"); fflush(nil)
     }
 
-    @MainActor static func show(_ projects: [ProjectSnapshot], launch: [String]? = nil) throws {
+    @MainActor private static func reconcilePendingAgents(
+        projects: inout [ProjectSnapshot],
+        runtimes: inout [SavedRuntimeKey: GraphicalTerminal],
+        pending: inout [String: Int],
+        retainedProjects: inout Set<String>
+    ) -> Bool {
+        var changed = false
+        for (id, projectIndex) in Array(pending) {
+            let key = SavedRuntimeKey.agent(id)
+            guard let runtime = runtimes[key] else { pending.removeValue(forKey: id); continue }
+            if runtime.hasCreatedAgent {
+                projects[projectIndex].sessions += 1
+                projects[projectIndex].recentAgents.insert(.init(id: id, title: "codex"), at: 0)
+                if projects[projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
+                    projects[projectIndex].recentAgents.removeLast()
+                }
+                retainedProjects.insert(projects[projectIndex].id)
+                pending.removeValue(forKey: id)
+                changed = true
+            } else if runtime.canReplace {
+                runtime.stop()
+                runtimes.removeValue(forKey: key)
+                pending.removeValue(forKey: id)
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    @MainActor static func show(_ initialProjects: [ProjectSnapshot], launch: [String]? = nil,
+                                agentExecutable: String? = nil) throws {
+        var projects = initialProjects
         guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
             throw WindowFailure(String(cString: tw_error()))
         }
         defer { tw_close(window) }
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
+        var pendingAgentProjects: [String: Int] = [:]
         var restoredProjectIDs: Set<String> = []
         var previousTerminalCounts: [String: Int] = [:]
         defer {
@@ -302,6 +343,9 @@ struct WindowHarness {
         var savedSelected = 0, savedFirst = 0
         var dirty = true
         while true {
+            if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
+                                      pending: &pendingAgentProjects,
+                                      retainedProjects: &restoredProjectIDs) { dirty = true }
             let count = max(1, (height / 2 - 32) / 24)
             if let savedPicker {
                 let project = projects[savedPicker.projectIndex]
@@ -345,8 +389,13 @@ struct WindowHarness {
                     if launch != nil {
                         root.title = width >= 700 ? "Projects - Enter: shell; Left: agents; Right: terminals" : "Projects - Enter: shell"
                     }
+                    if agentExecutable != nil {
+                        root.title = width >= 700 ? "Enter: shell; Left/Right: saved; C-S-A: new Codex" : "Ctrl+Shift+A: new Codex"
+                    }
                     if !projects.isEmpty, terminals[projects[selected].id]?.canReplace == true {
-                        root.title = width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Left/Right: saved" : "Ctrl+Shift+N: new"
+                        root.title = agentExecutable == nil
+                            ? (width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Left/Right: saved" : "Ctrl+Shift+N: new")
+                            : (width >= 700 ? "Enter: view; C-S-N: shell; C-S-A: Codex" : "C-S-N: shell; C-S-A: Codex")
                     }
                     end = min(projects.count, first + count)
                     for index in first..<end {
@@ -430,8 +479,8 @@ struct WindowHarness {
                     let session: GraphicalTerminal
                     if let existing = restoredRuntimes[key] { session = existing }
                     else {
-                        guard terminals.count + restoredRuntimes.count < maximumOpenTerminals else {
-                            tw_title(window, "Threading experiment - limit of \(maximumOpenTerminals) open terminals")
+                        guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                            tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                             break
                         }
                         session = GraphicalTerminal()
@@ -454,8 +503,8 @@ struct WindowHarness {
                 let session: GraphicalTerminal
                 if let existing = terminals[project.id] { session = existing }
                 else {
-                    guard terminals.count + restoredRuntimes.count < maximumOpenTerminals else {
-                        tw_title(window, "Threading experiment - limit of \(maximumOpenTerminals) open terminals")
+                    guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                        tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
                     }
                     session = GraphicalTerminal()
@@ -480,14 +529,33 @@ struct WindowHarness {
                     existing.stop()
                     terminals.removeValue(forKey: project.id)
                 }
-                guard terminals.count + restoredRuntimes.count < maximumOpenTerminals else {
-                    tw_title(window, "Threading experiment - limit of \(maximumOpenTerminals) open terminals")
+                guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                    tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
                 }
                 let session = GraphicalTerminal()
                 terminals[project.id] = session
                 session.start(store: launch[0], socket: launch[1], directory: project.path,
                               executable: launch[2], arguments: Array(launch.dropFirst(3)))
+                guard let size = try runTerminal(session, window: window, width: width, height: height,
+                                                 allowsProjects: true) else { return }
+                width = size.0; height = size.1
+                tw_project_mode(window)
+                dirty = true
+            case 13:
+                guard savedPicker == nil, let launch, let agentExecutable, !projects.isEmpty else { break }
+                guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                    tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                    break
+                }
+                let id = SessionID()
+                let savedID = String(describing: id)
+                let session = GraphicalTerminal()
+                restoredRuntimes[.agent(savedID)] = session
+                pendingAgentProjects[savedID] = selected
+                session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
+                                   shell: launch[2], codex: agentExecutable, id: id,
+                                   width: width, height: height)
                 guard let size = try runTerminal(session, window: window, width: width, height: height,
                                                  allowsProjects: true) else { return }
                 width = size.0; height = size.1
@@ -518,8 +586,13 @@ struct WindowHarness {
                     savedPicker = nil
                     dirty = true
                 } else if launch != nil, !projects.isEmpty {
+                    if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
+                                              pending: &pendingAgentProjects,
+                                              retainedProjects: &restoredProjectIDs) { dirty = true }
                     guard !projects[selected].recentAgents.isEmpty else {
-                        tw_title(window, "Threading experiment - no saved agents")
+                        let pending = pendingAgentProjects.values.contains(selected)
+                        tw_title(window, pending ? "Threading experiment - agent starting"
+                                                 : "Threading experiment - no saved agents")
                         break
                     }
                     savedPicker = .agents(selected)
