@@ -95,7 +95,7 @@ an explicit Live-only registration, a revoked pairing, or a request that both pr
 carries a new registration cannot reuse the old binding. Older clients omit the preservation
 request and retain their original registration behavior.
 
-`notify_user` and the Test Notification tab share `RequestedNotificationCommandService`. A send
+`notify_user` and the Push Test tab share `RequestedNotificationCommandService`. A send
 from the tab is a new request: it allocates a fresh event identity and rechecks current recipient
 permissions, Remote Access, and live or push targets. An opaque `target_ref` is resolved again on
 every send, so an expired reference fails rather than silently falling back to the chat; the tab

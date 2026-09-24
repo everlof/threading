@@ -1,6 +1,6 @@
 import Foundation
 
-/// The latest requested notification in each chat, kept so the Test Notification tab can show
+/// The latest requested notification in each chat, kept so the Push Test tab can show
 /// what was sent, how it ended, and send it again.
 ///
 /// Recording is all an agent's `notify_user` does to the interface. It never opens, selects or
@@ -17,7 +17,7 @@ final class NotificationTestLedger {
     enum Origin: Equatable {
       /// An agent's `notify_user` call.
       case agent
-      /// A send from the Test Notification tab.
+      /// A send from the Push Test tab.
       case person
     }
 

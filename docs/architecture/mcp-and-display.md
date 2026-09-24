@@ -110,12 +110,18 @@ limits and receipt truth. There is no additional UI surface or replaceable clipb
 version selected and revealed a Push Test tab on every call; because `notify_user` is the ordinary
 "tell me when it is done" tool, that moved the panel off the Simulator, browser or theme document
 the person was using each time an agent finished. So an agent's request never opens, selects or
-reveals anything. A **Test Notification** tab that is already open refreshes in place, and one
+reveals anything. A **Push Test** tab that is already open refreshes in place, and one
 with unsent edits keeps them and only reports the result.
 
 A person opens the tab through the panel command (`panel.notificationTest`: the **+** menu, View,
-the command palette, whose detail line makes it findable as "notification"); Remote Access
-settings point at it rather than growing a second sender. It starts from the ledger's latest
+the command palette, whose detail line makes it findable as "test notification"); Remote Access
+settings point at it rather than growing a second sender. The name is sized to the strip: the
+tab was "Test Notification" for one commit, and under Cyberpunk, Vaporwave and TUI that
+truncated at the 180pt chip cap and ran past the edge of a 420pt panel holding the Simulator tab
+beside it. Beside "iOS Simulator" in every stock theme the budget is about eleven characters, so
+it is **Push Test** — the name the tab was first given — and the search vocabulary lives in the
+detail line instead. `NotificationTestPaneTests` checks the pair fits, untruncated, in every stock
+theme. It starts from the ledger's latest
 record. `NotificationTestHosting` is the tab's only dependency, implemented by the tool
 coordinator, so a send goes through `RequestedNotificationCommandService` exactly as
 `notify_user` does — fresh event identity, fresh `target_ref` lookup, current consent. Recipient

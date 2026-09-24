@@ -3257,9 +3257,10 @@ this chat, or a named member. Open sessions show the device-aware live roster an
 typing…** without locking anyone out of a composer; the iPhone exposes separate switches for
 both indicators.
 
-**Test Notification** sends a notification from a chat so you can see how it arrives. Open it
+**Push Test** sends a notification from a chat so you can see how it arrives. Open it
 from the **+** in the chat's display panel, from **View**, or by searching the command palette for
-“notification”; **Settings → Remote Access → Notification Delivery** points to it too. It starts
+“test notification”; **Settings → Remote Access → Notification Delivery** points to it too. It
+tests the Mac as well as the iPhone, whatever the name says. It starts
 from the chat's latest request — an agent's `notify_user` call or your own last test — with its
 title, message and delivery (**iPhone**, **This Mac** or **iPhone and Mac**), and shows how that
 request ended. Edit anything and choose **Send Test**, or press **⌘↩** anywhere in the form. A

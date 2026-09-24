@@ -1071,7 +1071,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             SettingsUI.detailRow(
                 symbol: "bell.badge",
                 title: "Test a notification",
-                detail: "Choose Test Notification from the + in a chat’s panel.",
+                detail: "Choose Push Test from the + in a chat’s panel.",
                 help: HelpTopic(
                     title: L10n.string("Test a notification"),
                     paragraphs: [

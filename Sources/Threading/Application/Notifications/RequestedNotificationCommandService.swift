@@ -3,7 +3,7 @@ import ThreadingRemoteKit
 
 /// Where a requested notification may go.
 ///
-/// One vocabulary for the `notify_user` argument, the Test Notification tab's picker and the
+/// One vocabulary for the `notify_user` argument, the Push Test tab's picker and the
 /// service that acts on both, so the tab cannot offer a destination the tool would read
 /// differently. Declared in the order the picker lists them.
 enum RequestedNotificationDelivery: String, CaseIterable, Equatable, Sendable {
@@ -56,7 +56,7 @@ struct RequestedMacNotification: Sendable {
   let destination: RemoteNotificationDestinationDTO
 }
 
-/// The one validated delivery path for `notify_user` and the Test Notification tab.
+/// The one validated delivery path for `notify_user` and the Push Test tab.
 ///
 /// A resend from the tab is a new request: it takes a fresh event identity, resolves its
 /// `target_ref` again, and rechecks recipient consent, Remote Access and the live and push

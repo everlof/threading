@@ -164,6 +164,13 @@ final class ThemedTabStripView: NSView {
 
     private var chipsByID: [UUID: Chip] = [:]
     private var orderedIDs: [UUID] = []
+
+    /// The selected tab the strip last scrolled into view, and the one it still owes a scroll.
+    /// Kept so the strip reveals a tab when the *selection* changes and never on the updates in
+    /// between — a browser retitling its tab re-renders the strip constantly, and a strip that
+    /// re-revealed on each would drag the row back from wherever the person scrolled it.
+    private var revealedActiveID: UUID?
+    private var pendingRevealID: UUID?
     private var contextMenuSession: AnyObject?
 
     /// Fades the strip's clipped edge instead of cutting a tab off mid-label.
@@ -313,6 +320,12 @@ final class ThemedTabStripView: NSView {
                     at: min(index, stack.arrangedSubviews.count)
                 )
             }
+        }
+
+        let activeID = items.first(where: \.isActive)?.id
+        if activeID != revealedActiveID {
+            pendingRevealID = activeID
+            revealedActiveID = activeID
         }
 
         invalidateIntrinsicContentSize()
@@ -545,7 +558,36 @@ final class ThemedTabStripView: NSView {
     override func layout() {
         applyMetrics()
         super.layout()
+        revealPendingSelection()
         updateFade()
+    }
+
+    /// Scrolls a newly selected tab wholly into view.
+    ///
+    /// The strip scrolls rather than shrinking, and nothing moved it when the selection did: a
+    /// tab opened or chosen past the clipped edge stayed there, its title cut and its × sliced in
+    /// half by the edge — under a wide monospace theme, a 420pt panel holding the Simulator and
+    /// one more tab was enough. The reveal reaches the fade's length past the tab, because a tab
+    /// scrolled exactly to the edge still has content beyond it and the fade would lie over the
+    /// × it was meant to uncover. Scrolling is minimal: a tab already in view does not move.
+    private func revealPendingSelection() {
+        guard let id = pendingRevealID, drag == nil, let chip = chipsByID[id] else { return }
+        scrollView.layoutSubtreeIfNeeded()
+        let clip = scrollView.contentView.bounds
+        guard clip.width > 0 else { return }
+        pendingRevealID = nil
+
+        let tab = chip.arranged.frame
+        let target = tab.insetBy(dx: -Self.fadeLength, dy: 0)
+            .intersection(NSRect(origin: .zero, size: stack.frame.size))
+        var originX = clip.minX
+        if target.maxX > clip.maxX { originX = target.maxX - clip.width }
+        if target.minX < originX { originX = target.minX }
+        let maximumX = max(0, stack.frame.width - clip.width)
+        originX = min(max(0, originX), maximumX)
+        guard abs(originX - clip.minX) > 0.5 else { return }
+        scrollView.contentView.scroll(to: NSPoint(x: originX, y: clip.minY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func applyMetrics() {

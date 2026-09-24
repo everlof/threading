@@ -304,7 +304,7 @@ final class PaneTab {
     case .simulator:
       return L10n.string("iOS Simulator")
     case .notificationTest:
-      return L10n.string("Test Notification")
+      return L10n.string("Push Test")
     case .extensionPanel(let panel):
       return panel.panelTitle
     case .compare:

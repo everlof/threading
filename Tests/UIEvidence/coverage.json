@@ -341,7 +341,7 @@
       "kind": "surface",
       "status": "implemented",
       "priority": "important",
-      "title": "Test Notification pane",
+      "title": "Push Test pane",
       "description": "The chat's latest notify_user request and its result beside the real conversation, window chrome, and display-panel shell.",
       "states": ["Filled in from an agent's request", "Queued result", "Refused result wrapped at panel width", "Shared chat with recipient and tap-target rows"],
       "matrix": {

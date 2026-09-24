@@ -1,7 +1,7 @@
 import AppKit
 import ThreadingRemoteKit
 
-/// What a Test Notification tab needs from its window: the one validated send, who in the chat
+/// What a Push Test tab needs from its window: the one validated send, who in the chat
 /// could be chosen, what an agent's link still opens, and the chat's latest request.
 @MainActor
 protocol NotificationTestHosting: AnyObject {

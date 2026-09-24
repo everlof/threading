@@ -5,7 +5,7 @@ import ThreadingRemoteKit
 extension AgentToolCoordinator {
   // MARK: Requested Notifications
 
-  /// Sends a requested notification and records the attempt for the chat's Test Notification
+  /// Sends a requested notification and records the attempt for the chat's Push Test
   /// tab. Recording is the whole of its effect on the window: the tab is not opened, selected or
   /// revealed, so an agent announcing finished work never moves the panel away from what the
   /// person is looking at. A tab that is already open refreshes in place.

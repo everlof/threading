@@ -114,7 +114,8 @@ final class NotificationTestPaneTests: HostedStoreTestCase {
   }
 
   func testABlankTabIsSetToTheOwnersIPhone() throws {
-    let controller = try loadedController(for: SessionID(), host: FakeNotificationTestHost())
+    let host = FakeNotificationTestHost()
+    let controller = try loadedController(for: SessionID(), host: host)
 
     XCTAssertEqual(controller.draft, NotificationTestDefaults.blankDraft)
     XCTAssertFalse(controller.showsRecipientChoice)
@@ -122,6 +123,7 @@ final class NotificationTestPaneTests: HostedStoreTestCase {
     XCTAssertEqual(controller.statusMessage, "")
     let message = try control(NotificationTestIdentifiers.message, as: PromptView.self, in: controller)
     XCTAssertEqual(message.textAccessibilityLabel, NotificationTestStrings.messageCaption)
+    XCTAssertNil(host.notificationTests.latest(for: controller.sessionID))
   }
 
   // MARK: - Sending
@@ -295,13 +297,77 @@ final class NotificationTestPaneTests: HostedStoreTestCase {
       shortcut: nil, origin: .builtIn, scope: .session, risk: .ordinary,
       availability: .available, nextInput: nil, shortcutEditable: true
     )
-    for query in ["notification", "test", "iphone"] {
+    for query in ["test notification", "notification", "push", "iphone"] {
       XCTAssertEqual(
         HostCommandSearch.results(in: [descriptor], matching: query).map(\.id),
         [command.id],
         query
       )
     }
+  }
+
+  /// The tab is named for the room it gets, not the menu: under a wide monospace theme the
+  /// first name, "Test Notification", truncated at the chip's cap and pushed past the edge of a
+  /// panel holding the Simulator beside it. 420pt is the width the panel's evidence is reviewed
+  /// at, narrower than the 440 it opens at.
+  func testPushTestFitsBesideTheSimulatorInEveryStockThemeWithoutScrolling() throws {
+    let previous = AppThemePalette.current
+    defer { AppThemePalette.set(previous) }
+    for theme in [AppTheme.system] + AppThemeLibrary.stock {
+      AppThemePalette.set(theme)
+      let sessionID = SessionID()
+      let pane = DisplayPaneController()
+      let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 420, height: 400),
+        styleMask: [.borderless], backing: .buffered, defer: true
+      )
+      window.isReleasedWhenClosed = false
+      window.contentViewController = pane
+      window.setContentSize(NSSize(width: 420, height: 400))
+      pane.showSession(sessionID)
+      pane.addContentTab(
+        DisplayContent(body: .html("<p></p>"), title: L10n.string("iOS Simulator"), subtitle: ""),
+        for: sessionID
+      )
+      pane.activateNotificationTest(for: sessionID)
+      AppThemeRefresh.repaint(pane.view)
+      pane.view.layoutSubtreeIfNeeded()
+      pane.view.layoutSubtreeIfNeeded()
+
+      let strip = try XCTUnwrap(find(ThemedTabStripView.self, in: pane.view))
+      let clip = try XCTUnwrap(find(ThemedScrollView.self, in: strip)).contentView
+      let row = try XCTUnwrap(clip.documentView)
+      XCTAssertLessThanOrEqual(row.frame.width, clip.bounds.width + 0.5, theme.name)
+      let tab = try XCTUnwrap(
+        strip.subviewsRecursively(ofType: ThemedTabItemView.self)
+          .first { $0.title == L10n.string("Push Test") },
+        theme.name
+      )
+      let title = try XCTUnwrap(tab.subviewsRecursively(ofType: MorphingTitleLabel.self).first)
+      XCTAssertGreaterThanOrEqual(
+        title.frame.width, title.intrinsicContentSize.width - 0.5, "\(theme.name) truncated"
+      )
+    }
+  }
+
+  /// Only the display panel adopts this tab — the drawer takes terminals and browsers, a
+  /// detached window shared browsers — so the one lookup in `activateNotificationTest` is the
+  /// whole of what keeps a chat to a single Push Test tab.
+  func testTheTabCannotLeaveTheDisplayPanelSoItStaysSingle() throws {
+    let sessionID = SessionID()
+    let pane = DisplayPaneController()
+    let first = try XCTUnwrap(pane.activateNotificationTest(for: sessionID))
+    let tab = try XCTUnwrap(pane.tabs(for: sessionID).first { $0.notificationTest != nil })
+    let drawer = DrawerHostViewController(
+      directoryProvider: { _ in URL(fileURLWithPath: NSTemporaryDirectory()) },
+      loadPanel: { _ in nil },
+      persistDrawer: { _, _, _, _ in }
+    )
+
+    XCTAssertFalse(drawer.canAdopt(tab))
+    XCTAssertFalse(DetachedBrowserHostViewController.canHold(tab))
+    XCTAssertTrue(pane.activateNotificationTest(for: sessionID) === first)
+    XCTAssertEqual(pane.tabs(for: sessionID).filter { $0.notificationTest != nil }.count, 1)
   }
 
   // MARK: - Persistence
@@ -389,6 +455,15 @@ final class NotificationTestPaneTests: HostedStoreTestCase {
   private func find<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
     if let match = view as? T { return match }
     return view.subviews.lazy.compactMap { self.find(type, in: $0) }.first
+  }
+}
+
+private extension NSView {
+  func subviewsRecursively<T: NSView>(ofType type: T.Type) -> [T] {
+    subviews.flatMap { view -> [T] in
+      let own = (view as? T).map { [$0] } ?? []
+      return own + view.subviewsRecursively(ofType: type)
+    }
   }
 }
 

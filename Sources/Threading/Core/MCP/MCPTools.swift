@@ -3239,7 +3239,7 @@ enum MCPTools {
         target another chat or replace the normal final response in the conversation. Pass \
         target_ref from a display, Browser, or panel tool to make a tap open that attachment or \
         live surface; omit it to open the chat itself. The user can review and resend the \
-        latest request from Test Notification in this chat's panel.
+        latest request from Push Test in this chat's panel.
         """,
       inputSchema: MCPInputSchema(
         properties: [

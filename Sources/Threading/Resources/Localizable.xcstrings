@@ -11122,6 +11122,17 @@
         }
       }
     },
+    "Choose Push Test from the + in a chat’s panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj Testnotis från + i en chatts panel."
+          }
+        }
+      }
+    },
     "Choose Simulator" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11129,17 +11140,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj simulator"
-          }
-        }
-      }
-    },
-    "Choose Test Notification from the + in a chat’s panel." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Välj Testnotis från + i en chatts panel."
           }
         }
       }
@@ -34357,6 +34357,17 @@
         }
       }
     },
+    "Push Test" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testnotis"
+          }
+        }
+      }
+    },
     "Push a React design system to claude.ai/design" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40115,17 +40126,6 @@
         }
       }
     },
-    "Send a notification from this chat to the Mac or iPhone" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skicka en notis från den här chatten till Macen eller iPhonen"
-          }
-        }
-      }
-    },
     "Send a subagent off with your full context" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40133,6 +40133,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka i väg en underagent med hela ditt sammanhang"
+          }
+        }
+      }
+    },
+    "Send a test notification from this chat to the Mac or iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka en testnotis från den här chatten till Macen eller iPhonen"
           }
         }
       }
@@ -45359,17 +45370,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Testa villkor"
-          }
-        }
-      }
-    },
-    "Test Notification" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Testnotis"
           }
         }
       }

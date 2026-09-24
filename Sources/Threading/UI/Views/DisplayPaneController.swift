@@ -501,7 +501,7 @@ final class DisplayPaneController: NSViewController {
   /// The real window routes through the host plane; standalone fixtures use the same panel
   /// operation without needing to construct an application delegate.
   var onInvokePanelCommand: ((String) -> Void)?
-  /// Sends, and remembers, what a Test Notification tab asks for. In the app this is the
+  /// Sends, and remembers, what a Push Test tab asks for. In the app this is the
   /// window's tool coordinator, so a test send takes the same validated path as `notify_user`.
   weak var notificationTestHost: NotificationTestHosting?
 
@@ -1631,7 +1631,7 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Public — Notification Test Tab
 
-  /// Opens this chat's Test Notification tab, creating it the first time. A person asked for
+  /// Opens this chat's Push Test tab, creating it the first time. A person asked for
   /// it — from the `+` menu, the View menu or the command palette — so it is selected; an
   /// agent's `notify_user` only records its request in the host's ledger and never calls this.
   ///

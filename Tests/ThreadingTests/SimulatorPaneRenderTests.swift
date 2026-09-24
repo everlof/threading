@@ -130,7 +130,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
     }
 
-    /// The Test Notification tab beside the same conversation, in the states a person meets:
+    /// The Push Test tab beside the same conversation, in the states a person meets:
     /// filled in from an agent's request in each theme, a refused request, and a shared chat
     /// whose agent linked an attachment — the one case that shows the recipient and tap rows.
     func testRendersNotificationTestInRightPanel() throws {
@@ -631,7 +631,7 @@ private final class SimulatorPaneRenderStreamSession:
     func stop() { continuation.finish() }
 }
 
-/// Answers the Test Notification tab for a render: who is in the chat and what a link opens are
+/// Answers the Push Test tab for a render: who is in the chat and what a link opens are
 /// the fixture's choice, and nothing is sent.
 @MainActor
 private final class RenderNotificationTestHost: NotificationTestHosting {

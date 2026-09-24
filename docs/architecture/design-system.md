@@ -3801,7 +3801,7 @@ for `stackedControlRow`.
 
 `SubmissionStatusView` reported its sentence as one line of intrinsic width at the label's default
 horizontal compression resistance, which outranks a window holding its size (priority 500). In a
-sheet sized to its content nobody noticed; in the display panel a Test Notification refusal —
+sheet sized to its content nobody noticed; in the display panel a Push Test refusal —
 "No opted-in phone has a live connection or usable push registration…" — widened the panel from
 420pt to about 1,100pt and squeezed the conversation beside it, in a render whose every other
 assertion passed. The label now yields its width (`.defaultLow`) and `layout()` states the column
@@ -3810,3 +3810,15 @@ it got as `preferredMaxLayoutWidth`, the same wrap-at-the-width-you-have rule
 pane with room allow more than a sheet's three lines. `SubmissionStatusViewTests` fails without
 the change (728pt in a 320pt column, one line), and the notification render asserts the panel
 keeps its width.
+
+## 2026-09-24 — The strip scrolls a newly selected tab into view
+
+`ThemedTabStripView` scrolls rather than shrinking its tabs, and nothing moved it when the
+selection did. A tab opened or chosen past the clipped edge stayed there, title cut and its ×
+sliced in half by the edge. Under Cyberpunk a 420pt display panel holding the Simulator tab and
+one more was enough, and a render caught it where no assertion looked. The strip now reveals the
+selected tab when the selection *changes*, reaching the fade's length past it so the edge fade
+cannot lie over the × it uncovered. It moves the row minimally, and not at all for a tab already
+in view. It does not re-reveal on the other updates: a browser retitling its tab re-renders the
+strip constantly, and a row that snapped back on each would undo every scroll the person made.
+`TabStripSelectionRevealTests` pins all three.

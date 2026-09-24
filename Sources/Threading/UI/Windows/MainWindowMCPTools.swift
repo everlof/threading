@@ -237,7 +237,7 @@ final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting 
   var extensionInstallDecision: ((ChoiceRequest, @escaping @MainActor (Int?) -> Void) -> Void)?
   let browserAccessStore = BrowserAccessStore()
   var temporaryBrowserOrigins: [SessionID: Set<BrowserOrigin>] = [:]
-  /// Each chat's latest requested notification, for its Test Notification tab.
+  /// Each chat's latest requested notification, for its Push Test tab.
   let notificationTests = NotificationTestLedger()
 
   convenience init(

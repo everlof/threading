@@ -549,7 +549,7 @@ Before adding a component:
 
 ## Notification testing
 
-The session-scoped Test Notification tab is deliberately host-only. Its entity is the current
+The session-scoped Push Test tab is deliberately host-only. Its entity is the current
 chat and the chat's latest `notify_user` request, held in memory. Threading owns recipient
 resolution, consent, notification preferences, target-reference scope and expiry, event identity,
 and delivery. Those rules cannot be replaced by extension presentation. The native themed tab is
