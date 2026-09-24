@@ -19,6 +19,21 @@ final class ProjectStoreMutationTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testProjectFolderSymlinkDoesNotCreateAnotherIdentity() throws {
+        let folder = directory.appendingPathComponent("checkout", isDirectory: true)
+        let alias = directory.appendingPathComponent("checkout-link", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: folder)
+
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        let first = try XCTUnwrap(store.addProject(folderURL: alias))
+        let second = try XCTUnwrap(store.addProject(folderURL: folder))
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(store.projects.count, 1)
+        XCTAssertEqual(first.folderPath, ProjectDirectory.canonicalURL(folder).path)
+    }
+
     func testDurableMutationsReportAppliedAndSurviveReopening() throws {
         let manager = StateManager(appSupportDirectory: directory)
         let store = ProjectStore(stateManager: manager, refusesWrites: false)

@@ -22,12 +22,22 @@ func launchEnvironment() -> [String] {
     return environment.map { "\($0.key)=\($0.value)" }
 }
 
+func projectDirectory(_ path: String) throws -> URL {
+    guard let folder = ProjectDirectory.existing(at: path) else {
+        throw HostFailure.refused("project directory does not exist")
+    }
+    return folder
+}
+
 func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
-    try check(args.count >= 3, "usage: LinuxHost STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT | attach-agent SESSION_UUID")
+    let addingProject = args.first == "--add-project"
+    try check(addingProject ? args.count == 3 : args.count >= 3,
+        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT | attach-agent SESSION_UUID")
+    let importFolder = addingProject ? try projectDirectory(args[2]) : nil
     // Establish the signal mask before database decoding can create worker threads.
-    let terminalControl: LocalTerminal? = args[2] == "list" ? nil : try LocalTerminal()
-    let root = URL(fileURLWithPath: args[0], isDirectory: true)
+    let terminalControl: LocalTerminal? = addingProject || args[2] == "list" ? nil : try LocalTerminal()
+    let root = URL(fileURLWithPath: args[addingProject ? 1 : 0], isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
                                            attributes: [.posixPermissions: 0o700])
     // One CLI writer per store; never silently reconcile against a concurrent host.
@@ -38,6 +48,14 @@ func run() throws -> Int32 {
     let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
     defer { database.close() }
     var state = try database.load().state
+    if let folder = importFolder {
+        if !state.projects.contains(where: { $0.folderPath == folder.path }) {
+            try database.addProject(Project(name: folder.lastPathComponent, folderURL: folder),
+                                    position: state.projects.count)
+        }
+        print(folder.path)
+        return 0
+    }
     if args[2] == "list" {
         for project in state.projects {
             print("\(project.id)\t\(project.folderPath)")
@@ -56,7 +74,7 @@ func run() throws -> Int32 {
     if args[2] == "codex" {
         try check(args.count == 7, "codex requires DIRECTORY SHELL CODEX_EXECUTABLE PROMPT")
         try check(args[4].hasPrefix("/") && args[5].hasPrefix("/"), "shell and Codex executable must be absolute paths")
-        let folder = URL(fileURLWithPath: args[3]).standardizedFileURL
+        let folder = try projectDirectory(args[3])
         // The same fresh-record admission/defaults as macOS. This host has no model/effort
         // override and starts read-only/manual rather than inheriting a permissive CLI default.
         guard var session = AgentSessionCreation.makeRecord(kind: .codex, permissionMode: .manual) else {
@@ -99,7 +117,7 @@ func run() throws -> Int32 {
         try check((args[2] == "run" && args.count >= 5) || (login && args.count >= 6),
                   "run requires DIRECTORY EXECUTABLE; login-run requires DIRECTORY SHELL EXECUTABLE")
         let executableIndex = login ? 5 : 4
-        let folder = URL(fileURLWithPath: args[3]).standardizedFileURL
+        let folder = try projectDirectory(args[3])
         try check(args[4].hasPrefix("/"), "direct executable or login shell must be an absolute path")
         let plan: AgentLaunchPlan
         if login {

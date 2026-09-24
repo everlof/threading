@@ -27,6 +27,45 @@ for attempt in $(seq 1 100); do
 done
 [[ -S "$fixture/pty.sock" ]]
 timeout 30 "$(swift build --show-bin-path)/PortablePTYClientHarness" "$fixture/pty.sock"
+mkdir "$fixture/imported"
+ln -s "$fixture/imported" "$fixture/imported-link"
+"$host" --add-project "$fixture/import-store" "$fixture/imported-link" >"$fixture/import-path"
+[[ $(cat "$fixture/import-path") == "$fixture/imported" ]]
+"$host" --add-project "$fixture/import-store" "$fixture/imported" >/dev/null
+"$host" "$fixture/import-store" "$fixture/missing.sock" list >"$fixture/import-list"
+[[ $(grep -c "$fixture/imported" "$fixture/import-list") -eq 1 ]]
+[[ $(grep -c '^  ' "$fixture/import-list" || true) -eq 0 ]]
+if "$host" --add-project "$fixture/invalid-import" "$fixture/absent" >"$fixture/refusal" 2>&1; then
+  echo 'host imported an absent directory' >&2; exit 1
+fi
+[[ ! -e "$fixture/invalid-import" ]]
+if flock "$fixture/import-store/host.lock" "$host" --add-project "$fixture/import-store" "$fixture/project" >"$fixture/refusal" 2>&1; then
+  echo 'host imported through a competing store lock' >&2; exit 1
+fi
+"$host" "$fixture/import-store" "$fixture/pty.sock" run "$fixture/imported-link" /bin/true </dev/null
+"$host" "$fixture/import-store" "$fixture/missing.sock" list >"$fixture/import-after-run"
+[[ $(grep -c "$fixture/imported" "$fixture/import-after-run") -eq 1 ]]
+[[ $(grep -c '^  ' "$fixture/import-after-run") -eq 1 ]]
+python3 - "$fixture/import-store/threading.db" "$fixture/standing-project.json" <<'PY'
+import json, sqlite3, sys
+db, receipt = sys.argv[1:]
+with sqlite3.connect(db) as connection:
+    project_id, data = connection.execute('SELECT id, data FROM project').fetchone()
+    payload = json.loads(data)
+    payload['futureProjectField'] = 'retain without rewriting'
+    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    connection.execute('UPDATE project SET data = ? WHERE id = ?', (encoded, project_id))
+open(receipt, 'w').write(encoded)
+PY
+"$host" --add-project "$fixture/import-store" "$fixture/project" >/dev/null
+python3 - "$fixture/import-store/threading.db" "$fixture/standing-project.json" <<'PY'
+import sqlite3, sys
+db, receipt = sys.argv[1:]
+with sqlite3.connect(db) as connection:
+    rows = connection.execute('SELECT data FROM project ORDER BY position').fetchall()
+assert len(rows) == 2 and rows[0][0] == open(receipt).read(), 'project import rewrote a standing row'
+PY
+echo 'PASS offline incremental project import, symlink identity, refusals and untouched standing rows'
 printf 'from-input\n' | timeout 20 "$host" "$fixture/store" "$fixture/pty.sock" run "$fixture/project" /bin/sh -c \
   'test -t 0 && test -t 1 || exit 91; read value; printf "PTY:%s\\n" "$value"; pwd; stty size' >"$fixture/output"
 cat "$fixture/output"

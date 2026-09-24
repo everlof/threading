@@ -137,7 +137,12 @@ same `AgentSessionCreation`, `CodexLaunchCommand` and `AgentLaunchPlan` policies
 uses, then sends an `agentSession` spawn with the window's actual initial grid. Store membership,
 nonblocking lock ownership, record persistence and launch admission remain host-owned; the UI
 publishes the new identity into its bounded saved-agent snapshot only after persistence.
-The visible experiment has no agent-account or model picker and does not resume dormant records.
+The visible experiment has no agent-account or model picker. It resumes a dormant Codex record
+only after finding its exact provider rollout in the standard account and checking the known
+mixed-ordinal failure; named accounts and other providers are still unsupported. A source-tree
+Linux launcher can import an existing project into the same durable store without a daemon,
+then start or reuse the daemon before opening this window. The import uses the same canonical
+project-directory identity as macOS, so a symlink spelling does not create a second project.
 Explicit replacement is a separate project action. Once a spawn send is attempted, the runtime
 assumes a child may exist until a matching exit or definitive refusal proves otherwise. A missing
 reply, disconnect, write failure or `alreadyExists` refusal cannot authorize a replacement. The

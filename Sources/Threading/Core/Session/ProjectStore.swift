@@ -180,7 +180,7 @@ final class ProjectStore {
     /// is one. Returns the existing project if the folder was already added.
     @discardableResult
     func addProject(folderURL: URL) -> Project? {
-        let normalizedPath = folderURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let normalizedPath = ProjectDirectory.canonicalURL(folderURL).path
 
         if let existing = projects.first(where: { $0.folderPath == normalizedPath }) {
             return existing
