@@ -25,7 +25,9 @@ def title(expected):
 
 
 def key(value):
-    assert xdo('windowfocus', window, 'key', value).returncode == 0
+    # X11 focus changes are asynchronous. Wait until this window owns focus before sending
+    # the key, otherwise XTest can deliver it to the previous surface under a slow VM.
+    assert xdo('windowfocus', '--sync', window, 'key', '--delay', '50', value).returncode == 0
 
 
 def terminal_count():

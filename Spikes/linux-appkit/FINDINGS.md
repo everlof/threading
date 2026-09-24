@@ -1642,3 +1642,29 @@ production files remained byte-identical. The complete window suite
 passed its earlier native window, keyboard and terminal checks but stopped in the pre-existing
 project-navigation fixture before reaching this new case: the fixture missed the return-to-projects
 title deadline after the terminal frame had rendered. No Mac source changed in this slice.
+
+## 60. The project window can navigate saved agent identities
+
+Left from a project now opens its persisted agent sessions, newest first; Right keeps the
+saved-terminal picker. Both use a fixed initial store snapshot, at most 512 identities per kind
+and project, and viewport-only row construction. Their retained runtimes share the existing
+eight-entry ceiling and use typed agent/terminal cache keys so an equal UUID cannot cross the
+identity boundary. Enter on an agent attaches its persisted `agentSession` identity using the
+same replay and native terminal path as explicit `--attach-agent`. Ctrl+Shift+P returns to the
+same picker and selection. No new child or durable record is created by navigation. This is a
+host-only diagnostic presentation; process, identity, membership and input authority stay with
+the host. Starting or resuming a dormant agent from the window is still unfinished.
+
+The real-daemon/Xvfb fixture stores an older exited Codex session and a newer live one, closes
+the CLI client, then exercises the standalone attach and project-window picker. It checks the
+newest selection, Down/Up movement between distinct IDs, same child PID, replay, live input,
+exit 9, return navigation, and unchanged store listing. The inspected `out/agent-picker.png`
+shows two rows with the newer one selected. The existing saved-terminal picker fixture passed
+against the same rebuilt window.
+
+The full `window-smoke.sh` run passed all renderer, client, native navigation, replacement,
+picker, replay and refusal checks. Two earlier full runs had missed different keys in the older
+project-navigation fixture after X11 focus changes, with no following selection frame. That
+fixture now waits for `xdotool windowfocus --sync` before delivering each key and uses a 50 ms
+key delay; this is a test-stimulus change, not product event handling. The subsequent complete
+run passed the previously failing journey and both pickers. Mac product source was unchanged.

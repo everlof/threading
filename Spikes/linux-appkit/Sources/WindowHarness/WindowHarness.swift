@@ -11,7 +11,7 @@ import LinuxWindowBridge
 // Diagnostic platform harness, not a second product sidebar. It reuses the existing specimen
 // drawing and the production font while the native window/event transport is brought up.
 struct ProjectSnapshot: Sendable {
-    struct Terminal: Sendable {
+    struct SavedRuntime: Sendable {
         let id: String
         let title: String
     }
@@ -20,7 +20,8 @@ struct ProjectSnapshot: Sendable {
     let path: String
     let sessions: Int
     let terminalCount: Int
-    let recentTerminals: [Terminal]
+    let recentAgents: [SavedRuntime]
+    let recentTerminals: [SavedRuntime]
 }
 struct WindowFailure: Error, CustomStringConvertible {
     let description: String
@@ -41,8 +42,27 @@ func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: St
 @main
 struct WindowHarness {
     private static let maximumOpenTerminals = 8
+    private static let maximumSelectableAgentsPerProject = 512
     private static let maximumSelectableTerminalsPerProject = 512
-    private static let maximumPersistedTerminalTitleScalars = 256
+    private static let maximumPersistedRuntimeTitleScalars = 256
+
+    private enum SavedPicker {
+        case agents(Int)
+        case terminals(Int)
+
+        var projectIndex: Int {
+            switch self { case .agents(let index), .terminals(let index): return index }
+        }
+        var isAgent: Bool {
+            if case .agents = self { return true }
+            return false
+        }
+    }
+
+    private enum SavedRuntimeKey: Hashable {
+        case agent(String)
+        case terminal(String)
+    }
 
     @MainActor static func main() async {
         do {
@@ -99,13 +119,18 @@ struct WindowHarness {
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
         return try database.load().state.projects.map { project in
+            let agents = project.sessions.suffix(maximumSelectableAgentsPerProject).reversed().map {
+                ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
+                    title: String(($0.title.isEmpty ? $0.kind.rawValue : $0.title).unicodeScalars
+                        .prefix(maximumPersistedRuntimeTitleScalars)))
+            }
             let terminals = project.terminals.suffix(maximumSelectableTerminalsPerProject).reversed().map {
-                ProjectSnapshot.Terminal(id: String(describing: $0.id),
-                    title: String($0.displayTitle.unicodeScalars.prefix(maximumPersistedTerminalTitleScalars)))
+                ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
+                    title: String($0.displayTitle.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)))
             }
             return ProjectSnapshot(id: String(describing: project.id), name: project.name,
                 path: project.folderPath, sessions: project.sessions.count,
-                terminalCount: project.terminals.count, recentTerminals: terminals)
+                terminalCount: project.terminals.count, recentAgents: agents, recentTerminals: terminals)
         }
     }
 
@@ -265,24 +290,25 @@ struct WindowHarness {
         }
         defer { tw_close(window) }
         var terminals: [String: GraphicalTerminal] = [:]
-        var restoredTerminals: [String: GraphicalTerminal] = [:]
+        var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
         var restoredProjectIDs: Set<String> = []
         var previousTerminalCounts: [String: Int] = [:]
         defer {
             for terminal in terminals.values { terminal.stop() }
-            for terminal in restoredTerminals.values { terminal.stop() }
+            for terminal in restoredRuntimes.values { terminal.stop() }
         }
         var width = 800, height = 480, selected = 0, first = 0
-        var terminalProject: Int?
-        var terminalSelected = 0, terminalFirst = 0
+        var savedPicker: SavedPicker?
+        var savedSelected = 0, savedFirst = 0
         var dirty = true
         while true {
             let count = max(1, (height / 2 - 32) / 24)
-            if let projectIndex = terminalProject {
-                let terminalCount = projects[projectIndex].recentTerminals.count
-                terminalSelected = max(0, min(terminalCount - 1, terminalSelected))
-                if terminalSelected < terminalFirst { terminalFirst = terminalSelected }
-                if terminalSelected >= terminalFirst + count { terminalFirst = terminalSelected - count + 1 }
+            if let savedPicker {
+                let project = projects[savedPicker.projectIndex]
+                let savedCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
+                savedSelected = max(0, min(savedCount - 1, savedSelected))
+                if savedSelected < savedFirst { savedFirst = savedSelected }
+                if savedSelected >= savedFirst + count { savedFirst = savedSelected - count + 1 }
             } else {
                 selected = max(0, min(projects.count - 1, selected))
                 if selected < first { first = selected }
@@ -293,31 +319,34 @@ struct WindowHarness {
                 let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
                 let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
                 let end: Int
-                if let projectIndex = terminalProject {
-                    let project = projects[projectIndex]
-                    let saved = project.recentTerminals
-                    root.title = width >= 700 ? "Saved terminals - Enter: open; Left/Esc: back" : "Saved terminals - Enter: open"
-                    end = min(saved.count, terminalFirst + count)
-                    for index in terminalFirst..<end {
-                        let terminal = saved[index]
+                if let savedPicker {
+                    let project = projects[savedPicker.projectIndex]
+                    let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
+                    root.title = savedPicker.isAgent
+                        ? (width >= 700 ? "Saved agents - Enter: open; Left/Esc: back" : "Saved agents - Enter: open")
+                        : (width >= 700 ? "Saved terminals - Enter: open; Left/Esc: back" : "Saved terminals - Enter: open")
+                    end = min(saved.count, savedFirst + count)
+                    for index in savedFirst..<end {
+                        let runtime = saved[index]
                         // The specimen face is ASCII. Make unsupported text visibly explicit rather
                         // than silently drawing a blank; real shaping remains a platform requirement.
-                        let display = String(terminal.title.prefix(68)).unicodeScalars.map {
+                        let display = String(runtime.title.prefix(68)).unicodeScalars.map {
                             $0.value >= 32 && $0.value <= 126 ? String($0) : "?"
                         }.joined()
-                        let identity = String(terminal.id.prefix(8))
-                        let text = "\(display) [\(identity)]\(restoredTerminals[terminal.id] == nil ? "" : " *")"
+                        let identity = String(runtime.id.prefix(8))
+                        let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
+                        let text = "\(display) [\(identity)]\(restoredRuntimes[key] == nil ? "" : " *")"
                         root.addSubview(Specimen.Row(frame: NSRect(x: 6,
-                            y: root.frame.height - 50 - CGFloat(index - terminalFirst) * 24,
+                            y: root.frame.height - 50 - CGFloat(index - savedFirst) * 24,
                             width: root.frame.width - 12, height: 22),
-                            text: text, accent: accent, selected: index == terminalSelected))
+                            text: text, accent: accent, selected: index == savedSelected))
                     }
                 } else {
                     if launch != nil {
-                        root.title = width >= 700 ? "Projects - Enter: shell; Right: saved terminals" : "Projects - Enter: shell"
+                        root.title = width >= 700 ? "Projects - Enter: shell; Left: agents; Right: terminals" : "Projects - Enter: shell"
                     }
                     if !projects.isEmpty, terminals[projects[selected].id]?.canReplace == true {
-                        root.title = width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Right: saved" : "Ctrl+Shift+N: new"
+                        root.title = width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Left/Right: saved" : "Ctrl+Shift+N: new"
                     }
                     end = min(projects.count, first + count)
                     for index in first..<end {
@@ -345,13 +374,15 @@ struct WindowHarness {
                     tw_present(window, $0.baseAddress, Int32(width), Int32(height))
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
-                if let projectIndex = terminalProject {
-                    let project = projects[projectIndex]
-                    let saved = project.recentTerminals
-                    tw_title(window, "Threading terminals - \(project.path)")
-                    let selectedID = saved.isEmpty ? "none" : saved[terminalSelected].id
-                    let capped = project.terminalCount > saved.count ? 1 : 0
-                    print("TERMINAL_PICKER_FRAME \(width)x\(height) mounted=\(end - terminalFirst) selected=\(selectedID) total=\(project.terminalCount) capped=\(capped)")
+                if let savedPicker {
+                    let project = projects[savedPicker.projectIndex]
+                    let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
+                    let total = savedPicker.isAgent ? project.sessions : project.terminalCount
+                    tw_title(window, "Threading \(savedPicker.isAgent ? "agents" : "terminals") - \(project.path)")
+                    let selectedID = saved.isEmpty ? "none" : saved[savedSelected].id
+                    let capped = total > saved.count ? 1 : 0
+                    let label = savedPicker.isAgent ? "AGENT_PICKER_FRAME" : "TERMINAL_PICKER_FRAME"
+                    print("\(label) \(width)x\(height) mounted=\(end - savedFirst) selected=\(selectedID) total=\(total) capped=\(capped)")
                 } else {
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
                     tw_title(window, title)
@@ -365,8 +396,8 @@ struct WindowHarness {
             switch event.kind {
             case 5: return
             case 12:
-                if terminalProject != nil {
-                    terminalProject = nil
+                if savedPicker != nil {
+                    savedPicker = nil
                     dirty = true
                 } else { return }
             case 1:
@@ -375,32 +406,42 @@ struct WindowHarness {
                 dirty = true
             case 2:
                 let y = Int(event.y) / 2
-                let listFirst = terminalProject == nil ? first : terminalFirst
-                let listCount = terminalProject.map { projects[$0].recentTerminals.count } ?? projects.count
+                let listFirst = savedPicker == nil ? first : savedFirst
+                let listCount: Int
+                if let savedPicker {
+                    let project = projects[savedPicker.projectIndex]
+                    listCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
+                } else { listCount = projects.count }
                 let candidate = listFirst + (y - 28) / 24
                 if event.x >= 12 && event.x < width - 12 && y >= 28 && (y - 28) % 24 < 22
                     && candidate < listCount && candidate < listFirst + count {
-                    if terminalProject == nil { selected = candidate }
-                    else { terminalSelected = candidate }
+                    if savedPicker == nil { selected = candidate }
+                    else { savedSelected = candidate }
                     dirty = true
                 }
             case 8:
                 guard let launch, !projects.isEmpty else { break }
-                if let projectIndex = terminalProject {
-                    let project = projects[projectIndex]
-                    guard !project.recentTerminals.isEmpty else { break }
-                    let terminal = project.recentTerminals[terminalSelected]
+                if let savedPicker {
+                    let project = projects[savedPicker.projectIndex]
+                    let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
+                    guard !saved.isEmpty else { break }
+                    let runtime = saved[savedSelected]
+                    let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                     let session: GraphicalTerminal
-                    if let existing = restoredTerminals[terminal.id] { session = existing }
+                    if let existing = restoredRuntimes[key] { session = existing }
                     else {
-                        guard terminals.count + restoredTerminals.count < maximumOpenTerminals else {
+                        guard terminals.count + restoredRuntimes.count < maximumOpenTerminals else {
                             tw_title(window, "Threading experiment - limit of \(maximumOpenTerminals) open terminals")
                             break
                         }
                         session = GraphicalTerminal()
-                        restoredTerminals[terminal.id] = session
+                        restoredRuntimes[key] = session
                         restoredProjectIDs.insert(project.id)
-                        session.attach(store: launch[0], socket: launch[1], terminalID: terminal.id)
+                        if savedPicker.isAgent {
+                            session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
+                        } else {
+                            session.attach(store: launch[0], socket: launch[1], terminalID: runtime.id)
+                        }
                     }
                     guard let size = try runTerminal(session, window: window, width: width, height: height,
                                                      allowsProjects: true) else { return }
@@ -413,7 +454,7 @@ struct WindowHarness {
                 let session: GraphicalTerminal
                 if let existing = terminals[project.id] { session = existing }
                 else {
-                    guard terminals.count + restoredTerminals.count < maximumOpenTerminals else {
+                    guard terminals.count + restoredRuntimes.count < maximumOpenTerminals else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenTerminals) open terminals")
                         break
                     }
@@ -428,7 +469,7 @@ struct WindowHarness {
                 tw_project_mode(window)
                 dirty = true
             case 9:
-                guard terminalProject == nil, let launch, !projects.isEmpty else { break }
+                guard savedPicker == nil, let launch, !projects.isEmpty else { break }
                 let project = projects[selected]
                 if let existing = terminals[project.id] {
                     guard existing.canReplace else {
@@ -439,7 +480,7 @@ struct WindowHarness {
                     existing.stop()
                     terminals.removeValue(forKey: project.id)
                 }
-                guard terminals.count + restoredTerminals.count < maximumOpenTerminals else {
+                guard terminals.count + restoredRuntimes.count < maximumOpenTerminals else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenTerminals) open terminals")
                     break
                 }
@@ -453,27 +494,37 @@ struct WindowHarness {
                 tw_project_mode(window)
                 dirty = true
             case 3, 4:
-                if let projectIndex = terminalProject {
-                    let saved = projects[projectIndex].recentTerminals
-                    let next = max(0, min(saved.count - 1, terminalSelected + (event.kind == 3 ? -1 : 1)))
-                    if next != terminalSelected { terminalSelected = next; dirty = true }
+                if let savedPicker {
+                    let project = projects[savedPicker.projectIndex]
+                    let savedCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
+                    let next = max(0, min(savedCount - 1, savedSelected + (event.kind == 3 ? -1 : 1)))
+                    if next != savedSelected { savedSelected = next; dirty = true }
                 } else {
                     let next = max(0, min(projects.count - 1, selected + (event.kind == 3 ? -1 : 1)))
                     if next != selected { selected = next; dirty = true }
                 }
             case 10:
-                guard terminalProject == nil, launch != nil, !projects.isEmpty else { break }
+                guard savedPicker == nil, launch != nil, !projects.isEmpty else { break }
                 guard !projects[selected].recentTerminals.isEmpty else {
                     tw_title(window, "Threading experiment - no saved terminals")
                     break
                 }
-                terminalProject = selected
-                terminalSelected = 0
-                terminalFirst = 0
+                savedPicker = .terminals(selected)
+                savedSelected = 0
+                savedFirst = 0
                 dirty = true
             case 11:
-                if terminalProject != nil {
-                    terminalProject = nil
+                if savedPicker != nil {
+                    savedPicker = nil
+                    dirty = true
+                } else if launch != nil, !projects.isEmpty {
+                    guard !projects[selected].recentAgents.isEmpty else {
+                        tw_title(window, "Threading experiment - no saved agents")
+                        break
+                    }
+                    savedPicker = .agents(selected)
+                    savedSelected = 0
+                    savedFirst = 0
                     dirty = true
                 }
             default: break

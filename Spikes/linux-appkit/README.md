@@ -330,7 +330,7 @@ is capped at 256 pending events (plus the executing event), with at most 32 UTF-
 event. Overflow is explicit. `terminal_keyboard_child.py` verifies the actual native key bytes
 while the child changes modes; a trailing text marker after keyup separates each mode transition.
 
-### Navigate projects and live terminals in one window
+### Navigate projects, saved agents and live terminals in one window
 
 With an existing experimental store and a running daemon:
 
@@ -342,15 +342,20 @@ Select a project with Up/Down or a click, then press Enter to open its shell. Ct
 returns to projects; Enter revisits that project's existing terminal, including its child and
 emulator state. Right opens the selected project's saved terminals, newest first. Up/Down or a
 click selects one and Enter attaches it; Left or Escape returns to projects. A star marks a
-terminal retained by this window. Alt+F4 closes the window, Escape closes from projects, and
-Escape remains terminal input while in a shell.
+terminal retained by this window. Left from projects opens saved agent sessions, also newest
+first; Enter attaches the selected agent through its own persisted identity. Both pickers retain
+their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window,
+Escape closes from projects, and Escape remains terminal input while in a shell.
+The agent picker reattaches daemon-held children; it does not yet launch or resume dormant agents.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
-terminals, and requests frames only for the visible terminal. It saves each new terminal through
-the production store before spawning through the production PTY client. The fixed initial snapshot
-projects at most the newest 512 saved identities per project into the picker and constructs only
-viewport rows. It does not restore any terminal automatically; explicit `--attach` is also
-available below.
+terminals and agents, and requests frames only for the visible terminal. It saves each new
+terminal through the production store before spawning through the production PTY client. The
+fixed initial snapshot
+projects at most the newest 512 agents and 512 terminals per project into their pickers and
+constructs only viewport rows. It does not restore any runtime automatically; explicit `--attach`
+and `--attach-agent` are also available below.
+
 The project catalogue is an initial snapshot plus this window's newly created terminal counts;
 external store changes are not live-synchronized. Closing the window disconnects its clients;
 the daemon continues to own children that are still running.
