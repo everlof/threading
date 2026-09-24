@@ -87,12 +87,15 @@ func run() throws -> Int32 {
         session.resumeState = resumeState
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: args[4], resumeState: resumeState)
-        let index: Int
-        if let existing = state.projects.firstIndex(where: { $0.folderPath == folder.path }) { index = existing }
-        else { state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder)); index = state.projects.count - 1 }
-        state.projects[index].sessions.append(session)
-        state.selectedSessionID = session.id
-        try database.save(state)
+        if let existing = state.projects.firstIndex(where: { $0.folderPath == folder.path }) {
+            let project = state.projects[existing]
+            try database.addSession(session, to: project.id, position: project.sessions.count,
+                                    selectNewSession: true)
+        } else {
+            let project = Project(name: folder.lastPathComponent, folderURL: folder)
+            try database.addProjectAndSession(project, session: session, position: state.projects.count,
+                                              selectNewSession: true)
+        }
         identity = .agentSession(session.id)
         try link.send(.spawn(PTYHostSpawnRequest(id: identity,
             channel: .pty(grid: localTerminal.grid ?? PTYHostGrid(cols: 80, rows: 24)),
@@ -129,16 +132,24 @@ func run() throws -> Int32 {
             plan = AgentLaunchPlan(executable: args[4], arguments: Array(args.dropFirst(5)), resumeState: .unavailable)
         }
         let index: Int
-        if let existing = state.projects.firstIndex(where: { $0.folderPath == folder.path }) { index = existing }
-        else {
+        let addedProject: Bool
+        if let existing = state.projects.firstIndex(where: { $0.folderPath == folder.path }) {
+            index = existing
+            addedProject = false
+        } else {
             state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder))
             index = state.projects.count - 1
+            addedProject = true
         }
         let terminal = ProjectTerminal(id: TerminalID(), title: URL(fileURLWithPath: args[executableIndex]).lastPathComponent,
             customTitle: nil, currentDirectory: folder.path, branch: nil, themeID: nil,
             soundOverrides: nil, createdAt: Date())
         state.projects[index].terminals.append(terminal)
-        try database.save(state)
+        if addedProject {
+            try database.addProject(state.projects[index], position: index)
+        } else {
+            try database.saveProject(state.projects[index], position: index)
+        }
         identity = PTYHostSessionIdentity(.projectTerminal(terminal.id))
         try link.send(.spawn(PTYHostSpawnRequest(id: identity, channel: .pty(grid: localTerminal.grid ?? PTYHostGrid(cols: 80, rows: 24)),
             executable: plan.executable, arguments: plan.arguments,
