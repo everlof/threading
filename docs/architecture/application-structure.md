@@ -131,6 +131,13 @@ An integrated terminal failure stops only its client and remains navigable as a 
 returning to projects preserves other runtimes. Revisiting does not silently retry. The failed
 view waits on native events and bounds its diagnostic text before drawing. The standalone
 terminal diagnostic still exits nonzero on failure.
+`WindowHarness --app-codex` adds an explicit absolute Codex executable to the project window.
+Ctrl+Shift+A creates a fresh selected-project Codex record on the terminal worker through the
+same `AgentSessionCreation`, `CodexLaunchCommand` and `AgentLaunchPlan` policies the CLI host
+uses, then sends an `agentSession` spawn with the window's actual initial grid. Store membership,
+nonblocking lock ownership, record persistence and launch admission remain host-owned; the UI
+publishes the new identity into its bounded saved-agent snapshot only after persistence.
+The visible experiment has no agent-account or model picker and does not resume dormant records.
 Explicit replacement is a separate project action. Once a spawn send is attempted, the runtime
 assumes a child may exist until a matching exit or definitive refusal proves otherwise. A missing
 reply, disconnect, write failure or `alreadyExists` refusal cannot authorize a replacement. The

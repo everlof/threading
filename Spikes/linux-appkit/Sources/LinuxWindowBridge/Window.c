@@ -140,6 +140,10 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 && (e.key.keysym.mod & KMOD_SHIFT) && !e.key.repeat) {
                 out->kind = 9; w->suppressActivation = SDLK_n;
             }
+            else if (e.key.keysym.sym == SDLK_a && (e.key.keysym.mod & KMOD_CTRL)
+                && (e.key.keysym.mod & KMOD_SHIFT) && !e.key.repeat) {
+                out->kind = 13; w->suppressActivation = SDLK_a;
+            }
             else if (e.key.keysym.sym == SDLK_UP) out->kind = 3;
             else if (e.key.keysym.sym == SDLK_DOWN) out->kind = 4;
             else if (e.key.keysym.sym == SDLK_RIGHT) out->kind = 10;

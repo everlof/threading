@@ -1668,3 +1668,34 @@ project-navigation fixture after X11 focus changes, with no following selection 
 fixture now waits for `xdotool windowfocus --sync` before delivering each key and uses a 50 ms
 key delay; this is a test-stimulus change, not product event handling. The subsequent complete
 run passed the previously failing journey and both pickers. Mac product source was unchanged.
+
+## 61. The Linux project window starts a managed Codex session
+
+`WindowHarness --app-codex STORE SOCKET ABS_SHELL ABS_CODEX` now accepts an explicit local Codex
+executable. Ctrl+Shift+A on a selected project creates a fresh `AgentSession` using the same
+production record, command and login-shell plan policies as `LinuxHost codex`. The graphical
+terminal worker reopens the store under its nonblocking lock, confirms the project still belongs
+to it, saves the selected record, then sends an `agentSession` spawn. It uses the window's actual
+cell grid at spawn rather than booting the TUI into a placeholder grid. The newly persisted
+identity joins this window's bounded saved-agent picker; selecting it reuses the retained
+emulator and child. A competing store owner refuses creation before a record or child appears.
+
+This adds a host-owned create action to the existing diagnostic project surface, not a new
+public extension component. The host retains project/identity checks, permission defaults,
+store ownership, process launch, input and exit truth if presentation later becomes customizable.
+The Linux mode has no account/model picker, provider transcript-ID discovery or dormant-session
+resume yet. Its real-daemon fixture uses an explicit test executable, so it verifies the managed
+command flags and terminal behavior without claiming an authenticated Codex login.
+
+The focused Docker/Xvfb journey passed: one Manual/read-only Codex record and selected ID,
+80×21 initial PTY, unchanged child PID on picker revisit, live input and exit 6, plus unchanged
+store contents after lock refusal. I inspected `out/agent-create-project.png` and
+`out/agent-create-picker.png` in the native window; the new command hint and retained agent row
+are visible. A focused rerun after the retained-project mark fix also passed; the inspected
+`out/agent-create-returned.png` shows the persisted agent count and retained-runtime star on the
+project row. The complete `window-smoke.sh` run passed before that final presentation fix. Its
+final-code rerun stopped before the new fixture in the older project-navigation test: the second
+rapid Up key did not produce an Alpha selection after the first selected Beta. Six subsequent
+isolated real-daemon/Xvfb runs of that older journey passed, and the focused agent-creation and
+lock-refusal journeys passed on final behavior. The loaded-suite key loss remains unresolved; a
+passing focused journey is not a full-suite result. No Mac product source changed.

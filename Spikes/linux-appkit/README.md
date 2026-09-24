@@ -336,29 +336,34 @@ With an existing experimental store and a running daemon:
 
 ```bash
 WindowHarness --app /path/to/experimental-store /path/to/ptyd.sock /bin/bash -l
+WindowHarness --app-codex /path/to/experimental-store /path/to/ptyd.sock /bin/bash /absolute/path/to/codex
 ```
 
 Select a project with Up/Down or a click, then press Enter to open its shell. Ctrl+Shift+P
 returns to projects; Enter revisits that project's existing terminal, including its child and
 emulator state. Right opens the selected project's saved terminals, newest first. Up/Down or a
 click selects one and Enter attaches it; Left or Escape returns to projects. A star marks a
-terminal retained by this window. Left from projects opens saved agent sessions, also newest
+runtime retained by this window. Left from projects opens saved agent sessions, also newest
 first; Enter attaches the selected agent through its own persisted identity. Both pickers retain
 their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window,
 Escape closes from projects, and Escape remains terminal input while in a shell.
-The agent picker reattaches daemon-held children; it does not yet launch or resume dormant agents.
+In `--app-codex` mode, Ctrl+Shift+A on a project creates a fresh managed Codex session with the
+shared Manual permission and read-only sandbox defaults, opens it in the same terminal window,
+and adds its saved identity to the agent picker. The picker reattaches daemon-held children;
+resuming a dormant agent record is still unfinished.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new
 terminal through the production store before spawning through the production PTY client. The
-fixed initial snapshot
-projects at most the newest 512 agents and 512 terminals per project into their pickers and
-constructs only viewport rows. It does not restore any runtime automatically; explicit `--attach`
-and `--attach-agent` are also available below.
+fixed initial snapshot projects at most the newest 512 agents and 512 terminals per project
+into their pickers and constructs only viewport rows. New agents created by this window join
+its in-memory catalogue after persistence. It does not restore any runtime automatically;
+explicit `--attach` and
+`--attach-agent` are also available below.
 
-The project catalogue is an initial snapshot plus this window's newly created terminal counts;
-external store changes are not live-synchronized. Closing the window disconnects its clients;
-the daemon continues to own children that are still running.
+The project catalogue is an initial snapshot plus this window's newly created terminal counts
+and agent sessions; external store changes are not live-synchronized. Closing the window
+disconnects its clients; the daemon continues to own children that are still running.
 
 A terminal launch or transport failure in `--app` stays on an unavailable view with its cause.
 Ctrl+Shift+P still returns to projects, and other retained terminals remain usable. Revisiting a
