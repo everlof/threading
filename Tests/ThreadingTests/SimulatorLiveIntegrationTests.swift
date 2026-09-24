@@ -140,4 +140,18 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
         try await session.sendInput(.button(.home))
         try await session.sendInput(.tap(x: 0.5, y: 0.5))
     }
+
+    /// The pane maps a wheel tick to this existing helper verb. Run with a scrollable app in the
+    /// foreground and compare simulator screenshots before and after to verify guest movement.
+    func testWheelTouchDragIsAcceptedByBootedSimulator() async throws {
+        let deviceID = try integrationDeviceID()
+        let coordinator = SimulatorLiveStreamCoordinator(maximumStreams: 1)
+        let session = try await coordinator.openStream(for: deviceID)
+        defer { session.stop() }
+        try await session.sendInput(.drag(
+            fromX: 0.5, fromY: 0.55,
+            toX: 0.5, toY: 0.37,
+            durationMilliseconds: 140
+        ))
+    }
 }

@@ -391,6 +391,9 @@ final class SimulatorPaneViewController: NSViewController {
         preview.onTouchBegan = { [weak self] point in self?.beginTouchStream(at: point) }
         preview.onTouchMoved = { [weak self] point in self?.moveTouchStream(to: point) }
         preview.onTouchEnded = { [weak self] point in self?.endTouchStream(at: point) }
+        preview.onScroll = { [weak self] point, deltaX, deltaY in
+            self?.scrollDevice(at: point, deltaX: deltaX, deltaY: deltaY)
+        }
         preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
         preview.onAddNote = { [weak self] point in self?.addNote(at: point) }
         preview.onSelectNote = { [weak self] id in self?.selectNote(id) }
@@ -1142,6 +1145,10 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func stopTransport() {
+        scrollGeneration += 1
+        scrollAuthorizationInFlight = false
+        scrollSession = nil
+        pendingScroll = .zero
         fallbackTask?.cancel()
         fallbackTask = nil
         fallbackGeneration += 1
@@ -1167,6 +1174,90 @@ final class SimulatorPaneViewController: NSViewController {
     private var touchStreamSession: (any SimulatorLiveStreamSession)?
     /// A move that arrived while `began` was still authorizing; sent once the session is captured.
     private var bufferedTouchMove: CGPoint?
+    private var scrollSession: (any SimulatorLiveStreamSession)?
+    private var pendingScroll: CGPoint = .zero
+    private var pendingScrollOrigin = CGPoint(x: 0.5, y: 0.5)
+    private var scrollAuthorizationInFlight = false
+    private var scrollGeneration = 0
+
+    /// One in-flight swipe consumes bounded accumulated deltas from the cursor's latest point.
+    /// The native SimulatorKit scroll packet acknowledged input but did not scroll the guest on
+    /// Xcode 26.5, and the mouse-target variant reset SpringBoard, so a wheel tick uses the
+    /// existing device touch-drag path that scrollable iOS views understand.
+    private func scrollDevice(at point: CGPoint, deltaX: Double, deltaY: Double) {
+        guard let device = lease?.device else { return }
+        guard effectiveControlDecision != false else { return }
+        guard deltaX.isFinite, deltaY.isFinite else { return }
+        let delta = CGPoint(
+            x: min(64, max(-64, deltaX)),
+            y: min(64, max(-64, deltaY))
+        )
+        guard delta != .zero else { return }
+        reconnectTransportForInputIfNeeded(on: device.id)
+        pendingScroll.x = min(64, max(-64, pendingScroll.x + delta.x))
+        pendingScroll.y = min(64, max(-64, pendingScroll.y + delta.y))
+        pendingScrollOrigin = point
+        guard !scrollAuthorizationInFlight else { return }
+        scrollAuthorizationInFlight = true
+        let generation = scrollGeneration
+        runAgentCommand { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.scrollGeneration == generation { self.scrollAuthorizationInFlight = false }
+            }
+            do {
+                let session: any SimulatorLiveStreamSession
+                if let cached = self.scrollSession,
+                   self.streamSession === cached,
+                   self.effectiveControlDecision == true {
+                    session = cached
+                } else {
+                    session = try await self.authorizedInputSession(for: device)
+                }
+                guard self.scrollGeneration == generation,
+                      self.lease?.device.id == device.id,
+                      self.streamSession === session,
+                      self.effectiveControlDecision == true else { return }
+                if self.controlActivity != .idle {
+                    self.controlActivity = .idle
+                    self.renderState()
+                }
+                self.scrollSession = session
+                while self.pendingScroll != .zero {
+                    let delta = self.pendingScroll
+                    let origin = self.pendingScrollOrigin
+                    self.pendingScroll = .zero
+                    try await session.sendInput(Self.wheelDrag(at: origin, delta: delta))
+                    guard self.scrollGeneration == generation,
+                          self.lease?.device.id == device.id,
+                          self.streamSession === session else { return }
+                }
+            } catch {
+                guard self.scrollGeneration == generation else { return }
+                self.pendingScroll = .zero
+                if self.effectiveControlDecision != false {
+                    self.controlActivity = .failed(error.localizedDescription)
+                    self.renderState()
+                }
+            }
+        }
+    }
+
+    private static func wheelDrag(at point: CGPoint, delta: CGPoint) -> SimulatorBridgeInput {
+        let horizontal = wheelDragAxis(origin: Double(point.x), lines: Double(delta.x))
+        let vertical = wheelDragAxis(origin: Double(point.y), lines: Double(delta.y))
+        return .drag(
+            fromX: horizontal.start, fromY: vertical.start,
+            toX: horizontal.end, toY: vertical.end,
+            durationMilliseconds: 140
+        )
+    }
+
+    private static func wheelDragAxis(origin: Double, lines: Double) -> (start: Double, end: Double) {
+        let distance = min(0.5, max(-0.5, lines * 0.06))
+        let start = min(0.95 - max(0, distance), max(0.05 - min(0, distance), origin))
+        return (start, start + distance)
+    }
 
     /// `began` authorizes once — asking for control and recovering a dropped transport, like a tap
     /// — and captures the live session, sent reliably (awaited). Moves then go through the session's
@@ -2258,6 +2349,7 @@ final class SimulatorPaneViewController: NSViewController {
     var screenInteractionStateForTesting: SimulatorScreenView.InteractionState {
         screenView.interactionState
     }
+    var screenViewForTesting: SimulatorScreenView { screenView }
     var statusForTesting: String { statusLabel.stringValue }
     var controlButtonForTesting: ThemedIconButton { controlButton }
     func performScreenPrimaryActionForTesting() -> Bool { screenView.performPrimaryAction() }

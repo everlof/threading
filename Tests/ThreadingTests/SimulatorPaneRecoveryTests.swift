@@ -7,6 +7,30 @@ import XCTest
 
 @MainActor
 final class SimulatorPaneRecoveryTests: XCTestCase {
+    func testMouseWheelUsesAuthorizedDirectInputSession() async throws {
+        let session = SimulatorRecoveryStreamSessionFake()
+        let controller = makeController(
+            control: SimulatorRecoveryControlFake(),
+            coordinator: SimulatorRecoveryStreamCoordinatorFake([.success(session)]),
+            inputAuthorizer: SimulatorRecoveryInputAuthorizerFake(initialDecision: true)
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+
+        controller.screenViewForTesting.onScroll?(CGPoint(x: 0.5, y: 0.5), 0, -3)
+        try await eventually { session.inputs.count == 1 }
+        guard case .drag(let fromX, let fromY, let toX, let toY, let duration) = session.inputs[0] else {
+            return XCTFail("The wheel did not use the device's touch-drag input.")
+        }
+        XCTAssertEqual(fromX, 0.5, accuracy: 0.001)
+        XCTAssertEqual(fromY, 0.5, accuracy: 0.001)
+        XCTAssertEqual(toX, 0.5, accuracy: 0.001)
+        XCTAssertEqual(toY, 0.32, accuracy: 0.001)
+        XCTAssertEqual(duration, 140)
+    }
+
     func testHelperCrashFallsBackInsideTheAdoptedPane() async throws {
         let session = SimulatorRecoveryStreamSessionFake()
         let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(session)])

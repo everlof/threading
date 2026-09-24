@@ -82,6 +82,41 @@ final class SimulatorScreenViewInspectorTests: XCTestCase {
         XCTAssertNil(view.annotationIndex(under: CGPoint(x: 100, y: 200)))
     }
 
+    func testMouseWheelSendsScrollDeltasOnlyWhenScreenAcceptsInput() throws {
+        let view = makeView()
+        let window = NSWindow(contentRect: view.bounds, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.contentView = view
+        window.setFrameOrigin(.zero)
+        view.interactionState = .ready(touch: true, keyboard: true)
+        var requests: [(point: CGPoint, delta: CGPoint)] = []
+        view.onScroll = { point, x, y in
+            requests.append((point, CGPoint(x: x, y: y)))
+        }
+
+        let wheel = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .line,
+            wheelCount: 2,
+            wheel1: 3,
+            wheel2: -2,
+            wheel3: 0
+        ))
+        wheel.flags = []
+        // CGEvent uses a top-left global origin; NSEvent exposes the corresponding AppKit point.
+        let screenTop = try XCTUnwrap(NSScreen.main).frame.maxY
+        wheel.location = CGPoint(x: 100, y: screenTop - 200)
+        let event = try XCTUnwrap(NSEvent(cgEvent: wheel))
+        view.scrollWheel(with: event)
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.point, CGPoint(x: 0.5, y: 0.5))
+        XCTAssertEqual(requests.first?.delta, CGPoint(x: -2, y: 3))
+
+        view.isAnnotatingNotes = true
+        view.scrollWheel(with: event)
+        XCTAssertEqual(requests.count, 1)
+    }
+
     func testTheInspectorOverlayRendersInBothAppearances() throws {
         for appearance in [NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)] {
             let view = makeView()

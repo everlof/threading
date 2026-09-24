@@ -2,6 +2,8 @@
 
 **Status:** draft, partly implemented. Phase 1 has shipped: Home/Lock/Side/Volume hardware buttons,
 continuous-touch panning (click-drag and trackpad scroll), and the input-latency rework below.
+Notched mouse wheels now become short touch drags through the consented helper session; the
+remaining precision-scroll fallback and momentum work below are still draft.
 Extends [`docs/architecture/simulator-pane.md`](../architecture/simulator-pane.md) (the in-panel iOS
 Simulator, its signed direct helper, and the Indigo HID input path) and the shared-memory frame
 transport. Prompted by the pane shipping with only tap / drag-swipe / typed text and no hardware

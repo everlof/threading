@@ -43,7 +43,10 @@ final class SimulatorScreenView: ThemedControl {
     var interactionState: InteractionState = .unavailable {
         didSet {
             guard interactionState != oldValue else { return }
-            if !interactionState.acceptsPointerRequests { cancelPointerGesture() }
+            if !interactionState.acceptsPointerRequests {
+                cancelPointerGesture()
+                endScrollGesture()
+            }
             updateAccessibilityContract()
             needsDisplay = true
         }
@@ -70,6 +73,7 @@ final class SimulatorScreenView: ThemedControl {
         didSet {
             guard annotations != oldValue else { return }
             if annotations.isEmpty { hoveredAnnotationIndex = nil }
+            else { endScrollGesture() }
             updateInspectionTracking()
             needsDisplay = true
         }
@@ -116,6 +120,7 @@ final class SimulatorScreenView: ThemedControl {
         didSet {
             guard isAnnotatingNotes != oldValue else { return }
             if !isAnnotatingNotes { hoveredNoteID = nil }
+            else { endScrollGesture() }
             updateInspectionTracking()
             refreshPointerClaims()
             needsDisplay = true
@@ -144,6 +149,9 @@ final class SimulatorScreenView: ThemedControl {
     var onTouchBegan: ((CGPoint) -> Void)?
     var onTouchMoved: ((CGPoint) -> Void)?
     var onTouchEnded: ((CGPoint) -> Void)?
+    /// Discrete mouse-wheel ticks at a point on the device. Trackpad panning keeps its continuous
+    /// touch route below.
+    var onScroll: ((CGPoint, Double, Double) -> Void)?
     var onText: ((String) -> Void)?
 
     private var pointerStart: (location: CGPoint, time: TimeInterval)?
@@ -533,12 +541,20 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        // Only precise (trackpad) scrolling drives panning; a notched mouse wheel falls through.
         guard isEnabled,
               !isAnnotatingNotes,
+              annotations.isEmpty,
               interactionState.acceptsPointerRequests,
-              event.hasPreciseScrollingDeltas else {
+              imageRect.contains(convert(event.locationInWindow, from: nil)) else {
             super.scrollWheel(with: event)
+            return
+        }
+        if !event.hasPreciseScrollingDeltas {
+            let deltaX = Double(event.scrollingDeltaX)
+            let deltaY = Double(event.scrollingDeltaY)
+            if (deltaX != 0 || deltaY != 0), let point = normalizedPoint(convert(event.locationInWindow, from: nil)) {
+                onScroll?(point, deltaX, deltaY)
+            }
             return
         }
         switch event.phase {
@@ -556,8 +572,7 @@ final class SimulatorScreenView: ThemedControl {
             scrollPoint = point
             onTouchMoved?(clampedNormalizedPoint(point))
         case .ended, .cancelled:
-            if let point = scrollPoint { onTouchEnded?(clampedNormalizedPoint(point)) }
-            scrollPoint = nil
+            endScrollGesture()
         default:
             // Momentum phases are left to a later increment (see the controls draft's arm64
             // momentum note); a scroll that never reported a begin phase is ignored.
@@ -674,6 +689,12 @@ final class SimulatorScreenView: ThemedControl {
         pointerStart = nil
         isStreamingTouch = false
         needsDisplay = true
+    }
+
+    private func endScrollGesture() {
+        guard let point = scrollPoint else { return }
+        scrollPoint = nil
+        onTouchEnded?(clampedNormalizedPoint(point))
     }
 
     private func updateAccessibilityContract() {

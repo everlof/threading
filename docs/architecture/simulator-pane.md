@@ -232,6 +232,13 @@ otherwise fails closed whenever the lease, consent, device identity or stream ge
 matches. This control/recovery truth remains host-owned even though its button, status and screen
 invitation use shared Design components.
 
+A notched mouse wheel over the framebuffer becomes a short touch drag through the authorized direct
+helper session. The pane bounds and coalesces wheel ticks while a drag or authorization is in
+flight, then drains them without an authorization round trip per tick. SimulatorKit's direct
+scroll HID packet acknowledged input on Xcode 26.5 but did not move iOS content; targeting its
+mouse route restarted SpringBoard. Precise two-finger trackpad scrolling keeps the existing
+continuous touch path. Annotation and inspector modes do not send either gesture to the device.
+
 ## Presentation and customization boundary
 
 This is a durable host-only surface. Threading owns device identity, lease lifecycle, consent,
