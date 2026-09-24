@@ -207,6 +207,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         dirty = true
     }
     private static func createTerminal(store: String, directory: String, executable: String) throws -> PTYHostSessionIdentity {
+        guard let folder = ProjectDirectory.existing(at: directory) else {
+            throw WindowFailure("project directory does not exist")
+        }
         let root = URL(fileURLWithPath: store, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
@@ -216,7 +219,6 @@ final class GraphicalTerminal: @unchecked Sendable {
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
         var state = try database.load().state
-        let folder = URL(fileURLWithPath: directory).standardizedFileURL
         let index: Int
         if let found = state.projects.firstIndex(where: { $0.folderPath == folder.path }) { index = found }
         else { state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder)); index = state.projects.count - 1 }
@@ -232,9 +234,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard shell.hasPrefix("/"), codex.hasPrefix("/") else {
             throw WindowFailure("shell and Codex executable must be absolute paths")
         }
-        let folder = URL(fileURLWithPath: directory).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        guard let folder = ProjectDirectory.existing(at: directory) else {
             throw WindowFailure("project directory does not exist")
         }
         let root = URL(fileURLWithPath: store, isDirectory: true)

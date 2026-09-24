@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
 mkdir -p out
-docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
+docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool imagemagick >/dev/null
@@ -41,6 +41,10 @@ for attempt in $(seq 1 100); do
   sleep .1
 done
 timeout 30 "$bin/PortablePTYClientHarness" "$fixture/pty.sock"
+if [[ "$THREADING_LINUX_STARTUP_ONLY" == 1 ]]; then
+  python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
+  exit 0
+fi
 for project in Alpha Beta Gamma; do
   mkdir "$fixture/$project"
   "$bin/LinuxHost" "$fixture/store" "$fixture/pty.sock" run "$fixture/$project" /bin/true </dev/null
@@ -192,6 +196,7 @@ python3 tests/project_terminal_picker_smoke.py "$bin/WindowHarness" "$bin/LinuxH
 python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
 python3 tests/agent_create_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
+python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
 
 if [[ "$THREADING_LINUX_TERMINAL_STRESS" == 1 ]]; then
   "$bin/WindowHarness" --terminal "$fixture/store" "$fixture/pty.sock" "$fixture/Alpha" /usr/bin/python3 "$PWD/tests/terminal_stress_child.py" >"$fixture/window.log" 2>&1 &

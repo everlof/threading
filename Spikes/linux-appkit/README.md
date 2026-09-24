@@ -51,7 +51,7 @@ project-graph slice and runs fifteen on-disk contracts:
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 44 production files are byte-identical to their sources. Fresh-session record assembly,
+The 45 production files are byte-identical to their sources. Fresh-session record assembly,
 launch values, account command routing and bounded Codex rollout checks are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
 agent runtime. The debug harness uses
@@ -69,6 +69,28 @@ page allocation rather than filling the host disk. Logs are `out/sqlite-build.lo
 model encoding, or the complete application's recovery path.
 
 ## Experimental Linux host
+
+### Start the native window from a clean Linux profile
+
+On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, and `flock` installed:
+
+```bash
+./run-app.sh /absolute/path/to/an/existing/project
+```
+
+The development launcher builds the two host executables and `threading-ptyd`, imports the
+canonical project directory into a local store, starts or reuses one background daemon, and opens
+the native project window. It keeps data under
+`${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
+`${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
+private to the user. If `codex` resolves to an absolute executable, the window also offers the
+managed Codex action. Set `THREADING_LINUX_CODEX=` to run the terminal-only mode, or set it to an
+absolute executable to choose a particular CLI. Closing the window leaves running children with
+the daemon; running the command again opens the same stored projects and can reattach them.
+
+This is a source-tree development entry point, not a packaged Linux release. The startup command,
+project import, store lock, daemon rendezvous and process ownership are host-owned; it publishes
+no new extension presentation surface. The native UI and provider limitations below still apply.
 
 `./host-smoke.sh` builds `LinuxHost` and the production `threading-ptyd` in an arm64 Linux
 container, then exercises a real shell through a PTY with an isolated store and daemon. Full

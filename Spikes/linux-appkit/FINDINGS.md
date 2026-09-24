@@ -1748,3 +1748,30 @@ The complete native Docker/Xvfb `window-smoke.sh` and headless `host-smoke.sh` s
 this route, including wrong-account and broken-rollout refusals. The focused macOS launch,
 rollout-identity and resume-health suite passed 40 tests. Both Linux suites use a fake provider,
 so an authenticated Codex resume remains unverified.
+
+## 64. A clean Linux profile can open a project and keep its terminal across window restarts
+
+The native window previously required an existing experimental database and an already-running
+PTY daemon, so the only path to its first project was a separate host command that also launched
+a shell. `LinuxHost --add-project STORE DIRECTORY` now imports an existing directory without a
+daemon or a terminal record. It canonicalizes symlinks with the same Foundation-only project path
+rule as the macOS `ProjectStore`, deduplicates by that durable path, and uses the existing
+nonblocking store lock. It inserts only the new project row and graph generation, preserving
+standing session and project payloads; missing directories refuse before creating a store.
+
+`run-app.sh DIRECTORY` is a source-tree Linux development entry point. It builds the existing
+host and native window, uses private XDG data/runtime directories, imports the project, then
+starts or reuses `threading-ptyd` under a startup lock before opening that same native window.
+Only the daemon replaces a stale socket. Closing the window leaves the daemon and its running
+children alive; running the command again reaches the saved terminal picker and the same child.
+Project identity, store admission, daemon rendezvous and process ownership stay host-owned; this
+adds no extension presentation API or new window component.
+
+The complete `host-smoke.sh` passed the offline import, symlink deduplication, missing-path and
+lock refusals, a standing-row sentinel, and an actual PTY launch through the alias. The complete
+Docker/Xvfb `window-smoke.sh` passed the native terminal, agent, renderer, refusal and new startup
+journeys. After the incremental-import and caller-relative-path fixes, its focused startup lane
+again passed clean-profile launch, same-PID reattach and daemon reuse on final code. The focused
+macOS `ProjectStoreMutationTests` passed 11 tests, including the symlink-identity case. This is
+still a development command, not a packaged release or a project picker. Authenticated Codex, IME,
+accessibility, theme parity and other product surfaces remain outside this evidence.
