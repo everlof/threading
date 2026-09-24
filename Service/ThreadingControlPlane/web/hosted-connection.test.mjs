@@ -24,6 +24,18 @@ test('service failures close the signaling connection without sending Mac author
   assert.deepEqual(socket.sent,[{version:1,kind:'deviceConnect',hostID:'host',deviceID:'invite-chat'}]);
   assert.equal(socket.protocols.join(',').includes(base64url('mac-only')),false);
 });
+test('a used invitation gets a human-readable refusal from signaling',async()=>{
+  class Socket {
+    readyState=0;bufferedAmount=0;
+    constructor() {queueMicrotask(()=>{this.readyState=1;this.onopen();});}
+    send() {queueMicrotask(()=>this.onmessage({data:JSON.stringify({version:1,kind:'failure',errorCode:'unauthorized',errorMessage:'refused'})}));}
+    close() {this.readyState=3;}
+  }
+  await assert.rejects(
+    connectHosted(route,{signalURL:'wss://fixture.test',WebSocketClass:Socket,PeerClass:class{}}),
+    /already been used or has expired/
+  );
+});
 test('navigating away cancels an outstanding signaling handshake',async()=>{
   let socket;
   class Socket {readyState=0;constructor(){socket=this;} close(){this.readyState=3;} }

@@ -119,7 +119,7 @@ public actor PeerRendezvousWebSocket {
         do {
             try await task.send(.data(envelope.encoded()))
         } catch {
-            throw PeerRendezvousError.service(error.localizedDescription)
+            throw transportError(error, task: task)
         }
     }
 
@@ -154,7 +154,7 @@ public actor PeerRendezvousWebSocket {
             throw error
         } catch {
             if didTimeOut { throw PeerRendezvousError.timedOut }
-            throw PeerRendezvousError.service(error.localizedDescription)
+            throw transportError(error, task: task)
         }
     }
 
@@ -229,6 +229,15 @@ public actor PeerRendezvousWebSocket {
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         session.invalidateAndCancel()
+    }
+
+    private func transportError(_ error: Error, task: URLSessionWebSocketTask) -> PeerRendezvousError {
+        // URLSession reports a rejected WebSocket upgrade as a transport error. Its HTTP
+        // response still tells us when the invitation credential was refused.
+        if (task.response as? HTTPURLResponse)?.statusCode == 401 {
+            return .unauthorized
+        }
+        return .service(error.localizedDescription)
     }
 
     private func timeoutConnection() {

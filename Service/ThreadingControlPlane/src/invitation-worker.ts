@@ -42,8 +42,23 @@ export default {
       const upstream = browserSignalingRequest(request);
       if (!upstream) return new Response("Invalid signaling request", {status:400});
       const response = await fetch(upstream);
+      if (response.status === 401) {
+        // A browser cannot read the status of a rejected WebSocket upgrade. Deliver the
+        // sanitized refusal as a frame so a used invitation does not look like a network error.
+        const pair = new WebSocketPair();
+        const server = pair[1];
+        server.accept();
+        server.send(JSON.stringify({
+          version:1, kind:"failure", errorCode:"unauthorized",
+          errorMessage:"Invitation authorization was refused",
+        }));
+        server.close(1008, "Unauthorized");
+        return new Response(null, {status:101, webSocket:pair[0], headers:{
+          "Sec-WebSocket-Protocol":"threading.rendezvous.v1",
+        }});
+      }
       if (response.status !== 101 || !response.webSocket) {
-        return new Response("Connection refused", {status:response.status === 401 ? 401 : 503,
+        return new Response("Connection refused", {status:503,
           headers:{"Cache-Control":"no-store"}});
       }
       return new Response(null, {status:101, webSocket:response.webSocket, headers:{

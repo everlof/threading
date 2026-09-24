@@ -59,7 +59,7 @@ export async function connectHosted(route, { signalURL, WebSocketClass = WebSock
       if (stopped) return;
       const message = parseEnvelope(event.data);
       if (message.kind === 'failure') {
-        const messages = { hostOffline:'The Mac is offline. Ask the sender to open Threading.', unauthorized:'This invitation is no longer valid. Ask for a new link.', hostBusy:'The Mac has too many connections. Try again shortly.' };
+        const messages = { hostOffline:'The Mac is offline. Ask the sender to open Threading.', unauthorized:'This invitation has already been used or has expired. Ask the sender for a new link.', hostBusy:'The Mac has too many connections. Try again shortly.' };
         throw Error(messages[message.errorCode] || 'The connection service could not reach the Mac. Try again.');
       }
       if (!sessionID) {

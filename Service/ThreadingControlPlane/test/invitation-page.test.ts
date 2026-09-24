@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker, { browserSignalingRequest } from "../src/invitation-worker";
 
 describe("public invitations", () => {
@@ -47,6 +47,28 @@ describe("browser signaling boundary", () => {
     expect(forwarded?.headers.get("X-Threading-Rendezvous-Version")).toBe("1");
     expect(forwarded?.headers.get("Sec-WebSocket-Protocol")).toBeNull();
     expect(forwarded?.url).not.toContain("credential");
+  });
+  it("sends a readable refusal when the service rejects a used invitation", async () => {
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("unauthorized", {status:401})
+    );
+    try {
+      const response = await worker.fetch(request());
+      expect(response.status).toBe(101);
+      expect(response.headers.get("Sec-WebSocket-Protocol")).toBe("threading.rendezvous.v1");
+      const socket = response.webSocket;
+      expect(socket).toBeDefined();
+      const refusal = new Promise<string>(resolve => {
+        socket!.addEventListener("message", event => resolve(String(event.data)));
+      });
+      socket!.accept();
+      expect(JSON.parse(await refusal)).toEqual({
+        version:1, kind:"failure", errorCode:"unauthorized",
+        errorMessage:"Invitation authorization was refused",
+      });
+    } finally {
+      upstream.mockRestore();
+    }
   });
   it("rejects cross-origin, URL credentials, header injection and excessive protocols", () => {
     expect(browserSignalingRequest(request({Origin:"https://evil.test"}))).toBeNull();

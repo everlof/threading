@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 import XCTest
 @testable import ThreadingMobile
@@ -15,6 +16,26 @@ final class MobileInvitationRouteTests: XCTestCase {
     /// A 26-character base32 pairing code. `A` is zero in that alphabet, so the two bits left
     /// over from 130 are zero and the code decodes to the 16 bytes `RemoteHostPin` requires.
     private let fingerprint = String(repeating: "A", count: 26)
+
+    func testUsedHostedInvitationShowsAnInvitationMessage() {
+        for error: Error in [
+            PeerRendezvousError.unauthorized,
+            PeerRendezvousError.invalidCredential,
+            PeerControlPlaneError.invalidCredential,
+        ] {
+            XCTAssertEqual(
+                MobileInvitationFailureMessage.text(for: error, hostedInvitation: true),
+                MobileL10n.string("This invitation is expired or already used.")
+            )
+        }
+        XCTAssertEqual(
+            MobileInvitationFailureMessage.text(
+                for: PeerRendezvousError.hostOffline,
+                hostedInvitation: true
+            ),
+            PeerRendezvousError.hostOffline.localizedDescription
+        )
+    }
 
     private func makeLink(
         origin: String = "https://192.168.1.181:8760",

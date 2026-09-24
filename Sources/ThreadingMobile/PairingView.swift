@@ -1,3 +1,4 @@
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
@@ -27,6 +28,26 @@ enum MobileInvitationRoute {
 
     init?(url: URL) {
         self.init(payload: url.absoluteString)
+    }
+}
+
+enum MobileInvitationFailureMessage {
+    static func text(for error: Error, hostedInvitation: Bool) -> String {
+        if hostedInvitation {
+            if let rendezvous = error as? PeerRendezvousError {
+                switch rendezvous {
+                case .unauthorized, .invalidCredential:
+                    return MobileL10n.string("This invitation is expired or already used.")
+                default:
+                    break
+                }
+            }
+            if let controlPlane = error as? PeerControlPlaneError,
+               controlPlane == .invalidCredential {
+                return MobileL10n.string("This invitation is expired or already used.")
+            }
+        }
+        return error.localizedDescription
     }
 }
 
@@ -267,7 +288,7 @@ struct PairingView: View {
         }
         switch route {
         case .hostedPairing(let hostedLink):
-            beginPairing {
+            beginPairing(hostedInvitation: true) {
                 try await model.pair(hostedLink, displayName: UIDevice.current.name)
             }
         case .connection(let link):
@@ -277,7 +298,10 @@ struct PairingView: View {
         }
     }
 
-    private func beginPairing(_ operation: @escaping @MainActor () async throws -> Void) {
+    private func beginPairing(
+        hostedInvitation: Bool = false,
+        _ operation: @escaping @MainActor () async throws -> Void
+    ) {
         isConnecting = true
         errorMessage = nil
         Task {
@@ -285,7 +309,10 @@ struct PairingView: View {
                 try await operation()
                 dismiss()
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = MobileInvitationFailureMessage.text(
+                    for: error,
+                    hostedInvitation: hostedInvitation
+                )
                 isConnecting = false
             }
         }
