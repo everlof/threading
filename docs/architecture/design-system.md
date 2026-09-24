@@ -914,6 +914,10 @@ until dismissal. The alert restores focus and completes through the same API as 
 surface uses `applySurface`'s continuous layer corner, and a rounded theme insets classic title
 hardware by that radius. The real-window update captures check both square and rounded stock
 themes; the content-only storybook remains the theme and copy matrix.
+Those WindowServer captures require the hosted XCTest app to become active. An inactive host
+returned transparent frames even though its sheet was attached; the fixture now requests
+activation and skips the two capture assertions when macOS declines it. The storybook still runs
+in that command-line environment, but attached-panel masking needs a frontmost host to verify.
 
 **How long a receipt holds is a fact about who caused it, so it belongs to the request.** The six
 seconds are measured from a click: the hand is on the mouse and the eye is on the row that

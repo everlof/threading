@@ -131,7 +131,7 @@ final class UpdateSheetRenderTests: XCTestCase {
         defer { AppThemePalette.set(previous) }
         AppThemePalette.set(AppThemeStyles.neoBrutalism)
 
-        let parent = visibleSheetParent()
+        let parent = try visibleSheetParent()
         let alert = UpdatePresenter.installingAlert()
         alert.beginSheetModal(for: parent)
         defer { alert.dismiss(); parent.orderOut(nil) }
@@ -169,7 +169,7 @@ final class UpdateSheetRenderTests: XCTestCase {
         defer { AppThemePalette.set(previous) }
         AppThemePalette.set(AppThemeStyles.win98)
 
-        let parent = visibleSheetParent()
+        let parent = try visibleSheetParent()
         let alert = UpdatePresenter.installingAlert()
         alert.beginSheetModal(for: parent)
         defer { alert.dismiss(); parent.orderOut(nil) }
@@ -199,7 +199,21 @@ final class UpdateSheetRenderTests: XCTestCase {
         try data.write(to: Render.directory.appendingPathComponent("update-installing-panel-win98.png"))
     }
 
-    private func visibleSheetParent() -> NSWindow {
+    private func visibleSheetParent() throws -> NSWindow {
+        // WindowServer returns transparent pixels for a child panel whose host application
+        // never came to the front. A command-line XCTest run does not activate its app host.
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
+            let deadline = Date().addingTimeInterval(2)
+            while !NSApp.isActive, Date() < deadline {
+                RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
+            }
+        }
+        try XCTSkipUnless(
+            NSApp.isActive,
+            "the test host could not become active; its attached sheet is not observable in this run"
+        )
+
         let parent = NSWindow(
             contentRect: NSRect(x: 120, y: 120, width: 700, height: 500),
             styleMask: [.titled],
