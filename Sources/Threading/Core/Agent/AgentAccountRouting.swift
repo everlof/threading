@@ -9,16 +9,6 @@ import Foundation
 /// from resume routing.
 enum AgentAccountRouting {
     static func prefix(for kind: AgentKind, account: AgentAccount) -> ShellCommand {
-        var prefix = ShellCommand(word: "env")
-        // A runtime whose login is not a directory has nothing to point at, and callers reach
-        // here only after asking for `.accounts`. The bare `env` still carries whatever the
-        // caller appends after it.
-        guard let accountKey = kind.accountEnvironmentKey else { return prefix }
-        if account.isDefault {
-            prefix.append(flag: "-u", value: accountKey)
-        } else {
-            prefix.append(word: "\(accountKey)=\(account.configPath)")
-        }
-        return prefix
+        AgentAccountRoute.prefix(for: kind, handle: account.handle, configPath: account.configPath)
     }
 }

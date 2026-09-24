@@ -1725,3 +1725,26 @@ test concurrent same-directory provider launches; those still need product-level
 The final `window-smoke.sh` run passed the complete native renderer, project, terminal, agent,
 replay and refusal suite, including the new resume journey. The focused Mac rollout-identity
 test passed on the final lazy-directory-walk source.
+
+## 63. Linux Codex launches bind to the account their record names
+
+The Linux window previously persisted a `.standard` Codex account but inherited `CODEX_HOME`
+from whichever shell opened it. A later window could therefore resolve a provider ID under a
+different login from the one that created the session. The account command prefix now comes from
+the same Foundation-only assembly as the Mac launcher: a standard record runs through
+`env -u CODEX_HOME`, inside the login shell, so a shell profile cannot reintroduce the inherited
+alternate path. The headless Linux host uses that prefix too. Named accounts remain unsupported
+by this diagnostic host and are refused on resume rather than silently routed to the default.
+
+The saved-agent path still asks the daemon first. Only when its identity is absent does it reload
+the record under the store lock, locate that exact provider ID in the default account's rollout
+tree near the record's creation day, and apply the Mac's bounded mixed-ordinal health check.
+Missing or known-broken rollouts leave the durable session untouched and start no child. The
+lookup is bounded per selected resume, not a scan in project-list rendering. It does not make
+rollout discovery in concurrent same-directory launches exact, support named accounts or prove
+an authenticated Codex turn.
+
+The complete native Docker/Xvfb `window-smoke.sh` and headless `host-smoke.sh` suites passed on
+this route, including wrong-account and broken-rollout refusals. The focused macOS launch,
+rollout-identity and resume-health suite passed 40 tests. Both Linux suites use a fake provider,
+so an authenticated Codex resume remains unverified.

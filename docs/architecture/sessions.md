@@ -1067,6 +1067,12 @@ Codex has no equivalent, so its id is read back from the `session_meta` record a
 rollout file it writes under `~/.codex/sessions/`. The portable reader scans only launch-adjacent
 day directories with an entry and header-byte bound; if two recent rollouts name the same working
 directory, it leaves the session awaiting an identifier rather than choosing one arbitrarily.
+The account command prefix is now a Foundation-only value: the macOS resolver supplies a stored
+handle and path, while the Linux window currently admits only the standard Codex account. Both
+launches explicitly clear inherited `CODEX_HOME` for that handle. Before the Linux window resumes
+an exited child, it finds the exact stored ID in that account's launch-day rollout directory and
+applies the same bounded mixed-ordinal check as macOS; a missing or known-broken file refuses the
+launch rather than creating a different conversation.
 OpenCode also assigns its own `ses_…` id; discovery polls
 its supported `opencode session list --format json` command and selects the newest record for
 the launching checkout. This intentionally avoids its private storage schema.

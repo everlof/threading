@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-binary, host, endpoint, folder = sys.argv[1:]
+binary, host, daemon, endpoint, folder = sys.argv[1:]
 root = Path(folder)
 store = str(root / 'create-agent-store')
 project = root / 'CreatedAgent'
@@ -20,6 +20,7 @@ import datetime, fcntl, json, os, struct, sys, termios, tty, uuid
 from pathlib import Path
 tty.setraw(0)
 rows, cols, _, _ = struct.unpack('HHHH', fcntl.ioctl(0, termios.TIOCGWINSZ, b'\\0' * 8))
+assert 'CODEX_HOME' not in os.environ, 'standard account inherited an alternate Codex home'
 if 'resume' in sys.argv[1:]:
     resumed_id = sys.argv[sys.argv.index('resume') + 1]
     Path('resumed-agent.json').write_text(json.dumps({
@@ -30,7 +31,7 @@ if 'resume' in sys.argv[1:]:
     sys.exit(0)
 provider_id = str(uuid.uuid4())
 day = datetime.datetime.now(datetime.timezone.utc)
-sessions = Path(os.environ['CODEX_HOME']) / 'sessions' / day.strftime('%Y/%m/%d')
+sessions = Path(os.environ['HOME']) / '.codex' / 'sessions' / day.strftime('%Y/%m/%d')
 sessions.mkdir(parents=True, exist_ok=True)
 (sessions / ('rollout-' + provider_id + '.jsonl')).write_text(json.dumps({
     'type': 'session_meta', 'payload': {'id': provider_id, 'cwd': os.getcwd()}
@@ -76,12 +77,26 @@ def listing():
                           text=True, timeout=8).stdout
 
 
+def await_daemon_release(session_id):
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        result = subprocess.run([daemon, 'sessions', '--json', '--socket', endpoint],
+                                check=True, capture_output=True, text=True, timeout=8)
+        if not any(session_id.lower() in row['id'].lower() for row in json.loads(result.stdout)):
+            return
+        time.sleep(.1)
+    raise AssertionError('daemon retained exited agent beyond the release deadline')
+
+
 before = listing()
 assert '  agent ' not in before, before
 log_path = root / 'agent-create-window.log'
-codex_home = root / 'codex-home'
-codex_home.mkdir()
-environment = dict(os.environ, CODEX_HOME=str(codex_home))
+auth_home = root / 'auth-home'
+auth_home.mkdir()
+codex_home = auth_home / '.codex'
+foreign_home = root / 'foreign-home'
+foreign_home.mkdir()
+environment = dict(os.environ, HOME=str(auth_home), CODEX_HOME=str(foreign_home / '.codex'))
 with log_path.open('w+') as log:
     process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
                                stdout=log, stderr=log, env=environment)
@@ -154,6 +169,36 @@ assert sum(line.startswith('  ') for line in after.splitlines()) == sum(
 assert saved_id in after
 print('PASS native agent creation: shared flags, discovered ID, saved record, retained child and exit 6', flush=True)
 
+await_daemon_release(saved_id)
+
+# The store says "standard account", so an inherited CODEX_HOME is never enough to reopen it.
+wrong_environment = dict(environment, HOME=str(foreign_home), CODEX_HOME=str(codex_home))
+with (root / 'agent-wrong-home.log').open('w+') as log:
+    process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
+                               stdout=log, stderr=log, env=wrong_environment)
+    try:
+        window = title(process, 'Threading experiment - ' + str(project), root / 'agent-wrong-home.log')
+        key(window, 'Left')
+        title(process, 'Threading agents - ' + str(project), root / 'agent-wrong-home.log')
+        key(window, 'Return')
+        title(process, 'Threading terminal - unavailable', root / 'agent-wrong-home.log')
+        assert not (project / 'resumed-agent.json').exists(), 'wrong account spawned the child'
+        key(window, 'ctrl+shift+p')
+        title(process, 'Threading agents - ' + str(project), root / 'agent-wrong-home.log')
+        key(window, 'Escape')
+        title(process, 'Threading experiment - ' + str(project), root / 'agent-wrong-home.log')
+        key(window, 'Escape')
+        assert process.wait(timeout=5) == 0
+    except BaseException:
+        log.flush()
+        print((root / 'agent-wrong-home.log').read_text(), file=sys.stderr)
+        raise
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=3)
+print('PASS wrong Codex home refuses resume before spawning', flush=True)
+
 # After the first process exits, a new app window attaches if the daemon still has a child,
 # otherwise resumes this exact provider conversation under the same Threading identity.
 with (root / 'agent-resume-window.log').open('w+') as log:
@@ -186,6 +231,38 @@ with (root / 'agent-resume-window.log').open('w+') as log:
         process.wait(timeout=3)
 assert listing() == after, 'resuming created another session record'
 print('PASS saved Codex agent resumes the discovered provider ID in a new window', flush=True)
+
+await_daemon_release(saved_id)
+rollout = next(codex_home.rglob('rollout-' + report['provider_id'] + '.jsonl'))
+with rollout.open('a') as file:
+    file.write('{"timestamp":"t","ordinal":1,"type":"event_msg"}\n')
+    file.write('{"timestamp":"t","type":"event_msg"}\n')
+resumed_before = (project / 'resumed-agent.json').read_bytes()
+with (root / 'agent-broken-rollout.log').open('w+') as log:
+    process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
+                               stdout=log, stderr=log, env=environment)
+    try:
+        window = title(process, 'Threading experiment - ' + str(project), root / 'agent-broken-rollout.log')
+        key(window, 'Left')
+        title(process, 'Threading agents - ' + str(project), root / 'agent-broken-rollout.log')
+        key(window, 'Return')
+        title(process, 'Threading terminal - unavailable', root / 'agent-broken-rollout.log')
+        assert (project / 'resumed-agent.json').read_bytes() == resumed_before, 'broken rollout spawned the child'
+        key(window, 'ctrl+shift+p')
+        title(process, 'Threading agents - ' + str(project), root / 'agent-broken-rollout.log')
+        key(window, 'Escape')
+        title(process, 'Threading experiment - ' + str(project), root / 'agent-broken-rollout.log')
+        key(window, 'Escape')
+        assert process.wait(timeout=5) == 0
+    except BaseException:
+        log.flush()
+        print((root / 'agent-broken-rollout.log').read_text(), file=sys.stderr)
+        raise
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=3)
+print('PASS broken rollout refuses resume before spawning', flush=True)
 
 # A competing store owner rejects creation before a record or child can appear.
 log_path = root / 'agent-create-refusal.log'

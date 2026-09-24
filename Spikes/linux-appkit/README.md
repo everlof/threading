@@ -51,9 +51,10 @@ project-graph slice and runs fifteen on-disk contracts:
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 40 production files are byte-identical to their sources. Fresh-session record assembly and
-launch values are shared with the app. Runtime discovery remains outside the slice, which includes
-neither RemoteKit nor live account discovery. The debug harness uses
+The 44 production files are byte-identical to their sources. Fresh-session record assembly,
+launch values, account command routing and bounded Codex rollout checks are shared with the app.
+Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
+agent runtime. The debug harness uses
 `@testable import CoreSlice` without widening the production APIs. Commit-refusal fixtures use
 the existing preflight injection seam; no test fills the host disk. StateManager's quarantine and
 recovery policy remain outside this executable.
@@ -108,15 +109,16 @@ policy; a manually invoked CLI remains a project terminal, not a managed agent s
 
 `codex` creates a genuine Codex agent record and uses the shared production command builder with
 explicit Manual/read-only permission flags. It preserves the Linux caller's environment through
-the shared inherited-identity filter for the CLI's own existing login. `attach-agent` reconnects that persisted agent identity. The smoke uses an explicit
+the shared inherited-identity filter and clears an inherited `CODEX_HOME` for the stored standard
+account. `attach-agent` reconnects that persisted agent identity. The smoke uses an explicit
 argument recorder, not an authenticated Codex installation: it verifies flags, prompt quoting,
-storage and daemon identity, not provider execution. Transcript-ID discovery and provider resume
-are not wired yet, so new sessions remain awaiting their provider identifier. No macOS credentials
+storage and daemon identity, not provider execution. The headless `codex` command does not discover
+a provider ID or offer resume; the graphical `--app-codex` path below does. No macOS credentials
 are copied; Threading-managed credentials, multi-account routing, MCP and hook integration are
 unavailable in this experiment.
 
-Current limits: incomplete provider/account launch policy, no
-native window or terminal emulator, and no app-level recovery. EOF sends the terminal's
+Current CLI-host limits: incomplete provider/account launch policy, no graphical presentation,
+and no app-level recovery. EOF sends the terminal's
 conventional Ctrl-D byte. Closing the host disconnects it; the daemon owns the child lifetime.
 This is a debug target using `@testable` access to the source slice, not a release distribution.
 
@@ -168,12 +170,10 @@ of them is made smaller by the shim compiling.
 This lives on `linux-appkit`, a long-lived branch, which is the arrangement that usually rots. The
 three things that keep it from rotting here:
 
-**It is thin, on purpose.** Nothing in this directory is under `Sources/`, `Packages/` or
-`Tests/`, so it cannot conflict with product work and no `xcodebuild` on master can see it. When
-the spike needs something *changed* in the app — a seam widened, a direct `NSView` ownership moved
-behind a structural boundary — that change belongs on **master**, as ordinary work, under the
-ratchets in delivery slice 3 of the draft. Not here. A branch that starts absorbing `Sources/`
-edits is a fork, and a fork is the thing the draft says not to build.
+**The spike stays separate from the product.** This directory is not an Xcode target. Portable
+`Sources/` and `Tests/` changes made while proving a Linux seam are ordinary macOS product changes:
+test them through the shipping Mac build and bring them back to master promptly. Leaving those
+changes only on this branch would turn a useful experiment into a product fork.
 
 **It re-copies rather than remembers.** `./vendor.sh` re-reads the real files from the working
 tree every time, and `./vendor.sh --verify` fails the moment a copy and its original disagree. So
@@ -349,8 +349,11 @@ their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes 
 Escape closes from projects, and Escape remains terminal input while in a shell.
 In `--app-codex` mode, Ctrl+Shift+A on a project creates a fresh managed Codex session with the
 shared Manual permission and read-only sandbox defaults, opens it in the same terminal window,
-and adds its saved identity to the agent picker. The picker reattaches daemon-held children;
-resuming a dormant agent record is still unfinished.
+and adds its saved identity to the agent picker. The picker reattaches daemon-held children and,
+when the daemon no longer holds one, resumes the exact stored provider ID after finding its
+rollout under the standard Codex account. It refuses a missing or known-broken rollout before
+spawning. `env -u CODEX_HOME` prevents an inherited alternate login from silently taking over
+that standard-account record.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new
