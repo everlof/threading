@@ -485,7 +485,15 @@ final class ProjectDatabaseTests: XCTestCase {
             .run()
 
         let added = AgentSession(kind: .codex, title: "Added")
-        try database.addSession(added, to: project.id, position: 1)
+        try database.addSession(added, to: project.id, position: 1, selectNewSession: true)
+        do {
+            let selectedRow = try inspection.prepare(
+                "SELECT value FROM app_state WHERE key = 'selectedSessionID'"
+            )
+            defer { selectedRow.finalize() }
+            XCTAssertTrue(try selectedRow.step())
+            XCTAssertEqual(selectedRow.text(0), added.id.uuidString)
+        }
         var renamed = added
         renamed.title = "Renamed"
         try database.saveSession(renamed, in: project.id, position: 1)
@@ -509,6 +517,64 @@ final class ProjectDatabaseTests: XCTestCase {
             from: try XCTUnwrap(addedPayload.data(0))
         )
         XCTAssertEqual(restored.title, "Renamed")
+    }
+
+    func testNewSessionSelectionCommitsOrRollsBackWithItsRow() throws {
+        enum Expected: Error { case commitRefused }
+        var refuseNextCommit = false
+        let database = try ProjectDatabase(
+            url: directory.appendingPathComponent("selected-session-addition.db"),
+            transactionCommitPreflight: {
+                guard refuseNextCommit else { return }
+                refuseNextCommit = false
+                throw Expected.commitRefused
+            }
+        )
+        let original = AgentSession(kind: .claude, title: "Original")
+        let project = makeProject("alpha", sessions: [original])
+        try database.save(ProjectsState(projects: [project], selectedSessionID: original.id))
+        let added = AgentSession(kind: .codex, title: "Added")
+
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.addSession(added, to: project.id, position: 1,
+                                                    selectNewSession: true))
+        var restored = try database.load().state
+        XCTAssertEqual(restored.projects[0].sessions.map(\.id), [original.id])
+        XCTAssertEqual(restored.selectedSessionID, original.id)
+
+        try database.addSession(added, to: project.id, position: 1, selectNewSession: true)
+        restored = try database.load().state
+        XCTAssertEqual(restored.projects[0].sessions.map(\.id), [original.id, added.id])
+        XCTAssertEqual(restored.selectedSessionID, added.id)
+    }
+
+    func testFirstSessionAndProjectCommitOrRollBackTogether() throws {
+        enum Expected: Error { case commitRefused }
+        var refuseNextCommit = false
+        let database = try ProjectDatabase(
+            url: directory.appendingPathComponent("first-session-addition.db"),
+            transactionCommitPreflight: {
+                guard refuseNextCommit else { return }
+                refuseNextCommit = false
+                throw Expected.commitRefused
+            }
+        )
+        let project = makeProject("alpha")
+        let session = AgentSession(kind: .codex, title: "First")
+
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.addProjectAndSession(project, session: session,
+                                                                position: 0, selectNewSession: true))
+        var restored = try database.load().state
+        XCTAssertTrue(restored.projects.isEmpty)
+        XCTAssertNil(restored.selectedSessionID)
+
+        try database.addProjectAndSession(project, session: session, position: 0,
+                                          selectNewSession: true)
+        restored = try database.load().state
+        XCTAssertEqual(restored.projects.map(\.id), [project.id])
+        XCTAssertEqual(restored.projects[0].sessions.map(\.id), [session.id])
+        XCTAssertEqual(restored.selectedSessionID, session.id)
     }
 
     func testBatchSessionWritesAreAtomicAndDoNotRewriteStandingRows() throws {

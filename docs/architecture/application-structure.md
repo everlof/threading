@@ -137,6 +137,11 @@ same `AgentSessionCreation`, `CodexLaunchCommand` and `AgentLaunchPlan` policies
 uses, then sends an `agentSession` spawn with the window's actual initial grid. Store membership,
 nonblocking lock ownership, record persistence and launch admission remain host-owned; the UI
 publishes the new identity into its bounded saved-agent snapshot only after persistence.
+Linux launch paths use the production database's exact project/session mutations rather than a
+whole-graph save. A first Codex session and its newly imported project commit together; an
+existing-project session and its selection commit together; rollout discovery writes only the
+standing session. The project terminal remains embedded in its owning project row, so that row
+still grows with the number of terminals in that project.
 The visible experiment has no agent-account or model picker. It resumes a dormant Codex record
 only after finding its exact provider rollout in the standard account and checking the known
 mixed-ordinal failure; named accounts and other providers are still unsupported. A source-tree

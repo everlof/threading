@@ -343,6 +343,14 @@ is merely behind it — so quarantining would take a launch's writes away over a
 did its job. `ProjectStore` sees the failed write, rolls back to its last persisted snapshot, and
 the row the other writer added survives. Refusing costs one unsaved edit; pruning cost projects.
 
+The Linux local-session host uses the same narrow insertion contract. A fresh conversation in a
+new project writes the project, first session and selected ID in one graph transaction; a failed
+commit leaves none of them behind. An existing project's new session writes only its session row
+and optional selection in one transaction. Codex provider-ID discovery updates only that standing
+session row. A standalone terminal is stored inside its owning project payload, so adding one
+rewrites that project row but no other project or session row. Whole-graph reconciliation is not
+part of a Linux launch or discovery callback.
+
 It needed no migration and no `user_version` bump: `app_state` is key/value, and a build without
 the guard simply ignores the key. Living in the same transaction as the reconcile is what makes
 the check meaningful — read it outside and another writer commits between the check and the

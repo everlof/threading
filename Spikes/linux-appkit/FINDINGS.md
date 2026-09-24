@@ -1775,3 +1775,28 @@ again passed clean-profile launch, same-PID reattach and daemon reuse on final c
 macOS `ProjectStoreMutationTests` passed 11 tests, including the symlink-identity case. This is
 still a development command, not a packaged release or a project picker. Authenticated Codex, IME,
 accessibility, theme parity and other product surfaces remain outside this evidence.
+
+## 65. Linux launch writes leave standing conversations alone
+
+The CLI and native window previously used `ProjectDatabase.save(state)` for each terminal or
+agent creation and for Codex rollout-ID discovery. That re-encoded and upserted every retained
+project and session after loading the graph, even though the user changed one row. A newer-format
+field in an unrelated row would be dropped, and launch cost grew with the complete archive.
+
+Both Linux hosts now use the production exact-row mutations. An existing-project Codex launch
+inserts one session and its selected ID in one graph transaction. The first Codex session in an
+unknown project uses `addProjectAndSession`, so a failed commit leaves neither project, session
+nor selection. A terminal launch updates its owning project row (terminals still live inside that
+payload), or adds one new project row containing its first terminal. Codex provider-ID discovery
+updates only its standing session. Each host still loads the graph on a worker, so this removes
+whole-graph write/encoding cost, not the current whole-graph read or the size of a project's own
+terminal array.
+
+The real-daemon Linux host suite passed recorder-backed Codex launches and shell terminals in
+existing and new projects while preserving exact unknown-field sentinel bytes in another project
+and standing conversation. The complete native Docker/Xvfb suite passed the same preservation
+check through graphical Codex creation and rollout-ID discovery, plus its terminal, picker,
+resume, renderer, startup and refusal journeys on the final shared database code. Focused macOS
+`ProjectDatabaseTests` and `ProjectStoreMutationTests` passed 62 tests (one skipped), including
+rollback for session/selection and first-project/session transactions and byte preservation for
+standing rows.

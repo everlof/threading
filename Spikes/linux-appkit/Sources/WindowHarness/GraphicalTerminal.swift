@@ -220,13 +220,24 @@ final class GraphicalTerminal: @unchecked Sendable {
         defer { database.close() }
         var state = try database.load().state
         let index: Int
-        if let found = state.projects.firstIndex(where: { $0.folderPath == folder.path }) { index = found }
-        else { state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder)); index = state.projects.count - 1 }
+        let addedProject: Bool
+        if let found = state.projects.firstIndex(where: { $0.folderPath == folder.path }) {
+            index = found
+            addedProject = false
+        } else {
+            state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder))
+            index = state.projects.count - 1
+            addedProject = true
+        }
         let terminal = ProjectTerminal(id: TerminalID(), title: URL(fileURLWithPath: executable).lastPathComponent,
             customTitle: nil, currentDirectory: folder.path, branch: nil, themeID: nil,
             soundOverrides: nil, createdAt: Date())
         state.projects[index].terminals.append(terminal)
-        try database.save(state)
+        if addedProject {
+            try database.addProject(state.projects[index], position: index)
+        } else {
+            try database.saveProject(state.projects[index], position: index)
+        }
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
     private static func createAgent(store: String, directory: String, shell: String,
@@ -246,7 +257,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
-        var state = try database.load().state
+        let state = try database.load().state
         guard let projectIndex = state.projects.firstIndex(where: { $0.folderPath == folder.path }) else {
             throw WindowFailure("project is not in this store")
         }
@@ -264,9 +275,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         session.resumeState = resumeState
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: shell, resumeState: resumeState)
-        state.projects[projectIndex].sessions.append(session)
-        state.selectedSessionID = session.id
-        try database.save(state)
+        let project = state.projects[projectIndex]
+        try database.addSession(session, to: project.id, position: project.sessions.count,
+                                selectNewSession: true)
         return plan
     }
     private func received(_ frame: PTYHostFrame) {
@@ -382,7 +393,8 @@ final class GraphicalTerminal: @unchecked Sendable {
               let sessionIndex = state.projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID }),
               state.projects[projectIndex].sessions[sessionIndex].resumeState == .awaitingIdentifier else { return false }
         state.projects[projectIndex].sessions[sessionIndex].resumeState = .resumable(id)
-        try database.save(state)
+        try database.saveSession(state.projects[projectIndex].sessions[sessionIndex],
+                                 in: state.projects[projectIndex].id, position: sessionIndex)
         return true
     }
     private static func resumeAgent(store: String, sessionID: SessionID, shell: String,

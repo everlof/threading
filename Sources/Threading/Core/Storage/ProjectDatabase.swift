@@ -421,13 +421,39 @@ final class ProjectDatabase {
         }
     }
 
+    /// Creates a project and its first conversation as one graph mutation. A host opening a
+    /// previously unknown folder must not leave an empty project if the session insert or commit
+    /// fails, and it must not reconcile unrelated rows to get that atomicity.
+    func addProjectAndSession(
+        _ project: Project,
+        session: AgentSession,
+        position: Int,
+        selectNewSession: Bool = false
+    ) throws {
+        try graphTransaction {
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+            try upsert(project, position: position)
+            try upsert(session, in: project.id, position: 0)
+            if selectNewSession { try setSelectedSessionID(session.id) }
+            return try writeAdvancedGeneration(from: found)
+        }
+    }
+
     /// Inserts one new session row and advances the graph generation in the same transaction.
     /// Creation changes membership; walking every standing row to prove that one addition made
-    /// remote Start scale with the entire archive.
+    /// remote Start scale with the entire archive. An initiating host can also select the new
+    /// session in that transaction, so a failed commit leaves neither a row nor a stale selection.
     func addSession(
         _ session: AgentSession,
         to projectID: ProjectID,
-        position: Int
+        position: Int,
+        selectNewSession: Bool = false
     ) throws {
         try graphTransaction {
             let found = try storeGeneration()
@@ -438,6 +464,7 @@ final class ProjectDatabase {
                 )
             }
             try upsert(session, in: projectID, position: position)
+            if selectNewSession { try setSelectedSessionID(session.id) }
             return try writeAdvancedGeneration(from: found)
         }
     }

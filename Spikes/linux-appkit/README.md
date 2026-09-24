@@ -116,6 +116,10 @@ This is the first executable storage-to-runtime connection, not the native UI. I
 wire kit. No shell is represented as an agent session. The store stays locked for the invocation;
 a new terminal record is saved before spawn, so a failed launch may leave a dormant record.
 The Linux transport adapter streams bounded chunks without accumulating a transcript.
+Fresh agent sessions use one exact session-row insertion; the first agent in a new project and
+its selected identity commit with that project in one transaction. Project terminals update only
+their owning project row, and Codex-ID discovery updates only the standing session. Launch work
+does not reconcile every saved conversation in the store.
 
 Interactive callers enter raw keyboard mode while attached; the child starts at the caller's
 terminal size and receives resize requests on SIGWINCH. Pipes use an 80×24 fallback. Linux signal

@@ -50,6 +50,25 @@ sys.exit(6)
 child.chmod(0o700)
 subprocess.run([host, store, endpoint, 'run', str(project), '/bin/true'],
                input=b'', check=True, capture_output=True, timeout=15)
+standing_project = root / 'StandingAgent'
+standing_project.mkdir()
+subprocess.run([host, store, endpoint, 'codex', str(standing_project), '/bin/sh', '/bin/true', 'seed'],
+               input=b'', check=True, capture_output=True, timeout=15)
+with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+    standing_id, standing_data = database.execute(
+        'SELECT session.id, session.data FROM session JOIN project ON session.project_id = project.id '
+        'WHERE project.folder_path = ?', (str(standing_project),)).fetchone()
+    standing_payload = json.loads(standing_data)
+    standing_payload['futureSessionField'] = 'retain this conversation'
+    standing_data = json.dumps(standing_payload, sort_keys=True, separators=(',', ':'))
+    project_data = database.execute('SELECT data FROM project WHERE folder_path = ?',
+                                    (str(standing_project),)).fetchone()[0]
+    project_payload = json.loads(project_data)
+    project_payload['futureProjectField'] = 'retain this project'
+    project_data = json.dumps(project_payload, sort_keys=True, separators=(',', ':'))
+    database.execute('UPDATE session SET data = ? WHERE id = ?', (standing_data, standing_id))
+    database.execute('UPDATE project SET data = ? WHERE folder_path = ?',
+                     (project_data, str(standing_project)))
 
 
 def xdo(*args):
@@ -89,7 +108,9 @@ def await_daemon_release(session_id):
 
 
 before = listing()
-assert '  agent ' not in before, before
+with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+    assert database.execute('SELECT COUNT(*) FROM session JOIN project ON session.project_id = project.id '
+                            'WHERE project.folder_path = ?', (str(project),)).fetchone()[0] == 0
 log_path = root / 'agent-create-window.log'
 auth_home = root / 'auth-home'
 auth_home.mkdir()
@@ -115,7 +136,10 @@ with log_path.open('w+') as log:
         assert argv[argv.index('--sandbox') + 1] == 'read-only', argv
         assert 'resume' not in argv, argv
         with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
-            rows = database.execute('SELECT id, kind, data FROM session').fetchall()
+            rows = database.execute(
+                'SELECT session.id, session.kind, session.data FROM session '
+                'JOIN project ON session.project_id = project.id WHERE project.folder_path = ?',
+                (str(project),)).fetchall()
             assert len(rows) == 1 and rows[0][1] == 'codex', rows
             payload = json.loads(rows[0][2])
             assert payload['permissionMode'] == 'manual' and payload['title'] == '', payload
@@ -129,6 +153,11 @@ with log_path.open('w+') as log:
                 break
             assert time.monotonic() < deadline, stored
             time.sleep(.05)
+        with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+            assert database.execute('SELECT data FROM session WHERE id = ?',
+                                    (standing_id,)).fetchone()[0] == standing_data
+            assert database.execute('SELECT data FROM project WHERE folder_path = ?',
+                                    (str(standing_project),)).fetchone()[0] == project_data
         key(window, 'ctrl+shift+p')
         title(process, 'Threading experiment - ' + str(project), log_path)
         subprocess.run(['import', '-window', window, 'out/agent-create-returned.png'], check=True, timeout=5)
@@ -163,7 +192,8 @@ with log_path.open('w+') as log:
         process.wait(timeout=3)
 
 after = listing()
-assert sum(line.startswith('  agent ') for line in after.splitlines()) == 1, after
+assert sum(line.startswith('  agent ') for line in after.splitlines()) == sum(
+    line.startswith('  agent ') for line in before.splitlines()) + 1, after
 assert sum(line.startswith('  ') for line in after.splitlines()) == sum(
     line.startswith('  ') for line in before.splitlines()) + 1, after
 assert saved_id in after
