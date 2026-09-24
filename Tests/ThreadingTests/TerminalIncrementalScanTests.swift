@@ -138,6 +138,22 @@ final class TerminalIncrementalScanTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testTheViewReaderCanTranslateOnAWorker() async {
+        let view = TerminalView(frame: .zero)
+        view.feed(text: "wrote /tmp/worker-read.png\r\n")
+        let read = view.recentLogicalBufferReader(maximumUTF8Bytes: budget)
+
+        let result = await Task.detached { read(0) }.value
+
+        XCTAssertTrue(result.text.contains("/tmp/worker-read.png"))
+        XCTAssertEqual(
+            result,
+            view.recentLogicalBufferText(maximumUTF8Bytes: budget),
+            "the worker reader must use the same synchronized terminal state as the view API"
+        )
+    }
+
     // MARK: - Stress
 
     /// The read the attachment stress target never covered.
@@ -230,20 +246,60 @@ final class TerminalIncrementalScanTests: XCTestCase {
 
     // MARK: - The observer's half of the contract
 
+    private final class CursorProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [Int] = []
+        private var mainThreadReads: [Bool] = []
+        private let pauseFirstRead: Bool
+        private let firstReadGate = DispatchSemaphore(value: 0)
+
+        init(pauseFirstRead: Bool = false) {
+            self.pauseFirstRead = pauseFirstRead
+        }
+
+        var reads: [Int] { lock.withLock { seen } }
+        var readWasOnMainThread: [Bool] { lock.withLock { mainThreadReads } }
+
+        func read(since: Int) -> TerminalScanRead {
+            let isFirst = lock.withLock {
+                seen.append(since)
+                mainThreadReads.append(Thread.isMainThread)
+                return seen.count == 1
+            }
+            if pauseFirstRead && isFirst { firstReadGate.wait() }
+            return TerminalScanRead(text: "", nextAbsoluteRow: since + 7)
+        }
+
+        func releaseFirstRead() { firstReadGate.signal() }
+    }
+
+    @MainActor
+    private final class AdmissionGate {
+        private(set) var entered = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func hold() async {
+            entered = true
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func release() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
     @MainActor
     private func makeObserver(
         enabled: @escaping () -> Bool,
-        onRead: @escaping (Int) -> Void
+        probe: CursorProbe
     ) -> TerminalAttachmentObserver {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         return TerminalAttachmentObserver(
             sessionID: SessionID(),
             projectRoot: { root },
             currentDirectory: { root },
-            text: { since in
-                onRead(since)
-                return TerminalScanRead(text: "", nextAbsoluteRow: since + 7)
-            },
+            text: { since in probe.read(since: since) },
             isEnabled: enabled,
             record: { _, _, _, _ in .empty }
         )
@@ -261,8 +317,8 @@ final class TerminalIncrementalScanTests: XCTestCase {
 
     @MainActor
     func testTheObserverFeedsItsCursorBackToTheTerminal() async {
-        var seen: [Int] = []
-        let observer = makeObserver(enabled: { true }, onRead: { seen.append($0) })
+        let probe = CursorProbe()
+        let observer = makeObserver(enabled: { true }, probe: probe)
 
         observer.scanNow()
         await settle(observer)
@@ -272,9 +328,14 @@ final class TerminalIncrementalScanTests: XCTestCase {
         await settle(observer)
 
         XCTAssertEqual(
-            seen,
+            probe.reads,
             [0, 7, 14],
             "each applied scan resumes from where the previous read stopped"
+        )
+        XCTAssertEqual(
+            probe.readWasOnMainThread,
+            [false, false, false],
+            "translating terminal rows must not block the main thread"
         )
     }
 
@@ -283,25 +344,71 @@ final class TerminalIncrementalScanTests: XCTestCase {
     /// for the scan that replaces it.
     @MainActor
     func testAScanThatIsSupersededDoesNotCarryItsRowsAway() async {
-        var seen: [Int] = []
-        let observer = makeObserver(enabled: { true }, onRead: { seen.append($0) })
+        let probe = CursorProbe(pauseFirstRead: true)
+        let observer = makeObserver(enabled: { true }, probe: probe)
 
         observer.scanNow()
+        let deadline = Date().addingTimeInterval(2)
+        while probe.reads.isEmpty, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTAssertEqual(probe.reads, [0], "the first read must be in flight before it is replaced")
         observer.scanNow()
+        probe.releaseFirstRead()
         await settle(observer)
 
         XCTAssertEqual(
-            seen,
+            probe.reads,
             [0, 0],
             "the superseded scan's rows are read again rather than skipped"
         )
+        XCTAssertEqual(observer.lastScanMetrics?.wasUnchanged, false)
+    }
+
+    @MainActor
+    func testSupersedingAdmissionRetainsTheUnreadCursorAndFingerprint() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("attachment-admission-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("artifact.png")
+        try Data("png".utf8).write(to: file)
+
+        let buffer = TerminalScanTextBuffer(text: "wrote \(file.path)", nextAbsoluteRow: 7)
+        let gate = AdmissionGate()
+        var admissions = 0
+        let observer = TerminalAttachmentObserver(
+            sessionID: SessionID(),
+            projectRoot: { root },
+            currentDirectory: { root },
+            text: { since in buffer.read(since: since) },
+            record: { _, _, _, _ in
+                admissions += 1
+                if admissions == 1 { await gate.hold() }
+                return .empty
+            }
+        )
+
+        observer.scanNow()
+        let deadline = Date().addingTimeInterval(5)
+        while !gate.entered, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTAssertTrue(gate.entered, "the first scan must reach admission before replacement")
+        observer.scanNow()
+        gate.release()
+        await settle(observer)
+
+        XCTAssertEqual(buffer.reads, [0, 0], "the replacement must reread the uncommitted rows")
+        XCTAssertEqual(admissions, 2, "the replacement must resolve the same path again")
+        XCTAssertEqual(observer.lastScanMetrics?.wasUnchanged, false)
     }
 
     @MainActor
     func testTurningDetectionOffForgetsTheCursor() async {
         var enabled = true
-        var seen: [Int] = []
-        let observer = makeObserver(enabled: { enabled }, onRead: { seen.append($0) })
+        let probe = CursorProbe()
+        let observer = makeObserver(enabled: { enabled }, probe: probe)
 
         observer.scanNow()
         await settle(observer)
@@ -313,7 +420,7 @@ final class TerminalIncrementalScanTests: XCTestCase {
         await settle(observer)
 
         XCTAssertEqual(
-            seen,
+            probe.reads,
             [0, 0],
             "a disabled observer reads nothing, and the next enabled scan starts from the whole window"
         )

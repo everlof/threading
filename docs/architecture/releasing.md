@@ -768,6 +768,18 @@ Decisions a reader would otherwise re-litigate:
   for you" has reasons a hardcoded "You're up to date" would misreport: OS too old, channel
   gated, already newest.
 
+**Install and Relaunch is the quit consent.** Sparkle announces its relaunch through
+`updaterWillRelaunchApplication` before sending the Apple quit event. `AppDelegate` consumes that
+one pending intent and runs the ordinary shutdown without a second quit confirmation, including
+the session record and background-host handoff. Otherwise a person with running sessions could
+cancel the second question after approving the update, leaving Sparkle waiting for a process that
+never exited. The intent is consumed at the quit entry point and cleared on update failure or
+completion, so a later ordinary quit still asks. Sparkle can also report that installation has
+started while the target application is *not* yet terminated; this is a wait, not proof of file
+replacement. `UpdateUserDriver` closes the Installing sheet in that case and keeps Sparkle's
+retry-quit callback. Check for Updates brings back Ready to Install, whose affirmative answer
+retries the quit event. Only a confirmed terminated target may keep the Installing narration up.
+
 **The one thing a custom driver cannot take over.** After the app terminates for the file swap,
 Sparkle's own installer agent can put a small progress window on screen —
 `Sparkle/InstallerProgress/InstallerProgressAppController.m`, launched from `AppInstaller.m`.

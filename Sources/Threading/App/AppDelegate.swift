@@ -994,7 +994,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return .terminateNow
         }
 
-        let quitAnswer = confirmQuitIfAgentsRunning()
+        // Sparkle's quit event follows the user's explicit Install and Relaunch choice.
+        // Asking the ordinary session-quit question again can cancel that event while the
+        // installer waits for this process to exit, leaving an "Installing Update" sheet
+        // over an app that is still running. The normal shutdown below still records and
+        // detaches the sessions before AppKit exits.
+        let quitAnswer: QuitAnswer = AppUpdater.takeInstallRelaunchPending()
+            ? .leaveRunning
+            : confirmQuitIfAgentsRunning()
         guard quitAnswer.quits else { return .terminateCancel }
 
         let retentionDisposition: SessionProcessRetentionCoordinator.QuitDisposition

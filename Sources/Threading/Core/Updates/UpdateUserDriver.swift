@@ -35,6 +35,7 @@ protocol UpdatePresenting: AnyObject {
 
     func showReadyToInstall(respond: @escaping (UpdateChoice) -> Void)
     func showInstalling()
+    func showReadyToRetryTermination(retry: @escaping () -> Void)
 
     /// Rare by design: only reachable when the updater outlives the relaunch.
     func showUpdateInstalled(acknowledge: @escaping () -> Void)
@@ -71,6 +72,7 @@ final class UpdateUserDriver: NSObject {
 
     /// Reset when a download begins, because one driver serves many update sessions.
     private var downloadProgress = UpdateDownloadProgress()
+    private var retryTerminatingApplication: (() -> Void)?
 
     init(
         presenter: UpdatePresenting,
@@ -200,6 +202,8 @@ extension UpdateUserDriver: SPUUserDriver {
     }
 
     func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        AppUpdater.clearInstallRelaunchPending()
+        retryTerminatingApplication = nil
         let nsError = error as NSError
         ThreadingLogger.updates.error(
             "Updater error: \(nsError.localizedDescription, privacy: .private(mask: .hash))"
@@ -215,6 +219,7 @@ extension UpdateUserDriver: SPUUserDriver {
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         downloadProgress = UpdateDownloadProgress()
+        retryTerminatingApplication = nil
         ThreadingLogger.updates.info("Update download started")
         presenter.showDownloadStarted(cancel: cancellation)
     }
@@ -249,18 +254,28 @@ extension UpdateUserDriver: SPUUserDriver {
         withApplicationTerminated applicationTerminated: Bool,
         retryTerminatingApplication: @escaping () -> Void
     ) {
-        // Threading terminates cleanly on the quit event Sparkle sends, so the retry handler
-        // goes unused; the sheet's only job is to say why the app is about to disappear.
         ThreadingLogger.updates.notice(
             "Update installation started application_terminated=\(applicationTerminated, privacy: .public)"
         )
-        presenter.showInstalling()
+        if applicationTerminated {
+            self.retryTerminatingApplication = nil
+            presenter.showInstalling()
+        } else {
+            // Sparkle has sent a quit event, but this process is still alive. Keeping the
+            // installing sheet up claims progress that may never happen and can cover a
+            // delayed quit. Like Sparkle's standard driver, dismiss it and retain the
+            // retry route for the next Check for Updates command.
+            self.retryTerminatingApplication = retryTerminatingApplication
+            presenter.dismissUpdateUI()
+        }
     }
 
     func showUpdateInstalledAndRelaunched(
         _ relaunched: Bool,
         acknowledgement: @escaping () -> Void
     ) {
+        AppUpdater.clearInstallRelaunchPending()
+        retryTerminatingApplication = nil
         ThreadingLogger.updates.info(
             "Update installation completed relaunched=\(relaunched, privacy: .public)"
         )
@@ -269,11 +284,20 @@ extension UpdateUserDriver: SPUUserDriver {
 
     func showUpdateInFocus() {
         ThreadingLogger.updates.debug("Update UI focused")
-        presenter.focusUpdateUI()
+        if let retryTerminatingApplication {
+            presenter.showReadyToRetryTermination {
+                AppUpdater.markInstallRelaunchPending()
+                retryTerminatingApplication()
+            }
+        } else {
+            presenter.focusUpdateUI()
+        }
     }
 
     func dismissUpdateInstallation() {
         ThreadingLogger.updates.debug("Update UI dismissed")
+        AppUpdater.clearInstallRelaunchPending()
+        retryTerminatingApplication = nil
         presenter.dismissUpdateUI()
     }
 }

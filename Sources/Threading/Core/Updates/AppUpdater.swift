@@ -24,6 +24,25 @@ final class AppUpdater {
 
     static let shared = AppUpdater()
 
+    /// Sparkle announces the relaunch before it sends the quit event. The user has already
+    /// chosen Install and Relaunch, so AppDelegate must not ask the ordinary quit question
+    /// again while handling that event. A failed or finished update clears this state.
+    private static var isInstallRelaunchPending = false
+
+    static func markInstallRelaunchPending() {
+        isInstallRelaunchPending = true
+    }
+
+    static func takeInstallRelaunchPending() -> Bool {
+        let pending = isInstallRelaunchPending
+        isInstallRelaunchPending = false
+        return pending
+    }
+
+    static func clearInstallRelaunchPending() {
+        isInstallRelaunchPending = false
+    }
+
     private let presenter = UpdatePresenter()
     private let updater: SPUUpdater
 
@@ -114,6 +133,13 @@ final class AppUpdater {
 /// A separate object rather than `AppUpdater` conforming, because the updater is constructed
 /// in `AppUpdater.init` and a stored `let` cannot be built from `self` before it exists.
 private final class FeedDelegate: NSObject, SPUUpdaterDelegate {
+
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        MainActor.assumeIsolated {
+            AppUpdater.markInstallRelaunchPending()
+            ThreadingLogger.updates.notice("Sparkle relaunch requested; quit confirmation covered by update consent")
+        }
+    }
 
     func feedURLString(for updater: SPUUpdater) -> String? {
         UpdateFeedPolicy.feedOverride(for: AppInfo.buildChannel)

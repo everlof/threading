@@ -329,12 +329,12 @@ final class ThinkingOrbTintTests: XCTestCase {
 
         let sessionID = SessionID()
         var isEnabled = false
-        var renderedText = first.path
+        let renderedText = TerminalScanTextBuffer(text: first.path)
         let observer = TerminalAttachmentObserver(
             sessionID: sessionID,
             projectRoot: { root },
             currentDirectory: { root },
-            text: { _ in TerminalScanRead(text: renderedText, nextAbsoluteRow: 0) },
+            text: { since in renderedText.read(since: since) },
             isEnabled: { isEnabled }
         )
 
@@ -350,7 +350,7 @@ final class ThinkingOrbTintTests: XCTestCase {
         )
 
         isEnabled = false
-        renderedText = second.path
+        renderedText.text = second.path
         observer.scanNow()
         XCTAssertEqual(
             SessionAttachmentStore.shared.attachments(for: sessionID).map(\.relativePath),
@@ -381,13 +381,13 @@ final class ThinkingOrbTintTests: XCTestCase {
         try Data("png".utf8).write(to: late)
 
         let sessionID = SessionID()
-        var renderedText = early.path
+        let renderedText = TerminalScanTextBuffer(text: early.path)
         var clock = Date(timeIntervalSince1970: 1_750_000_000)
         let observer = TerminalAttachmentObserver(
             sessionID: sessionID,
             projectRoot: { root },
             currentDirectory: { root },
-            text: { _ in TerminalScanRead(text: renderedText, nextAbsoluteRow: 0) },
+            text: { since in renderedText.read(since: since) },
             now: { clock }
         )
 
@@ -400,7 +400,7 @@ final class ThinkingOrbTintTests: XCTestCase {
         )
 
         // Moments later the debounce holds — nothing new is recorded synchronously.
-        renderedText = late.path
+        renderedText.text = late.path
         clock = clock.addingTimeInterval(0.1)
         observer.noteOutput()
         XCTAssertEqual(

@@ -179,6 +179,9 @@ final class AgentSessionViewController: NSViewController {
         session.terminalView.dropReader = .agent(agentSession.kind)
 
         let terminalSession = session
+        let attachmentBufferReader = session.terminalView.recentLogicalBufferReader(
+            maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes
+        )
         attachmentObserver = TerminalAttachmentObserver(
             sessionID: agentSession.id,
             projectRoot: {
@@ -189,14 +192,8 @@ final class AgentSessionViewController: NSViewController {
             currentDirectory: { [weak terminalSession] in
                 terminalSession?.effectiveWorkingDirectory()
             },
-            text: { [weak terminalSession] since in
-                guard let terminalView = terminalSession?.terminalView else {
-                    return .empty
-                }
-                let read = terminalView.recentLogicalBufferText(
-                    maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes,
-                    sinceAbsoluteRow: since
-                )
+            text: { since in
+                let read = attachmentBufferReader(since)
                 return TerminalScanRead(text: read.text, nextAbsoluteRow: read.nextAbsoluteRow)
             },
             isEnabled: {

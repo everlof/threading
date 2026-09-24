@@ -18,16 +18,6 @@ final class TerminalAttachmentScanReuseTests: XCTestCase {
 
     private var checkout: URL!
 
-    /// Boxed so the observer's `text` closure and the test can both see the same buffer.
-    private final class Buffer {
-        var text: String
-        var nextAbsoluteRow: Int
-        init(text: String, nextAbsoluteRow: Int = 0) {
-            self.text = text
-            self.nextAbsoluteRow = nextAbsoluteRow
-        }
-    }
-
     override func setUpWithError() throws {
         try super.setUpWithError()
         checkout = FileManager.default.temporaryDirectory
@@ -48,29 +38,23 @@ final class TerminalAttachmentScanReuseTests: XCTestCase {
         XCTAssertFalse(observer.isScanInFlight, "attachment resolution did not finish")
     }
 
-    private func makeObserver(buffer: Buffer) -> TerminalAttachmentObserver {
+    private func makeObserver(buffer: TerminalScanTextBuffer) -> TerminalAttachmentObserver {
         TerminalAttachmentObserver(
             sessionID: SessionID(),
             projectRoot: { [checkout] in checkout },
             currentDirectory: { [checkout] in checkout },
-            text: { _ in
-                TerminalScanRead(text: buffer.text, nextAbsoluteRow: buffer.nextAbsoluteRow)
-            },
+            text: { since in buffer.read(since: since) },
             record: { _, _, _, _ in SessionAttachmentStore.ScannedRecordResult.empty }
         )
     }
 
     /// Whether the scan just asked for actually ran a detection pass.
     ///
-    /// `isScanInFlight` is the structural answer rather than a proxy for one: a real scan sets it
-    /// synchronously as it hands the text to the detached detector, and the skip returns before
-    /// that task is ever created. Counting recorded attachments would not do — the recorder is
-    /// only reached when something was found, so it cannot tell "scanned and found nothing" from
-    /// "did not scan".
+    /// The read itself now runs on a worker, so the resolution decision arrives asynchronously.
+    /// The finished metrics distinguish a reused answer from an actual detection pass.
     private func didResolve(_ observer: TerminalAttachmentObserver) -> Bool {
-        let started = observer.isScanInFlight
         waitForScan(observer)
-        return started
+        return observer.lastScanMetrics?.wasUnchanged == false
     }
 
     // MARK: - Reuse
@@ -79,7 +63,7 @@ final class TerminalAttachmentScanReuseTests: XCTestCase {
         let file = checkout.appendingPathComponent("notes.txt")
         try Data("hello".utf8).write(to: file)
 
-        let buffer = Buffer(text: "wrote \(file.path)\n")
+        let buffer = TerminalScanTextBuffer(text: "wrote \(file.path)\n")
         let observer = makeObserver(buffer: buffer)
 
         observer.scanNow()
@@ -102,7 +86,7 @@ final class TerminalAttachmentScanReuseTests: XCTestCase {
         try Data("one".utf8).write(to: first)
         try Data("two".utf8).write(to: second)
 
-        let buffer = Buffer(text: "wrote \(first.path)\n")
+        let buffer = TerminalScanTextBuffer(text: "wrote \(first.path)\n")
         let observer = makeObserver(buffer: buffer)
 
         observer.scanNow()
@@ -121,7 +105,7 @@ final class TerminalAttachmentScanReuseTests: XCTestCase {
         let file = checkout.appendingPathComponent("only.txt")
         try Data("x".utf8).write(to: file)
 
-        let buffer = Buffer(text: "wrote \(file.path)\n", nextAbsoluteRow: 1)
+        let buffer = TerminalScanTextBuffer(text: "wrote \(file.path)\n", nextAbsoluteRow: 1)
         let observer = makeObserver(buffer: buffer)
 
         observer.scanNow()

@@ -5269,6 +5269,8 @@ version. An update found by the daily background check waits until Threading is 
 before it says anything. Download and preparation each show a progress sheet — download can be
 cancelled, and once preparing starts the sheet says so instead of offering a Cancel that would
 no longer work — and the final step asks before the app quits and reopens as the new version.
+If the app remains open while installation waits for it to quit, **Help ▸ Check for Updates…**
+brings back **Install and Relaunch** so you can try again.
 The menu command can also be given a keyboard shortcut under **Settings ▸ Keyboard**.
 
 **Reporting something.** **Help ▸ Report a Problem…** writes a private report without leaving

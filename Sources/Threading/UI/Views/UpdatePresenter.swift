@@ -155,6 +155,15 @@ final class UpdatePresenter: UpdatePresenting {
         present(Self.installingAlert())
     }
 
+    func showReadyToRetryTermination(retry: @escaping () -> Void) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = ConfirmationAlert.makeAlert(Self.readyRequest())
+        present(alert) { response in
+            guard ConfirmationAlert.chosenIndex(response, optionCount: 1) == 0 else { return }
+            retry()
+        }
+    }
+
     /// The final stage is a real alert so its rendered fixture exercises the shipping copy,
     /// button and sheet silhouette together.
     static func installingAlert() -> ThemedAlert {

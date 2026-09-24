@@ -16,6 +16,41 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.4.0]
+
+### Added
+
+- **Test a notification from the chat that sent it.** Push Test shows the latest request and its
+  result, lets you edit the title, message, recipient and destination, and sends a test through the
+  same delivery checks used by an agent. Find it from the display panel, View menu, command
+  palette or Remote Access settings. An agent's notification updates an open test tab without
+  taking focus or replacing a draft you are editing.
+- **Record and present the adopted Simulator.** Save a recording with visible taps and swipes, or
+  capture a full-resolution Simulator video. Choose the touch colour, size and trail, and open a
+  separate presenter window for screen sharing. The pane and presenter both accept scrolling and
+  device controls.
+- Native conversations now name Threading tool calls, and browser annotations include the page
+  element path so an agent can identify the marked control more precisely.
+
+### Changed
+
+- Recently viewed chats remain ready to reopen under the idle-agent limit without changing which
+  chats resume at launch. Terminal attachment scanning now performs its buffer read and path
+  resolution off the main queue, reducing work while large terminals are active.
+- A missing worktree stays grouped under its repository in the sidebar, where its recovery action
+  remains available.
+
+### Fixed
+
+- **Install and Relaunch** proceeds through Threading's shutdown after you approve the update,
+  without asking you to confirm quitting a second time. If installation is still waiting for the
+  app to quit, Check for Updates offers a retry instead of leaving an Installing sheet on screen.
+- Used Share Chat invitations now explain that the link has already been accepted rather than
+  showing a misleading generic failure. Live notification routing on iPhone also follows the
+  current connection after a reconnect.
+- Simulator recordings keep the right orientation when touches are shown, and themed alert
+  borders retain their corners when attached as sheets.
+
 ## [0.3.0]
 
 ### Added

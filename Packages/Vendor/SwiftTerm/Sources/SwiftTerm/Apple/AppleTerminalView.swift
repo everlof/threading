@@ -1762,6 +1762,21 @@ extension TerminalView {
             kind: kind)
     }
 
+    /// Captures the synchronized terminal reader without retaining the AppKit/UIKit view.
+    /// Callers may translate the buffer on a worker; the render owner locks terminal state.
+    public nonisolated func recentLogicalBufferReader(
+        maximumUTF8Bytes: Int
+    ) -> @Sendable (Int) -> Terminal.RecentBufferText {
+        let owner = renderOwner
+        return { sinceAbsoluteRow in
+            owner.recentLogicalBufferText(
+                maximumUTF8Bytes: maximumUTF8Bytes,
+                sinceAbsoluteRow: sinceAbsoluteRow,
+                kind: .active
+            )
+        }
+    }
+
     /// Changes normal-buffer scrollback through the terminal's synchronized command boundary.
     public nonisolated func changeHistorySize(_ newScrollback: Int?) {
         renderOwner.changeHistorySize(newScrollback)

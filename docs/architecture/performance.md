@@ -2338,6 +2338,20 @@ keeping:
    `ring_events`, `ring_distinct_spans` and `top_spans` in `otherData`, and the automatic-export
    log line repeats them, so `log show` shows what is flooding the recorder without opening a file.
 
+On 2026-09-24 another live sample found the remaining read cost in the main queue. During a
+ten-second capture, 379 of 615 sampled main-queue frames were inside
+`TerminalAttachmentObserver.scanNow` → `recentLogicalBufferText`; a recent trace had 1,884
+`attachments.read` spans, with a 20.8 ms median and 28.4 ms p95. Most reported zero new rows,
+yet still translated the mutable screen. Incremental scrollback bounds made the read smaller but
+could not make repeated screen translation free. The observer now captures SwiftTerm's synchronized
+render owner as a `Sendable` reader and performs both buffer translation and path resolution on a
+worker. Its main-actor phase only compares the completed read with the last *applied* fingerprint
+and publishes the bounded result. A superseded read cannot commit the cursor or fingerprint; the
+next read must still see and resolve those rows. The focused observer test asserts the read runs
+off main, plus the cursor, repaint, cancellation and enabled-state rules. The live app used for
+the capture has not been restarted with this change, so the numbers above are baseline evidence,
+not an after measurement.
+
 The general rule, which is not specific to attachments: **a cap on output is not a cap on work.**
 A bound stated in bytes, rows or items returned says nothing about how much was examined to
 produce them, and the two diverge exactly when the content is sparse.

@@ -2015,7 +2015,7 @@ enum AttachmentReferenceDetector {
 /// The observer keeps the cursor rather than the terminal, because only the observer knows when a
 /// scan was actually consumed. A disabled or restarted observer resets it and reads the whole
 /// window again.
-struct TerminalScanRead {
+struct TerminalScanRead: Sendable {
     let text: String
     /// One past the newest row read, in coordinates that survive scrollback trimming.
     let nextAbsoluteRow: Int
@@ -2048,13 +2048,13 @@ final class TerminalAttachmentObserver {
     /// A terminal running a TUI rewrites its screen in place, so `noteOutput` fires constantly
     /// while the text under the read window stays exactly what it was — 736 scans in one four
     /// minute trace, most of them over bytes that had already been resolved. Identical inputs
-    /// cannot produce a different resolution, and the regex pass is the expensive half, so the
-    /// pass is what gets skipped. Nothing about *what* is detected changes.
+    /// cannot produce a different resolution, so the regex pass is skipped after the worker
+    /// reads the mutable screen. Nothing about *what* is detected changes.
     ///
     /// The row position is part of it deliberately: text can repeat while the buffer advances
     /// (a spinner, a progress line), and an advance must always be scanned so the read window
     /// does not stall behind it.
-    private struct ScanFingerprint: Equatable {
+    private struct ScanFingerprint: Equatable, Sendable {
         let textHash: Int
         let byteCount: Int
         let readThrough: Int
@@ -2072,7 +2072,7 @@ final class TerminalAttachmentObserver {
     private let sessionID: SessionID
     private let projectRoot: () -> URL?
     private let currentDirectory: () -> URL?
-    private let text: (Int) -> TerminalScanRead
+    private let text: @Sendable (Int) -> TerminalScanRead
     private let isEnabled: () -> Bool
     private let now: () -> Date
     private let record: Recorder
@@ -2096,7 +2096,7 @@ final class TerminalAttachmentObserver {
         sessionID: SessionID,
         projectRoot: @escaping () -> URL?,
         currentDirectory: @escaping () -> URL?,
-        text: @escaping (Int) -> TerminalScanRead,
+        text: @escaping @Sendable (Int) -> TerminalScanRead,
         isEnabled: @escaping () -> Bool = { true },
         now: @escaping () -> Date = Date.init,
         record: @escaping Recorder = { resolution, sessionID, root, shouldAdmit in
@@ -2170,63 +2170,42 @@ final class TerminalAttachmentObserver {
         }
         guard let root = projectRoot() else { return }
 
-        // Reading SwiftTerm's buffer is main-actor work. Everything after that is immutable text,
-        // URLs and filesystem queries, so doing it on the queue the window draws on would turn a
-        // bounded 20–55 ms regex pass into visible input and scroll latency.
-        //
-        // The read gets its own span because it is the only synchronous main-thread phase here.
-        // It used to sit outside every span, so the one measurement of this feature described the
-        // worker round trip and never the work that blocked the window. Reading only what is new
-        // is what keeps it bounded; the span is what keeps it honest.
-        let readSpan = PerformanceRecorder.shared.begin(
-            "attachments.read",
-            category: "attachments",
-            metadata: ["since": String(lastScannedAbsoluteRow)]
-        )
-        let read = text(lastScannedAbsoluteRow)
-        readSpan.end(metadata: [
-            "bytes": String(read.text.utf8.count),
-            "new_rows": String(max(0, read.nextAbsoluteRow - lastScannedAbsoluteRow))
-        ])
-
-        let scanned = read.text
-        let readThrough = read.nextAbsoluteRow
+        let since = lastScannedAbsoluteRow
         let current = currentDirectory()
-
-        // Nothing the answer depends on has moved, so the answer is the one already applied.
-        // Recorded rather than silently returned: a scan that did no work is still a scan, and
-        // the stress fixture measuring the warm repaint needs to see what it now costs.
-        let fingerprint = ScanFingerprint(
-            textHash: scanned.hashValue,
-            byteCount: scanned.utf8.count,
-            readThrough: readThrough,
-            currentDirectory: current?.path,
-            projectRoot: root.path
-        )
-        if fingerprint == lastScanFingerprint {
-            lastScanMetrics = ScanMetrics(
-                bytes: scanned.utf8.count,
-                workerNanoseconds: 0,
-                custodyWorkerNanoseconds: 0,
-                applyNanoseconds: 0,
-                found: 0,
-                recorded: 0,
-                wasUnchanged: true
-            )
-            return
-        }
-        lastScanFingerprint = fingerprint
-
-        // Wall time across a worker hop. It begins and ends on the main actor without occupying
-        // it, so it must not be read as a main-thread stall.
-        let span = PerformanceRecorder.shared.begin(
-            "attachments.scan",
-            category: "attachments",
-            crossesQueues: true,
-            metadata: ["bytes": String(scanned.utf8.count)]
-        )
         isScanInFlight = true
+        let readText = text
         resolutionTask = Task.detached(priority: .userInitiated) { [weak self] in
+            // SwiftTerm owns the mutable terminal behind a lock. Translating its bounded text
+            // here keeps even a wide, unchanged screen out of the main queue's output callback.
+            let readSpan = PerformanceRecorder.shared.begin(
+                "attachments.read",
+                category: "attachments",
+                metadata: ["since": String(since)]
+            )
+            let read = readText(since)
+            let scanned = read.text
+            let scannedBytes = scanned.utf8.count
+            readSpan.end(metadata: [
+                "bytes": String(scannedBytes),
+                "new_rows": String(max(0, read.nextAbsoluteRow - since))
+            ])
+            guard !Task.isCancelled else { return }
+            let fingerprint = ScanFingerprint(
+                textHash: scanned.hashValue,
+                byteCount: scannedBytes,
+                readThrough: read.nextAbsoluteRow,
+                currentDirectory: current?.path,
+                projectRoot: root.path
+            )
+            guard await self?.shouldResolve(
+                fingerprint, scannedBytes: scannedBytes, generation: generation
+            ) == true else { return }
+            let span = PerformanceRecorder.shared.begin(
+                "attachments.scan",
+                category: "attachments",
+                crossesQueues: true,
+                metadata: ["bytes": String(scannedBytes)]
+            )
             let started = DispatchTime.now().uptimeNanoseconds
             let resolution = AttachmentReferenceDetector.resolve(
                 text: scanned,
@@ -2240,14 +2219,38 @@ final class TerminalAttachmentObserver {
             }
             await self?.finishScan(
                 resolution,
-                scannedBytes: scanned.utf8.count,
+                scannedBytes: scannedBytes,
                 workerNanoseconds: ended - started,
                 generation: generation,
-                readThrough: readThrough,
+                readThrough: read.nextAbsoluteRow,
+                fingerprint: fingerprint,
                 projectRoot: root,
                 span: span
             )
         }
+    }
+
+    private func shouldResolve(
+        _ fingerprint: ScanFingerprint,
+        scannedBytes: Int,
+        generation: Int
+    ) -> Bool {
+        guard generation == scanGeneration else { return false }
+        guard fingerprint != lastScanFingerprint else {
+            resolutionTask = nil
+            isScanInFlight = false
+            lastScanMetrics = ScanMetrics(
+                bytes: scannedBytes,
+                workerNanoseconds: 0,
+                custodyWorkerNanoseconds: 0,
+                applyNanoseconds: 0,
+                found: 0,
+                recorded: 0,
+                wasUnchanged: true
+            )
+            return false
+        }
+        return true
     }
 
     /// Remembers offered paths, newest wins, bounded.
@@ -2280,6 +2283,7 @@ final class TerminalAttachmentObserver {
         workerNanoseconds: UInt64,
         generation: Int,
         readThrough: Int,
+        fingerprint: ScanFingerprint,
         projectRoot root: URL,
         span: PerformanceSpan
     ) async {
@@ -2304,12 +2308,6 @@ final class TerminalAttachmentObserver {
             outsideProject: resolution.outsideProject.filter { !recentlySeenPathSet.contains($0.path) },
             resolvedProjectRoot: resolution.resolvedProjectRoot
         )
-        noteSeen((resolution.insideProject + resolution.outsideProject).map(\.path))
-        // Only now, once this scan's text has been folded into the history that dedupes the next
-        // one, may the read cursor move past it. Advancing at read time instead would let a scan
-        // that lost a race to a newer generation carry its rows away unprocessed, and nothing
-        // would ever read them again.
-        lastScannedAbsoluteRow = max(lastScannedAbsoluteRow, readThrough)
         let filteredEnded = DispatchTime.now().uptimeNanoseconds
         let result = if newly.isEmpty {
             SessionAttachmentStore.ScannedRecordResult.empty
@@ -2323,6 +2321,12 @@ final class TerminalAttachmentObserver {
             span.end(metadata: ["superseded": "1"])
             return
         }
+        // Admission can suspend while custody is staged. A newer scan may replace this one in
+        // that interval, so neither its cursor nor its deduplication history is committed until
+        // the result has actually been applied.
+        noteSeen((resolution.insideProject + resolution.outsideProject).map(\.path))
+        lastScannedAbsoluteRow = max(lastScannedAbsoluteRow, readThrough)
+        lastScanFingerprint = fingerprint
         resolutionTask = nil
         isScanInFlight = false
         let found = newly.insideProject.count + newly.outsideProject.count
