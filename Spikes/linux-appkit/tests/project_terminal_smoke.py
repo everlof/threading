@@ -132,6 +132,7 @@ with open(Path(folder) / 'navigation.log', 'w+') as log:
     except BaseException:
         log.seek(0)
         print(log.read(), file=sys.stderr)
+        (Path('out') / 'project-navigation-failure.log').write_text((Path(folder) / 'navigation.log').read_text())
         raise
     finally:
         if process.poll() is None:

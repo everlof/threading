@@ -205,34 +205,6 @@ public enum DisplayPaneDefaults {
     public static let maximumBrowserTabs = 8
 }
 
-// MARK: - Codex Discovery Defaults
-
-public enum CodexDiscoveryDefaults {
-    public static let rolloutPrefix = "rollout-"
-    public static let rolloutExtension = "jsonl"
-    public static let sessionMetaType = "session_meta"
-    public static let sessionIndexFile = "session_index.jsonl"
-
-    /// Bound for Codex's one-record-per-thread title index. The real index is a few hundred
-    /// kilobytes for thousands of conversations; this leaves ample growth without letting a
-    /// corrupt file turn one title refresh into an unbounded read.
-    public static let sessionIndexScanLimit = 64 * 1024 * 1024
-
-    /// Event recording a turn the user typed, as opposed to the copy replayed into the
-    /// conversation behind the CLI's instruction blocks.
-    public static let userMessageType = "user_message"
-
-    /// Codex writes the rollout file shortly after launch, so discovery retries briefly.
-    public static let pollInterval: TimeInterval = 0.25
-    public static let maxAttempts = 40
-
-    /// Tolerance for the gap between our launch timestamp and the file's creation date.
-    public static let clockSlack: TimeInterval = 5.0
-
-    /// The `session_meta` record is the first line, so only a prefix needs reading.
-    public static let headerReadLimit = 64 * 1024
-}
-
 // MARK: - OpenCode Discovery Defaults
 
 public enum OpenCodeDiscoveryDefaults {

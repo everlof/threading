@@ -1699,3 +1699,29 @@ rapid Up key did not produce an Alpha selection after the first selected Beta. S
 isolated real-daemon/Xvfb runs of that older journey passed, and the focused agent-creation and
 lock-refusal journeys passed on final behavior. The loaded-suite key loss remains unresolved; a
 passing focused journey is not a full-suite result. No Mac product source changed.
+
+## 62. A saved Codex agent can carry its provider identity into a later Linux window
+
+Codex does not accept a caller-supplied session ID. The rollout header reader is now a
+Foundation-only core operation shared with the Mac discovery path and vendored byte-identically
+into the Linux slice. It checks only launch-adjacent day directories, reads at most 64 KiB from
+each candidate, caps directory entries, matches the recorded working directory and creation
+time, and refuses multiple matches. Linux polls it on a utility queue after the daemon confirms
+spawn, then saves the provider ID only while the original session still awaits one. A rollout
+that never appears leaves the record awaiting an ID.
+
+Selecting a saved Codex agent first attaches to the daemon's existing identity. If the daemon
+reports that identity unknown, the window reloads the record under the store lock and builds a
+shared `CodexLaunchCommand` resume for its persisted provider ID. It never turns an unknown ID
+into a fresh conversation or adds a second session row. Live agents still reattach to the same
+child; exited agents can start a new child for the same conversation. The host owns identity,
+store, process and PTY authority; this remains the diagnostic host-only window surface.
+
+The real-daemon/Xvfb fixture uses a fake Codex executable that writes a `session_meta` rollout
+and later records the exact `resume <provider-id>` argv in a second app window. It also verifies
+the original permission flags, PTY, retained-child revisit, exit, store lock refusal and
+unchanged session count after resume. The fixture does not prove an authenticated Codex login or
+test concurrent same-directory provider launches; those still need product-level validation.
+The final `window-smoke.sh` run passed the complete native renderer, project, terminal, agent,
+replay and refusal suite, including the new resume journey. The focused Mac rollout-identity
+test passed on the final lazy-directory-walk source.

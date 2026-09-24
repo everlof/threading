@@ -1064,7 +1064,10 @@ Claude and Grok accept `--session-id <uuid>`, so the id is minted up front. Grok
 that id while its first-login browser authentication screen is open, so `GrokSessionDiscovery`
 polls the supported `grok sessions list` command and marks it resumable only after it appears.
 Codex has no equivalent, so its id is read back from the `session_meta` record at the head of the
-rollout file it writes under `~/.codex/sessions/`. OpenCode also assigns its own `ses_…` id; discovery polls
+rollout file it writes under `~/.codex/sessions/`. The portable reader scans only launch-adjacent
+day directories with an entry and header-byte bound; if two recent rollouts name the same working
+directory, it leaves the session awaiting an identifier rather than choosing one arbitrarily.
+OpenCode also assigns its own `ses_…` id; discovery polls
 its supported `opencode session list --format json` command and selects the newest record for
 the launching checkout. This intentionally avoids its private storage schema.
 
