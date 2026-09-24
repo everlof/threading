@@ -820,6 +820,10 @@ read side remains alive, pipelined and late requests are not routed, a peer clos
 socket, and a peer that never closes still reaches the deadline. `RemoteListenerTLSTests` also
 checks exact, decodable thumbnail and full-image bytes near the reported 140 KB size and above the
 WebSocket backlog ceiling, directly and through a bounded 4 KiB-at-a-time TLS tunnel.
+The idle test fixture waits for both its client and listener to report cancellation before the
+next case binds a port. Network.framework cancels them asynchronously; without that wait, a full
+suite run intermittently reached `connectx` with `EADDRINUSE` during test setup, before the idle
+timer was exercised.
 
 **A page stops asking for its bytes only once it holds them** — never because an attempt is
 already running. `RemoteAttachmentPreviewLoad.shouldRequestBytes` is the whole rule, and it

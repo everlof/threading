@@ -67,9 +67,26 @@ final class RemoteConnectionIdleTests: XCTestCase {
     }
 
     override func tearDown() {
-        client?.cancel()
-        accepted.withLock { $0 }.forEach { $0.cancel() }
-        listener?.cancel()
+        // NWConnection and NWListener release their local ports asynchronously. The next
+        // test binds another ephemeral loopback port immediately, so leaving either cancellation
+        // in flight can make its client's connectx fail with EADDRINUSE before idle logic runs.
+        if let client {
+            XCTAssertTrue(client.cancelAndWait(timeout: 5), "the client released its socket")
+        }
+        serverQueue?.sync {
+            accepted.withLock { $0 }.forEach { $0.cancel() }
+        }
+        if let listener {
+            let cancelled = DispatchSemaphore(value: 0)
+            listener.stateUpdateHandler = { state in
+                if case .cancelled = state { cancelled.signal() }
+            }
+            listener.cancel()
+            XCTAssertEqual(
+                cancelled.wait(timeout: .now() + 5), .success,
+                "the listener released its loopback port before the next test"
+            )
+        }
         super.tearDown()
     }
 
@@ -236,6 +253,7 @@ final class RemoteConnectionIdleTests: XCTestCase {
 
         private let connection: NWConnection
         private let queue = DispatchQueue(label: "RemoteConnectionIdleTests.client")
+        private let cancelled = DispatchSemaphore(value: 0)
         private let condition = NSCondition()
         private var buffer = Data()
         private var responses: [String] = []
@@ -256,9 +274,13 @@ final class RemoteConnectionIdleTests: XCTestCase {
                 switch state {
                 case .ready:
                     outcome.withLock { if $0 == nil { $0 = true; settled.signal() } }
-                case .failed, .cancelled:
+                case .failed:
                     outcome.withLock { if $0 == nil { $0 = false; settled.signal() } }
                     self?.markEnded()
+                case .cancelled:
+                    outcome.withLock { if $0 == nil { $0 = false; settled.signal() } }
+                    self?.markEnded()
+                    self?.cancelled.signal()
                 default:
                     break
                 }
@@ -306,8 +328,9 @@ final class RemoteConnectionIdleTests: XCTestCase {
             return ended
         }
 
-        func cancel() {
+        func cancelAndWait(timeout: TimeInterval) -> Bool {
             connection.cancel()
+            return cancelled.wait(timeout: .now() + timeout) == .success
         }
 
         private func receiveLoop() {
