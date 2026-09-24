@@ -127,6 +127,9 @@ the agent record and keeps its typed daemon identity. Automatic restoration is s
 store membership on a worker, adopts the daemon grid without resizing the child, suppresses query
 responses for the announced replay byte prefix and marks cut history. Input and frames remain
 gated until replay completes; old or invalid peers fail explicitly under an attach deadline.
+An explicit native clipboard gesture forwards at most 64 KiB of valid UTF-8 on the same ordered
+terminal worker, with the emulator's live bracketed-paste mode deciding the framing. The host
+keeps shortcut routing and clipboard refusal; selection/copy and IME are not implemented there.
 An integrated terminal failure stops only its client and remains navigable as a failed entry;
 returning to projects preserves other runtimes. Revisiting does not silently retry. The failed
 view waits on native events and bounds its diagnostic text before drawing. The standalone

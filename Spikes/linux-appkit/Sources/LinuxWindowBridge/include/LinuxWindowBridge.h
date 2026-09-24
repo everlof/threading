@@ -15,10 +15,14 @@ void tw_close(TWWindow *);
 void tw_terminal_mode(TWWindow *);
 // Optional host navigation: kind 8 activates/returns, 9 requests a fresh terminal,
 // 10/11 drill in/back, 12 is keyboard cancel, 13 requests a fresh managed agent.
+// In terminal mode, kind 14 requests a clipboard paste. The caller reads a bounded UTF-8
+// payload only after this event; the bridge never puts unbounded clipboard text in TWEvent.
 void tw_project_navigation(TWWindow *, int enabled);
 void tw_project_mode(TWWindow *);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);
 const char *tw_event_text(const TWEvent *);
+// Returns byte count, -1 for content over capacity, -2 for a clipboard error.
+int tw_clipboard_read(uint8_t *destination, int capacity);
 typedef struct { int offset, length, width; uint32_t foreground, background; int bold, underline; } TWCell;
 // Worker-only Pango/Cairo renderer. Output is RGBA, in fixed 10x22 pixel terminal cells.
 int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *, int columns, int rows,

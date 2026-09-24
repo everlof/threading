@@ -62,6 +62,15 @@ void tw_terminal_mode(TWWindow *w) { w->terminal = 1; SDL_StartTextInput(); }
 void tw_project_navigation(TWWindow *w, int enabled) { w->projectNavigation = enabled; }
 void tw_project_mode(TWWindow *w) { w->terminal = 0; SDL_StopTextInput(); }
 const char *tw_event_text(const TWEvent *e) { return e->text; }
+int tw_clipboard_read(uint8_t *destination, int capacity) {
+    if (!destination || capacity < 1 || capacity > 65536) return -2;
+    char *text = SDL_GetClipboardText();
+    if (!text) return -2;
+    size_t length = strnlen(text, (size_t)capacity + 1);
+    if (length <= (size_t)capacity) memcpy(destination, text, length);
+    SDL_free(text);
+    return length > (size_t)capacity ? -1 : (int)length;
+}
 int tw_next(TWWindow *w, TWEvent *out) { return tw_next_timeout(w, out, -1); }
 int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
     SDL_Event e;
@@ -80,9 +89,18 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->suppressActivation && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && e.key.keysym.sym == w->suppressActivation) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;
+        } else if (w->terminal && w->suppressActivation == SDLK_v && e.type == SDL_TEXTINPUT) {
+            // A shortcut must not also type its printable key into the PTY.
         } else if (w->terminal && e.type == SDL_TEXTINPUT) {
             out->kind = 6; memcpy(out->text, e.text.text, sizeof(out->text));
         } else if (w->terminal && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)) {
+            if (e.key.keysym.sym == SDLK_v && (e.key.keysym.mod & KMOD_CTRL)
+                && (e.key.keysym.mod & KMOD_SHIFT)) {
+                if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+                    out->kind = 14; w->suppressActivation = SDLK_v; return 1;
+                }
+                continue;
+            }
             if (w->projectNavigation && e.key.keysym.sym == SDLK_p
                 && (e.key.keysym.mod & KMOD_CTRL) && (e.key.keysym.mod & KMOD_SHIFT)) {
                 if (e.type == SDL_KEYDOWN && !e.key.repeat) { out->kind = 8; return 1; }

@@ -1800,3 +1800,25 @@ resume, renderer, startup and refusal journeys on the final shared database code
 `ProjectDatabaseTests` and `ProjectStoreMutationTests` passed 62 tests (one skipped), including
 rollback for session/selection and first-project/session transactions and byte preservation for
 standing rows.
+
+## 66. Native terminal clipboard paste reaches the child as one ordered gesture
+
+The SDL window handled committed text and functional keys but had no clipboard route, so a user
+could type a command but could not paste a path or multiline prompt. Ctrl+Shift+V now requests
+text from the native clipboard. The host accepts only valid UTF-8 up to 64 KiB, refuses a larger
+selection without sending a truncated prefix, and sends the accepted bytes through the existing
+ordered terminal worker. The emulator reads its live bracketed-paste mode under its terminal lock
+and emits the same start/text/end sequence as the macOS terminal when that mode is on. The
+shortcut's printable `v` and control byte are suppressed rather than leaking into the child.
+
+The bound applies after SDL retrieves the X11 selection: `SDL_GetClipboardText` may allocate the
+whole source text before the host can inspect its length. Retrieval happens only for an explicit
+paste, outside the frame loop. Selection, copy, rich clipboard types and IME composition remain
+unimplemented in this diagnostic surface. Input routing and transport remain host-owned; this
+adds no extension presentation API.
+
+The complete Docker/Xvfb `window-smoke.sh` suite passed on the final code. Its new real-child
+fixture set the X11 clipboard, sent native Ctrl+Shift+V, checked exact Unicode and multiline
+bytes with bracketed paste on, checked plain bytes with the mode off, and proved a 64 KiB-plus-one
+selection was refused before a following small paste completed. This is clipboard/PTY evidence,
+not an IME, copy/selection, or installed-distribution check.

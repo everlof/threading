@@ -184,6 +184,27 @@ struct WindowHarness {
         session.key(key, modifiers: modifiers, action: action)
     }
 
+    @MainActor static func pasteClipboard(into session: GraphicalTerminal, window: OpaquePointer) {
+        var bytes = [UInt8](repeating: 0, count: GraphicalTerminal.maximumPasteBytes)
+        let length = bytes.withUnsafeMutableBufferPointer {
+            tw_clipboard_read($0.baseAddress, Int32($0.count))
+        }
+        guard length >= 0 else {
+            let reason = length == -1 ? "clipboard exceeds 64 KiB" : "clipboard is unavailable"
+            tw_title(window, "Threading terminal - \(reason)")
+            print("CLIPBOARD_REFUSED \(reason)"); fflush(nil)
+            return
+        }
+        guard length > 0 else { return }
+        let payload = Data(bytes.prefix(Int(length)))
+        guard String(data: payload, encoding: .utf8) != nil else {
+            tw_title(window, "Threading terminal - clipboard is not UTF-8")
+            print("CLIPBOARD_REFUSED invalid UTF-8"); fflush(nil)
+            return
+        }
+        session.paste(payload)
+    }
+
     @MainActor static func showTerminal(_ args: [String]) throws {
         guard args.count >= 4, args[3].hasPrefix("/") else {
             throw WindowFailure("usage: WindowHarness --terminal STORE SOCKET DIRECTORY ABS_EXECUTABLE [ARG ...]")
@@ -269,6 +290,7 @@ struct WindowHarness {
                 guard failure == nil else { continue }
                 if event.kind == 6 { session.send(Data(String(cString: tw_event_text(&event)).utf8)) }
                 if event.kind == 7 { sendFunctional(event, to: session) }
+                if event.kind == 14 { pasteClipboard(into: session, window: window) }
             }
         }
     }
