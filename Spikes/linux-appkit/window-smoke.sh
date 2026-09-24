@@ -189,6 +189,7 @@ python3 tests/project_terminal_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$
 
 python3 tests/project_retry_smoke.py "$bin/WindowHarness" "$fixture/store"
 python3 tests/project_terminal_picker_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
+python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
 
 if [[ "$THREADING_LINUX_TERMINAL_STRESS" == 1 ]]; then

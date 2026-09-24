@@ -1,0 +1,109 @@
+"""A saved agent session survives its CLI client and reopens in the native window."""
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import time
+import uuid
+
+binary, host, endpoint, folder = sys.argv[1:]
+root = Path(folder)
+store = str(root / 'agent-window-store')
+project = root / 'AgentProject'
+project.mkdir()
+child = root / 'agent-window-child'
+child.write_text('''#!/usr/bin/python3
+import json, os, signal, sys, termios, tty
+from pathlib import Path
+tty.setraw(0)
+changes = [0]
+signal.signal(signal.SIGWINCH, lambda *_: changes.__setitem__(0, changes[0] + 1))
+Path('agent-child.json').write_text(json.dumps({'pid': os.getpid(), 'argv': sys.argv[1:]}))
+os.write(1, b'Original agent child\\r\\n\\x1b]0;AGENT READY\\x07')
+before = changes[0]
+assert os.read(0, 1) == b'p'
+assert changes[0] == before, 'graphical attach resized the agent PTY'
+os.write(1, b'SAME AGENT CHILD\\r\\n\\x1b]0;AGENT LIVE\\x07')
+assert os.read(0, 1) == b'q'
+sys.exit(9)
+''')
+child.chmod(0o700)
+log_path = root / 'agent-window.log'
+
+
+def xdo(*args):
+    return subprocess.run(['xdotool', *args], capture_output=True, text=True, timeout=3)
+
+
+def await_title(process, expected):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        assert process.poll() is None, f'window exited before {expected}: {log_path.read_text()}'
+        result = xdo('search', '--name', '^' + re.escape(expected) + '$')
+        if result.returncode == 0:
+            return result.stdout.splitlines()[0]
+        time.sleep(.05)
+    raise AssertionError(f'missing title {expected}: {log_path.read_text()}')
+
+
+def listing():
+    return subprocess.run([host, store, endpoint, 'list'], check=True, capture_output=True,
+                          text=True, timeout=8).stdout
+
+
+with log_path.open('w+') as log:
+    cli = subprocess.Popen([host, store, endpoint, 'codex', str(project), '/bin/sh', str(child),
+                            'inspect this project'], stdin=subprocess.PIPE, stdout=log, stderr=log)
+    try:
+        deadline = time.monotonic() + 15
+        marker = project / 'agent-child.json'
+        while not marker.exists():
+            assert cli.poll() is None and time.monotonic() < deadline, 'agent did not start'
+            time.sleep(.05)
+        original = json.loads(marker.read_text())
+        assert original['argv'][-2:] == ['--', 'inspect this project'], original
+        cli.send_signal(signal.SIGTERM)
+        assert cli.wait(timeout=5) == 143
+        cli.stdin.close()
+        os.kill(original['pid'], 0)
+        saved = listing()
+        agents = [line.strip().split()[1] for line in saved.splitlines() if line.startswith('  agent ')]
+        assert len(agents) == 1, saved
+        with (root / 'agent-attachment.log').open('w+') as window_log:
+            process = subprocess.Popen([binary, '--attach-agent', store, endpoint, agents[0]],
+                                       stdout=window_log, stderr=window_log)
+            try:
+                window = await_title(process, 'Threading terminal - AGENT READY [history cut]')
+                geometry = xdo('getwindowgeometry', '--shell', window).stdout
+                assert 'WIDTH=800\n' in geometry and 'HEIGHT=528\n' in geometry, geometry
+                assert json.loads(marker.read_text()) == original
+                assert xdo('windowfocus', window, 'key', 'p').returncode == 0
+                await_title(process, 'Threading terminal - AGENT LIVE [history cut]')
+                assert xdo('windowfocus', window, 'key', 'q').returncode == 0
+                await_title(process, 'Threading terminal - exited 9 [history cut]')
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
+                assert process.wait(timeout=5) == 0
+            except BaseException:
+                window_log.flush()
+                print((root / 'agent-attachment.log').read_text(), file=sys.stderr)
+                raise
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
+        assert listing() == saved, 'graphical attach changed the saved agent record'
+        missing = subprocess.run([binary, '--attach-agent', store, endpoint, str(uuid.uuid4())],
+                                 capture_output=True, timeout=8)
+        assert missing.returncode != 0 and b'session is not in this store' in missing.stderr, missing
+        print('PASS graphical agent reattach: same daemon child, saved identity, replay, input and exit 9', flush=True)
+    except BaseException:
+        log.flush()
+        print(log_path.read_text(), file=sys.stderr)
+        raise
+    finally:
+        if cli.poll() is None:
+            cli.kill()
+        cli.wait(timeout=3)
