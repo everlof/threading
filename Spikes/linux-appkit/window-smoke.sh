@@ -6,7 +6,7 @@ mkdir -p out
 docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool imagemagick >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool xclip imagemagick >/dev/null
 ./vendor.sh --verify
 swift build --product WindowHarness
 swift build --product LinuxHost
@@ -188,6 +188,7 @@ xdotool key alt+F4
 wait "$window_pid"
 window_pid=''
 echo 'PASS native functional keys: normal/application modes, modifiers, kitty press/release and ordered editing'
+python3 tests/terminal_clipboard_smoke.py "$bin/WindowHarness" "$fixture/store" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_exit_smoke.py "$bin/WindowHarness"
 python3 tests/project_terminal_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/store" "$fixture/pty.sock" "$fixture" "$PWD/tests/project_terminal_child.py"
 

@@ -10,6 +10,7 @@ import ThreadingPTYHostKit
 /// Experimental host-only terminal surface. Threading retains store identity, process ownership,
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
+    static let maximumPasteBytes = 64 * 1024
     private static let exitWaitSeconds: Double = 5
     private static let maximumReplayBytes = 4 * 1024 * 1024
     private static let maximumAttachColumns = 128
@@ -29,6 +30,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var pendingInputCount = 0
     private enum Input: Sendable {
         case text(Data)
+        case paste(Data)
         case key(PTYEmulator.Key, PTYEmulator.Modifiers, PTYEmulator.KeyAction)
     }
     private var frame: Frame?
@@ -446,6 +448,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard bytes.count <= 32 else { fail(WindowFailure("input event exceeds byte budget")); return }
         submit(.text(bytes))
     }
+    func paste(_ bytes: Data) {
+        guard !bytes.isEmpty && bytes.count <= Self.maximumPasteBytes else { return }
+        submit(.paste(bytes))
+    }
     func key(_ key: PTYEmulator.Key, modifiers: PTYEmulator.Modifiers, action: PTYEmulator.KeyAction) {
         submit(.key(key, modifiers, action))
     }
@@ -466,6 +472,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             guard admitted else { return }
             switch input {
             case .text(let bytes): emulator?.input(bytes)
+            case .paste(let bytes): emulator?.paste(bytes)
             case .key(let key, let modifiers, let action): emulator?.key(key, modifiers: modifiers, action: action)
             }
         }

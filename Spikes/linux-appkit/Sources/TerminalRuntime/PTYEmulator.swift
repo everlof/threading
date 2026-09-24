@@ -10,6 +10,17 @@ final class PTYEmulator: TerminalDelegate {
     func input(_ bytes: Data) {
         terminal.terminalLock.withLock { terminal.sendUserInput(Array(bytes)[...]) }
     }
+    func paste(_ bytes: Data) {
+        terminal.terminalLock.withLock {
+            if terminal.bracketedPasteMode {
+                terminal.sendUserInput(EscapeSequences.bracketedPasteStart[...])
+            }
+            terminal.sendUserInput(Array(bytes)[...])
+            if terminal.bracketedPasteMode {
+                terminal.sendUserInput(EscapeSequences.bracketedPasteEnd[...])
+            }
+        }
+    }
     func key(_ key: Key, modifiers: Modifiers = [], action: KeyAction = .press) {
         terminal.terminalLock.withLock {
             if let bytes = terminal.encodedFunctionalKey(key, modifiers: modifiers, eventType: action) {

@@ -319,8 +319,16 @@ Backspace, Escape, Delete, arrows, Home/End, Page Up/Down and F1–F12) use Swif
 including modifiers and press/repeat/release. This honors application-cursor and negotiated kitty
 modes for those keys. Complete enhanced printable-key, keypad, Insert and IME support remains
 outstanding; this is not full keyboard-protocol parity. Pango shapes individual cell graphemes: cross-cell
-joining, full IME composition, clipboard, selection, mouse reporting, scrollback navigation,
+joining, full IME composition, clipboard copy/selection, mouse reporting, scrollback navigation,
 accessibility and live profile/theme configuration remain outstanding.
+
+Ctrl+Shift+V pastes UTF-8 text from the native clipboard. The host accepts at most 64 KiB per
+gesture, refuses larger or invalid text without sending a prefix, and forwards the accepted bytes
+on the ordered terminal worker. The live SwiftTerm mode decides whether to wrap them in bracketed
+paste markers; the shortcut key itself is not forwarded to the child. Clipboard retrieval is an
+SDL/X11 platform operation on explicit user input, not part of the frame loop; SDL may allocate the
+source text before the host can reject an oversized selection. This does not
+implement selection, copy, rich clipboard types, or IME composition.
 
 Customization classification: this is a host-only diagnostic embedding of the terminal surface,
 not a new public extension component. Store identities, launch admission, input authority,
@@ -355,6 +363,8 @@ Text and functional events share the terminal worker's ordered input path and ca
 is capped at 256 pending events (plus the executing event), with at most 32 UTF-8 bytes per text
 event. Overflow is explicit. `terminal_keyboard_child.py` verifies the actual native key bytes
 while the child changes modes; a trailing text marker after keyup separates each mode transition.
+`terminal_clipboard_child.py` verifies pasted Unicode and newlines through a real PTY in both
+bracketed and plain modes, with a third stage refusing an oversized clipboard.
 
 ### Navigate projects, saved agents and live terminals in one window
 
