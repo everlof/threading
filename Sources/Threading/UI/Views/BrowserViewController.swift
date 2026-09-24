@@ -78,6 +78,15 @@ struct BrowserAnnotation: Equatable, Sendable {
     var documentPoint: CGPoint
     let url: String
     var anchorID: String? = nil
+    var element: BrowserAnnotationElementReference? = nil
+}
+
+/// A bounded, page-derived hint for locating the marked element in source markup.
+/// `::frame` and `::shadow` in the path identify boundaries outside ordinary CSS syntax.
+struct BrowserAnnotationElementReference: Equatable, Sendable {
+    let path: String?
+    let role: String?
+    let name: String?
 }
 
 // MARK: - Browser Chrome
@@ -570,6 +579,7 @@ final class BrowserViewController: NSViewController {
 
     private var annotationAnchorPositions: [ObjectIdentifier: [String: BrowserAnnotationAnchorPosition]] = [:]
     private var capturedAnnotationAnchorTokens: [ObjectIdentifier: Set<String>] = [:]
+    private var annotationCaptureTasks: [String: Task<Void, Never>] = [:]
     private var annotationAnchorRefreshRunning = false
     private var annotationAnchorRefreshPending = false
     private var isAnnotating = false
@@ -2763,7 +2773,7 @@ final class BrowserViewController: NSViewController {
             let annotation = BrowserAnnotation(
                 id: draft.id, note: note,
                 documentPoint: annotationWithCurrentPosition(draft).documentPoint,
-                url: draft.url, anchorID: draft.anchorID
+                url: draft.url, anchorID: draft.anchorID, element: draft.element
             )
             if isSendingAnnotations || sentAnnotationNotes[draft.id] != note {
                 pendingAnnotations[draft.id] = annotation
@@ -2800,12 +2810,26 @@ final class BrowserViewController: NSViewController {
         }
         annotationOverlay.setPendingSend(count: pendingAnnotations.count, sending: true)
         Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.awaitAnnotationTargets(for: Array(batch.values))
+            let resolvedBatch = batch.values.map { annotation in
+                var resolved = annotation
+                resolved.element = self.annotationsByPage[annotation.url]?.first {
+                    $0.anchorID == annotation.anchorID
+                }?.element ?? annotation.element
+                return resolved
+            }
             let text = await Task.detached(priority: .userInitiated) {
-                "Please address these browser annotations from me:\n\n" + batch.values.sorted { $0.id < $1.id }.map {
-                    "Annotation \($0.id)\nPage: \($0.url)\nPosition: (\($0.documentPoint.x), \($0.documentPoint.y)) CSS pixels\nNote: \($0.note)"
+                "Please address these browser annotations from me:\n\n" + resolvedBatch.sorted { $0.id < $1.id }.map {
+                    var lines = ["Annotation \($0.id)", "Page: \($0.url)"]
+                    if let path = $0.element?.path { lines.append("Element path (page-derived): \(path)") }
+                    if let role = $0.element?.role { lines.append("Element role (page-derived): \(role)") }
+                    if let name = $0.element?.name { lines.append("Element name (page-derived): \(name)") }
+                    lines.append("Position: (\($0.documentPoint.x), \($0.documentPoint.y)) CSS pixels")
+                    lines.append("Note: \($0.note)")
+                    return lines.joined(separator: "\n")
                 }.joined(separator: "\n\n")
             }.value
-            guard let self else { return }
             self.deliverAnnotations(text, sessionID) { [weak self] outcome in
                 guard let self else { return }
                 self.isSendingAnnotations = false
@@ -2895,17 +2919,41 @@ final class BrowserViewController: NSViewController {
         var arguments = pointArguments(x: point.x / browserPageZoom, y: point.y / browserPageZoom)
         arguments["token"] = token
         arguments["precise"] = annotationOverlay.selectsDeepestElement
-        Task { @MainActor [weak self] in
-            guard let self, self.agentPageIdentity == identity else { return }
+        annotationCaptureTasks[token] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.annotationCaptureTasks.removeValue(forKey: token) }
+            guard self.agentPageIdentity == identity else { return }
             let position: BrowserAnnotationAnchorPosition? = try? await self.callAgentScript(
                 BrowserAgentScripts.captureAnnotationAnchor, arguments: arguments
             )
-            guard self.agentPageIdentity == identity, let position, position.anchored else { return }
+            guard self.agentPageIdentity == identity, let position else { return }
+            let element = BrowserAnnotationElementReference(
+                path: position.targetPath, role: position.targetRole, name: position.targetName
+            )
+            if element.path != nil || element.role != nil || element.name != nil {
+                self.saveAnnotationElement(element, for: annotation)
+            }
+            guard position.anchored else { return }
             self.capturedAnnotationAnchorTokens[identity.webView, default: []].insert(token)
             self.annotationAnchorPositions[identity.webView, default: [:]][token] = position
             self.updateAnnotationOverlay()
             self.refreshAnnotationAnchors()
         }
+    }
+
+    private func saveAnnotationElement(_ element: BrowserAnnotationElementReference, for annotation: BrowserAnnotation) {
+        if annotationDraft?.anchorID == annotation.anchorID { annotationDraft?.element = element }
+        if let index = annotationsByPage[annotation.url]?.firstIndex(where: { $0.anchorID == annotation.anchorID }) {
+            annotationsByPage[annotation.url]?[index].element = element
+        }
+        if pendingAnnotations[annotation.id]?.anchorID == annotation.anchorID {
+            pendingAnnotations[annotation.id]?.element = element
+        }
+    }
+
+    func awaitAnnotationTargets(for annotations: [BrowserAnnotation]) async {
+        let tasks = annotations.compactMap { $0.anchorID.flatMap { annotationCaptureTasks[$0] } }
+        for task in tasks { await task.value }
     }
 
     /// Scroll/resize messages can arrive from many frames in one compositor turn. One request

@@ -161,13 +161,16 @@ struct BrowserAnnotationTargetProbe: Decodable, Equatable {
     }
 }
 
-/// Live geometry only; note text never crosses into WebKit.
+/// Page-derived target details and live geometry; note text never crosses into WebKit.
 struct BrowserAnnotationAnchorPosition: Decodable {
     let token: String
     let anchored: Bool
     let visible: Bool
     let x: Double?
     let y: Double?
+    let targetPath: String?
+    let targetRole: String?
+    let targetName: String?
 }
 
 struct BrowserActionOutcome: Decodable, Equatable {
@@ -1544,6 +1547,83 @@ enum BrowserAgentScripts {
           }
           return element;
         }
+        function annotationName(element) {
+          const maximumCharacters = 80;
+          const boundedClean = value => clean(String(value || '').slice(0, 512), maximumCharacters);
+          function boundedText(root) {
+            if (!root) return '';
+            let text = '';
+            let node = root;
+            for (let count = 0; node && count < 128; count += 1) {
+              if (node.nodeType === 3) text += ' ' + node.textContent.slice(0, maximumCharacters);
+              if (text.length >= maximumCharacters) break;
+              const skip = node.nodeType === 1
+                && node.matches('script,style,input,textarea,select,[hidden],[aria-hidden="true"]');
+              if (!skip && node.firstChild) { node = node.firstChild; continue; }
+              while (node !== root && !node.nextSibling) node = node.parentNode;
+              node = node === root ? null : node.nextSibling;
+            }
+            return boundedClean(text);
+          }
+          const authored = boundedClean(element.getAttribute('aria-label'));
+          if (authored) return authored;
+          const ids = boundedClean(element.getAttribute('aria-labelledby')).split(/\s+/).slice(0, 8);
+          const root = element.getRootNode();
+          const referenced = boundedClean(ids.map(id => boundedText(root.getElementById?.(id))).join(' '));
+          if (referenced) return referenced;
+          return boundedText(element.labels?.[0])
+            || boundedClean(element.getAttribute('alt') || element.getAttribute('title'))
+            || (element.matches('input,textarea,select,script,style') ? '' : boundedText(element));
+        }
+        // A composed CSS path is useful for finding source markup. ::frame and ::shadow mark
+        // boundaries where an ordinary CSS selector cannot express the whole path.
+        function annotationTargetPath(element) {
+          const sections = [];
+          let current = element;
+          let remaining = 32;
+          let boundaries = 0;
+          while (current && remaining > 0 && boundaries <= 8) {
+            const root = current.getRootNode();
+            const steps = [];
+            while (current && current.getRootNode() === root && remaining > 0) {
+              const tag = current.localName?.toLowerCase();
+              if (!tag) return null;
+              const id = current.getAttribute('id');
+              if (id && /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(id)) {
+                steps.unshift(`${tag}#${id}`);
+                break;
+              }
+              let index = 1;
+              let sibling = current.previousElementSibling;
+              let inspected = 0;
+              while (sibling && inspected < 256) {
+                if (sibling.localName === current.localName) index += 1;
+                sibling = sibling.previousElementSibling;
+                inspected += 1;
+              }
+              if (sibling) return null;
+              steps.unshift(`${tag}:nth-of-type(${index})`);
+              current = current.parentElement;
+              remaining -= 1;
+            }
+            sections.unshift(steps.join(' > '));
+            if (root.nodeType === 11 && root.host) {
+              sections.unshift('::shadow');
+              current = root.host;
+            } else if (root.nodeType === 9 && root !== document) {
+              try { current = root.defaultView?.frameElement || null; }
+              catch (_) { return null; }
+              if (!current) return null;
+              sections.unshift('::frame');
+            } else {
+              current = null;
+            }
+            boundaries += 1;
+          }
+          if (current || !sections.length) return null;
+          const path = sections.join(' ');
+          return path.length <= 512 ? path : null;
+        }
         """#
 
     /// A bounded, snapshot-independent hit test for the native annotation overlay.
@@ -1557,40 +1637,7 @@ enum BrowserAgentScripts {
         const point = resolvePointTarget();
         if (!point || point.message || !point.element) return missed;
 
-        const maximumLabelNodes = 128;
-        const maximumLabelCharacters = 80;
-        const boundedClean = value => clean(String(value || '').slice(0, 512), maximumLabelCharacters);
         const chosen = annotationComponent(point.element, precise);
-
-        function boundedText(element) {
-          if (!element) return '';
-          let text = '';
-          let node = element;
-          for (let count = 0; node && count < maximumLabelNodes; count += 1) {
-            if (node.nodeType === 3) text += ' ' + node.textContent.slice(0, maximumLabelCharacters);
-            if (text.length >= maximumLabelCharacters) break;
-            const skip = node.nodeType === 1
-              && node.matches('script,style,input,textarea,select,[hidden],[aria-hidden="true"]');
-            if (!skip && node.firstChild) { node = node.firstChild; continue; }
-            // Count rejected nodes too. A filtered TreeWalker can scan an unlimited run of
-            // hidden siblings inside one nextNode() despite a bound on returned nodes.
-            while (node !== element && !node.nextSibling) node = node.parentNode;
-            node = node === element ? null : node.nextSibling;
-          }
-          return boundedClean(text);
-        }
-        function annotationName(element) {
-          const authored = boundedClean(element.getAttribute('aria-label'));
-          if (authored) return authored;
-          const ids = boundedClean(element.getAttribute('aria-labelledby')).split(/\s+/).slice(0, 8);
-          const root = element.getRootNode();
-          const referenced = boundedClean(ids.map(id => boundedText(root.getElementById?.(id))).join(' '));
-          if (referenced) return referenced;
-          const label = element.labels?.[0];
-          return boundedText(label)
-            || boundedClean(element.getAttribute('alt') || element.getAttribute('title'))
-            || (element.matches('input,textarea,select,script,style') ? '' : boundedText(element));
-        }
         const rect = chosen.getBoundingClientRect();
         return JSON.stringify({
           ok: rect.width > 0 && rect.height > 0,
@@ -1679,7 +1726,11 @@ enum BrowserAgentScripts {
             }
           }
         }
-        return JSON.stringify(anchorPosition(token));
+        const position = anchorPosition(token);
+        position.targetPath = element ? annotationTargetPath(element) : null;
+        position.targetRole = element ? (roleOf(element) || null) : null;
+        position.targetName = element ? (annotationName(element) || null) : null;
+        return JSON.stringify(position);
         """#
 
     static let annotationAnchorPositions = annotationAnchorPrelude + #"""

@@ -64,35 +64,46 @@ extension AgentToolCoordinator {
                 return
             }
 
-            let notes = browser.annotationsForActivePage
-            guard browser.agentPageIdentity == authorizedPage else {
-                completion(.failure(
-                    "The browser document changed while its annotations were being read; "
-                        + "retry against the current page."
-                ))
-                return
-            }
-            let payload = BrowserAnnotationsPayload(
-                provenance: "user_authored",
-                url: BrowserURLRedactor.redact(authorizedPage.url),
-                count: notes.count,
-                annotations: notes.map {
-                    BrowserAnnotationsPayload.Annotation(
-                        id: $0.id,
-                        note: $0.note,
-                        x: Double($0.documentPoint.x),
-                        y: Double($0.documentPoint.y)
-                    )
+            Task { @MainActor in
+                await browser.awaitAnnotationTargets(for: browser.annotationsForActivePage)
+                guard browser.agentPageIdentity == authorizedPage else {
+                    completion(.failure(
+                        "The browser document changed while its annotations were being read; "
+                            + "retry against the current page."
+                    ))
+                    return
                 }
-            )
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            guard let data = try? encoder.encode(payload),
-                  let text = String(data: data, encoding: .utf8) else {
-                completion(.failure("Could not encode browser annotations."))
-                return
+                let notes = browser.annotationsForActivePage
+                let payload = BrowserAnnotationsPayload(
+                    provenance: "user_authored",
+                    url: BrowserURLRedactor.redact(authorizedPage.url),
+                    count: notes.count,
+                    annotations: notes.map {
+                        BrowserAnnotationsPayload.Annotation(
+                            id: $0.id,
+                            note: $0.note,
+                            element: $0.element.map {
+                                BrowserAnnotationsPayload.Annotation.Element(
+                                    provenance: "page_derived",
+                                    path: $0.path,
+                                    role: $0.role,
+                                    name: $0.name
+                                )
+                            },
+                            x: Double($0.documentPoint.x),
+                            y: Double($0.documentPoint.y)
+                        )
+                    }
+                )
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                guard let data = try? encoder.encode(payload),
+                      let text = String(data: data, encoding: .utf8) else {
+                    completion(.failure("Could not encode browser annotations."))
+                    return
+                }
+                completion(.success(text))
             }
-            completion(.success(text))
         }
     }
 

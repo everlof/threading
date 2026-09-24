@@ -5,6 +5,38 @@ import XCTest
 
 @MainActor
 final class BrowserAnnotationEditingTests: XCTestCase {
+    func testAnnotationDeliveryNamesTheElementAndKeepsItsPosition() throws {
+        let (browser, _, window) = try fixture(width: 430)
+        defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
+        _ = try script(browser, """
+            const target = document.createElement('button');
+            target.id = 'review-action';
+            target.textContent = 'Save changes';
+            target.style.cssText = 'position:fixed;left:120px;top:120px;width:180px;height:50px;z-index:9999';
+            document.body.append(target);
+            """)
+        var message: String?
+        browser.deliverAnnotations = { text, _, completion in
+            message = text
+            completion(.sentNow)
+        }
+        browser.setAnnotationMode(true)
+        browser.addAnnotation(atViewportPoint: CGPoint(x: 140, y: 140))
+        let overlay = try XCTUnwrap(descendant(BrowserAnnotationOverlay.self, in: browser.view))
+        try XCTUnwrap(overlay.editor).noteField.stringValue = "Change this action"
+        browser.finishAnnotationEditing(save: true)
+        browser.sendPendingAnnotations()
+        try waitUntil { message != nil }
+        let annotation = try XCTUnwrap(browser.annotationsForActivePage.first)
+        XCTAssertEqual(annotation.element?.path, "button#review-action")
+        XCTAssertEqual(annotation.element?.role, "button")
+        XCTAssertEqual(annotation.element?.name, "Save changes")
+        XCTAssertTrue(try XCTUnwrap(message).contains("Element path (page-derived): button#review-action"))
+        XCTAssertTrue(try XCTUnwrap(message).contains("Element role (page-derived): button"))
+        XCTAssertTrue(try XCTUnwrap(message).contains("Element name (page-derived): Save changes"))
+        XCTAssertTrue(try XCTUnwrap(message).contains("Position: (140.0, 140.0) CSS pixels"))
+    }
+
     func testEnterStagesAndCommandReturnSendsToOwningChat() throws {
         let (browser, host, window) = try fixture(width: 430)
         defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
@@ -161,6 +193,8 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         XCTAssertEqual(editor.note, "Keep this embedded action next to its heading")
         browser.finishAnnotationEditing(save: true)
         let saved = try XCTUnwrap(browser.annotationsForActivePage.first)
+        try waitUntil { browser.annotationsForActivePage.first?.element?.path?.contains("::frame") == true }
+        XCTAssertTrue(try XCTUnwrap(browser.annotationsForActivePage.first?.element?.path).contains("button"))
         XCTAssertEqual(saved.documentPoint.y, point.y - 36, accuracy: 1, "Agents receive the updated top-document coordinate")
         _ = try script(browser, "outer.contentWindow.scrollTo(0, 30)")
         try waitUntil { abs((overlay.markers.first?.point.y ?? 0) - (point.y - 60)) < 1 }

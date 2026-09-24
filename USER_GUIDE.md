@@ -4012,9 +4012,10 @@ Notes inside same-origin iframes follow their target as the frame scrolls, inclu
 Pins hide when clipped or when their frame loads a different document, while the note is kept.
 Cross-origin frames can be annotated as visible regions; their internal content remains opaque.
 Clicking another point, leaving annotation mode, or navigating saves nonempty text against its
-original page. Click an existing pin to edit or delete it. The agent can read the
-notes for the currently authorized page with their document-space coordinates, clearly labelled as
-user-authored context; it cannot create or change them.
+original page. Click an existing pin to edit or delete it. Sent notes and the agent's
+`browser_annotations` result include the marked element's path, role and name when available,
+alongside its document-space coordinates. Element details are labelled as page-derived; the note
+is labelled as user-authored context. The agent cannot create or change notes.
 
 Local development pages are available immediately. Before an agent can read or act on another
 website, Threading asks whether to allow it once, always allow that origin, or deny it. Persistent

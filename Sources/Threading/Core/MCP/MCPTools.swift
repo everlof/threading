@@ -5158,9 +5158,11 @@ enum MCPTools {
       },
       description: """
         Read the user's native annotations for the active browser page. Each note includes \
-        its numbered pin and document-space CSS-pixel coordinates. These notes were \
-        authored explicitly in Threading's UI, remain outside the page DOM, and are never \
-        visible to site JavaScript. The current origin still requires browser access, \
+        its numbered pin and document-space CSS-pixel coordinates. When available, a nested \
+        page-derived element gives its path, role, and name; ::frame and ::shadow in a path \
+        mark boundaries rather than valid CSS selector syntax. The note itself was authored \
+        explicitly in Threading's UI, remains outside the page DOM, and is never visible to \
+        site JavaScript. The current origin still requires browser access, \
         because a note may reveal what page the user is reviewing. This tool is read-only; \
         only the user can create, edit, or delete annotations.
         """,

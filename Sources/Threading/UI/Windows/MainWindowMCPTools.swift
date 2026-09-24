@@ -116,8 +116,16 @@ struct BrowserCapabilitiesPayload: Encodable {
 
 struct BrowserAnnotationsPayload: Encodable {
   struct Annotation: Encodable {
+    struct Element: Encodable {
+      let provenance: String
+      let path: String?
+      let role: String?
+      let name: String?
+    }
+
     let id: Int
     let note: String
+    let element: Element?
     let x: Double
     let y: Double
   }

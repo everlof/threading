@@ -412,8 +412,12 @@ hit testing outside annotation mode except on the pending Send button, so visibl
 block the page or agent actions.
 Scroll observation and weak iframe target anchors run in WebKit's isolated client world; no note text is injected
 into the DOM or exposed to page JavaScript. `browser_annotations` returns the current authorized
-page's notes separately from the untrusted DOM snapshot, with explicit `user_authored` provenance
-and document-space CSS-pixel coordinates. The agent cannot create, edit, or delete them. Annotation
+page's notes separately from the untrusted DOM snapshot, with explicit `user_authored` provenance,
+page-derived element path/role/name when available, and document-space CSS-pixel coordinates.
+The Send batch carries the same element hints before each user's note. A path uses bounded CSS steps;
+`::frame` and `::shadow` mark boundaries that are not themselves CSS selector syntax. The path is a
+source-finding hint, not a promise that a later rerender still contains that node. Coordinate fallback
+remains for visual or inaccessible targets. The agent cannot create, edit, or delete notes. Annotation
 mode ends on navigation, while notes remain runtime-only for a later visit to the same page URL.
 
 The mode itself is stated on the browser surface rather than only on the control that started it:
@@ -467,8 +471,9 @@ revision ownership cannot be replaced by an extension. Expected batches are 5–
 200 as the existing stress cardinality. Count refresh is O(1), commit updates one pending value,
 and repeated geometry updates do not reset button layout. Submission snapshots value state,
 formats note text off-main, and creates no per-note UI. The button uses the editor’s opaque ground so outlined theme styles remain readable over
-arbitrary pages, and editor placement reserves space above it. No screenshots or page DOM
-are collected by Send; its payload is the user's notes with their captured page/coordinate anchors.
+arbitrary pages, and editor placement reserves space above it. No screenshots or page DOM dumps
+are collected by Send; its payload is the user's notes with their captured page/element/coordinate
+anchors. Element hints are page-derived and labelled separately from the user's text.
 
 Empty new drafts are discarded; unfinished text never enters `browser_annotations`. Editing and
 deleting existing notes use stable IDs rather than array positions. Deletion removes both the
