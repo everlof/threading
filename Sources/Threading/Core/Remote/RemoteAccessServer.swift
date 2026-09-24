@@ -1351,12 +1351,26 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-        // Decoded before the hop to the main queue: an empty body is the ordinary resume, and
-        // neither answer needs the project graph.
-        let retries = (try? JSONDecoder().decode(
+        // Decoded before the hop to the main queue: current clients always send the Boolean so
+        // the host can distinguish navigation (`false`) from the failure surface's explicit
+        // retry (`true`). Builds predating that contract sent an empty body for both. Preserve
+        // their former retry-on-open behavior; they cannot otherwise escape a stored failure.
+        // A non-empty malformed body is not a legacy signal and must not become permission to
+        // clear the only record of what the failed launch said.
+        let resumeRequest: RemoteResumeSessionRequestDTO?
+        if request.body.isEmpty {
+            resumeRequest = nil
+        } else if let decoded = try? JSONDecoder().decode(
             RemoteResumeSessionRequestDTO.self,
             from: request.body
-        ))?.retryFailedLaunch == true
+        ) {
+            resumeRequest = decoded
+        } else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        let supportsExplicitFailedLaunchRetry = resumeRequest != nil
+        let retries = resumeRequest?.retryFailedLaunch == true
 
         DispatchQueue.main.async {
             guard RemoteSessionAccess.isVisible(
@@ -1371,13 +1385,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     respond(.respond(self.persistenceRefusalResponse()))
                     return
                 }
-                // A session whose last launch failed is not started by asking again: the Mac's
-                // pane refuses the identical gesture and shows what the agent said instead of
-                // spending another doomed process. Accepting it here was answering "starting"
-                // for a launch that never happened, which left the phone holding its opening
-                // loader for the whole startup deadline (2026-09-20). A person who has read the
-                // refusal can retry, and that clears the record first, exactly as the button on
-                // the Mac does.
+                // A session whose last launch failed is not started by another ordinary open
+                // from a client that can express the difference: the Mac's pane refuses the
+                // identical gesture and shows what the agent said instead of spending another
+                // doomed process. Accepting it here was answering "starting" for a launch that
+                // never happened, which left the phone holding its opening loader for the whole
+                // startup deadline (2026-09-20). A person who has read the refusal can retry,
+                // and that clears the record first, exactly as the button on the Mac does.
                 let refusingFailure = self.services.sessionQueries
                     .session(withID: sessionID)
                     .flatMap {
@@ -1388,7 +1402,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                             )
                         )
                     }
-                if let refusingFailure, !retries {
+                if let refusingFailure, !retries, supportsExplicitFailedLaunchRetry {
                     // The Mac's journal said nothing at all about the second tap in the
                     // incident above, which is why matching "it just spins" to a failed launch
                     // took an archaeology pass over an unrelated log.

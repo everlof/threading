@@ -2281,11 +2281,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(sessionCommands.resumedSessionIDs, [session.id])
     }
 
-    /// A phone tapping a chat whose agent died on the way up used to be told "starting" for a
-    /// launch the Mac was never going to perform: `show` refuses the identical gesture and puts
-    /// the failure surface up instead. The phone then held its opening loader until the startup
-    /// deadline ran out (2026-09-20 report: two taps, no Mac-side launch, twelve seconds of
-    /// "Opening chat…" before the person gave up and shook the phone).
+    /// A current phone tapping a chat whose agent died on the way up is refused until the person
+    /// chooses retry. The false value is its capability signal: unlike a legacy bodyless client,
+    /// it can distinguish navigation from the button on the failure surface.
     func testResumeOfAFailedLaunchIsRefusedWithItsCauseRatherThanAcceptedAsStarting() throws {
         let project = try XCTUnwrap(ProjectStore.shared.addProject(
             folderURL: FileManager.default.temporaryDirectory
@@ -2305,7 +2303,10 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
         let refusal = try XCTUnwrap(post(
             "/api/session/\(session.id.uuidString)/resume",
-            bearer: "goodtoken", body: Data()
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(
+                RemoteResumeSessionRequestDTO(retryFailedLaunch: false)
+            )
         ))
         XCTAssertEqual(refusal.status, 409)
         XCTAssertEqual(
@@ -2319,6 +2320,63 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(sessionCommands.retriedSessionIDs.isEmpty)
         // The record is the only account of what the agent said, so a refused resume must not
         // consume it.
+        XCTAssertNotNil(ProjectStore.shared.session(withID: session.id)?.lastLaunchFailure)
+    }
+
+    /// Build 1's Try Again button and ordinary open both sent an empty body. Once a newer Mac
+    /// began requiring the explicit retry decision, that button could only repeat the same 409;
+    /// the 2026-09-23 report records repeated bodyless opens with that result. A bodyless client
+    /// keeps its old semantics so it can recover, while current clients retain the safer refusal.
+    func testLegacyBodylessResumeOfAFailedLaunchRetriesForCompatibility() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+        ))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, usesNativeUI: false, title: "Legacy retry"
+        ))
+        ProjectStore.shared.update(sessionID: session.id) { stored in
+            stored.lastLaunchFailure = SessionLaunchFailure(
+                origin: .processExit,
+                exitCode: 1,
+                ranFor: 0.3,
+                summary: "Claude Code stopped right after starting."
+            )
+        }
+
+        let accepted = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken",
+            body: Data()
+        ))
+        XCTAssertEqual(accepted.status, 202)
+        XCTAssertEqual(sessionCommands.retriedSessionIDs, [session.id])
+        XCTAssertTrue(sessionCommands.resumedSessionIDs.isEmpty)
+        XCTAssertNil(ProjectStore.shared.session(withID: session.id)?.lastLaunchFailure)
+    }
+
+    func testMalformedResumeBodyDoesNotClearAFailedLaunch() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory
+        ))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id, kind: .claude, usesNativeUI: false, title: "Malformed retry"
+        ))
+        ProjectStore.shared.update(sessionID: session.id) { stored in
+            stored.lastLaunchFailure = SessionLaunchFailure(
+                origin: .processExit,
+                exitCode: 1,
+                ranFor: 0.3,
+                summary: "Claude Code stopped right after starting."
+            )
+        }
+
+        let refusal = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/resume",
+            bearer: "goodtoken",
+            body: Data("not-json".utf8)
+        ))
+        XCTAssertEqual(refusal.status, 400)
+        XCTAssertTrue(sessionCommands.retriedSessionIDs.isEmpty)
         XCTAssertNotNil(ProjectStore.shared.session(withID: session.id)?.lastLaunchFailure)
     }
 
@@ -2356,7 +2414,10 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         // And the next ordinary open is an ordinary resume again.
         let reopened = try XCTUnwrap(post(
             "/api/session/\(session.id.uuidString)/resume",
-            bearer: "goodtoken", body: Data()
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(
+                RemoteResumeSessionRequestDTO(retryFailedLaunch: false)
+            )
         ))
         XCTAssertEqual(reopened.status, 202)
         XCTAssertEqual(sessionCommands.resumedSessionIDs, [session.id])

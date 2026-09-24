@@ -538,6 +538,7 @@ final class AgentSessionViewController: NSViewController {
             beginExternalResumePreflight(
                 executableName: agentSession.kind.executableName,
                 transcriptID: transcriptID,
+                hostedReplacementSessionID: remoteHost == nil ? sessionID : nil,
                 initialPrompt: initialPrompt
             )
             return
@@ -575,16 +576,29 @@ final class AgentSessionViewController: NSViewController {
     private func beginExternalResumePreflight(
         executableName: String,
         transcriptID: TranscriptID,
+        hostedReplacementSessionID: SessionID?,
         initialPrompt: String?
     ) {
         let requestID = UUID()
         externalResumePreflightID = requestID
         let rawTranscriptID = transcriptID.rawValue
+        let hostDecision = hostedReplacementSessionID.map { _ in
+            PTYHostDecision.live(settings: .shared, bundle: .main)
+        }
+        let hostSurvey = PTYHostHoldingsSurvey.connecting()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let owner = ExternalConversationPreflight.runningProcessID(
                 executableName: executableName,
-                transcriptID: rawTranscriptID
+                transcriptID: rawTranscriptID,
+                sessionID: hostedReplacementSessionID,
+                // The socket round trip is lazy: ordinary launches with no matching resume
+                // process still spend only the process-table scan. It is also off-main with the
+                // argv reads, because either source can block on machine-supplied work.
+                hostedSessions: {
+                    guard let hostDecision else { return [] }
+                    return hostSurvey.holdings(for: hostDecision)?.sessions ?? []
+                }
             )
 
             DispatchQueue.main.async {

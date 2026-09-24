@@ -15,7 +15,12 @@ final class MobileLiveRoutePolicyTests: XCTestCase {
         static let token = "bearer-fixture"
         static let tailnetURL = URL(string: "https://david-mac.tailnet-demo.ts.net:8443/")!
         static let loopbackURL = URL(string: "http://127.0.0.1:53817/")!
+        static let replacementLoopbackURL = URL(string: "http://127.0.0.1:53818/")!
         static let hostedLink = RemoteConnectionLink(baseURL: loopbackURL, token: token)!
+        static let replacementHostedLink = RemoteConnectionLink(
+            baseURL: replacementLoopbackURL,
+            token: token
+        )!
 
         static func host(activeKind: RemoteHostEndpointKind? = .tailscale) -> PairedRemoteHost {
             PairedRemoteHost(
@@ -108,6 +113,92 @@ final class MobileLiveRoutePolicyTests: XCTestCase {
             hostedLink: Fixture.hostedLink
         )
         XCTAssertEqual(route, MobileLiveRoute(link: host.link, kind: .tailscale, isHosted: false))
+    }
+
+    /// The 2026-09-21 report lost its hosted tunnel during a path change, prepared another while
+    /// racing LAN, and then received the LAN catalogue. The constructible client therefore moved
+    /// hosted -> LAN -> hosted -> LAN, but those first two moves were not answers and restarted
+    /// the same terminal dial each time. Adoption stays on the committed hosted answer until LAN
+    /// actually wins.
+    func testSessionAdoptionWaitsForARouteToAnswer() {
+        let hostedAnswer = Fixture.answered(
+            over: .hosted,
+            at: Fixture.loopbackURL,
+            isHosted: true
+        )
+        let host = Fixture.host(activeKind: .hosted)
+
+        let safeClientAfterTunnelLoss = MobileLiveRoutePolicy.route(
+            for: host,
+            lastConnection: hostedAnswer,
+            hostedLink: nil
+        )
+        XCTAssertEqual(
+            safeClientAfterTunnelLoss,
+            MobileLiveRoute(link: host.link, kind: .tailscale, isHosted: false),
+            "a new request must not dial the ended tunnel"
+        )
+        XCTAssertEqual(
+            MobileRouteAdoptionPolicy.identity(
+                activeHostID: host.id,
+                lastConnection: hostedAnswer
+            ),
+            MobileRouteIdentity(origin: Fixture.loopbackURL, endpointKind: .hosted),
+            "a provisional fallback is not an authenticated route move"
+        )
+
+        let safeClientAfterReplacementPreparation = MobileLiveRoutePolicy.route(
+            for: host,
+            lastConnection: hostedAnswer,
+            hostedLink: Fixture.replacementHostedLink
+        )
+        XCTAssertEqual(
+            safeClientAfterReplacementPreparation,
+            MobileLiveRoute(
+                link: Fixture.replacementHostedLink,
+                kind: .hosted,
+                isHosted: true
+            ),
+            "a new request may use the standing replacement tunnel"
+        )
+        XCTAssertEqual(
+            MobileRouteAdoptionPolicy.identity(
+                activeHostID: host.id,
+                lastConnection: hostedAnswer
+            ),
+            MobileRouteIdentity(origin: Fixture.loopbackURL, endpointKind: .hosted),
+            "tunnel preparation alone does not supersede an unanswered dial"
+        )
+
+        let lanAnswer = Fixture.answered(
+            over: .lan,
+            at: host.link.baseURL,
+            isHosted: false
+        )
+        XCTAssertEqual(
+            MobileRouteAdoptionPolicy.identity(
+                activeHostID: host.id,
+                lastConnection: lanAnswer
+            ),
+            MobileRouteIdentity(origin: host.link.baseURL, endpointKind: .lan),
+            "the winning catalogue response commits the adoption"
+        )
+    }
+
+    func testSessionAdoptionDoesNotCrossHostsOrInventAnUnansweredRoute() {
+        XCTAssertNil(
+            MobileRouteAdoptionPolicy.identity(activeHostID: "mac", lastConnection: nil)
+        )
+        XCTAssertNil(
+            MobileRouteAdoptionPolicy.identity(
+                activeHostID: "another-mac",
+                lastConnection: Fixture.answered(
+                    over: .hosted,
+                    at: Fixture.loopbackURL,
+                    isHosted: true
+                )
+            )
+        )
     }
 }
 

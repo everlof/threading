@@ -577,6 +577,12 @@ capture a project root at construction; refreshing either old controller would r
 checkout and leave exactly the split view where the sidebar names one branch while Review names
 another. Standalone terminals retain their own checkout and working directory.
 
+For a persistent terminal, the outgoing provider process can still be visible while this
+replacement is being composed. The external-owner preflight recognizes it only through a fresh
+local PTY-host inventory for the same session plus proven process ancestry, then lets the daemon's
+`replaceExisting` spawn serialize old exit before new start. It never grants that exception to a
+different Threading row or an unhosted CLI process.
+
 The menu, MCP tools and Tools ▸ Project authority preference are host-owned work-organization
 controls. `explicit_user_request` is allowed without a second prompt under the default
 `allowExplicitRequests`; factual `observed_execution` follows too, while `agent_initiated` still

@@ -1,4 +1,5 @@
 import Darwin
+import ThreadingPTYHostKit
 import XCTest
 @testable import Threading
 
@@ -38,6 +39,99 @@ final class ExternalConversationPreflightTests: XCTestCase {
         ))
     }
 
+    func testSameSessionHostedAncestorIsNotTreatedAsExternalOwnership() {
+        let sessionID = SessionID()
+        let rootPID: pid_t = 40
+        let wrapperPID: pid_t = 41
+        let codexPID: pid_t = 42
+
+        XCTAssertNil(matchingProcess(
+            summaries: [
+                rootPID: summary(pid: rootPID, parentPID: 1, command: "node"),
+                wrapperPID: summary(pid: wrapperPID, parentPID: rootPID, command: "node"),
+                codexPID: summary(pid: codexPID, parentPID: wrapperPID, command: "codex")
+            ],
+            commandLines: [
+                codexPID: commandLine("codex", "resume", wantedID)
+            ],
+            sessionID: sessionID,
+            hostedSessions: [hostedSession(sessionID: sessionID, pid: rootPID)]
+        ))
+    }
+
+    func testHostedAncestorForAnotherSessionStillRefusesTheOwner() {
+        let currentSessionID = SessionID()
+        let otherSessionID = SessionID()
+        let rootPID: pid_t = 40
+        let codexPID: pid_t = 42
+
+        XCTAssertEqual(
+            matchingProcess(
+                summaries: [
+                    rootPID: summary(pid: rootPID, parentPID: 1, command: "node"),
+                    codexPID: summary(pid: codexPID, parentPID: rootPID, command: "codex")
+                ],
+                commandLines: [
+                    codexPID: commandLine("codex", "resume", wantedID)
+                ],
+                sessionID: currentSessionID,
+                hostedSessions: [hostedSession(sessionID: otherSessionID, pid: rootPID)]
+            ),
+            codexPID
+        )
+    }
+
+    func testExternalOwnerAfterSameSessionHostedOwnerStillRefuses() {
+        let sessionID = SessionID()
+        let rootPID: pid_t = 40
+        let hostedCodexPID: pid_t = 42
+        let externalCodexPID: pid_t = 43
+
+        XCTAssertEqual(
+            matchingProcess(
+                summaries: [
+                    rootPID: summary(pid: rootPID, parentPID: 1, command: "node"),
+                    hostedCodexPID: summary(
+                        pid: hostedCodexPID,
+                        parentPID: rootPID,
+                        command: "codex"
+                    ),
+                    externalCodexPID: summary(
+                        pid: externalCodexPID,
+                        parentPID: 1,
+                        command: "codex"
+                    )
+                ],
+                commandLines: [
+                    hostedCodexPID: commandLine("codex", "resume", wantedID),
+                    externalCodexPID: commandLine("codex", "resume", wantedID)
+                ],
+                sessionID: sessionID,
+                hostedSessions: [hostedSession(sessionID: sessionID, pid: rootPID)]
+            ),
+            externalCodexPID
+        )
+    }
+
+    func testHostedSessionSurveyIsLazyWithoutAMatchingResume() {
+        var surveyCount = 0
+
+        let owner = ExternalConversationPreflight.runningProcessID(
+            executableName: "codex",
+            transcriptID: wantedID,
+            sessionID: SessionID(),
+            hostedSessions: {
+                surveyCount += 1
+                return []
+            },
+            processTable: { [42: self.summary(pid: 42, command: "other")] },
+            commandLine: { _ in self.commandLine("other", "resume", self.wantedID) }
+        )
+
+        XCTAssertNil(owner)
+        XCTAssertEqual(surveyCount, 0)
+    }
+
     func testPreflightFailureIsDurableAndActionableWithoutProcessOutput() {
         let failure = ExternalConversationPreflight.launchFailure(
             kind: .codex,
@@ -53,20 +147,28 @@ final class ExternalConversationPreflightTests: XCTestCase {
 
     private func matchingProcess(
         summaries: [pid_t: ProcessSummary],
-        commandLines: [pid_t: ProcessCommandLine]
+        commandLines: [pid_t: ProcessCommandLine],
+        sessionID: SessionID? = nil,
+        hostedSessions: [PTYHostSessionSummary] = []
     ) -> pid_t? {
         ExternalConversationPreflight.runningProcessID(
             executableName: "codex",
             transcriptID: wantedID,
+            sessionID: sessionID,
+            hostedSessions: { hostedSessions },
             processTable: { summaries },
             commandLine: { commandLines[$0] }
         )
     }
 
-    private func summary(pid: pid_t, command: String) -> ProcessSummary {
+    private func summary(
+        pid: pid_t,
+        parentPID: pid_t = 1,
+        command: String
+    ) -> ProcessSummary {
         ProcessSummary(
             pid: pid,
-            parentPid: 1,
+            parentPid: parentPID,
             command: command,
             state: .running,
             startTime: nil
@@ -77,6 +179,20 @@ final class ExternalConversationPreflightTests: XCTestCase {
         ProcessCommandLine(
             executablePath: "/usr/local/bin/\(arguments[0])",
             arguments: arguments
+        )
+    }
+
+    private func hostedSession(
+        sessionID: SessionID,
+        pid: pid_t
+    ) -> PTYHostSessionSummary {
+        PTYHostSessionSummary(
+            id: .agentSession(sessionID),
+            pid: pid,
+            startedAt: Date(),
+            executable: "/usr/local/bin/codex",
+            grid: PTYHostGrid(cols: 80, rows: 24),
+            isAttached: false
         )
     }
 }

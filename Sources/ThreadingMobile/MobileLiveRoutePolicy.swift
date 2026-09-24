@@ -9,8 +9,8 @@ struct MobileLiveRoute: Equatable, Sendable {
     let isHosted: Bool
 }
 
-/// Decides which route carries the sockets: the dashboard's event socket, a session's socket,
-/// and the client a mutation or a reconnect starts from.
+/// Decides which route a new dashboard socket, session socket, mutation, or reconnect starts
+/// from.
 ///
 /// The rule is the one the conditional refresh already follows: **the route that answered
 /// last**. A hosted tunnel is that route only when hosted is what answered, and only while the
@@ -26,6 +26,11 @@ struct MobileLiveRoute: Equatable, Sendable {
 /// dialled the loopback again. The catalogue was fine, so the dashboard showed every row; the
 /// session sockets took the same route, so no chat would open; only a force quit, which forgets
 /// the tunnel, ended it.
+///
+/// This is deliberately not the identity a socket still dialling watches for route adoption. A
+/// hosted tunnel can end or be prepared while a route race is still running, which changes the
+/// client that can safely be constructed without proving that route answered. See
+/// ``MobileRouteAdoptionPolicy``.
 ///
 /// Pure and unit-tested. `hostedLink` is nil unless the tunnel behind it is standing.
 enum MobileLiveRoutePolicy {
@@ -50,6 +55,29 @@ enum MobileLiveRoutePolicy {
             kind = PairedRemoteHost.endpointKind(for: host.link.baseURL)
         }
         return MobileLiveRoute(link: host.link, kind: kind, isHosted: false)
+    }
+}
+
+/// The authoritative route change an unanswered session socket may adopt.
+///
+/// Only a successful authenticated route response moves this identity. The constructible live
+/// client has a different job: it must stop exposing a hosted loopback as soon as its tunnel ends,
+/// and it may expose a newly prepared tunnel while a race is still deciding which route answered.
+/// Using that transient client as the adoption signal made one recovery publish hosted -> LAN ->
+/// hosted -> LAN and restart the same terminal dial three times. `lastConnection` is the commit
+/// record for route selection, so it is the sole source here.
+enum MobileRouteAdoptionPolicy {
+    static func identity(
+        activeHostID: String?,
+        lastConnection: MobileConnectionRecord?
+    ) -> MobileRouteIdentity? {
+        guard let activeHostID,
+              let lastConnection,
+              lastConnection.hostID == activeHostID else { return nil }
+        return MobileRouteIdentity(
+            origin: lastConnection.baseURL,
+            endpointKind: lastConnection.kind
+        )
     }
 }
 

@@ -138,6 +138,23 @@ final class RemoteConnectionFailureTests: XCTestCase {
         )
     }
 
+    /// The Boolean's presence is the compatibility handshake for failed-launch recovery. An
+    /// ordinary open must say `false`, not fall back to the bodyless shape old builds used for
+    /// both navigation and their generic Try Again button.
+    func testResumeBodyAlwaysCarriesWhetherThePersonIsRetryingAFailedLaunch() throws {
+        let ordinary = try RemoteClient.resumeMutationBody(retryFailedLaunch: false)
+        let retry = try RemoteClient.resumeMutationBody(retryFailedLaunch: true)
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteResumeSessionRequestDTO.self, from: ordinary),
+            RemoteResumeSessionRequestDTO(retryFailedLaunch: false)
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteResumeSessionRequestDTO.self, from: retry),
+            RemoteResumeSessionRequestDTO(retryFailedLaunch: true)
+        )
+    }
+
     // MARK: - The phone must fail instead of hanging
 
     func testASilentServerProducesATerminalFailureBeforeTheDeadlineElapses() async throws {

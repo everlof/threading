@@ -516,6 +516,12 @@ self-retains for a bounded five seconds after an explicit stop, long enough for 
 receive the queued kill and mark the ending observed instead of retaining the identity for its
 30-minute unattended-exit window.
 
+The external-resume preflight yields to this local replacement authority only when a fresh daemon
+inventory names the same Threading session and the matching provider process is a descendant of
+the daemon-reported root. That is the checkout-move and failed-reattach case: the old process is
+Threading's own incarnation, not an external conversation owner. A process held for another row,
+an ordinary CLI process, or any process whose ancestry cannot be proved still refuses the launch.
+
 An exit is noticed through `EVFILT_PROC`/`NOTE_EXIT` and reaped with a non-blocking `waitpid`,
 retried on the queue rather than waited for. **The `exited` frame waits for the output that
 preceded it**: the child's last write is usually still in the terminal buffer when the kernel

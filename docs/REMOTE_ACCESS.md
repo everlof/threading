@@ -378,6 +378,15 @@ the route the same change is re-resolving. `testOnlyANetworkOrInterfaceKindChang
 and `testAPathChangeDuringBackoffAsksTheModelAtOnce` are the boundaries; the ping on a live
 socket has no automated test, since it needs a connected socket against a server that answers.
 
+The route a new request can safely construct and the route an unanswered session dial may adopt
+are deliberately separate. A 2026-09-21 path-change report captured the old hosted tunnel ending,
+a replacement tunnel being prepared beside a LAN race, and LAN winning. The constructible client
+moved hosted -> LAN -> hosted -> LAN, and deriving `routeIdentity` from it restarted the same
+terminal dial at every provisional step. `MobileLiveRoutePolicy` still refuses an ended hosted
+tunnel immediately, while `MobileRouteAdoptionPolicy` advances only when an authenticated route
+request answers. A route race therefore exposes one committed winner to session sockets, not its
+preparation state.
+
 That untested ping was wrong for its whole life. A pong was never recorded as the answer, so the
 one-second deadline always found the probe unanswered and tore down a socket that had just
 proved it was alive. It did not show until 2026-09-18, when a phone whose path reported a
@@ -1378,9 +1387,13 @@ phone words that cause itself and shows it in place of the loader.
 `{"retryFailedLaunch": true}` to the same route, which clears the stored record and launches —
 exactly what the button on the Mac's failure surface does, and for the same reason: the record is
 the gate, and it is also the only account of what the agent said, so opening a chat never clears
-it. An ordinary open still sends no body at all. Both halves are pinned by
+it. A current ordinary open posts `{"retryFailedLaunch": false}`; the present Boolean tells the
+Mac that the client can distinguish those two actions. Build 1 sent an empty body for both and
+would otherwise repeat the same 409 from its **Try Again** button forever, so bodyless clients
+retain the pre-contract retry-on-open behavior. A malformed non-empty body is rejected rather
+than treated as legacy. The current refusal, explicit retry, and legacy fallback are pinned by
 `RemoteServerIntegrationTests.testResumeOfAFailedLaunchIsRefusedWithItsCauseRatherThanAcceptedAsStarting`
-and `…testRetryingAFailedLaunchClearsTheRecordAndStartsTheSession`.
+and the adjacent retry/compatibility cases.
 
 **A connection the host ends is not an opening that succeeded.** The hold that keeps a terminal's
 first screen from arriving in pieces used to outlive the socket: the same 20 Sep report shows a

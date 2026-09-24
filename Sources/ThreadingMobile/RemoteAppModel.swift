@@ -123,10 +123,12 @@ struct MobileSessionReconnectRequest: Equatable {
     let peerSentClose: Bool
 }
 
-/// Where the model would send a new socket right now.
+/// The last successfully answered route whose movement a dialling socket may adopt.
 ///
-/// Derived from published state, so a SwiftUI `onChange` sees it move the moment a refresh adopts
-/// another route and can hand the new route to a session socket still dialling the old one.
+/// This is a committed identity, not necessarily the client a new request can safely construct
+/// while a route race is running. Derived from published state, so a SwiftUI `onChange` sees it
+/// move when a refresh selects its winner and can hand that route to a session socket still
+/// dialling the old one.
 struct MobileRouteIdentity: Equatable {
     let origin: URL
     let endpointKind: RemoteHostEndpointKind
@@ -1585,9 +1587,14 @@ final class RemoteAppModel: ObservableObject {
         ).direct
     }
 
-    /// The origin and kind of address a new socket would be given now. See ``MobileRouteIdentity``.
+    /// The last route that actually answered for this host. A detail socket watches this commit
+    /// signal while it is dialling; transient hosted-tunnel preparation during a route race must
+    /// not restart it before the race has selected a winner.
     var routeIdentity: MobileRouteIdentity? {
-        client.map { MobileRouteIdentity(origin: $0.link.baseURL, endpointKind: $0.endpointKind) }
+        MobileRouteAdoptionPolicy.identity(
+            activeHostID: activeHostID,
+            lastConnection: lastConnection
+        )
     }
 
     private func performRefresh(from host: PairedRemoteHost, reason: MobileRefreshReason) async {

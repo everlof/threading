@@ -1217,15 +1217,23 @@ Three rules replace the "one cheap retry first" one:
   not only while the route race exists. Whichever socket wakes first starts the race and the
   other joins it; the 72 ms window is gone without adding jitter.
 - **A route that moves supersedes a socket still dialling the old one.** `routeIdentity` is
-  derived from the model's published host state; the detail views watch it and hand the new
-  client to `RemoteSessionConnection.adoptRoute(_:)`. A hello still waiting or a backoff still
-  counting restarts on the new origin at once, and the abandoned attempt gets the terminal
+  derived from the last successful authenticated route response rather than the transient client
+  the model can currently construct; the detail views watch it and hand the new client to
+  `RemoteSessionConnection.adoptRoute(_:)`. A hello still waiting or a backoff still counting
+  restarts on the winning origin at once, and the abandoned attempt gets the terminal
   `socketEnded` record (`result: superseded`, `reason: routeChanged`) every connect is owed. A
   connected socket is left alone: it is either fine or about to say it is not, and its own
   reconnect asks the model for the current route. The route race can also flip between two
   healthy routes (the Tailscale candidate won over Wi-Fi at 04:35:26 in the same report), so
   adoption may restart a sub-second connect that would have succeeded; that costs one handshake
   and is accepted for a deterministic rule.
+
+That committed identity is separate from live-client safety. The 2026-09-21 path-change report
+captured the old hosted tunnel ending, a replacement tunnel being prepared beside a LAN race, and
+LAN winning: the constructible client moved hosted -> LAN -> hosted -> LAN and restarted the same
+unanswered terminal dial at every provisional step. `MobileRouteAdoptionPolicy` now advances only
+when an authenticated route request answers; `MobileLiveRoutePolicy` still drops an ended tunnel
+immediately for new requests.
 
 The client still has no `NWPathMonitor` on the connection path; a Wi-Fi to cellular switch is
 learned from a socket dying of it. `RemoteConnectionFailureTests` holds the first-retry request,

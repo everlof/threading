@@ -1101,9 +1101,10 @@ struct RemoteClient {
     /// Asks the Mac to bring a dormant session back.
     ///
     /// `retryFailedLaunch` is the person's answer to a `sessionLaunchFailed` refusal, and is
-    /// carried only then: the Mac clears its stored failure before launching, which is what its
-    /// own **Try Again** button does. Opening a chat never sets it, so a record nobody has read
-    /// is never cleared by navigation. An ordinary resume keeps sending no body at all.
+    /// carried as `true` only then: the Mac clears its stored failure before launching, which is
+    /// what its own **Try Again** button does. Opening a chat sends `false`, so a record nobody
+    /// has read is never cleared by navigation. The present Boolean also distinguishes this
+    /// client from older builds whose bodyless **Try Again** could not express that decision.
     func resume(
         sessionID: String,
         retryFailedLaunch: Bool = false,
@@ -1111,15 +1112,22 @@ struct RemoteClient {
     ) async throws {
         var request = request(url: link.resumeURL(sessionID: sessionID))
         request.httpMethod = "POST"
-        if retryFailedLaunch {
-            request.httpBody = try Self.encodeMutationBody(
-                RemoteResumeSessionRequestDTO(retryFailedLaunch: true)
-            )
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
+        request.httpBody = try Self.resumeMutationBody(
+            retryFailedLaunch: retryFailedLaunch
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200 ... 299)
+    }
+
+    /// The false value is wire-significant: its presence tells a current Mac that an ordinary
+    /// open and the failure surface's explicit retry are distinct actions. Older clients sent an
+    /// empty body for both, so the host retains their former retry-on-open behaviour.
+    static func resumeMutationBody(retryFailedLaunch: Bool) throws -> Data {
+        try encodeMutationBody(
+            RemoteResumeSessionRequestDTO(retryFailedLaunch: retryFailedLaunch)
+        )
     }
 
     func resumeTerminal(

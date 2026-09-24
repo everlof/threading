@@ -106,6 +106,14 @@ preflight or records a no-process `.preflight` failure with cause `identifier-in
 identifier is logged. The existing failure surface says to close the conversation elsewhere and
 try again, so selecting the row no longer spends a doomed process merely to discover the lock.
 
+One process that matches that argv contract is deliberately not external: a previous incarnation
+of the same Threading row still owned by the local `threading-ptyd` during a local checkout
+replacement or failed startup reattach. The exception requires a fresh daemon inventory naming
+that session and process ancestry from the matching provider process to the daemon-reported root.
+A launch targeting a remote host never uses local daemon ownership. The preflight keeps
+scanning after that process, so a second unhosted owner or an owner belonging to another row still
+refuses the launch. Unavailable or incomplete host evidence also refuses rather than guessing.
+
 ## What the user sees
 
 `LaunchFailureView` replaces the dormant placeholder rather than annotating it, for the reason
@@ -208,6 +216,14 @@ transport:
   in the same order, as `relaunchAfterFailure` behind the button on the Mac. An automatic open
   never sets it, because clearing on navigation is exactly the "selecting the row retries it"
   behaviour this subsystem exists to remove.
+
+Current clients send `{"retryFailedLaunch": false}` on an ordinary open as well. The false value
+is a capability signal: the Mac may safely return the stored failure because that client can send
+the distinct true decision from its button. iOS build 1 predates the body and used an empty POST
+for both navigation and **Try Again**; returning 409 to it made the button repeat the refusal
+forever. A bodyless request therefore keeps the legacy retry-on-open behavior. This is deliberately
+limited to the old wire shape — a malformed non-empty body is rejected, and current navigation
+still cannot consume the record.
 
 The refusal and the retry are both journalled (`Remote resume refused`, `Remote launch retried`).
 The Mac's journal said nothing whatsoever about the second tap in that report, which is what made
