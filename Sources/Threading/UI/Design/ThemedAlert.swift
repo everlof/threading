@@ -4,8 +4,8 @@ import AppKit
 ///
 /// Its small API intentionally mirrors the subset the app used: title and message, ordered
 /// buttons, an optional accessory, a suppression choice, modal or sheet presentation, and the
-/// ordinary alert response values. The visual surface is ours; AppKit still owns sheet
-/// attachment, modal dispatch, focus, windows, and assistive-technology transport.
+/// ordinary alert response values. The visual surface and attached-sheet placement are ours;
+/// AppKit still owns modal dispatch, focus, windows, and assistive-technology transport.
 @MainActor
 final class ThemedAlert {
 
@@ -72,6 +72,9 @@ final class ThemedAlert {
     private weak var previousKeyWindow: NSWindow?
     private weak var previousFirstResponder: NSResponder?
     private var sheetCompletion: ((NSApplication.ModalResponse) -> Void)?
+    private var parentIgnoredMouseEvents: Bool?
+    private var parentIsClosing = false
+    private let attachmentEvents = AppEventObservations()
     private var isModal = false
 
     init() {}
@@ -132,6 +135,7 @@ final class ThemedAlert {
 
         panel.center()
         panel.makeKeyAndOrderFront(nil)
+        panel.refreshPresentedShapeAndShadow()
         focusInitialResponder(in: panel)
         NSAccessibility.post(element: panel, notification: .created)
         let response = NSApp.runModal(for: panel)
@@ -149,15 +153,32 @@ final class ThemedAlert {
         sheetCompletion = completionHandler
         let panel = makePanel()
 
-        window.beginSheet(panel) { [weak self, weak panel] response in
-            guard let self, let panel else { return }
-            let completion = self.sheetCompletion
-            self.sheetCompletion = nil
-            self.cleanup(panel: panel, restoring: window)
-            completion?(response)
+        // Native sheets impose their own rounded mask, even on a borderless panel. Attach our
+        // panel as a child window so the theme's authored corner survives in every alert stage.
+        window.addChildWindow(panel, ordered: .above)
+        positionAttachedPanel()
+        parentIgnoredMouseEvents = window.ignoresMouseEvents
+        window.ignoresMouseEvents = true
+        attachmentEvents.observe(NSWindow.didResizeNotification, object: window) { [weak self] in
+            self?.positionAttachedPanel()
         }
+        attachmentEvents.observe(NSWindow.willCloseNotification, object: window) { [weak self] in
+            self?.parentIsClosing = true
+            self?.dismiss()
+        }
+        panel.makeKeyAndOrderFront(nil)
+        panel.refreshPresentedShapeAndShadow()
         focusInitialResponder(in: panel)
         NSAccessibility.post(element: panel, notification: .created)
+    }
+
+    private func positionAttachedPanel() {
+        guard let panel = presentedWindow, let parent = parentWindow else { return }
+        let titlebarHeight = parent.frame.height - parent.contentLayoutRect.maxY
+        panel.setFrameOrigin(NSPoint(
+            x: parent.frame.midX - panel.frame.width / 2,
+            y: parent.frame.maxY - titlebarHeight - panel.frame.height
+        ))
     }
 
     /// Ends the presentation without a button having been chosen.
@@ -243,7 +264,15 @@ final class ThemedAlert {
             NSApp.stopModal(withCode: response)
             panel.orderOut(nil)
         } else if let parentWindow {
-            parentWindow.endSheet(panel, returnCode: response)
+            attachmentEvents.removeAll()
+            parentWindow.removeChildWindow(panel)
+            parentWindow.ignoresMouseEvents = parentIgnoredMouseEvents ?? false
+            parentIgnoredMouseEvents = nil
+            let completion = sheetCompletion
+            sheetCompletion = nil
+            cleanup(panel: panel, restoring: parentIsClosing ? nil : parentWindow)
+            parentIsClosing = false
+            completion?(response)
         } else {
             panel.orderOut(nil)
             cleanup(panel: panel, restoring: previousKeyWindow)
@@ -292,6 +321,14 @@ private final class ThemedAlertPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Attachment resolves the panel's appearance and content silhouette. Refresh that shape
+    /// before AppKit measures the window shadow, for both modal and parent-attached alerts.
+    func refreshPresentedShapeAndShadow() {
+        (contentView as? ThemedAlertContentView)?.refreshSurface()
+        displayIfNeeded()
+        invalidateShadow()
+    }
 
     override func cancelOperation(_ sender: Any?) { onCancel?() }
 
@@ -633,7 +670,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             modernStackTopConstraint?.isActive = true
         }
         sectionStack?.spacing = usesClassicRequester ? Design.Spacing.small : Design.Spacing.large
-        needsDisplay = true
+        refreshSurface()
         window?.invalidateShadow()
     }
 
@@ -697,7 +734,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         applyTheme()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    fileprivate func refreshSurface() {
         let material = AppThemePalette.current.material(for: effectiveAppearance)
         let popover = material.popoverStyle
         // Anchored Help Tags and modal alerts share the presentation model but not their
@@ -708,11 +745,12 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         let bevel: SurfaceBevel = popover.edge == .material
             ? .automatic
             : .none
-        ThemedSurface.draw(
-            bounds,
+        let radius = Design.Radius.panel
+        requesterTitleBand.cornerInset = radius
+        applySurface(
             fill: fill,
+            radius: .fixed(radius),
             border: edge,
-            radius: Design.Radius.panel,
             bevel: bevel
         )
     }
@@ -725,7 +763,18 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
 private final class ThemedAlertRequesterTitleBandView: NSView, ThemedComponent {
     private let title: String
     private let depthButton = WindowChromeButton(role: .depth)
+    private var depthTrailingConstraint: NSLayoutConstraint?
     private let appEvents = AppEventObservations()
+
+    /// A rounded theme clips the title strip's ends. Keep its caption and depth control inside
+    /// the themed curve; square requesters keep their original edge placement.
+    var cornerInset: CGFloat = 0 {
+        didSet {
+            guard cornerInset != oldValue else { return }
+            depthTrailingConstraint?.constant = -cornerInset
+            needsDisplay = true
+        }
+    }
 
     init(title: String) {
         self.title = title
@@ -733,8 +782,10 @@ private final class ThemedAlertRequesterTitleBandView: NSView, ThemedComponent {
         translatesAutoresizingMaskIntoConstraints = false
         depthButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(depthButton)
+        let depthTrailing = depthButton.trailingAnchor.constraint(equalTo: trailingAnchor)
+        depthTrailingConstraint = depthTrailing
         NSLayoutConstraint.activate([
-            depthButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            depthTrailing,
             depthButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             depthButton.widthAnchor.constraint(equalToConstant: 18),
             depthButton.heightAnchor.constraint(equalToConstant: 16)
@@ -794,7 +845,7 @@ private final class ThemedAlertRequesterTitleBandView: NSView, ThemedComponent {
         )
         let measured = attributed.size()
         let origin = NSPoint(
-            x: 4,
+            x: max(4, cornerInset),
             y: floor(bounds.midY - measured.height / 2)
         )
         attributed.draw(at: origin)

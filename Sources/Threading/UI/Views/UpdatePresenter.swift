@@ -152,12 +152,18 @@ final class UpdatePresenter: UpdatePresenting {
     }
 
     func showInstalling() {
-        let alert = makeAlert(
-            message: L10n.string("Installing Update…"),
-            informative: L10n.string("Threading will quit in a moment.")
-        )
+        present(Self.installingAlert())
+    }
+
+    /// The final stage is a real alert so its rendered fixture exercises the shipping copy,
+    /// button and sheet silhouette together.
+    static func installingAlert() -> ThemedAlert {
+        let alert = ThemedAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L10n.string("Installing Update…")
+        alert.informativeText = L10n.string("Threading will quit in a moment.")
         alert.addButton(withTitle: L10n.string("Hide"))
-        present(alert)
+        return alert
     }
 
     func showUpdateInstalled(acknowledge: @escaping () -> Void) {
@@ -197,8 +203,8 @@ final class UpdatePresenter: UpdatePresenting {
     func focusUpdateUI() {
         NSApp.activate(ignoringOtherApps: true)
         presentDeferredIfPossible()
-        if let sheet = alert?.presentedWindow {
-            sheet.sheetParent?.makeKeyAndOrderFront(nil)
+        if let panel = alert?.presentedWindow {
+            panel.makeKeyAndOrderFront(nil)
         }
     }
 

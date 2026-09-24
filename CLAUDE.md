@@ -581,10 +581,17 @@ the following cases genuinely need to be visible, and they are skipped by name i
   `testAlertDismissEndsTheSheetWithoutAButtonAnswer()` and
   `testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()` — the four that share
   `testWindow()`, a titled 420×260 fixture at (120,120) with `makeKeyAndOrderFront`. They
-  present a real popover panel and real sheets and assert who holds the keyboard afterwards,
-  which is AppKit's presentation machinery rather than ours. They were flashing a window three
+  present a real popover panel and attached alert panels, then assert who holds the keyboard
+  afterwards. They were flashing a window three
   times per `fast` run, which is the lane an agent re-runs all day; they still run in `all`, so
   the push gate is unchanged.
+- `UpdateSheetRenderTests/testRealInstallingSheetKeepsSquareThemedBorder()` — captures the
+  assembled update dialog through WindowServer and checks the square border at all four corners.
+  Its titled parent must be on screen to exercise real child-window attachment, so it runs in
+  `all`.
+- `UpdateSheetRenderTests/testRealClassicSheetKeepsSquareTitleHardware()` — uses that same
+  attachment under Win98 and checks that the title and depth control keep their square-era
+  placement. Its window capture also requires `all`.
 
 **Adding a test that needs a real window?** Add it to `skippedTests` in
 `TestPlans/Threading-Fast.xctestplan` and say why here. Anything that can be asserted against an

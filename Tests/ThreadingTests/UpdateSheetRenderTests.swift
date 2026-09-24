@@ -4,9 +4,9 @@ import XCTest
 
 /// Draws the software-update sheets as they actually assemble — through
 /// `UpdatePresenter`'s own request builders and `ConfirmationAlert.makeAlert` — and writes
-/// each stage out as an image, light and dark, under System plus two deliberately different
-/// stock themes. Win98 is one of them on purpose: it is the theme whose `ThemedProgressBar`
-/// switches to segmented classic drawing, which no assertion would think to look at.
+/// each stage out as an image, light and dark, under System plus three deliberately different
+/// stock themes. Win98 exercises segmented progress and Neo Brutalism covers the square alert
+/// silhouette that native macOS sheet attachment would otherwise round.
 ///
 /// What these have to get right is relational: whether a Markdown release-notes column reads
 /// as content or as a second dialog, whether a 3-point bar under a heading reads as progress
@@ -34,7 +34,8 @@ final class UpdateSheetRenderTests: XCTestCase {
         static let themes: [(name: String, theme: AppTheme)] = [
             ("system", .system),
             ("swiss", AppThemeStyles.swissMinimalist),
-            ("win98", AppThemeStyles.win98)
+            ("win98", AppThemeStyles.win98),
+            ("neo-brutalism", AppThemeStyles.neoBrutalism)
         ]
 
         enum Story: String, CaseIterable {
@@ -46,6 +47,8 @@ final class UpdateSheetRenderTests: XCTestCase {
             case downloading
             /// The last question before the app quits.
             case ready
+            /// The final narration-only sheet, including the reported corner failure.
+            case installing
         }
 
         static let notes = """
@@ -115,6 +118,120 @@ final class UpdateSheetRenderTests: XCTestCase {
 
         let downloading = alert(for: .downloading)
         XCTAssertEqual(downloading.buttons.map(\.title), ["Cancel"])
+
+        let installing = alert(for: .installing)
+        XCTAssertEqual(installing.buttons.map(\.title), ["Hide"])
+        XCTAssertEqual(installing.messageText, L10n.string("Installing Update…"))
+    }
+
+    /// The content-only storybook cannot prove the real window's silhouette. A square theme
+    /// must remain square after attachment, including the first pixel of every black edge.
+    func testRealInstallingSheetKeepsSquareThemedBorder() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+
+        let parent = visibleSheetParent()
+        let alert = UpdatePresenter.installingAlert()
+        alert.beginSheetModal(for: parent)
+        defer { alert.dismiss(); parent.orderOut(nil) }
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        let panel = try XCTUnwrap(alert.presentedWindow)
+        XCTAssertTrue(panel.hasShadow)
+        XCTAssertTrue(panel.parent === parent)
+        XCTAssertNil(panel.sheetParent)
+        XCTAssertTrue(parent.ignoresMouseEvents)
+        let rep = try capture(panel)
+        for y in [0, rep.pixelsHigh - 1] {
+            for x in [0, rep.pixelsWide - 1] {
+                let ink = try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                XCTAssertGreaterThan(ink.alphaComponent, 0.98)
+                XCTAssertLessThan(
+                    max(ink.redComponent, ink.greenComponent, ink.blueComponent),
+                    0.25,
+                    "the square themed border is missing at (\(x), \(y))"
+                )
+            }
+        }
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try FileManager.default.createDirectory(
+            at: Render.directory, withIntermediateDirectories: true
+        )
+        try data.write(to: Render.directory.appendingPathComponent("update-installing-panel-neo.png"))
+        alert.dismiss()
+        XCTAssertFalse(parent.ignoresMouseEvents)
+    }
+
+    /// A classic requester keeps its caption and depth button at the square title band's ends.
+    func testRealClassicSheetKeepsSquareTitleHardware() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        AppThemePalette.set(AppThemeStyles.win98)
+
+        let parent = visibleSheetParent()
+        let alert = UpdatePresenter.installingAlert()
+        alert.beginSheetModal(for: parent)
+        defer { alert.dismiss(); parent.orderOut(nil) }
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        let panel = try XCTUnwrap(alert.presentedWindow)
+        let content = try XCTUnwrap(panel.contentView)
+        let depth = try XCTUnwrap(depthButton(in: content))
+        let depthFrame = depth.convert(depth.bounds, to: content)
+        XCTAssertGreaterThan(depthFrame.maxX, content.bounds.maxX - 20)
+
+        let rep = try capture(panel)
+        let titleInkX = (3..<18).flatMap { y in
+            (0..<(rep.pixelsWide / 2)).compactMap { x -> Int? in
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      min(color.redComponent, color.greenComponent, color.blueComponent) > 0.8,
+                      color.alphaComponent > 0.9 else { return nil }
+                return x
+            }
+        }.min()
+        XCTAssertLessThan(try XCTUnwrap(titleInkX), 20)
+
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try FileManager.default.createDirectory(
+            at: Render.directory, withIntermediateDirectories: true
+        )
+        try data.write(to: Render.directory.appendingPathComponent("update-installing-panel-win98.png"))
+    }
+
+    private func visibleSheetParent() -> NSWindow {
+        let parent = NSWindow(
+            contentRect: NSRect(x: 120, y: 120, width: 700, height: 500),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        parent.isReleasedWhenClosed = false
+        parent.backgroundColor = NSColor(calibratedWhite: 0.8, alpha: 1)
+        parent.makeKeyAndOrderFront(nil)
+        return parent
+    }
+
+    private func capture(_ panel: NSWindow) throws -> NSBitmapImageRep {
+        let image = try XCTUnwrap(CGWindowListCreateImage(
+            .null, .optionIncludingWindow, CGWindowID(panel.windowNumber),
+            [.boundsIgnoreFraming, .nominalResolution]
+        ))
+        let rep = NSBitmapImageRep(cgImage: image)
+        XCTAssertGreaterThan(
+            rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?.alphaComponent ?? 0,
+            0.9,
+            "the sheet capture was blank"
+        )
+        return rep
+    }
+
+    private func depthButton(in view: NSView) -> WindowChromeButton? {
+        for child in view.subviews {
+            if let button = child as? WindowChromeButton, button.role == .depth { return button }
+            if let button = depthButton(in: child) { return button }
+        }
+        return nil
     }
 
     // MARK: - Fixtures
@@ -156,6 +273,8 @@ final class UpdateSheetRenderTests: XCTestCase {
             alert.accessoryView = accessory
             alert.addButton(withTitle: L10n.string("Cancel"))
             return alert
+        case .installing:
+            return UpdatePresenter.installingAlert()
         }
     }
 

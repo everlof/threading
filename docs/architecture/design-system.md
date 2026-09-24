@@ -905,6 +905,16 @@ No user driver can take that over; it appears only when no Threading window exis
 with it, and forking Sparkle to remove it is the escape hatch if it ever grates
 (see [`releasing.md`](releasing.md)).
 
+`ThemedAlert` attaches its borderless panel as a child window below the parent's titlebar.
+`beginSheet` gives even a borderless panel a rounded system mask on macOS 26; a square theme
+cannot draw its authored face or edge outside that mask. Trying a transparent gutter exposed
+AppKit's dark sheet backing instead. The child panel keeps the theme's own radius and native
+shadow, follows its parent, recenters on resize, and blocks mouse interaction with that parent
+until dismissal. The alert restores focus and completes through the same API as a sheet. Its
+surface uses `applySurface`'s continuous layer corner, and a rounded theme insets classic title
+hardware by that radius. The real-window update captures check both square and rounded stock
+themes; the content-only storybook remains the theme and copy matrix.
+
 **How long a receipt holds is a fact about who caused it, so it belongs to the request.** The six
 seconds are measured from a click: the hand is on the mouse and the eye is on the row that
 changed. An agent archiving its own session (see [`sessions.md`](sessions.md)) puts the same band

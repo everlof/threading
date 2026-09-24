@@ -75,7 +75,9 @@
         "ThemedPresentationTests\/testAlertDismissEndsTheSheetWithoutAButtonAnswer()",
         "ThemedPresentationTests\/testAlertEscapeEndsTheSheetAndReturnsFocus()",
         "ThemedPresentationTests\/testPopoverEscapeClosesOnceAndReturnsFocus()",
-        "ThemedPresentationTests\/testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()"
+        "ThemedPresentationTests\/testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()",
+        "UpdateSheetRenderTests\/testRealClassicSheetKeepsSquareTitleHardware()",
+        "UpdateSheetRenderTests\/testRealInstallingSheetKeepsSquareThemedBorder()"
       ],
       "target" : {
         "containerPath" : "container:Threading.xcodeproj",
