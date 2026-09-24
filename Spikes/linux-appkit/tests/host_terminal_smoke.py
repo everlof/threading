@@ -107,16 +107,17 @@ print("PASS child preserves Linux PATH, HOME and account locations while strippi
 # An explicit argument recorder verifies integration without pretending to be an authenticated CLI.
 import sqlite3
 recorder = Path(folder) / "codex-argument-recorder"
-recorder.write_text("#!/usr/bin/python3\nimport json,os,sys\nprint(json.dumps({'argv':sys.argv[1:],'cwd':os.getcwd()}))\n")
+recorder.write_text("#!/usr/bin/python3\nimport json,os,sys\nprint(json.dumps({'argv':sys.argv[1:],'cwd':os.getcwd(),'codexHome':os.getenv('CODEX_HOME')}))\n")
 recorder.chmod(0o700)
 prompt = "- inspect this 'quoted' request; $(do-not-execute) 日本語"
 result = subprocess.run([host, store, socket, "codex", folder, "/bin/sh", str(recorder), prompt],
-                        input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+                        env=inherited, input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
 assert result.returncode == 0, (result.returncode, result.stderr)
 reports = [json.loads(line) for line in result.stdout.decode().splitlines() if line.startswith("{")]
 assert len(reports) == 1, result.stdout
 argv = reports[0]["argv"]
 assert reports[0]["cwd"] == folder
+assert reports[0]["codexHome"] is None, "standard Codex launch inherited an alternate home"
 assert argv[-2:] == ["--", prompt], argv
 assert "--no-alt-screen" in argv
 assert argv[argv.index("--ask-for-approval") + 1] == "untrusted"

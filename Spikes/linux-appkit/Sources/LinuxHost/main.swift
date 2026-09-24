@@ -62,8 +62,10 @@ func run() throws -> Int32 {
         guard var session = AgentSessionCreation.makeRecord(kind: .codex, permissionMode: .manual) else {
             throw HostFailure.refused("unsupported session configuration")
         }
-        let (command, resumeState) = CodexLaunchCommand.terminal(executable: args[5], model: nil,
+        let (codexCommand, resumeState) = CodexLaunchCommand.terminal(executable: args[5], model: nil,
             permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: args[6])
+        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
+        command.append(contentsOf: codexCommand)
         session.resumeState = resumeState
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: args[4], resumeState: resumeState)

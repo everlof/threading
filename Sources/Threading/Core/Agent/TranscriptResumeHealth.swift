@@ -69,18 +69,7 @@ enum CodexRolloutHealth {
     // MARK: - Public Methods
 
     static func verdict(for url: URL) -> TranscriptResumeHealth.Verdict {
-        guard let tail = tail(of: url) else { return .usable }
-
-        let lines = tail
-            .split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
-            .map { Data($0) }
-        guard let last = lines.last else { return .usable }
-
-        // The first line of a tail read may be half a record. Ordinals are looked for across the
-        // whole window, so one clipped line cannot make a healthy file look unnumbered; the final
-        // line is whole by construction, because the writer appends complete records.
-        let fileUsesOrdinals = lines.contains { hasOrdinal($0) }
-        guard fileUsesOrdinals, !hasOrdinal(last) else { return .usable }
+        guard CodexRolloutNumbering.isMixed(at: url) else { return .usable }
 
         return .unusable(
             reason: L10n.string(
@@ -91,49 +80,4 @@ enum CodexRolloutHealth {
         )
     }
 
-    // MARK: - Private Methods
-
-    /// The last window of the file, or nil when it cannot be read.
-    private static func tail(of url: URL) -> Data? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-
-        guard let size = try? handle.seekToEnd() else { return nil }
-        let offset = size > CodexRolloutHealthDefaults.tailBytes
-            ? size - CodexRolloutHealthDefaults.tailBytes
-            : 0
-        try? handle.seek(toOffset: offset)
-        return try? handle.readToEnd()
-    }
-
-    /// Matched on the raw bytes rather than by decoding the record.
-    ///
-    /// A rollout line can be a quarter of a megabyte of tool output — three such lines sit in the
-    /// specimen — and `JSONSerialization` on the tail window would parse all of it to answer a
-    /// question about one key. The key is written by the runtime's own serializer directly after
-    /// the timestamp, so its byte form is stable in a way its position in a decoded dictionary
-    /// is not.
-    private static func hasOrdinal(_ line: Data) -> Bool {
-        // Bounded to the head of the record: the key belongs to the record's own envelope, and
-        // scanning a 250 KB payload for it would find one that a nested tool result happened to
-        // contain.
-        let window = line.prefix(CodexRolloutHealthDefaults.envelopeBytes)
-        return window.range(of: CodexRolloutHealthDefaults.ordinalKeyBytes) != nil
-    }
-}
-
-// MARK: - Defaults
-
-enum CodexRolloutHealthDefaults {
-
-    /// How much of the end of a rollout is read. Large enough to contain several whole records
-    /// even when they are long, small enough that the check is a single read of a page or two.
-    static let tailBytes: UInt64 = 65_536
-
-    /// How far into one record the envelope keys are looked for.
-    static let envelopeBytes = 512
-
-    static let ordinalKey = "\"ordinal\":"
-
-    static let ordinalKeyBytes = Data(ordinalKey.utf8)
 }
