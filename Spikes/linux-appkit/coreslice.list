@@ -1,4 +1,4 @@
-# The persistence slice, vendored byte-identical from the working tree. One path per line; an optional
+# Persistence and portable launch values, vendored byte-identical from the working tree. One path per line; an optional
 # second, tab-separated field renames the copy (only where a basename would mislead).
 #
 # There are no stand-ins. There used to be two — `TerminalThemeID` extracted from an AppKit file,
@@ -35,3 +35,16 @@ Sources/Threading/Models/ProjectExecutionHost.swift
 Sources/Threading/Models/RemoteHostRecord.swift
 Sources/Threading/Models/SessionReadReceiptState.swift
 Sources/Threading/Models/AccountUsage.swift
+Sources/Threading/Core/Agent/AgentLaunchPlan.swift
+Sources/Threading/Core/Agent/ShellCommand.swift
+Sources/Threading/Core/Agent/CodexLaunchCommand.swift
+Sources/Threading/Core/Session/AgentSessionCreation.swift
+Sources/Threading/Core/Agent/AgentEnvironment.swift
+Sources/Threading/Core/Constants/EnvironmentKeys.swift
+Sources/Threading/Core/PTYHost/PTYHostClientError.swift
+Sources/Threading/Core/PTYHost/PTYHostSocket.swift
+Sources/Threading/Core/PTYHost/PTYHostConnectionBinding.swift
+Sources/Threading/Core/PTYHost/PTYHostHandshake.swift
+Sources/Threading/Core/PTYHost/PTYHostClientDefaults.swift
+Sources/Threading/Core/PTYHost/PTYHostSocketWriter.swift
+Sources/Threading/Core/PTYHost/PTYHostClient.swift

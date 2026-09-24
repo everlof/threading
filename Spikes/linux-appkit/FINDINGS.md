@@ -889,3 +889,734 @@ production copies are unchanged and verify byte-identical; `git diff --check` pa
 `out/coreslice-*.log`. No shipping source or runner changed, so the prior macOS and runner-test
 validation remains applicable. These fixtures verify the move primitive, not StateManager's
 choice to quarantine, naming/recovery policy, or an app-level recovery flow.
+
+
+## 36. A Linux host connects durable project terminals to the real PTY daemon
+
+The experiment now includes `LinuxHost`, a runnable command-line host with `run` and `list`
+operations. It uses the verified production storage slice, the actual `ThreadingPTYHostKit`
+package and the production daemon built from `Targets/PTYHost`. A Linux Unix-socket adapter owns
+transport only; the package owns frames, identities, bounds and compatibility. Project terminals
+keep their proper domain identity instead of borrowing agent-session identifiers.
+
+A run opens an explicitly selected store under an exclusive file lock, loads its graph, connects
+and checks the daemon's protocol, saves the project/terminal record, and requests a PTY spawn.
+Output is streamed in bounded chunks, input forwarded after spawn acknowledgement, and the
+child's exit status returned. A separate invocation reopens and lists the durable records. The
+minimal child environment and fixed grid are explicit prototype constraints, not provider launch
+policy. No shipping app source changed.
+
+`host-smoke.sh` builds both executables on arm64 Linux and owns a disposable daemon/store. Its
+real `/bin/sh` verifies stdin/stdout are terminals, reads forwarded text, reports its working
+directory and observes `stty size` as 24×80. Another launch exits 7, which the host preserves.
+The reopened store has one project and two distinct terminal records. Additional refusal checks
+hold the store lock or remove the daemon rendezvous, and confirm the durable listing is unchanged.
+Full build/run evidence is retained in `out/host-smoke.log`.
+
+This moves the experiment from storage verification to an executable local host boundary. It is
+not a working native Linux Threading app: raw keyboard mode, resizing, attach/reconnect, agent
+launch/account policy, native rendering, accessibility and extension surfaces remain unfinished.
+The adapter is experimental, uses debug-only record access and does not replace the asynchronous
+macOS client. Store/launch authority is deliberately host-owned; no public UI component is added.
+
+
+## 37. Terminal watchers reconnect, forward raw keys and follow window size
+
+`LinuxHost attach TERMINAL_UUID` now resolves an existing project terminal from its store and
+attaches that exact typed identity through the production daemon. It does not spawn a replacement
+or rewrite the graph. Replay status is reported explicitly; a cut raw history is not claimed to
+restore an exact terminal screen.
+
+The Linux transport leaf now owns the caller's terminal mode during a live connection. A real
+TTY enters raw mode and provides the spawn grid; pipe callers retain the 80×24 fallback. SIGWINCH
+sends the current dimensions after binding. A small system module exposes Linux `signalfd`, which
+Swift's Glibc module omits. The host blocks relevant signals before storage decoding can create
+workers, polls the signal descriptor beside input/output, and restores the caller's mode on normal
+exit, errors and handled termination. No Swift work runs in an async signal handler. SIGKILL
+remains uncatchable.
+
+The arm64 Linux smoke lane now proves:
+
+- A first watcher exits while its real shell waits in a PTY read. Another watcher attaches the
+  persisted identity, receives prior output, delivers new input and observes the same child PID.
+  The before/after store listings are identical; an identity absent from the store is refused.
+- An outer PTY starts at 31×97. A key sent without a newline reaches the child immediately.
+  Changing the outer terminal to 42×113 and sending SIGWINCH makes the child's `stty size`
+  observe the new dimensions.
+- The complete original caller termios is restored after normal child exit and after external
+  SIGTERM. The previous real-shell, exit-status, ownership and persistence checks still pass.
+
+`host-smoke.sh` runs these checks against the actual production daemon; the new Python fixture
+uses kernel PTYs and bounded waits rather than mocked transport or grid state. Evidence remains
+in `out/host-smoke.log`. Shipping sources are unchanged. This is progress on the runtime/platform
+boundary, not native UI, provider launch policy, emulator screen restoration or accessibility.
+
+
+## 38. Linux and macOS share the login-shell command plan
+
+`ShellCommand` moved unchanged from `AgentLauncher.swift` into its own Foundation-only file.
+`AgentLaunchPlan` also became a standalone value. Its new `inLoginShell` factory holds the former
+launcher's exact `cd && exec` composition and login-shell argument shape, taking the resolved
+shell path as a value. `AgentLauncher` delegates to it and retains shell discovery, account
+routing, provider flags, permissions and `launchEnvironment()` resolution. This is a shared
+production extraction prepared on this branch, not an alternate Linux provider implementation.
+
+The experiment vendors both files byte-identically: **29 files / 9,040 lines**. `LinuxHost
+login-run DIRECTORY SHELL EXECUTABLE [ARG ...]` uses the same factory and quoter with an explicit
+Linux shell. It still creates a project terminal; running a CLI this way does not manufacture a
+managed agent record or claim that provider lifecycle/discovery has been ported.
+
+The real arm64 Linux PTY smoke passes with a directory containing quotes, dollar signs and a
+semicolon, and arguments containing empty strings, Unicode, newlines, leading dashes, quotes and
+command-substitution syntax. A real child reports the exact cwd and argument values; substitution
+marker files remain absent. Existing shell, reconnect, raw-input and resize checks also pass.
+The host therefore shares executable command composition rather than only matching a string
+snapshot. The full account/provider policy and native UI remain unfinished.
+
+Shipping verification: all **99** selected macOS tests pass (launch quoting, permission modes and
+provider capabilities), with no failures or skips. The app builds with its repository gates.
+The Linux host smoke passes, all 29 vendored sources verify byte-identical, and
+`git diff --check` is clean. No UI appearance changed.
+
+
+## 39. Managed Codex sessions share production command assembly
+
+`CodexLaunchCommand` now holds the provider invocation and terminal command composition as a
+portable value operation. `AgentLauncher` supplies its resolved conversation overrides, permission
+mode and hook flags in the existing order, retaining all account discovery, hook maintenance,
+model metadata and default-setting decisions. The same invocation helper supplies the startup
+update-check override on non-terminal Mac routes too. Resume preflight remains host-owned; the
+builder never substitutes a new conversation for a supplied transcript ID.
+
+LinuxHost's `codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT` creates and selects a real
+`AgentSession(kind: .codex)`, persists explicit Manual permission mode, builds the shared command
+and spawns a typed agent identity through the actual daemon. `attach-agent` resolves that stored
+session without treating a project-terminal UUID as an agent. The Linux caller's HOME is passed
+for CLI-owned existing login state; no macOS credential store is read or copied.
+
+The smoke uses an explicitly named argument-recording executable, not a pretend authenticated
+provider. Through a real PTY it verifies the exact prompt (including leading dash, quotes, command
+substitution text and Unicode), cwd, no-alt-screen, update override, untrusted approval,
+read-only sandbox and user-reviewer flags. SQLite contains one selected Codex session with stored
+Manual mode. Reattachment checks reuse of that agent identity and refusal of a terminal identity.
+
+This establishes managed launch wiring and persistence, not a successful authenticated model
+turn. Provider transcript discovery/resume, hook/MCP integration, model catalogs, multiple
+accounts and native UI remain unfinished. Credentials remain CLI-owned in this prototype;
+Threading's own Linux secret-store decision is still open. All production sources are vendored
+byte-identically; the dependency slice now contains 30 files.
+
+This integration exposed an EOF/exit race in the experimental host: input may cross a child's
+exit and receive `sessionExited` before the actual exit-status frame. The host now suppresses
+further input, including readiness from that same poll cycle, and waits up to five seconds for
+the authoritative `exited` frame. It never turns the refusal into an invented success or failure
+status. The smoke repeats eight immediate exit-7 children with closed stdin to cover this path.
+
+Verification: the finalized Linux host smoke passes all shell, reconnect, keyboard/resize,
+quoting, managed-agent fixture, identity-refusal and repeated-fast-exit checks. The macOS app
+builds with its repository gates and all **99** launch-quoting, permission-mode and provider
+capability tests pass without failures or skips. All 30 vendored copies verify and
+`git diff --check` is clean. This is still not evidence of a live authenticated Codex turn.
+
+## 40. The rasterizer reaches a native Linux window
+
+`window-smoke.sh` now opens an SDL2/X11 window under Xvfb, using the existing specimen views
+and byte-identical production `PlatinumBitmapFont`. `LinuxWindowBridge` owns only native window
+lifetime, pixel presentation and event translation; it does not own product drawing or records.
+`WindowHarness` loads an existing production project store on a worker under the host lock and
+passes immutable snapshot values to the UI. Selection is local, and only viewport rows exist as
+views. This is still diagnostic specimen UI, not the production navigator or a selected backend.
+
+The completed Linux run proved native Down-key selection of Beta, mouse selection of Gamma,
+resize from 800×480 to 960×600, Escape dismissal and unchanged durable project/terminal listings.
+The captured X window, `out/window-native.png`, was inspected: all three fixture names and terminal
+counts are readable, Gamma is selected, and the resized row remains inside the window. The first
+run used fixed subsecond waits and failed; the test now waits for the native title and completed
+frame dimensions, retains failure logs, and passed. This is correctness evidence, not a latency
+measurement or proof of production UI parity.
+
+The experiment deliberately caps software rendering at 1280×900 and label preparation at 80
+characters. It builds only visible rows, but high-cardinality preparation and resize latency are
+not yet measured. The font still lacks shaping and IME; the window lacks AT-SPI, terminal content,
+live store updates, themes and extension composition. These are requirements for a product, not
+features the shim claims to supply. The harness is host-only, with no new durable component API.
+
+The platform proof is bounded here. The next shared extraction should address session creation
+and launch coordination, keeping macOS and Linux on the same host-independent operations while
+platform presentation and notifications stay in adapters. The SDL experiment by itself does not
+improve macOS architecture; the production record/runtime and command-plan separations do.
+
+## 41. Fresh-session assembly is shared with the shipping macOS store
+
+`AgentSessionCreation.makeRecord` now owns fresh-record capability admission, handoff destination
+validation, unnamed-title defaults, launch options and managed-workspace assignment. The shipping
+`ProjectStore.addSession` delegates to it while retaining account/model catalogue admission,
+project/identity checks, fallback git lookup, incremental persistence and sidebar notifications.
+The Linux host uses the same factory and no longer fabricates the provider name as the title.
+Imports and forks retain their separate provenance/resume operations.
+
+The byte-identical CoreSlice now includes 31 production files. Its new Linux contract checks
+fresh records across every runtime, account/permission refusal, native-surface clamping, initial
+resume state and mismatched handoff refusal. Those checks and the existing 15 persistence contracts
+passed. The real-daemon host smoke also passed, including the managed-command recorder's assertion
+that the stored fresh session has the same empty title as macOS.
+
+This is record assembly, not a complete shared creation transaction: the Linux host still has its
+own project ownership and persistence coordination, and macOS still owns presentation delivery.
+The operation creates one record and validates at most the existing bounded handoff chain; it
+performs no filesystem, account, process or catalogue work.
+
+The focused macOS run for §41 completed: 56 tests passed across fresh-session creation, provider
+capabilities and durable store mutations; the shipping app and repository gates built cleanly.
+
+## 42. Launch environment policy no longer depends on the Mac host
+
+`AgentEnvironment` now takes explicit dictionaries and tool-path settings. Process environment,
+macOS preferences and command-line-tool installation paths resolve in `AgentEnvironmentHost`;
+`EnvironmentKeys` is a separate Foundation-only vocabulary. The shipping terminal and headless
+launchers use the same pure inherited-identity filter. The 33-file CoreSlice compiles it unchanged.
+
+The Linux host applies that filter to its own caller environment rather than substituting a fixed
+PATH and dropping account locations. Missing PATH/TERM/LANG retain the experiment's explicit
+fallbacks; present values, including an intentionally empty PATH, are preserved. The Linux CLI
+keeps caller colour/pager claims because it still forwards to that terminal rather than owning
+a graphical emulator. It does not read macOS preferences or transfer the Mac's environment.
+
+The real-daemon Linux smoke passed with an added child-process observation: fixture PATH, HOME,
+CODEX_HOME, CLAUDE_CONFIG_DIR and a fixture-only Cursor credential survived, while CODEX_CI,
+CODEX_THREAD_ID, CLAUDECODE and AI_AGENT were absent. The observation prints only fixture-key
+results on success and never dumps ambient credentials. All existing PTY lifecycle, input,
+resize, shell quoting and managed-command recorder checks passed in the same run.
+
+The focused macOS environment verification completed with 10 passing tests: command-line-tool
+PATH composition plus production terminal/headless identity, account, colour and pager behavior.
+
+## 43. Both hosts use the production Unix connection boundary
+
+`PTYHostSocket.connect` now serves the shipping macOS PTY client and Linux host. Socket address
+construction, close-on-exec setup, the connect deadline and kernel error inspection have one
+owner. The caller chooses blocking or nonblocking mode after connection. The deadline uses
+monotonic elapsed time, and embedded NUL is refused rather than allowing the kernel to interpret
+only a prefix of the requested path. `PTYHostClientError` moved unchanged to a portable file.
+The Mac client retains its handshake, session binding, DispatchIO pump, bounded write queue and
+diagnostics; Linux retains its stream loop. This is not full client parity.
+
+The 35-file CoreSlice compiled and passed its new Linux connector contract: both requested modes,
+close-on-exec, nonexistent and oversized socket paths, and embedded-NUL refusal. Existing session
+creation and all 15 persistence contracts passed too. The real-daemon Linux host smoke then
+passed through this connector, covering PTY launch/reopen/reattach, raw input, resize, terminal
+restoration, shell quoting, environment policy, managed agent identity and authoritative exits.
+
+The focused macOS PTY client run for §43 completed with 18 passing tests, including the new
+embedded-NUL refusal and close-on-exec checks.
+
+## 44. Session binding belongs to one portable policy
+
+`PTYHostConnectionBinding` now governs both the production macOS client's send path and the Linux
+host. Input requires a binding; spawn/attach cannot replace an existing stream; resize, detach,
+close-input and kill must name the full typed identity, not just its UUID. A matching spawn
+refusal releases the binding. Connection readiness, locking and byte delivery remain host-owned.
+
+Failed-send rollback uses an opaque attempt reservation. Merely matching the session ID is not
+sufficient: after a refusal, a newer attempt may retry that same ID. An older failure must not
+clear it. Contracts cover retries for both the same session and a different session, as well as
+cross-kind identities sharing a UUID and unrelated refusals. This protects ordering at the policy
+boundary; it is not a claim that the synthetic failure ordering was observed in a running app.
+
+The 36-file Linux CoreSlice passed these binding contracts and all existing connector, creation
+and persistence contracts. The real-daemon Linux smoke then passed with binding admission wired
+into control sends, raw input and received refusals, retaining launch, reconnect, resize, raw-key,
+exit-status, quoting and environment behavior. The full client is still not portable: protocol
+handshake/admission, diagnostics, bounded asynchronous writes and event delivery remain to share.
+
+The focused macOS verification for §44 completed with 22 passing client/binding tests, including
+the same-session retry reservation case.
+
+## 45. Both clients retain the complete hello batch within a finite budget
+
+`PTYHostHandshake` now carries pending deliveries across reads and through the end of the batch
+containing hello. macOS and Linux use the same ordering, stderr distinction and daemon-refusal
+perspective. Hosts inject control decoding diagnostics and admission effects; socket reads,
+retirement writes and event delivery remain outside the policy. Linux now skips additive control
+frames consistently with the Mac client and drains retained deliveries before polling again.
+
+The shared handshake bounds pending wire bytes at 4 MiB, counting eight-byte headers as well as
+payloads. Even an empty-output flood consumes the budget. Overflow is a typed handshake refusal
+before pending delivery; this replaces the Mac path's deadline-only bound on aggregate storage.
+Linux also polls against the original hello deadline rather than granting another full wait after
+pre-hello traffic.
+
+The 37-file Linux CoreSlice passed hello-batch ordering, stderr, additive controls, refusal
+perspective and aggregate-bound contracts, alongside the earlier binding, connector, creation
+and persistence contracts. The final Linux host smoke passed its real-daemon checks and two
+explicit fake-peer checks: output before/beside hello survives with stderr routed correctly, and
+an unknown frame sent three seconds into a silent handshake does not extend its five-second
+deadline. These are protocol fixtures, not evidence of an authenticated provider session.
+
+The focused macOS run for §45 completed with 23 passing client/binding tests, including a real
+fake-daemon connection that exceeds the pre-hello buffer limit. The shipping app and repository
+checks built cleanly. No test process remained active at this checkpoint.
+
+## 46. The full production PTY client runs on Linux
+
+The CoreSlice now compiles all of `PTYHostClient`, not only its portable policy helpers.
+`PTYHostClientHost` preserves the app's EventLog-backed initializer and availability probe;
+`PTYHostClientDefaults` separates transport bounds from registration and filesystem locations.
+The core receives a journal callback and still uses the existing diagnostic logging adapter.
+macOS keeps DispatchIO reads/writes. Linux keeps DispatchIO reads and uses a serial socket writer
+whose close-on-exec duplicate cannot be reassigned by read-channel cleanup. Sends use socket-local
+SIGPIPE suppression and a monotonic whole-frame deadline. Queue admission stays in the shared
+client; close cancels queued work before it can start another deadline.
+
+The handshake's retained deliveries enter the event queue after channel-owner allocation and
+before live reads start. This preserves hello-batch ordering while ensuring that a failed Linux
+writer allocation cannot deliver events from a connection that never finished opening.
+
+`PortablePTYClientHarness` exercised the byte-identical client against the production Linux daemon:
+spawn, disconnect, replay and attachment to the same child, input, drain and authoritative exit 7.
+It also passed production queue-overflow refusal/binding release, a stalled socket's write deadline,
+a closed-peer error without a process-global SIGPIPE override, and queued-write cancellation. The
+final `host-smoke.sh` run passed this harness and all existing CLI/PTY/handshake checks. The 40-file
+CoreSlice compiled and passed its existing contracts. macOS passed 54 focused client, binding and
+terminal-session tests with the host adapter in use. No test jobs remained active at this checkpoint.
+
+The Linux CLI still uses its smaller synchronous Link. Migrating that host and the native window
+to the production client's event interface is next; neither its event buffering nor many-client
+Linux throughput/shutdown latency has been established by this single-session probe. This is a
+runtime portability result, not a complete Linux app or release-readiness claim.
+
+## 47. The Linux CLI uses the production client throughout
+
+Removed the CLI's separate `Link` implementation. Connection, handshake, binding, decoding,
+ordered writes and close now come from the byte-identical `PTYHostClient` used by macOS.
+`HostEventInbox` bridges its asynchronous callbacks to the CLI's stdin/signal poll loop with a
+nonblocking close-on-exec socket pair. Admission, notification and the batch swap share a lock,
+so producers cannot lose the wakeup between the consumer's drain and its next poll. Controls,
+stdout, stderr and close stay in order. Spawn admission now has one absolute deadline rather
+than restarting its timeout whenever another event arrives.
+
+Scaling gate: this host has one connection, typical small interactive chunks and an unbounded
+output lifetime/rate. The inbox admits at most 4 MiB of payload/encoded controls and 1,024 events;
+empty frames consume entries. One consumer-held batch may coexist with one accumulating batch.
+Overflow is an explicit failure, never silent byte loss followed by a successful child status.
+Callbacks do not wait for the consumer or write stdout. Controls are charged by encoded size;
+output uses its existing byte count without a codec pass. This bounds the adapter, not all
+libdispatch internals. CLI stdout can still block its consumer, and graphical integration needs
+its own scheduling/backpressure measurements rather than inheriting that behavior.
+
+The full Linux host smoke passed after migration, including real PTY raw keys, initial/live
+geometry, exit/SIGTERM restoration, same-child reconnect/replay, persisted identities, launch
+quoting/environment/permission rules, hello-batch ordering and the total hello deadline. An added
+real-daemon check compared an entire 2 MiB live output stream byte for byte. The portable harness
+also checked inbox order/close, notification rearming, byte overflow and 100,000 empty callbacks
+with no consumer; the existing full-client queue/deadline/cancellation checks still passed.
+The final run exited zero and no test job remains active. No shipping macOS source changed in
+this slice; the prior 54-test Mac client/binding/session result is unchanged, not a fresh run.
+The native window has not yet adopted this runtime or acquired a terminal emulator/input path.
+
+## 48. SwiftTerm and the production client share a real Linux PTY
+
+Added the existing vendored SwiftTerm package as a direct spike dependency; no emulator source
+fork or alternate ANSI parser was introduced. `PTYEmulator` owns the embedding contract: worker
+feed/resize/snapshot under SwiftTerm's lock, visible-cell values carrying grapheme text, width and
+attributes, cursor/title state, and a callback for terminal replies. The expected grid is 80×24;
+admission limits it to 240×100, with 2,000 scrollback lines. Snapshots copy only visible cells.
+A future window consumer must keep one snapshot request outstanding at display cadence. This
+slice does not claim measured window rendering, shaping, IME, accessibility or snapshot latency.
+
+The first build exposed a generator hang, not a compiler failure. Its Git child exited 128 because
+the Docker-mounted worktree's `.git` pointer named host-only metadata. A bounded standalone
+reproduction timed out too. A syscall trace showed Git reaped while the generator remained in
+Foundation's `waitUntilExit()` run-loop wait. Switching the shared build-info generator to a
+termination callback registered before launch completed the same probe. Only then was the exact
+stuck generator terminated and the build rerun. A checked-in regression fixture now exercises
+unavailable metadata, a clean tagged repository and a dirty repository, each with a process
+deadline. It passed against compiled generator binaries on both Linux and macOS.
+
+The final Linux host smoke exited zero. Its emulator contracts cover individually fragmented
+UTF-8 bytes, wide/combining cells, SGR foreground, alternate-screen restoration, cursor addressing
+and query response, resize and invalid-grid refusal. A real PTY child then checked its cursor
+query's response sent through `PTYHostClient`, set its title, accepted a key after resize, observed
+100×30 through TIOCGWINSZ and exited 7. The resulting cell snapshot retained the Unicode text and
+reported the child's final grid message. All prior client, inbox, CLI, reconnect, handshake,
+2 MiB stream and fast-exit checks passed in that same run. No test process remains active.
+
+The native window still has no terminal presentation/input path. These are screen-cell and
+runtime results, not inspected glyph evidence. Reattachment to the emulator also remains work:
+this adapter is currently for fresh spawns and does not yet implement replay-response suppression
+or exact screen reconstruction. The full Linux application remains unfinished.
+
+## 49. A native Linux window displays and drives a real terminal
+
+`WindowHarness --terminal STORE SOCKET DIRECTORY ABS_EXECUTABLE [ARG ...]` now opens a native
+SDL window backed by the production client and SwiftTerm. A worker connects, creates a durable
+project-terminal record through the production SQLite store under its transaction lock, and
+spawns the child. Input admission waits for the matching spawned identity. Exit is the matching
+daemon status and remains visible in the native title. Closing disconnects; it does not take
+process ownership away from the daemon. This mode is a host-only diagnostic embedding, not a
+new extension component or a completed product navigation flow.
+
+SwiftTerm feed/resize/snapshot runs on a serial worker. A separate Pango/Cairo worker renders
+visible cell graphemes with font fallback, foreground/background, bold, underline and cursor.
+The shared package gained `Terminal.ansiColor(at:)` so the renderer reads the live palette,
+including OSC 4 changes, rather than inventing a second palette. A runtime contract changes an
+indexed color and checks the snapshot RGB. The fixed diagnostic face is 16px DejaVu Sans Mono in
+10×22 cells; the native window's 1280×900 cap implies at most 128×40 cells. This does not prove
+cross-cell script joining, full terminal styles, IME composition or accessibility.
+
+Frame admission is at most once per 33 ms, even when native events arrive continuously. Only one
+snapshot/raster request can be outstanding, with one completed RGBA frame retained for the UI.
+Visible UTF-8 export also has a 4 MiB cap. The UI uploads the completed image and handles events;
+it does no database access, protocol parsing or font shaping. Native expose events repaint the
+existing texture. A dense-grid opt-in child fixture emits 300 full grids at 60 Hz for subsequent
+stress measurement; that dense workload has not been run at this checkpoint.
+
+The final `window-smoke.sh` run exited zero. It reran the portable client/emulator contracts and
+the original project-list navigation/resize/store-preservation checks, then launched a real raw
+PTY child in terminal mode. Native X events typed `native-input`, resized the window to 960×660,
+and the child verified both the bytes and its 96×30 TIOCGWINSZ result before exiting 7. Alt-F4
+closed cleanly and the production store reopened with exactly one additional terminal record.
+The first attempt's `xdotool windowclose` destroyed the X window without a window manager and
+failed during XInput cleanup; the final test exercises the native close shortcut instead.
+
+Inspected `out/terminal-native.png` from the final product-shell experiment: the CJK cell, combining
+accent, Ångström, indexed green and true-color blue text, typed line, confirmed grid and cursor
+are visible without replacement boxes or overlap in this fixture. This is evidence for those
+rendered glyphs and interactions, not broad language or accessibility coverage. The small screen's
+warm worker rasterizations were 5.0–7.0 ms and warm UI presentation 2.9–4.1 ms. First text shaping
+was 193 ms on the worker; first blank-frame presentation was 10.4 ms. These are Debug Docker/Xvfb
+samples, not dense-grid, tail-latency or many-session results.
+
+The macOS shipping build and all 38 `TerminalColorQueryTests` passed with the new SwiftTerm
+palette accessor. No test jobs remain active. Full native project/session navigation, emulator
+reattachment, complete keyboard protocols, scrollback/selection/clipboard, IME, AT-SPI, profile
+and theme integration, and packaging remain unfinished. Changes are uncommitted.
+
+## 50. Dense terminal output reuses shaped ASCII without changing pixels
+
+The maximum-grid workload is now automated by
+`THREADING_LINUX_TERMINAL_STRESS=1 ./window-smoke.sh`. It resizes to 1280×900, starts a real PTY
+child's 300 full-grid updates at 60 Hz, probes keyboard acknowledgment during output, waits for
+authoritative exit 0, captures the final screen and verifies frame production stays idle after
+output/exit settle. Moving the window to (0,0) before resizing is required: the first run's
+centered window extended outside Xvfb, so its screenshot captured only 1100×764 of the surface.
+The final matched runs both capture the complete 1280×900 grid.
+
+The direct renderer reshaped identical ASCII in every cell. `TerminalDrawing.c` now keeps at
+most 95 printable ASCII layouts × two weights for one frame. This is a fixed array with no
+externally sized key collection. Foreground/background remain per-cell, and the existing Pango
+drawing path keeps antialiasing. Unicode still uses direct Pango, including fallback and color
+fonts. All cached layouts are released at the frame boundary. A first alpha-mask cache trial was
+discarded: it changed antialiasing pixels and did not improve the measured keyboard result.
+Do not infer mask equivalence from a similar-looking screenshot.
+
+`terminal_renderer_contract.py` compares the actual C renderer against direct Pango over mixed
+ASCII weights, colors, underlines, combining accents and wide cells, requiring exact RGBA bytes.
+That contract passed repeatedly. The final native interactive (960×660) and dense (1280×900)
+screenshots also matched reference and cached output byte for byte. Inspected the complete dense
+window: all 40 rows and the full 128-column extent are present. The explicit reference switch,
+`THREADING_TERMINAL_REFERENCE_RENDERER=1`, keeps the same workload available for future checks.
+
+Matched Debug Docker/Xvfb results, with identical final geometry and child workload:
+
+| Metric | Direct Pango | Cached layouts |
+|---|---:|---:|
+| Dense-frame samples | 74 | 103 |
+| Worker draw median / p95 | 33.90 / 42.86 ms | 18.17 / 31.04 ms |
+| UI presentation median / p95 | 7.89 / 12.46 ms | 9.45 / 25.76 ms |
+| Keyboard acknowledgment probe | 129 ms | 93 ms |
+
+Worker median improved about 46%. Presentation tails did not improve; sample counts differ
+because the faster worker publishes more frames during the same output workload. These shared
+machine measurements establish reduced repeated shaping work and exact rendering preservation,
+not a frame-rate or end-to-end latency guarantee. They exclude many-session behavior, IME and
+cross-cell script joining. Idle verification means no new rendered frames, not zero timer wakeups.
+
+Both final native runs exited zero, including pixel contracts, portable client/emulator contracts,
+project selection/resize, interactive input/resize/exit/persistence, stress input and idle checks.
+No test jobs remain active. This slice changes the Linux renderer and its fixtures only; the
+prior macOS 38-test color result is unchanged, not a new Mac run. Changes remain uncommitted.
+
+## 51. Native functional keys use SwiftTerm's live keyboard modes
+
+Removed the native bridge's fixed escape table for functional keys. SDL now reports semantic key
+identity, modifiers, and press/repeat/release. The graphical host maps that finite vocabulary to
+SwiftTerm's existing `TerminalFunctionalKey` API. `PTYEmulator` calls `encodedFunctionalKey` under
+the terminal lock on the same worker that processes output, so DECCKM and kitty mode changes are
+read live rather than copied into UI state. No new encoder or shipping SwiftTerm change was needed.
+
+Text and functional keys now share one ordered worker hop. Sending text directly while queuing a
+Backspace would let subsequent text overtake the edit; both now enter `Terminal.sendUserInput`,
+which also preserves SwiftTerm's semantic interaction state. Admission is bounded at 256 pending
+events plus the executing event, with 32 bytes per native text event. Overflow publishes an
+explicit failure and stops further admission. This cap is an implementation bound; saturation of
+that new input queue was not separately injected in this slice.
+
+The portable emulator contract passed normal/application arrows, modified navigation, legacy
+repeat/release behavior, kitty repeat/release and ordered text/editing. The native fixture then
+switched modes in a real raw PTY child and verified bytes from actual X keyboard events: normal
+Up, application Up, Ctrl-Right, kitty Ctrl-Tab, kitty Up press/release, Home/End, Page Up/Down,
+Delete, F2, and mixed text/Backspace/Return. A text marker after keyup separates each mode change,
+so the fixture does not change modes while a preceding key is still held. Inspected the rendered
+`out/terminal-keyboard.png` showing the child's successful checks; the window closed normally.
+
+The final stress-enabled window smoke exited zero, rerunning renderer pixel equivalence, portable
+client/emulator checks, project navigation, native terminal resize/input/exit/persistence, native
+keyboard modes and the maximum-grid live-output fixture. The input acknowledgment under that
+load was 96 ms in this run; it is one probe, not a latency guarantee. No test jobs remain active.
+No shipping macOS source changed in this slice, and no new Mac test run is claimed.
+
+Coverage is deliberately specific: enhanced printable-key reporting, full keypad/Insert handling,
+IME composition and desktop shortcut integration remain unfinished. The graphical host's handling
+of input racing child exit also needs the explicit late-input/authoritative-exit policy already
+used by the CLI; these staged fixtures do not cover that race. Project/session navigation and
+reattachment to the graphical emulator remain separate unfinished app work. Changes are uncommitted.
+
+## 52. Keep the graphical terminal alive across late-input refusal
+
+The graphical host previously treated every in-band error as fatal. Input can cross the child's
+exit, however: `sessionExited` qualified by `input` refuses that input without carrying the child's
+status. The window now stops input admission and waits for the matching authoritative `exited`
+frame, following the CLI's existing policy. One worker-owned five-second monotonic timer is armed
+on the first refusal; repeated refusals neither allocate more timers nor extend the deadline.
+A completed exit makes the timer inert, and window closure prevents late failure publication.
+Other errors, disconnects before exit and mismatched exit identities remain failures.
+
+The native wire fixture sends an actual X keyboard event, observes its input frame, then controls
+the peer ordering. It covers exit status 7 with the window still open past the timeout, repeated
+refusals without an exit, an unrelated error qualifier, disconnect and a wrong session identity.
+This complements the smoke suite's real-daemon PTY checks; it does not replace them.
+
+Validation: `window-smoke.sh` exited zero, including all five native exit-ordering cases,
+real-daemon client/emulator checks, project navigation, native input/resize/persistence and
+functional keyboard modes. `git diff --check` passed. The optional dense-output stress lane was
+not repeated for this lifecycle-only change. No shipping Mac source changed in this slice;
+no new Mac test run is claimed. Graphical reattachment and combined project/session navigation
+remain unfinished, and the branch work remains uncommitted.
+
+## 53. Project activation reaches a live terminal in the same native window
+
+`WindowHarness --app STORE SOCKET ABS_SHELL [ARG ...]` connects the existing project browser to
+`GraphicalTerminal`. Enter creates one durable terminal in the selected project's directory;
+Ctrl+Shift+P returns to projects, and Enter revisits the retained child/emulator rather than
+spawning again. Both views reuse the same native window. The activation Return's remaining key
+repeat/release is consumed at the mode boundary so it cannot become unsolicited terminal input.
+The standalone diagnostic modes remain available.
+
+Customization decision: this remains a deliberately host-only diagnostic platform embedding,
+not a public extension component or shipping replacement sidebar. Store identity, launch,
+process/input ownership and navigation stay host-owned. The existing specimen draws the bounded
+project viewport; the existing terminal renderer draws the selected emulator.
+
+Scaling decision: expected navigation covers a few projects; the retained-runtime ceiling is
+eight terminals, checked before creating another runtime. Each retains the existing capped grid,
+2,000-line scrollback, one pending render and one published frame. Hidden terminals continue
+processing child output to preserve emulator truth but receive no new render requests. Switching
+uses one keyed lookup and renders only viewport rows; it does not reload the whole catalogue.
+The initial store snapshot still loads on a worker. Newly saved terminal counts are published
+under the existing runtime lock. This is not a many-session memory or throughput measurement.
+
+The native journey fixture opens two real daemon children in different project directories,
+returns through projects, revisits the original child and screen, then exits both children and
+returns to projects. A child refuses a duplicate spawn via a per-project marker, and records its
+actual PID and cwd. The journey captures both the project browser and the revisited terminal.
+
+Validation: the complete `window-smoke.sh` run exited zero, including the new two-project native
+journey and all existing client, emulator, renderer, keyboard and exit-ordering checks. Inspected
+`out/project-terminals.png`: the selected project, retained-terminal stars, counts and navigation
+hint are visible. Inspected `out/project-terminal-revisited.png`: the original project, PID,
+directory and earlier output remain beside the revisit acknowledgment. `git diff --check` passed.
+The eight-runtime ceiling and many-child throughput were not stress-tested in this slice. A
+terminal failure still ends this diagnostic window; per-terminal failure presentation remains
+unfinished. No shipping Mac source changed or Mac tests ran. Changes remain uncommitted.
+
+## 54. A failed terminal does not close the project browser
+
+In the integrated native host, `GraphicalTerminal.takeFrame()` failures now enter a retained
+terminal-unavailable view instead of escaping the application event loop. Only that terminal's
+client is stopped. Ctrl+Shift+P returns to projects, where another retained terminal remains
+usable. Revisiting the failed entry shows its failure again; it does not create another durable
+record or silently retry a launch. Standalone `--terminal` retains its nonzero failure exit for
+command-line diagnostics. Native-window presentation errors still terminate the window.
+
+The error view uses the existing host-only specimen surface and production bitmap font. Its
+message is capped at 1,024 Unicode scalars, unsupported characters are explicit question marks,
+and wrapping measures glyph advances within the current viewport. The maximum line count comes
+from available height, with an ellipsis when the viewport truncates the message. Failed views
+wait for native events instead of polling frames; resize alone rebuilds their bounded display.
+Terminal input is not admitted from the error view. No extension contract or Mac surface changed.
+
+The project journey now takes an actual competing lock on the disposable store while Gamma is
+activated, keeping Alpha and Beta running. It captures normal/narrow failure surfaces, sends a
+key to the failed view, releases the lock, revisits the retained failure, then returns to Alpha's
+original child/screen and exits both healthy children. Gamma must never create a child marker.
+
+Visual review caught two issues in the first narrow capture: it sampled the old texture stretched
+before the resize redraw completed, and the completed redraw split ordinary words at arbitrary
+glyph boundaries. The fixture now waits for `FAILURE_FRAME 320x480` after presentation rather
+than sleeping for an assumed redraw duration. Diagnostic wrapping prefers the last space that
+fits, with glyph wrapping only for an overlong word. These are rendering/capture findings, not
+claims that the behavioral assertions alone verified layout.
+
+Final validation: the smoke suite exited zero after the wrapping correction, including the real
+store-lock failure, navigation back to both surviving children, and existing client/emulator,
+keyboard, exit-ordering and renderer contracts. Inspected the final 800x480 and 320x480 captures:
+the cause and return shortcut are readable, with whole words at the narrow width. `git diff
+--check` passed. The optional dense-output lane and Mac tests were not repeated; this slice changes
+only the Linux diagnostic host. Explicit retry/replacement and graphical restart restoration
+remain unfinished. Work remains uncommitted, and no test process remains running.
+
+## 55. Explicit terminal replacement requires evidence that no child remains
+
+Ctrl+Shift+N in the integrated project browser creates a replacement for the selected terminal;
+Enter continues to revisit it. The shortcut is advertised when replacement is admitted. Before
+attempting a spawn send, the runtime marks child ownership uncertain. Only a matching `exited`
+frame or a matching definitive spawn refusal clears that uncertainty. `alreadyExists` cannot
+clear it, because that refusal says a child may exist. A pre-spawn failure can be replaced; a
+live child, lost spawn reply, write failure or disconnected running child cannot. Replacement
+never sends kill. The prior client stops, the new runtime gets a fresh durable terminal identity,
+and previous saved records remain counted rather than disappearing when the cache entry changes.
+
+This stays within the eight-entry runtime cache; replacement changes one entry. The per-project
+historical count is a scalar, not another retained runtime or emulator. Native activation consumes
+the shortcut's remaining repeat/release events across the mode switch, as Enter already did.
+No shared Mac behavior, new extension contract or new chrome component is introduced.
+
+The real-daemon journey retries Gamma after a store-lock failure, exits it, explicitly replaces it,
+and verifies a distinct child PID in the same directory. It also refuses replacement of live
+Alpha and checks exactly four new durable terminal records across the whole journey. A separate
+controlled peer receives spawn then disconnects without a result; Ctrl+Shift+N must refuse and
+must not connect again. That fixture uses a SQLite backup of the disposable production store,
+not a hand-authored schema.
+
+Validation: `window-smoke.sh` exited zero with both new replacement journeys and all existing
+native/client/emulator/renderer checks. Inspected `out/project-terminal-replace.png`: the selected
+project, accumulated terminal count and distinct view/new-terminal shortcuts are legible.
+`git diff --check` passed. Individual definitive spawn-refusal reasons were not separately injected
+in this slice; the exercised paths are pre-spawn store failure, confirmed exit, live child and
+unacknowledged spawn/disconnect. No Mac test or dense-output stress rerun is claimed. Graphical
+restoration and selecting among persisted terminals remain unfinished. Changes remain uncommitted.
+
+## 56. Replay needs a byte boundary before an emulator can reattach safely
+
+The daemon already orders `attached`, historical output, then live output, but the old frame did
+not state how many output bytes were replay. `totalBytesWritten` is a ring offset rather than
+replay size: seeds and CAN are not counted there, and overwritten history still is. Suppressing
+responses for an arbitrary callback or time interval would either answer historical queries or
+swallow live replies.
+
+The shared `PTYHostAttached` now carries optional `replayByteCount`, computed from the exact
+payload array the daemon queues. Nil means an older peer omitted the field, not zero. The
+additive field leaves existing callers and Mac attachment behavior intact. Wire tests distinguish
+missing, zero and nonzero boundaries. Real-daemon tests assert both cut history including CAN and
+exact history including screen/mode seeds. The calculation examines the bounded payload list,
+not every byte of its data.
+
+`PTYEmulator.feed(..., replaying: true)` parses under the terminal lock while suppressing delegate
+sends, then restores ordinary sends. The portable harness consumes the announced byte boundary,
+including a callback split between replay and live bytes, and refuses missing/invalid counts.
+It reconnects a fresh emulator to a child that has already consumed its first cursor-query reply.
+The next child input must be the user's x, not another historical query response; the reconstructed
+cells, subsequent resize and exit status are checked too. Fragmented historical queries and
+resumption of live query replies have a separate emulator contract.
+
+This closes a transport prerequisite rather than claiming graphical restoration is implemented.
+At this point the window still needed persisted-terminal selection, bounded attach lifecycle and
+explicit cut-history presentation; exact screen/mode seeds for graphical detach were also unfinished.
+
+Validation: all 78 PTY wire-package tests passed on macOS. The shipping Mac app build and two
+focused real-daemon tests passed, proving exact-seed and cut-tail byte counts through the bundled
+helper. The full Linux window smoke also exited zero, including the live emulator reconnect and
+existing native navigation, replacement, failure, keyboard and rendering contracts. `git diff
+--check` passed; no localization or project-file churn appeared. No new appearance change or
+visual claim is made in this slice. Work remains uncommitted and no test job remains active.
+
+## 57. A second native window can attach a saved terminal without respawning it
+
+`WindowHarness --attach STORE SOCKET TERMINAL_UUID` validates project-terminal membership through
+the production database on its worker, then uses the shared client to attach the existing daemon
+identity. It creates no record and never sends spawn. The same client/emulator setup now serves
+fresh and attached sessions. A five-second worker deadline bounds the attach/replay wait;
+missing, negative or over-budget replay counts fail rather than enabling input on guessed state.
+
+The worker parses precisely the historical byte prefix with replies suppressed. Only completed
+replay admits native input and frame requests. The daemon grid is adopted by publishing a single
+initial viewport to the UI. A worker acknowledgment of that publication fences older queued frame
+requests, so a request carrying the initial default window size cannot resize the child before
+the UI adopts its grid. Grids beyond the current window's 128-column/40-row ceiling are refused.
+Cut replay is explicitly labeled in the window title; it is not claimed as exact reconstruction.
+
+The native fixture launches a real raw child, answers its cursor query, resizes to 96x30 and
+closes the first window process. A second process attaches the saved terminal identity. The child
+asserts that no additional SIGWINCH occurred and that its next byte is user input, not a duplicate
+reply to its historical query. A new live query still receives a reply. The fixture compares
+saved record listings, child PID metadata and physical window dimensions, captures the rejoined
+screen, then checks exit 7. Controlled peers separately omit the boundary, send an invalid one,
+or leave replay incomplete; none may publish a terminal frame or wait indefinitely.
+
+This is still a host-only diagnostic entry point. In this slice, persisted-terminal selection
+inside the project browser, automatic restoration and graphical detach seeds remained unfinished.
+No new extension component or shipping Mac presentation is introduced.
+
+The first rendered-evidence run exposed a presentation defect after the host adopted the saved
+grid. The attached frame's immutable input contained the expected text and a 960x660 background;
+reading SDL's software-renderer surface after `SDL_RenderCopy` showed those same pixels across the
+full extent. The X11 drawable still showed only a blank 960x528 surface plus a black strip. Delayed
+captures and rebuilding the renderer did not change it, so emulator replay, rasterization and
+renderer allocation were excluded as causes.
+
+`tw_resize` now marks the rare host-driven resize. Present and repaint still use the software
+renderer, then explicitly flush its owned window surface with `SDL_UpdateWindowSurface` only for
+that path. User-driven resize keeps the ordinary SDL event/renderer path and pays no extra update.
+The renderer rebuild experiment was removed. The retained pixel assertions require the adopted
+surface's last pixel and visible replay text, so the original blank 960x528 result cannot regress
+silently.
+
+Validation: the focused real-daemon attachment fixture passed the same-child, grid, replay-query,
+live-input, visible-pixel, exit and malformed-peer contracts. The inspected 960x660 screenshot in
+`out/terminal-reattached.png` shows the original child PID and live `SAME CHILD, GRID AND HISTORY`
+line over the full terminal background. The complete `window-smoke.sh` run then exited zero,
+including native project navigation, ordinary window resize, terminal rendering, functional keys,
+exit ordering, replacement safety and all attachment refusals. `git diff --check` passed. No Mac
+code changed in this follow-up. Changes remain uncommitted and no test process remains active.
+
+## 58. The project browser can select and attach a saved terminal
+
+Right on a selected project now opens its saved terminals, newest first. Up/Down and pointer
+selection use the same bounded row geometry as the project list; Enter attaches the selected
+persisted identity through `GraphicalTerminal`, and Left or Escape returns to projects. Returning
+from a terminal with Ctrl+Shift+P preserves the picker context. A retained runtime is starred in
+the picker and its project is starred in the outer list. Fresh-terminal creation, revisit and
+explicit replacement remain separate project actions.
+
+The database snapshot is still decoded on a worker. It projects at most the newest 512 terminal
+identities and bounded display titles per project, while rendering constructs only viewport rows.
+Fresh runtimes are keyed by project identity and restored runtimes by terminal identity; both
+caches share the existing eight-runtime ceiling. Hidden runtimes continue processing their bounded
+emulators but receive no frame requests. The snapshot is fixed for the window lifetime, so external
+records do not appear live and no terminal restores automatically.
+
+This remains a host-only diagnostic surface built from the existing `Specimen.Window` and
+`Specimen.Row`. It is not a public extension component. The host keeps store validation, launch,
+process, input, resize, persistence and navigation authority when presentation is customizable.
+No shipping Mac UI or source changed.
+
+The end-to-end fixture creates an older dormant record and then a live persisted terminal, resizes
+the latter to 96x30, closes its first window while leaving the daemon child alive, then reaches both
+identities through the project picker. It verifies newest-first selection, Down/Up navigation, the
+same child PID, adopted physical window size, replay boundary, live query/input and exit status,
+and proves the attach did not alter durable records. The fixture also exposed that the bridge had
+collapsed keyboard Escape and window quit into one event while translating Alt+F4 only in terminal
+mode. Keyboard cancel now has its own event; SDL/window quit remains distinct, and Alt+F4 is handled
+in both host modes.
+
+Validation: the complete `window-smoke.sh` run exited zero after the event fix, including the new
+picker journey and all renderer, event-inbox, emulator, keyboard, production-client, native project,
+replacement, exit-ordering and malformed/incomplete attach checks. The final two-record,
+scalar-bounded-title version then rebuilt and passed its isolated real-daemon/Xvfb journey. Two
+attempts to repeat the whole suite in the subsequently degraded Docker VM stopped in the older
+project journey before reaching the picker: one lost Xvfb, and one missed Gamma's eight-second
+title deadline after the daemon had spawned it. Inspected `out/project-terminal-picker.png`: both
+saved rows, the newest selected terminal, shortcut hint and persisted-ID prefixes are visible in
+the real X11 window. Automatic restoration, live store updates, exact graphical detach seeds and
+full scrollback reconstruction remain unfinished. No Linux test process remains active.

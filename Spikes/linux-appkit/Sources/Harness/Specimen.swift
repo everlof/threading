@@ -8,6 +8,7 @@ import Foundation
 enum Specimen {
 
     final class Window: NSView {
+        var title = "Threading on Linux"
         override func draw(_ dirtyRect: NSRect) {
             NSColor(white: 0.87, alpha: 1).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
@@ -23,12 +24,55 @@ enum Specimen {
             // An em-dash is not in the face, and the real file answers that by returning false
             // rather than drawing a blank — which is exactly what it did here on the first run.
             PlatinumBitmapFont.draw(
-                "Threading on Linux",
+                title,
                 penX: bounds.minX + 12,
                 baselineFromTop: 18,
                 in: bar,
                 ink: NSColor(white: 0.1, alpha: 1)
             )
+        }
+    }
+
+    /// Bounded diagnostic prose, using the same measured bitmap face as the specimen rows.
+    final class Message: NSView {
+        private static let maximumScalars = 1024
+        private static let lineHeight: CGFloat = 16
+        let text: String
+
+        init(frame: NSRect, text: String) {
+            self.text = String(text.unicodeScalars.prefix(Self.maximumScalars))
+            super.init(frame: frame)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSBezierPath(rect: bounds).addClip()
+            let maximumLines = max(1, Int(bounds.height / Self.lineHeight))
+            var lines = [String](), line = "", advance = 0
+            for scalar in text.unicodeScalars {
+                let glyph = scalar.value >= 32 && scalar.value <= 126 ? String(scalar) : "?"
+                let glyphAdvance = PlatinumBitmapFont.advance(of: glyph) ?? 0
+                if scalar == "\n" || advance + glyphAdvance > Int(bounds.width) {
+                    if scalar != "\n", let space = line.lastIndex(of: " ") {
+                        lines.append(String(line[..<space]))
+                        line = String(line[line.index(after: space)...])
+                        advance = PlatinumBitmapFont.advance(of: line) ?? 0
+                    } else {
+                        lines.append(line); line = ""; advance = 0
+                    }
+                    if lines.count == maximumLines { break }
+                    if scalar == "\n" { continue }
+                }
+                if glyph == " " && line.isEmpty { continue }
+                line += glyph; advance += glyphAdvance
+            }
+            if lines.count < maximumLines { lines.append(line) }
+            else { lines[maximumLines - 1] = "..." }
+            for (index, value) in lines.enumerated() {
+                PlatinumBitmapFont.draw(value, penX: 0,
+                    baselineFromTop: CGFloat(index + 1) * Self.lineHeight - 2,
+                    in: bounds, ink: NSColor(white: 0.15, alpha: 1))
+            }
         }
     }
 
@@ -47,6 +91,7 @@ enum Specimen {
         required init?(coder: NSCoder) { fatalError() }
 
         override func draw(_ dirtyRect: NSRect) {
+            NSBezierPath(rect: bounds).addClip()
             if selected {
                 accent.setFill()
                 NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
