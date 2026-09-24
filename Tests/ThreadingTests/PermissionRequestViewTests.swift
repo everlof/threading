@@ -142,6 +142,21 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertEqual(mcp.label, "query")
     }
 
+    func testNativeThreadingToolUsesCatalogTitleWithoutChangingOtherMCPTools() {
+        let screenshot = ToolGlyph.forTool(.mcp("mcp__threading__simulator_screenshot"))
+        XCTAssertEqual(screenshot.symbol, "◇")
+        XCTAssertEqual(screenshot.label, "Threading")
+        XCTAssertEqual(screenshot.displaySubject(""), "Capture Simulator")
+        XCTAssertEqual(screenshot.displaySubject("Sign in"), "Capture Simulator · Sign in")
+
+        let foreign = ToolGlyph.forTool(.mcp("mcp__web__query"))
+        XCTAssertEqual(foreign.label, "query")
+        XCTAssertEqual(foreign.displaySubject("example"), "example")
+
+        let future = ToolGlyph.forTool(.mcp("mcp__threading__future_tool"))
+        XCTAssertEqual(future.label, "future_tool")
+    }
+
     private func makeRequest() -> PermissionRequest {
         PermissionRequest(sessionID: SessionID(), toolName: "Bash", input: ["command": "pwd"])
     }

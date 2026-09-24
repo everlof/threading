@@ -8,6 +8,7 @@ import XCTest
 final class NativeChatShowcaseTests: XCTestCase {
     enum Scene: String, CaseIterable {
         case answer, working, permission, usage, interrupted, streaming, question, questionSelected, expandedWork, longMessage
+        case threadingTool = "threading-tool"
     }
 
     static let reply = """
@@ -69,6 +70,19 @@ final class NativeChatShowcaseTests: XCTestCase {
             ToolResult(toolUseID: "read-greeting", text: "func greeting() -> String { \"Hi\" }", isError: false),
             ToolResult(toolUseID: "edit-greeting", text: "Updated Sources/Greeting.swift", isError: false)
         ]))
+        if scene == .threadingTool {
+            emit(.assistantMessage(blocks: [.text("The edit is ready. I’ll inspect the Simulator.")]))
+            emit(.assistantMessage(blocks: [
+                .toolUse(
+                    id: "simulator-capture",
+                    tool: .mcp("mcp__threading__simulator_screenshot"),
+                    input: ["include_image": .bool(true)]
+                )
+            ]))
+            emit(.toolResults([
+                ToolResult(toolUseID: "simulator-capture", text: "Captured current Simulator frame.", isError: false)
+            ]))
+        }
         if scene == .answer {
             emit(.assistantMessage(blocks: [.text(reply)]))
             emit(.turnFinished(text: nil, outcome: .completed, metrics: TurnMetrics(duration: 42)))
@@ -77,7 +91,7 @@ final class NativeChatShowcaseTests: XCTestCase {
         }
         controller.isReplaying = false
         controller.finishReplayRendering()
-        if [.working, .permission, .streaming, .question, .questionSelected, .expandedWork, .longMessage].contains(scene) {
+        if [.working, .permission, .streaming, .question, .questionSelected, .expandedWork, .longMessage, .threadingTool].contains(scene) {
             controller.apply(.status(.working(word: "Working…")))
         }
         if scene == .working {

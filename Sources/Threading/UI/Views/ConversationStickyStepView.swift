@@ -178,9 +178,12 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
         let style = ToolGlyph.forTool(tool)
         glyphLabel.stringValue = style.symbol
         toolLabel.stringValue = style.label
-        subjectLabel.stringValue = subject
+        if case .mcp = tool { toolLabel.toolTip = tool.rawName }
+        else { toolLabel.toolTip = nil }
+        let displayedSubject = style.displaySubject(subject)
+        subjectLabel.stringValue = displayedSubject
         rowIndex = index
-        setAccessibilityLabel("\(style.label) \(subject)")
+        setAccessibilityLabel("\(style.label) \(displayedSubject)")
     }
 
     // MARK: - Interaction

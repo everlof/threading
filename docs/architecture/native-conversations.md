@@ -1809,6 +1809,16 @@ whole surface aren't inspiration taken loosely from opencode's TUI — they are 
 expressed in AppKit and system colours instead of a hardcoded palette, per this file's
 design-system rule.
 
+Threading's own built-in MCP calls use their catalogue title in that one-line subject: the row
+reads `Threading  Capture Simulator` instead of `simulator_screenshot`, followed by the call's
+specific target when one exists. The same presentation names the sticky step header. The match
+requires both the exact `mcp__threading__` prefix and a declared built-in tool; other servers and
+unknown future names keep their original label. The raw identity remains in the timeline and on
+the row's tooltip, while the title lookup is built once for transcript-sized tool runs.
+This is the host-owned default of the existing tool row, not a new extension component:
+extensions may still replace the row's presentation, while Threading keeps tool identity,
+permission decisions, and result outcome.
+
 A tool row settles into an **outcome**, not just a size. The provider's error flag is
 necessary but not sufficient — Codex folds exit codes into it and Claude forwards `is_error`,
 yet a shell command can print `command not found` and still be reported as success — so

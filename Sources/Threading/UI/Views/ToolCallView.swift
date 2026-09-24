@@ -16,13 +16,14 @@ final class ToolCallView: NSView {
     private let tool: ToolIdentity
     private let diffLines: [DiffLine]?
     private let summary: String
+    private lazy var style = ToolGlyph.forTool(tool)
 
     private lazy var glyphLabel = makeLabel(
-        ToolGlyph.forTool(tool).symbol,
+        style.symbol,
         role: .code(weight: .medium)
     )
-    private lazy var titleLabel = makeLabel(ToolGlyph.forTool(tool).label, role: .caption)
-    private lazy var detailLabel = makeLabel(summary, role: .code())
+    private lazy var titleLabel = makeLabel(style.label, role: .caption)
+    private lazy var detailLabel = makeLabel(style.displaySubject(summary), role: .code())
     private lazy var metaLabel = makeLabel(Self.runningText, role: .caption)
     private lazy var chevron: NSImageView = {
         let image = NSImageView()
@@ -90,6 +91,7 @@ final class ToolCallView: NSView {
         glyphLabel.alignment = .center
 
         titleLabel.textColor = Design.Text.secondary
+        if case .mcp = tool { titleLabel.toolTip = tool.rawName }
 
         detailLabel.textColor = Design.Text.tertiary
         detailLabel.lineBreakMode = .byTruncatingMiddle
@@ -210,7 +212,6 @@ final class ToolCallView: NSView {
         }
 
         let failed = outcome == .failed
-        let style = ToolGlyph.forTool(tool)
         let tint: NSColor = failed ? Design.Status.negative : Design.Text.secondary
         glyphLabel.stringValue = failed ? ToolGlyph.failureSymbol : style.symbol
         glyphLabel.textColor = tint
@@ -367,7 +368,28 @@ enum ToolGlyph {
     struct Style {
         let symbol: String
         let label: String
+        let action: String?
+
+        init(symbol: String, label: String, action: String? = nil) {
+            self.symbol = symbol
+            self.label = label
+            self.action = action
+        }
+
+        func displaySubject(_ subject: String) -> String {
+            guard let action else { return subject }
+            return subject.isEmpty ? action : "\(action) · \(subject)"
+        }
     }
+
+    /// The built-in catalogue already owns the user-facing names. Keep an exact lookup so a
+    /// foreign server or an unrecognised future Threading tool retains its original identity.
+    /// Rows can number in the hundreds, so descriptor discovery is paid once, not per view.
+    private static let threadingActions: [String: String] = Dictionary(
+        uniqueKeysWithValues: MCPBuiltInToolRegistry.descriptors.map {
+            ($0.definition.name, $0.presentation.title)
+        }
+    )
 
     /// Overrides the identity glyph when a call fails — t3code's destructive-✗ cascade. `✓`
     /// is not its counterpart here: it already means Todo in this column, and success stays
@@ -405,6 +427,11 @@ enum ToolGlyph {
         case .taskList, .taskGet:
             return Style(symbol: "•", label: tool.rawName)
         case .mcp(let name):
+            let prefix = "mcp__\(MCPDefaults.serverName)__"
+            if name.hasPrefix(prefix),
+               let action = threadingActions[String(name.dropFirst(prefix.count))] {
+                return Style(symbol: "◇", label: "Threading", action: action)
+            }
             return Style(symbol: "◇", label: name.components(separatedBy: "__").last ?? name)
         case .notebookEdit, .notebookRead, .todoRead, .toolSearch, .plan:
             return Style(symbol: "•", label: tool.rawName)
