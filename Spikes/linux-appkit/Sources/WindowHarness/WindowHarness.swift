@@ -477,8 +477,10 @@ struct WindowHarness {
                     let runtime = saved[savedSelected]
                     let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                     let session: GraphicalTerminal
-                    if let existing = restoredRuntimes[key] { session = existing }
+                    let mayResume = savedPicker.isAgent && agentExecutable != nil
+                    if let existing = restoredRuntimes[key], !(mayResume && existing.canReplace) { session = existing }
                     else {
+                        if let existing = restoredRuntimes.removeValue(forKey: key) { existing.stop() }
                         guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
                             tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                             break
@@ -487,7 +489,12 @@ struct WindowHarness {
                         restoredRuntimes[key] = session
                         restoredProjectIDs.insert(project.id)
                         if savedPicker.isAgent {
-                            session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
+                            if let agentExecutable {
+                                session.openAgent(store: launch[0], socket: launch[1], sessionID: runtime.id,
+                                    shell: launch[2], codex: agentExecutable, width: width, height: height)
+                            } else {
+                                session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
+                            }
                         } else {
                             session.attach(store: launch[0], socket: launch[1], terminalID: runtime.id)
                         }

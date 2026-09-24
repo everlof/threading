@@ -16,13 +16,29 @@ project = root / 'CreatedAgent'
 project.mkdir()
 child = root / 'created-agent-child'
 child.write_text('''#!/usr/bin/python3
-import fcntl, json, os, struct, sys, termios, tty
+import datetime, fcntl, json, os, struct, sys, termios, tty, uuid
 from pathlib import Path
 tty.setraw(0)
 rows, cols, _, _ = struct.unpack('HHHH', fcntl.ioctl(0, termios.TIOCGWINSZ, b'\\0' * 8))
+if 'resume' in sys.argv[1:]:
+    resumed_id = sys.argv[sys.argv.index('resume') + 1]
+    Path('resumed-agent.json').write_text(json.dumps({
+        'pid': os.getpid(), 'argv': sys.argv[1:], 'provider_id': resumed_id,
+    }))
+    os.write(1, b'\\x1b]0;RESUMED AGENT READY\\x07')
+    assert os.read(0, 1) == b'q'
+    sys.exit(0)
+provider_id = str(uuid.uuid4())
+day = datetime.datetime.now(datetime.timezone.utc)
+sessions = Path(os.environ['CODEX_HOME']) / 'sessions' / day.strftime('%Y/%m/%d')
+sessions.mkdir(parents=True, exist_ok=True)
+(sessions / ('rollout-' + provider_id + '.jsonl')).write_text(json.dumps({
+    'type': 'session_meta', 'payload': {'id': provider_id, 'cwd': os.getcwd()}
+}) + '\\n')
 Path('created-agent.json').write_text(json.dumps({
     'pid': os.getpid(), 'cwd': os.getcwd(), 'argv': sys.argv[1:],
     'grid': [cols, rows], 'term': os.getenv('TERM'), 'color': os.getenv('COLORTERM'),
+    'provider_id': provider_id,
 }))
 os.write(1, b'\\x1b]0;CREATED AGENT READY\\x07')
 assert os.read(0, 1) == b'p', 'activation key leaked into the PTY'
@@ -63,9 +79,12 @@ def listing():
 before = listing()
 assert '  agent ' not in before, before
 log_path = root / 'agent-create-window.log'
+codex_home = root / 'codex-home'
+codex_home.mkdir()
+environment = dict(os.environ, CODEX_HOME=str(codex_home))
 with log_path.open('w+') as log:
     process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
-                               stdout=log, stderr=log)
+                               stdout=log, stderr=log, env=environment)
     try:
         window = title(process, 'Threading experiment - ' + str(project), log_path)
         subprocess.run(['import', '-window', window, 'out/agent-create-project.png'], check=True, timeout=5)
@@ -87,6 +106,14 @@ with log_path.open('w+') as log:
             assert payload['permissionMode'] == 'manual' and payload['title'] == '', payload
             assert database.execute("SELECT value FROM app_state WHERE key='selectedSessionID'").fetchone()[0] == rows[0][0]
         saved_id = rows[0][0]
+        deadline = time.monotonic() + 5
+        while True:
+            with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+                stored = json.loads(database.execute('SELECT data FROM session WHERE id=?', (saved_id,)).fetchone()[0])
+            if stored.get('agentSessionID') == report['provider_id']:
+                break
+            assert time.monotonic() < deadline, stored
+            time.sleep(.05)
         key(window, 'ctrl+shift+p')
         title(process, 'Threading experiment - ' + str(project), log_path)
         subprocess.run(['import', '-window', window, 'out/agent-create-returned.png'], check=True, timeout=5)
@@ -125,13 +152,46 @@ assert sum(line.startswith('  agent ') for line in after.splitlines()) == 1, aft
 assert sum(line.startswith('  ') for line in after.splitlines()) == sum(
     line.startswith('  ') for line in before.splitlines()) + 1, after
 assert saved_id in after
-print('PASS native agent creation: shared flags, saved record, 80x21 PTY, retained child and exit 6', flush=True)
+print('PASS native agent creation: shared flags, discovered ID, saved record, retained child and exit 6', flush=True)
+
+# After the first process exits, a new app window attaches if the daemon still has a child,
+# otherwise resumes this exact provider conversation under the same Threading identity.
+with (root / 'agent-resume-window.log').open('w+') as log:
+    process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
+                               stdout=log, stderr=log, env=environment)
+    try:
+        window = title(process, 'Threading experiment - ' + str(project), root / 'agent-resume-window.log')
+        key(window, 'Left')
+        title(process, 'Threading agents - ' + str(project), root / 'agent-resume-window.log')
+        key(window, 'Return')
+        title(process, 'Threading terminal - RESUMED AGENT READY', root / 'agent-resume-window.log')
+        resumed = json.loads((project / 'resumed-agent.json').read_text())
+        assert resumed['provider_id'] == report['provider_id'], resumed
+        assert resumed['argv'][-2:] == ['resume', report['provider_id']], resumed
+        key(window, 'q')
+        title(process, 'Threading terminal - exited 0', root / 'agent-resume-window.log')
+        key(window, 'ctrl+shift+p')
+        title(process, 'Threading agents - ' + str(project), root / 'agent-resume-window.log')
+        key(window, 'Escape')
+        title(process, 'Threading experiment - ' + str(project), root / 'agent-resume-window.log')
+        key(window, 'Escape')
+        assert process.wait(timeout=5) == 0
+    except BaseException:
+        log.flush()
+        print((root / 'agent-resume-window.log').read_text(), file=sys.stderr)
+        raise
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=3)
+assert listing() == after, 'resuming created another session record'
+print('PASS saved Codex agent resumes the discovered provider ID in a new window', flush=True)
 
 # A competing store owner rejects creation before a record or child can appear.
 log_path = root / 'agent-create-refusal.log'
 with log_path.open('w+') as log:
     process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
-                               stdout=log, stderr=log)
+                               stdout=log, stderr=log, env=environment)
     try:
         window = title(process, 'Threading experiment - ' + str(project), log_path)
         with (Path(store) / 'host.lock').open('a') as lock:

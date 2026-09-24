@@ -43,6 +43,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     // Worker-owned runtime. Every emulator operation stays off the UI actor.
     private var emulator: PTYEmulator?
     private var client: PTYHostClient?
+    private var connectionGeneration = 0
     private var identity: PTYHostSessionIdentity?
     private var dirty = true
     private var lastWidth = 0, lastHeight = 0
@@ -52,6 +53,9 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var replayRemaining: Int?
     private var replayLabel = ""
     private var attachmentViewportApplied = false
+    private var codexDiscovery: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)?
+    private var codexResume: (store: String, socket: String, shell: String, executable: String, sessionID: SessionID,
+                              width: Int, height: Int)?
 
     func start(store: String, socket: String, directory: String, executable: String, arguments: [String]) {
         worker.async { [self] in
@@ -76,14 +80,18 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let link = try connect(socket: socket, columns: columns, rows: rows)
                 let plan = try Self.createAgent(store: store, directory: directory,
                                                 shell: shell, codex: codex, id: id)
+                let environment = Self.launchEnvironment()
+                let home = ProcessInfo.processInfo.environment["CODEX_HOME"]
+                    ?? (ProcessInfo.processInfo.environment["HOME"] ?? "") + "/.codex"
                 let identity = PTYHostSessionIdentity.agentSession(id)
                 self.identity = identity
+                codexDiscovery = (store, directory, home, id, Date())
                 lastWidth = width; lastHeight = height
                 lock.lock(); createdAgent = true; spawnMayBeLive = true; lock.unlock()
                 try link.spawn(PTYHostSpawnRequest(id: identity,
                     channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
                     executable: plan.executable, arguments: plan.arguments,
-                    environment: Self.launchEnvironment(), cwd: directory))
+                    environment: environment, cwd: directory))
             } catch { fail(error) }
         }
     }
@@ -95,14 +103,22 @@ final class GraphicalTerminal: @unchecked Sendable {
         return environment.map { "\($0.key)=\($0.value)" }
     }
     private func connect(socket: String, columns: Int = 80, rows: Int = 24) throws -> PTYHostClient {
+        connectionGeneration += 1
+        let generation = connectionGeneration
         emulator = try PTYEmulator(columns: columns, rows: rows) { [weak self] data in
             do { try self?.client?.sendInput(data) } catch { self?.fail(error) }
         }
         let link = PTYHostClient(socketPath: socket, build: "linux-native-window", events: .init(
-            frame: { [weak self] frame in self?.received(frame) },
-            output: { [weak self] data in self?.receiveOutput(data) },
+            frame: { [weak self] frame in
+                guard let self, self.connectionGeneration == generation else { return }
+                self.received(frame)
+            },
+            output: { [weak self] data in
+                guard let self, self.connectionGeneration == generation else { return }
+                self.receiveOutput(data)
+            },
             closed: { [weak self] error in
-                guard let self else { return }
+                guard let self, self.connectionGeneration == generation else { return }
                 if let error { self.fail(error) }
                 else if self.exitStatus == nil { self.fail(WindowFailure("PTY connection closed")) }
             }), journal: { _, _ in }, queue: worker)
@@ -116,14 +132,23 @@ final class GraphicalTerminal: @unchecked Sendable {
     func attachAgent(store: String, socket: String, sessionID: String) {
         attach(store: store, socket: socket, savedID: sessionID, kind: .agent)
     }
+    func openAgent(store: String, socket: String, sessionID: String, shell: String,
+                   codex: String, width: Int, height: Int) {
+        attach(store: store, socket: socket, savedID: sessionID, kind: .agent,
+               resume: (shell, codex, width, height))
+    }
     private enum SavedKind { case terminal, agent }
-    private func attach(store: String, socket: String, savedID: String, kind: SavedKind) {
+    private func attach(store: String, socket: String, savedID: String, kind: SavedKind,
+                        resume: (String, String, Int, Int)? = nil) {
         worker.async { [self] in
             do {
                 attaching = true
                 lock.lock(); spawnMayBeLive = true; lock.unlock()
                 let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind)
                 identity = id
+                if let resume, let uuid = UUID(uuidString: savedID) {
+                    codexResume = (store, socket, resume.0, resume.1, SessionID(uuid), resume.2, resume.3)
+                }
                 let link = try connect(socket: socket)
                 try link.attach(PTYHostAttach(id: id))
                 worker.asyncAfter(deadline: .now() + Self.exitWaitSeconds) { [weak self] in
@@ -262,10 +287,15 @@ final class GraphicalTerminal: @unchecked Sendable {
             lastHeight = max(180, value.grid.rows * 22)
             replayRemaining = count
             lock.lock(); initialViewport = (lastWidth, lastHeight); running = count == 0; lock.unlock()
+            codexResume = nil
             dirty = true
         case .spawned(let value):
             guard !attaching, value.id == identity else { fail(WindowFailure("spawn identity mismatch")); return }
             lock.lock(); running = true; lock.unlock(); dirty = true
+            if let discovery = codexDiscovery {
+                codexDiscovery = nil
+                Self.discoverCodexSession(discovery)
+            }
         case .exited(let value):
             guard value.id == identity else { fail(WindowFailure("exit identity mismatch")); return }
             guard !attaching || replayRemaining == 0 else { fail(WindowFailure("exit before completed replay")); return }
@@ -286,9 +316,94 @@ final class GraphicalTerminal: @unchecked Sendable {
                 guard let self, self.exitStatus == nil else { return }
                 self.fail(WindowFailure("timed out waiting for child exit after input refusal"))
             }
+        case .error(let value) where value.code == .unknownSession && value.detail == "attach" && attaching:
+            guard let resume = codexResume else { fail(WindowFailure("PTY: \(value)")); return }
+            codexResume = nil
+            do {
+                let (plan, directory) = try Self.resumeAgent(store: resume.store,
+                    sessionID: resume.sessionID, shell: resume.shell, codex: resume.executable)
+                let columns = max(2, resume.width / 10), rows = max(1, resume.height / 22)
+                connectionGeneration += 1
+                client?.close()
+                client = nil
+                let link = try connect(socket: resume.socket, columns: columns, rows: rows)
+                lastWidth = resume.width; lastHeight = resume.height
+                attaching = false
+                lock.lock(); spawnMayBeLive = true; lock.unlock()
+                try link.spawn(PTYHostSpawnRequest(id: .agentSession(resume.sessionID),
+                    channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
+                    executable: plan.executable, arguments: plan.arguments,
+                    environment: Self.launchEnvironment(), cwd: directory))
+            } catch { fail(error) }
         case .error(let value): fail(WindowFailure("PTY: \(value)"))
         default: break
         }
+    }
+    private static func discoverCodexSession(
+        _ launch: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)
+    ) {
+        DispatchQueue.global(qos: .utility).async {
+            let sessions = URL(fileURLWithPath: launch.home, isDirectory: true)
+                .appendingPathComponent("sessions", isDirectory: true)
+            for _ in 0..<CodexDiscoveryDefaults.maxAttempts {
+                if let id = CodexRolloutIdentity.find(projectPath: launch.directory,
+                    sessionsDirectory: sessions, launchedAt: launch.launchedAt) {
+                    do {
+                        if try persistCodexID(id, in: launch.store, for: launch.sessionID) {
+                            print("CODEX_SESSION_ID \(launch.sessionID) \(id)"); fflush(nil)
+                        }
+                    } catch {
+                        FileHandle.standardError.write(Data("Codex session discovery: \(error)\n".utf8))
+                    }
+                    return
+                }
+                Thread.sleep(forTimeInterval: CodexDiscoveryDefaults.pollInterval)
+            }
+        }
+    }
+    private static func persistCodexID(_ id: TranscriptID, in store: String, for sessionID: SessionID) throws -> Bool {
+        let root = URL(fileURLWithPath: store, isDirectory: true)
+        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
+        defer { Glibc.close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
+        defer { database.close() }
+        var state = try database.load().state
+        guard let projectIndex = state.projects.firstIndex(where: { $0.sessions.contains(where: { $0.id == sessionID }) }),
+              let sessionIndex = state.projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID }),
+              state.projects[projectIndex].sessions[sessionIndex].resumeState == .awaitingIdentifier else { return false }
+        state.projects[projectIndex].sessions[sessionIndex].resumeState = .resumable(id)
+        try database.save(state)
+        return true
+    }
+    private static func resumeAgent(store: String, sessionID: SessionID, shell: String,
+                                    codex: String) throws -> (AgentLaunchPlan, String) {
+        guard shell.hasPrefix("/"), codex.hasPrefix("/") else {
+            throw WindowFailure("shell and Codex executable must be absolute paths")
+        }
+        let root = URL(fileURLWithPath: store, isDirectory: true)
+        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
+        defer { Glibc.close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
+        defer { database.close() }
+        let state = try database.load().state
+        guard let project = state.projects.first(where: { $0.sessions.contains(where: { $0.id == sessionID }) }),
+              let session = project.sessions.first(where: { $0.id == sessionID }),
+              session.kind == .codex,
+              session.resumeState.isResumable else {
+            throw WindowFailure("saved agent has no resumable Codex conversation")
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: project.folderPath, isDirectory: &isDirectory),
+              isDirectory.boolValue else { throw WindowFailure("project directory does not exist") }
+        let (command, resumeState) = CodexLaunchCommand.terminal(executable: codex,
+            model: session.model, permissionMode: session.permissionMode,
+            resumeState: session.resumeState, prompt: nil)
+        return (AgentLaunchPlan.inLoginShell(command: command, in: project.folderPath,
+            shellPath: shell, resumeState: resumeState), project.folderPath)
     }
     private func fail(_ error: Error) {
         lock.lock(); if !closed && failure == nil { failure = String(describing: error) }; lock.unlock()
