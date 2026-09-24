@@ -74,8 +74,8 @@ request needs. Nothing in it is a rule about a runtime by name.
 Fresh record assembly lives in the Foundation-only `AgentSessionCreation.makeRecord` factory.
 It applies configuration admission and validates the handoff destination before reaching the
 record initializer's preconditions, then sets the unnamed-title policy, launch options and
-managed-workspace branch. `ProjectStore.addSession` uses it. The store still admits project/identity
-ownership and account/model catalogue values, resolves any
+managed-workspace branch. Both `ProjectStore.addSession` and the experimental Linux host use it.
+Each host still admits project/identity ownership and account/model catalogue values, resolves any
 fallback git branch, persists the record and emits presentation notifications. Imports and forks
 keep their distinct resume/provenance paths. The factory works on one record and the existing
 bounded handoff chain; it performs no discovery, I/O or catalogue scan.
@@ -1027,9 +1027,10 @@ inert invented name out of the one place this filter reads to decide what *not* 
 which are about a stream rather than a run — is in [`themes.md`](themes.md).
 
 The filter itself is the pure `AgentEnvironment.removingInheritedIdentity(from:)` operation,
-shared by macOS terminal and headless launches. `AgentEnvironmentHost.swift` resolves macOS process
-values and command-line-tool preferences; the portable policy performs no process lookup,
-filesystem work or preference access.
+shared by macOS terminal/headless launches and the Linux host. `AgentEnvironmentHost.swift`
+resolves macOS process values and command-line-tool preferences; the portable policy performs no
+process lookup, filesystem work or preference access. Linux preserves its caller's account and
+PATH values through the same filter instead of substituting a minimal fixed environment.
 
 The MCP routing variables are the deliberate exception to stripping an inherited agent
 identity: `AgentLauncher` creates them for the new child after filtering. They are per-process

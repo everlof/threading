@@ -60,6 +60,11 @@ three AppKit-oriented visual dependencies each need a real platform story.
 
 ## What the spike measured
 
+The later native-window probe (`FINDINGS.md` §40) presents the existing rasterizer through
+SDL2/X11 and exercises real window input against a production-store snapshot. It is diagnostic
+specimen UI, not a backend selection or the product navigator. The next shared-code target is
+session creation and launch coordination; a platform-only window does not satisfy that extraction.
+
 `Spikes/linux-appkit/` is a bounded, wired-to-nothing experiment run on 2026-09-17 and 2026-09-18
 against `swift:6.3.2-noble` — the same image and Swift as `scripts/test-ptyd-linux.sh`. It is
 evidence for this document, not an implementation of it: no Xcode target references it and no gate
@@ -137,6 +142,23 @@ newer-writer operation; [FINDINGS section 34](../../Spikes/linux-appkit/FINDINGS
 records their scope. Two further contracts exercise pinned-WAL refusal and single-file relocation for healthy and
 damaged project stores, preserving recent records and corrupt-row evidence; [FINDINGS section 35](../../Spikes/linux-appkit/FINDINGS.md#35-project-stores-move-safely-after-pinned-readers-release-wal)
 records the boundary. The project executable now passes fifteen contracts.
+
+The experiment now also has a runnable `LinuxHost` connecting real project-terminal records to
+the production PTY daemon. Its real-shell smoke lane verifies input/output, cwd, initial geometry,
+exit status, persistence across invocations and ownership/refusal behavior. [FINDINGS section 36](../../Spikes/linux-appkit/FINDINGS.md#36-a-linux-host-connects-durable-project-terminals-to-the-real-pty-daemon)
+records the evidence and limits. This is an experimental command-line storage/runtime connection;
+it does not satisfy the native host-and-UI product contract above.
+The host also reattaches stored terminals after watcher termination, forwards raw keyboard input,
+tracks terminal resize and restores caller terminal mode on exit. [FINDINGS section 37](../../Spikes/linux-appkit/FINDINGS.md#37-terminal-watchers-reconnect-forward-raw-keys-and-follow-window-size)
+records real PTY and same-child-PID evidence. Native rendering remains unfinished.
+The production launch command values now compile independently of host settings, and Linux's
+`login-run` uses the same login-shell plan factory and argument quoting as macOS. [FINDINGS
+section 38](../../Spikes/linux-appkit/FINDINGS.md#38-linux-and-macos-share-the-login-shell-command-plan)
+records real-shell evidence. `CodexLaunchCommand` now also shares resolved provider command
+assembly. The Linux `codex` operation persists a real agent session with explicit Manual/read-only
+policy and spawns its typed identity; [FINDINGS section 39](../../Spikes/linux-appkit/FINDINGS.md#39-managed-codex-sessions-share-production-command-assembly)
+distinguishes argument-recorder evidence from an authenticated provider run. Account resolution,
+transcript discovery and native UI remain unfinished.
 
 ## The boundary to build
 

@@ -110,17 +110,18 @@ login-shell command line — are one decision that stays in one place in the app
 
 `PTYHostSocket.connect` owns Unix socket address construction, close-on-exec setup, nonblocking
 connect and its monotonic deadline, kernel `SO_ERROR` inspection, and requested post-connect mode.
-The macOS client uses it. Darwin retains socket-local `SO_NOSIGPIPE`; the Linux writer uses
-`MSG_NOSIGNAL`. The connector installs no process-global signal disposition. Embedded NUL is
-refused before the kernel can interpret a path prefix. `PTYHostClientError` is a portable error
-vocabulary in its own file.
+The macOS client and experimental Linux host both use it. Darwin retains socket-local
+`SO_NOSIGPIPE`; Linux writers retain `MSG_NOSIGNAL`. The connector installs no process-global
+signal disposition. Embedded NUL is refused before the kernel can interpret a path prefix.
+`PTYHostClientError` is a portable error vocabulary in its own file, so the Linux host keeps the
+same connection causes rather than translating them into arbitrary strings.
 
 `PTYHostConnectionBinding` owns the portable one-connection/one-session admission policy. It
 refuses input without a binding, a second spawn/attach, and controls whose full typed identity
 does not match. Each accepted spawn/attach returns an opaque reservation; failed-send rollback
 can release only that attempt, including when a newer retry uses the same session ID. A matching
 spawn refusal releases the binding; an unrelated refusal does not. Hosts retain synchronization
-and readiness checks around the value.
+and readiness checks around the value. Both macOS and Linux use this policy.
 
 `PTYHostHandshake` retains deliveries in wire order across reads and through the complete read
 containing hello, including stderr flags and controls following hello. Its aggregate pending
@@ -131,8 +132,9 @@ reverses daemon-authored compatibility refusals into the client's perspective; r
 stays with the host. The shared client delivers the retained batch before live reads and uses one total hello
 deadline, including while additive frames arrive.
 
-`PTYHostClient` owns handshake I/O and admission effects, connection readiness, bounded
-asynchronous writes, diagnostics and event delivery.
+The connector and policy values are not the full client. `PTYHostClient` owns handshake I/O and
+admission effects, connection readiness, bounded asynchronous writes, diagnostics and event
+delivery. Both the experimental Linux CLI and its portable-client harness now use that client.
 
 ### Portable client and host adapter
 
@@ -153,8 +155,31 @@ and `MSG_DONTWAIT` to keep a readiness race from becoming an unbounded syscall.
 
 Pending hello deliveries enter the event queue only after all channel owners were allocated,
 and before live reads start. A failed Linux writer allocation therefore cannot deliver a
-half-connected event sequence. Many-client Linux throughput and shutdown latency remain
-unmeasured.
+half-connected event sequence. The experimental Linux CLI uses this event interface through
+`HostEventInbox`: one nonblocking close-on-exec socket pair wakes its stdin/signal poll loop.
+The inbox retains at most 4 MiB of payload/encoded controls and 1,024 events; both bytes and count
+are checked before admission. Overflow ends the inbox with an explicit failure. A consumer may
+hold one drained batch while the next accumulates, so those limits can be present twice. Output,
+stderr, controls and close retain their order. The notification drain and batch swap share a lock
+with admission, preventing a lost wakeup. No callback waits for stdout or the consuming loop.
+
+This is a CLI adapter: stdout writes can still block its consumer, and this inbox budget does
+not measure libdispatch's internal read buffering. Many-client throughput and shutdown latency
+remain unmeasured.
+
+The experimental Linux graphical host serializes user input with emulator output on the client
+worker. Native functional keys carry identity, modifiers and press/repeat/release; SwiftTerm's
+`encodedFunctionalKey` reads the live cursor/kitty mode there. Text and encoded keys both enter
+`Terminal.sendUserInput`, keeping semantic input state and transport together. One input queue
+preserves text/editing order and admits at most 256 pending events, with 32 bytes per committed
+text event; overflow is explicit. This is functional-key coverage, not complete enhanced text,
+keypad, IME or desktop-shortcut parity.
+
+The experimental Linux hosts distinguish late-input refusal (`sessionExited`, detail `input`)
+from child exit. They stop input and wait up to five seconds for the matching `exited` frame;
+repeated refusals do not restart that deadline. The graphical host arms at most one worker timer
+and keeps the completed terminal visible after exit. Other refusals and a connection closing
+without an exit remain failures.
 
 ## Framing
 
