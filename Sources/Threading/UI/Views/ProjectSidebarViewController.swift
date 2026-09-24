@@ -4465,6 +4465,19 @@ extension ProjectSidebarViewController {
            let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
             entries.append(openIn)
         }
+        if let projectID,
+           let project = projectStore.project(withID: projectID),
+           !project.isTheScratchpad,
+           project.lastKnownRepositoryIdentity == nil,
+           GitInfo.repositoryIdentity(for: project.folderPath) == nil {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Group Under Repository…"),
+                image: ThemedMenuIcon.symbol("folder.badge.plus"),
+                onChoose: { [weak self] in
+                    self?.chooseRepositoryForUnavailableCheckout(projectID)
+                }
+            )))
+        }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reveal in Finder"),
             image: ThemedMenuIcon.symbol("magnifyingglass"),
@@ -4525,6 +4538,28 @@ extension ProjectSidebarViewController {
             ))
         }
         return entries
+    }
+
+    /// Repairs the sidebar relationship of a checkout saved before repository affiliation was
+    /// persisted. Choosing an already-added repository never changes where its chats execute.
+    private func chooseRepositoryForUnavailableCheckout(_ projectID: ProjectID) {
+        ProjectFolderPrompt.chooseExistingFolder(
+            prompt: L10n.string("Group"),
+            message: L10n.string("Choose a repository already in the sidebar.")
+        ) { [weak self] url in
+            guard let self else { return }
+            let chosenPath = url.standardizedFileURL.resolvingSymlinksInPath().path
+            guard let identity = GitInfo.repositoryIdentity(for: chosenPath),
+                  projectStore.projects.contains(where: {
+                      GitInfo.repositoryIdentity(for: $0.folderPath) == identity
+                  }) else {
+                presentProjectNotice(L10n.string("Choose a repository already in the sidebar."))
+                return
+            }
+            if !projectStore.associateUnavailableCheckout(projectID, withRepository: identity) {
+                presentProjectNotice(L10n.string("The project data could not be saved."))
+            }
+        }
     }
 
     /// The icon submenu: choose one, take a site's favicon, re-run the free discovery,

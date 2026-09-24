@@ -1819,6 +1819,23 @@ enum NativeSidebarPipelineOptions {
             "domain .folderPath must use host(.localRepositoryContext)"
         )
 
+    def test_remembered_local_repository_cannot_claim_a_public_fact(self) -> None:
+        self.replace(
+            "Sources/Threading/Models/Models.swift",
+            "    let folderPath: String\n",
+            "    let folderPath: String\n    let lastKnownRepositoryIdentity: String?\n",
+        )
+        self.replace(
+            "Sources/Threading/UI/Views/SidebarOutlineNodes.swift",
+            "            for session in sessions {\n",
+            "            _ = NativeSidebarParity.fact(.projectManualOrder, "
+            "project.lastKnownRepositoryIdentity)\n"
+            "            for session in sessions {\n",
+        )
+        self.assert_fails_with(
+            "domain .lastKnownRepositoryIdentity must use host(.localRepositoryContext)"
+        )
+
     def test_dependency_argument_must_be_literal(self) -> None:
         self.replace(
             "Sources/Threading/UI/Views/SessionRowView.swift",

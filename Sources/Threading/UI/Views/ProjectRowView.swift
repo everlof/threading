@@ -30,6 +30,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Materialized only when one does; see `setConductMark`.
     private var conductIndicator: NSImageView?
     private var executionHostIndicator: NSImageView?
+    private var unavailableCheckoutIndicator: NSImageView?
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
     private let trailingSlot = NSView()
@@ -260,8 +261,12 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         // for carrying configuration" rule was too broad for.
         setConductMark(conduct)
         setExecutionHostMark(executionHost)
+        let checkoutUnavailable = project.lastKnownRepositoryIdentity != nil
+            && GitInfo.repositoryIdentity(for: project.folderPath) == nil
+        setUnavailableCheckoutMark(checkoutUnavailable)
         nativeToolTip = [
             project.folderPath,
+            checkoutUnavailable ? L10n.string("Checkout unavailable at this path") : nil,
             executionHost.map(RemoteExecutionHostMark.runsOn),
             SoundOverrideAudit.toolTipLine(
                 for: .project(project.id),
@@ -327,6 +332,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         // because this view is recycled: a mark left over from the checkout that used the cell
         // before would be a root claiming a chat's configuration.
         setConductMark(nil)
+        setUnavailableCheckoutMark(false)
         animatesNextName = false
         applyTextColors()
         captureNativePresentation()
@@ -354,6 +360,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         nativeName = branch
         setCount(collapsedSessionCount)
         setConductMark(nil)
+        setUnavailableCheckoutMark(false)
         nativeToolTip = branch
         animatesNextName = hasConfiguredSinceReuse && nameLabel.stringValue != nativeName
         applyTextColors()
@@ -374,6 +381,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         nativeName = title
         setCount(collapsedSessionCount)
         setConductMark(nil)
+        setUnavailableCheckoutMark(false)
         nativeToolTip = title
         animatesNextName = hasConfiguredSinceReuse && nameLabel.stringValue != nativeName
         applyTextColors()
@@ -1030,6 +1038,41 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         executionHostIndicator = indicator
     }
 
+    /// Host-owned availability remains visible even when an extension replaces row content.
+    private func setUnavailableCheckoutMark(_ unavailable: Bool) {
+        guard unavailable else {
+            unavailableCheckoutIndicator?.isHidden = true
+            return
+        }
+        if let unavailableCheckoutIndicator {
+            unavailableCheckoutIndicator.isHidden = false
+            return
+        }
+
+        let indicator = NSImageView()
+        indicator.holdSymbol("exclamationmark.triangle", slot: Design.Size.inlineButtonGlyph)
+        indicator.imageScaling = .scaleProportionallyDown
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.setContentHuggingPriority(.required, for: .horizontal)
+        indicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+        indicator.setAccessibilityElement(true)
+        indicator.setAccessibilityRole(.image)
+        indicator.setAccessibilityLabel(L10n.string("Checkout unavailable at this path"))
+        indicator.setAccessibilityIdentifier("sidebar.project.checkout-unavailable")
+        indicator.contentTintColor = backgroundStyle == .emphasized
+            ? Design.Ink.selection.secondary
+            : Design.Text.secondary
+
+        let insertionIndex = rowContentStack.arrangedSubviews.firstIndex(of: afterTitleSlot)
+            ?? rowContentStack.arrangedSubviews.count
+        rowContentStack.insertArrangedSubview(indicator, at: insertionIndex)
+        NSLayoutConstraint.activate([
+            indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+            indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+        ])
+        unavailableCheckoutIndicator = indicator
+    }
+
     private func updateTrailingSlotVisibility() {
         trailingSlot.isHidden = !showsHoverControls && !hasCount
     }
@@ -1055,6 +1098,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             )
             conductIndicator?.contentTintColor = Design.Ink.selection.secondary
             executionHostIndicator?.contentTintColor = Design.Ink.selection.secondary
+            unavailableCheckoutIndicator?.contentTintColor = Design.Ink.selection.secondary
             iconView.contentTintColor = Design.Text.selected
             nativeIconTint = iconView.contentTintColor
             return
@@ -1063,6 +1107,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         countLabel?.textColor = Design.Text.secondary
         conductIndicator?.contentTintColor = Design.Text.secondary
         executionHostIndicator?.contentTintColor = Design.Text.secondary
+        unavailableCheckoutIndicator?.contentTintColor = Design.Text.secondary
         iconView.contentTintColor = Design.Text.secondary
         nativeIconTint = iconView.contentTintColor
     }

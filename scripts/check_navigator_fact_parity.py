@@ -1872,7 +1872,7 @@ def audit_scope(
             required_host: Optional[str] = None
             if spelling == ".id":
                 required_host = "entityIdentity"
-            elif spelling == ".folderPath":
+            elif spelling in {".folderPath", ".lastKnownRepositoryIdentity"}:
                 required_host = "localRepositoryContext"
             if required_host is not None and not (
                 marker.lane == "host" and marker.tokens == (required_host,)

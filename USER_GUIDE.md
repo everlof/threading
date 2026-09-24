@@ -200,6 +200,12 @@ This is the same shape whether the repository has one checkout or five, so nothi
 your pointer as you add and remove worktrees. A folder that is not in a git repository has no
 repository to sit under and stays a plain row on its own.
 
+If an added checkout is removed from disk or loses its Git metadata, it stays under its last
+verified repository. A warning mark on the checkout row identifies the unavailable path; its
+chats remain listed there, but the missing folder is not a place to run them. For a checkout
+saved before Threading remembered repository membership, use **Group Under Repository…** in its
+project menu and choose a repository already in the sidebar. This changes the grouping only.
+
 **+ on a repository row** starts a chat, manager or terminal in that repository's main checkout,
 and — under a line, because it is the one item that makes a place rather than using one — offers
 **New Worktree…**. That creates a worktree on a new branch and adds it as a checkout under the

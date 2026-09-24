@@ -191,6 +191,7 @@ final class ProjectStore {
             folderURL: folderURL
         )
         project.folderPath = normalizedPath
+        project.lastKnownRepositoryIdentity = GitInfo.repositoryIdentity(for: normalizedPath)
 
         guard flushPendingRecordSaves() else {
             notifyChanged()
@@ -638,6 +639,7 @@ final class ProjectStore {
                 folderURL: URL(fileURLWithPath: checkoutPath, isDirectory: true)
             )
             project.folderPath = checkoutPath
+            project.lastKnownRepositoryIdentity = GitInfo.repositoryIdentity(for: checkoutPath)
             // Marked as Threading's own so it can be taken back. Without this the row is
             // indistinguishable from a folder the user added, and the only safe answer to "may
             // I remove this?" later is no — which is how empty rows accumulated.
@@ -2531,6 +2533,7 @@ final class ProjectStore {
             if migrateLegacyThemeAssignments() {
                 save()
             }
+            rememberAvailableRepositoryIdentities()
         case .failed(let quarantinedAt):
             LaunchLedger.shared.record(.persistenceOpened, detail: [
                 StartupCheckpointDefaults.storeStateField: StartupCheckpointDefaults.storeFailed
@@ -2545,6 +2548,34 @@ final class ProjectStore {
                 )
             }
         }
+    }
+
+    /// Existing records predate the stored affiliation. Capture only identities proved by Git,
+    /// and write only those project rows; a missing checkout cannot be inferred from its name.
+    private func rememberAvailableRepositoryIdentities() {
+        guard stateWritePolicy.allowsWrites else { return }
+        for index in projects.indices where !projects[index].isTheScratchpad
+            && projects[index].lastKnownRepositoryIdentity == nil {
+            guard let identity = GitInfo.repositoryIdentity(for: projects[index].folderPath),
+                  projects[index].lastKnownRepositoryIdentity != identity else { continue }
+            projects[index].lastKnownRepositoryIdentity = identity
+            guard saveProjectRecord(at: index) else { return }
+        }
+    }
+
+    /// Associates a legacy unavailable checkout with a repository the user has already added.
+    /// This changes sidebar membership only; its saved execution folder remains untouched.
+    @discardableResult
+    func associateUnavailableCheckout(_ projectID: ProjectID, withRepository identity: String) -> Bool {
+        guard let index = index(ofProject: projectID),
+              !projects[index].isTheScratchpad,
+              GitInfo.repositoryIdentity(for: projects[index].folderPath) == nil,
+              projects.contains(where: { GitInfo.repositoryIdentity(for: $0.folderPath) == identity })
+        else { return false }
+        projects[index].lastKnownRepositoryIdentity = identity
+        guard saveProjectRecord(at: index) else { return false }
+        notifyChanged()
+        return true
     }
 
     /// Reloads the authoritative graph after `StateManager` has proved the database healthy and

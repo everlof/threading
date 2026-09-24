@@ -28,7 +28,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Chat invitation sheet | deliberately host-only | host form | capability scope, permission approval, route reachability, expiry, credential issuance and revocation | Implemented |
 | Main window content | `application.main-window@1` | around-hook | window chrome, input routing | Implemented |
 | Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
-| Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count | Implemented |
+| Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count, checkout availability mark | Implemented |
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |

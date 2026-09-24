@@ -192,8 +192,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar checkout location",
-      "description": "The shipping sidebar shows a quiet worktree path after its branch, under truncation pressure, in both appearances.",
-      "states": ["Inline checkout path", "Narrow sidebar"],
+      "description": "The shipping sidebar shows a quiet worktree path after its branch, under truncation pressure, and keeps an unavailable checkout under its remembered repository.",
+      "states": ["Inline checkout path", "Narrow sidebar", "Unavailable checkout"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],

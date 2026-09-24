@@ -77,6 +77,9 @@ struct Project: Codable, Identifiable {
   var name: String
   /// Stored as a path string for reliable encoding, matching `SessionSnapshot`.
   var folderPath: String
+  /// The repository last verified for this checkout. Its folder can disappear while its chats
+  /// remain; this keeps the sidebar relationship without treating the path as runnable.
+  var lastKnownRepositoryIdentity: String?
   var sessions: [AgentSession]
   var terminals: [ProjectTerminal]
   var isExpanded: Bool
@@ -153,6 +156,7 @@ struct Project: Codable, Identifiable {
     self.id = id
     self.name = name
     self.folderPath = folderURL.path
+    self.lastKnownRepositoryIdentity = nil
     self.sessions = []
     self.terminals = []
     self.isExpanded = true
@@ -173,7 +177,7 @@ struct Project: Codable, Identifiable {
     case isHidden
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
     case curfewRule, isAdoptedForCheckoutMove
-    case executionHost
+    case executionHost, lastKnownRepositoryIdentity
   }
 
   init(from decoder: Decoder) throws {
@@ -185,6 +189,9 @@ struct Project: Codable, Identifiable {
       try container.decodeIfPresent(String.self, forKey: .name)
       ?? URL(fileURLWithPath: decodedFolderPath).lastPathComponent
     folderPath = decodedFolderPath
+    lastKnownRepositoryIdentity = try container.decodeIfPresent(
+      String.self, forKey: .lastKnownRepositoryIdentity
+    )
     guard folderPath.hasPrefix("/"), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else {
       throw DecodingError.dataCorruptedError(
@@ -247,6 +254,7 @@ struct Project: Codable, Identifiable {
     try container.encode(id, forKey: .id)
     try container.encode(name, forKey: .name)
     try container.encode(folderPath, forKey: .folderPath)
+    try container.encodeIfPresent(lastKnownRepositoryIdentity, forKey: .lastKnownRepositoryIdentity)
     try container.encode(sessions, forKey: .sessions)
     try container.encode(terminals, forKey: .terminals)
     try container.encode(isExpanded, forKey: .isExpanded)

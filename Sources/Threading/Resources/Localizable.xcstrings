@@ -11028,6 +11028,17 @@
         }
       }
     },
+    "Checkout unavailable at this path" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utcheckningen är inte tillgänglig på den här sökvägen"
+          }
+        }
+      }
+    },
     "Checkpoint incomplete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11228,6 +11239,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj ett projekt…"
+          }
+        }
+      }
+    },
+    "Choose a repository already in the sidebar." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett förråd som redan finns i sidofältet."
           }
         }
       }
@@ -21850,6 +21872,17 @@
         }
       }
     },
+    "Group" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gruppera"
+          }
+        }
+      }
+    },
     "Group Sessions by Branch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21857,6 +21890,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gruppera konversationer efter gren"
+          }
+        }
+      }
+    },
+    "Group Under Repository…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gruppera under förråd…"
           }
         }
       }

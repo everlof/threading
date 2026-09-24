@@ -24,6 +24,10 @@ final class SidebarWorktreePathTests: HostedStoreTestCase {
         controller.sidebarViewController.mountInitialTreeIfNeeded()
         controller.projectSidebar(controller.sidebarViewController, didSelectProject: project.id)
         let content = try XCTUnwrap(window.contentView)
+        let greeting = try XCTUnwrap(
+            descendants(content).compactMap { $0 as? MorphingMultilineTitleLabel }.first
+        )
+        greeting.setStringValue("What are we building today?", animated: false)
         let priorTheme = AppThemePalette.current
         defer { AppThemePalette.set(priorTheme) }
         AppThemePalette.set(.system)
@@ -45,6 +49,37 @@ final class SidebarWorktreePathTests: HostedStoreTestCase {
             XCTAssertEqual(pathLabel.stringValue, "[\(PathAbbreviation.abbreviatingHome(in: project.folderPath))]")
             XCTAssertEqual(pathLabel.toolTip, project.folderPath)
             XCTAssertGreaterThan(pathLabel.frame.width, 0)
+            let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: output).appendingPathComponent("sidebar-worktree-\(name).png"))
+        }
+
+        let removedCheckout = directory.appendingPathComponent("sonda-removed-worktree")
+        try FileManager.default.createDirectory(at: removedCheckout, withIntermediateDirectories: true)
+        try Data("gitdir: \(checkout.path)/.git/worktrees/removed\n".utf8)
+            .write(to: removedCheckout.appendingPathComponent(".git"))
+        let removedProject = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: removedCheckout))
+        XCTAssertNotNil(removedProject.lastKnownRepositoryIdentity)
+        try FileManager.default.removeItem(at: removedCheckout)
+        GitInfo.invalidateCache(for: removedCheckout.path)
+        controller.sidebarViewController.reload()
+        RunLoop.current.run(until: Date().addingTimeInterval(Design.Motion.standard + 0.2))
+
+        for (name, appearance) in [
+            ("unavailable-light", NSAppearance.Name.aqua),
+            ("unavailable-dark", NSAppearance.Name.darkAqua)
+        ] {
+            controller.splitViewController.splitView.setPosition(360, ofDividerAt: 0)
+            content.appearance = NSAppearance(named: appearance)
+            AppThemeRefresh.repaint(content)
+            content.layoutSubtreeIfNeeded()
+            let unavailableMark = try XCTUnwrap(descendants(content).compactMap { $0 as? NSImageView }
+                .first {
+                    $0.accessibilityIdentifier() == "sidebar.project.checkout-unavailable"
+                        && !$0.isHidden
+                })
+            XCTAssertEqual(unavailableMark.accessibilityLabel(), "Checkout unavailable at this path")
             let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: bitmap)
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))

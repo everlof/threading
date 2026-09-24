@@ -8,13 +8,17 @@ import AppKit
 enum ProjectFolderPrompt {
 
     /// Asks for an existing folder to adopt as a project.
-    static func chooseExistingFolder(completion: @escaping (URL) -> Void) {
+    static func chooseExistingFolder(
+        prompt: String = L10n.string("Add Project"),
+        message: String = L10n.string("Choose a folder to add as a project."),
+        completion: @escaping (URL) -> Void
+    ) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = L10n.string("Add Project")
-        panel.message = L10n.string("Choose a folder to add as a project.")
+        panel.prompt = prompt
+        panel.message = message
 
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }

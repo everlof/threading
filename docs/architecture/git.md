@@ -7,11 +7,15 @@ and managed publication live behind the separate
 [source-control provider boundary](source-control.md); this file owns local Git only.
 
 Git discovery requires the requested path to exist before walking its ancestors. A saved
-project whose nested worktree was removed must not inherit the containing checkout’s repository
-identity or branch. After the normal cache invalidation, it resolves as unavailable and the
-sidebar retains the saved project name and chats outside the parent repository group. Existing
-subdirectories still resolve to their containing checkout. `GitMissingCheckoutTests` covers
-the missing path, refresh after deletion, and the production sidebar tree.
+project whose nested worktree was removed must not inherit the containing checkout’s live
+repository identity or branch. The project record keeps the last repository identity Git
+verified for it, so the sidebar can leave its checkout and chats under that repository while
+the path is unavailable. This remembered value is presentation only: checkout menus and session
+routing still require a live checkout, and the row shows an unavailable mark. Older records with
+no saved identity and no working checkout remain standalone; their project menu offers **Group
+Under Repository…**, which chooses an already-added repository without changing the execution
+path. Existing subdirectories still resolve to their containing checkout. `GitMissingCheckoutTests`
+covers missing paths, persisted grouping and the legacy repair.
 
 `GitInfo` reads git metadata from disk rather than shelling out. Three layouts matter, and
 only the first has a `.git` *directory*:
@@ -67,8 +71,9 @@ headings. Every other branch under a checkout keeps its heading: a checkout can 
 a chat records the branch it **ran** on, so those rows are genuinely on another branch and the
 heading is the only thing saying so.
 
-The root borrows a record from one of its checkouts — `RepoGroupNode.representativeProjectID`, the
-main worktree when one has been added — to draw its icon and to aim its `+`. A repository has no
+The root borrows a record from one of its available checkouts —
+`RepoGroupNode.representativeProjectID`, the main worktree when available — to draw its icon and
+to aim its `+`. If all saved checkouts are unavailable, there is no `+` target. A repository has no
 record of its own; the alternative was a second place to store a repository's icon, which would
 then disagree with the icon set on the checkout. A root the user folds away stays folded across
 launches (`SidebarDefaults.collapsedRepositoriesKey`, through `PreferenceStore`), unlike a branch
@@ -1169,4 +1174,3 @@ rules above — `--no-optional-locks`, no textconv or external diff — hold rem
 drift. A host without git, a folder that is not a repository and a folder that does not exist are
 each their own answer. Nothing can watch a folder on another machine, so the remote pane refreshes
 when shown, at a turn's end and on demand. The other modes say they are not offered remotely yet.
-

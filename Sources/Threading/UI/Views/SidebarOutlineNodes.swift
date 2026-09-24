@@ -247,7 +247,8 @@ final class RepoGroupNode: NSObject {
 
     /// The checkout that answers for the repository where a row needs a record rather than an
     /// identity: whose icon the root draws, and where its `+` starts a chat. The main worktree
-    /// when one has been added, otherwise the first checkout in the user's own order.
+    /// when available, otherwise the first available checkout in the user's own order. Nil
+    /// when every checkout is unavailable, so `+` cannot target a missing path.
     ///
     /// A repository has no record of its own — only checkouts do — so this is the alternative
     /// to inventing a second place to store a repository's icon, which would then disagree with
@@ -483,26 +484,30 @@ enum SidebarTreeBuilder {
         // what keeps it out of a repository heading — and, just as importantly, keeps it from
         // *causing* one: counted as a checkout, it would drag a project the user added inside it
         // under a heading that exists only because the scratchpad is there.
-        let identities = arranged.map { project in
+        let repositoryContexts: [(identity: String?, available: Bool)] = arranged.map { project in
             let isScratchpad = NativeSidebarParity.fact(
                 .projectScratchpad,
                 project.isTheScratchpad
             )
+            if isScratchpad { return (nil, false) }
             let localRepositoryPath = NativeSidebarParity.host(
                 .localRepositoryContext,
                 project.folderPath
             )
-            return isScratchpad
-                ? nil
-                : NativeSidebarParity.host(
-                    .localRepositoryContext,
-                    GitInfo.repositoryIdentity(for: localRepositoryPath)
-                )
+            let rememberedIdentity = NativeSidebarParity.host(
+                .localRepositoryContext,
+                project.lastKnownRepositoryIdentity
+            )
+            let liveIdentity = NativeSidebarParity.host(
+                .localRepositoryContext,
+                GitInfo.repositoryIdentity(for: localRepositoryPath)
+            )
+            return (liveIdentity ?? rememberedIdentity, liveIdentity != nil)
         }
         var roots: [NSObject] = []
         var groupsByIdentity: [String: RepoGroupNode] = [:]
 
-        for (project, identity) in zip(arranged, identities) {
+        for (project, context) in zip(arranged, repositoryContexts) {
             // Standalone terminals are not sessions and cannot be snoozed, so they stay in the
             // ordinary attention view and never leak into the dedicated Snoozed scope.
             let terminals = NativeSidebarParity.facts(
@@ -518,7 +523,7 @@ enum SidebarTreeBuilder {
                 visibility: visibilityScope,
                 excludingSessionIDs: transientExclusions,
                 date: evaluationDate,
-                checkoutBranch: identity == nil ? nil : checkoutBranch(of: project),
+                checkoutBranch: context.identity == nil ? nil : checkoutBranch(of: project),
                 factSnapshot: registeredFactSnapshot,
                 chatPreviewStage: previewStages[
                     NativeSidebarParity.host(.entityIdentity, project.id)
@@ -526,7 +531,7 @@ enum SidebarTreeBuilder {
                 revealingSessionIDs: revealedSessions
             )
 
-            guard let identity else {
+            guard let identity = context.identity else {
                 roots.append(node)
                 continue
             }
@@ -541,6 +546,9 @@ enum SidebarTreeBuilder {
 
             if let group = groupsByIdentity[identity] {
                 group.projectNodes.append(node)
+                if group.representativeProjectID == nil && context.available {
+                    group.representativeProjectID = node.projectID
+                }
                 if speaksForTheRepository {
                     group.adopt(
                         named: NativeSidebarParity.fact(.projectName, project.name),
@@ -558,9 +566,9 @@ enum SidebarTreeBuilder {
                 )
             )
             group.projectNodes.append(node)
-            // A first checkout stands in until the main working tree turns up, so a root is
-            // never left with nothing to draw or aim its `+` at.
-            group.representativeProjectID = node.projectID
+            // An available checkout stands in until the main working tree turns up. A root
+            // containing only missing checkouts has no safe target for `+`.
+            group.representativeProjectID = context.available ? node.projectID : nil
             if speaksForTheRepository {
                 group.adopt(
                     named: NativeSidebarParity.fact(.projectName, project.name),
