@@ -626,7 +626,7 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
     }
 }
 
-private actor SimulatorRecoveryStreamCoordinatorFake: SimulatorLiveStreamCoordinating {
+actor SimulatorRecoveryStreamCoordinatorFake: SimulatorLiveStreamCoordinating {
     private var results: [Result<SimulatorRecoveryStreamSessionFake, SimulatorLiveStreamError>]
     private(set) var requestedDeviceIDs: [SimulatorDeviceID] = []
 
@@ -645,7 +645,7 @@ private actor SimulatorRecoveryStreamCoordinatorFake: SimulatorLiveStreamCoordin
     }
 }
 
-private final class SimulatorRecoveryStreamSessionFake: SimulatorLiveStreamSession,
+final class SimulatorRecoveryStreamSessionFake: SimulatorLiveStreamSession,
     @unchecked Sendable {
     let events: AsyncStream<SimulatorLiveStreamEvent>
 
@@ -728,7 +728,7 @@ private final class SimulatorShortcutFocusProbe: NSView {
 }
 
 @MainActor
-private final class SimulatorRecoveryInputAuthorizerFake: SimulatorInputAuthorizing {
+final class SimulatorRecoveryInputAuthorizerFake: SimulatorInputAuthorizing {
     private(set) var resetCount = 0
     private(set) var authorizationCount = 0
     private var storedDecision: Bool?
@@ -757,7 +757,7 @@ private final class SimulatorRecoveryInputAuthorizerFake: SimulatorInputAuthoriz
     }
 }
 
-private actor SimulatorRecoveryControlFake: SimulatorControlling {
+actor SimulatorRecoveryControlFake: SimulatorControlling {
     private(set) var prepareCount = 0
     private(set) var screenshotCount = 0
     private(set) var installObservedTransportStopped: Bool?
@@ -818,7 +818,7 @@ private actor SimulatorRecoveryControlFake: SimulatorControlling {
         + "ScLhWQAAAABJRU5ErkJggg=="
 }
 
-private let simulatorRecoveryFirstDevice = SimulatorDevice(
+let simulatorRecoveryFirstDevice = SimulatorDevice(
     id: SimulatorDeviceID("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
     name: "iPhone 17 Pro",
     runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
@@ -829,7 +829,7 @@ private let simulatorRecoveryFirstDevice = SimulatorDevice(
     lastBootedAt: nil
 )
 
-private let simulatorRecoverySecondDevice = SimulatorDevice(
+let simulatorRecoverySecondDevice = SimulatorDevice(
     id: SimulatorDeviceID("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!,
     name: "iPhone Air",
     runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",

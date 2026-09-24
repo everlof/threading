@@ -3447,7 +3447,7 @@ uses a slower screenshot preview if that live connection is unavailable.
 Agents are told to prefer this route. They choose the device in the panel, build for the exact
 destination Threading returns, install and launch the resulting app there, and inspect it in the
 same place. Input asks for permission once per exact device for this Threading launch. Hiding the
-tab pauses live capture, and a tab left hidden for about fifteen seconds lets its live connection
+tab pauses live capture (unless its presenter window is open or a recording is running), and a tab left hidden for about fifteen seconds lets its live connection
 go, so the sessions you are looking at always get one; showing it again reconnects. An agent can
 keep using a tab in a session you are not looking at, which reconnects for as long as it needs to.
 An agent's screenshot of a visible tab is read from the live picture, so it does not interrupt the
@@ -3468,24 +3468,65 @@ the live connection is gone. Hover it to see which transport is carrying the pic
 
 A click on a visible fallback frame asks to reconnect and preserves the intended tap, but Threading
 does not send it until the direct device connection and permission are
-both in place. The hand control beside Refresh enables control without spending a tap. If you
-previously chose not to allow control, press that hand explicitly to ask again; repeated screen
-clicks do not keep presenting the permission sheet.
+both in place. The pointer control beside Refresh enables control without spending a tap. If you
+previously chose not to allow control, its glyph is crossed out; press it explicitly to ask again;
+repeated screen clicks do not keep presenting the permission sheet.
 
-**Option-click** the device to add a note without switching modes. Save or cancel the note
-and continue interacting with the device. To place several notes, use the annotate button:
-its selected state and **Annotating · Esc to finish** control show that clicks place pins.
-Press **Escape** to cancel an open editor, then again to leave annotation mode, or click the
-mode indicator to finish. **Enable Simulator Annotations** and **Disable Simulator Annotations**
-are available in the command palette and View menu; assign shortcuts in **Settings → Keyboard**.
-The screen's keyboard/accessibility press places a centered pin while annotation mode is enabled.
-Right-click the annotate button to copy the annotated frame or clear all notes.
-**Send** (or **⌘Return** in the pane) sends the pending notes. Delivered pins disappear once the
-message is sent or queued; failed sends and notes added or edited during delivery stay pending.
+**The toolbar, left to right:** the camera saves a screenshot, the record button records a video,
+the hand shows touches, the speech bubble annotates, the accessibility figure outlines the screen's
+elements, the window button opens the presenter window, then device control and Refresh. The
+device's appearance toggle sits with the hardware buttons under the screen.
 
-Hold **Control** to change the camera button to **Copy Snapshot**, then click to copy the
-device image to the clipboard. Release Control to return to saving a snapshot. Right-click
-keeps the capture options available; during recording the button still stops recording.
+**Right-click the device** (or Control-click) for everything the pane can do to it: copy, save or
+save-as a screenshot, start or stop a recording, add a note exactly where you clicked, send, copy or
+clear notes, show touches and change their style, inspect elements, and open the presenter window.
+Right-click a note's pin to edit or delete that one note. Keyboard users reach the same menu with
+VoiceOver's Show Menu on the screen.
+
+Hold **Control** to change the camera button to **Copy Screenshot**, then click to copy the
+device image to the clipboard. Release Control to return to saving a screenshot, which lands in
+Pictures ▸ Threading and is revealed in Finder. Right-click the camera for Copy, Save and Save As….
+
+**Recording.** Press the record button to record what the pane shows — touches included when they
+are drawn. While a recording runs you cannot miss it: a red **REC 1:07** badge sits over the device,
+the screen wears a red ring, the status line reads **Recording** with the time, and the record button
+becomes a stop button. Click the badge or the button to stop; the movie lands in Movies ▸ Threading
+and is revealed in Finder. Right-click the record button for **Record High-Quality Video**, which
+captures full resolution from Simulator itself but without touch marks. A recording keeps the
+device's live picture flowing even if you switch to another session, and closing the tab or
+choosing another device finishes the movie rather than leaving it unplayable.
+
+**Touches.** The hand button draws your taps and swipes — and the agent's — over the device. The
+choice is remembered, so touches stay on for the next session you present. Right-click the hand
+(or use **Touch Style** in the screen's menu) to pick a colour, a size, and whether swipes leave a
+trail. The same style is drawn in the pane, in the presenter window and in recordings, and marks are
+sized relative to the screen, so a finger in the saved movie is the size it was on screen.
+
+**Presenter window, for Meet, Zoom and screen recordings.** The window button opens the device alone
+in a window of its own, sized to the device and titled with its name (for example "iPhone 17 Pro
+Simulator"), so it is the obvious choice in a share picker. It mirrors the pane: touches show there
+when they are on, and you can click, drag, scroll and type on it as on the pane, including the
+Simulator shortcuts. It keeps a live picture even when you switch to another session. Right-click
+it for capture, recording, touch style, **Keep on Top**, and **Close Presenter Window**; ⌘W closes it
+too. Closing the Simulator tab closes it.
+
+**Notes.** **Option-click** the device to add a note without switching modes, or right-click and
+choose **Add Note Here**. Save or cancel the note and continue interacting with the device. To place
+several notes, press the annotate button: a band under the toolbar says that clicks now pin notes,
+that pointing at a pin and pressing **Delete** removes it, and offers **Clear All** once there are
+notes; its ✕ ends annotation mode. Press **Escape** to cancel an open editor, then again to leave
+annotation mode. The annotate button's
+tooltip counts the notes still waiting to be sent. **Enable Simulator Annotations** and **Disable
+Simulator Annotations** are available in the command palette and View menu; assign shortcuts in
+**Settings → Keyboard**. The screen's keyboard/accessibility press places a centered pin while
+annotation mode is enabled. Right-click the annotate button to send, copy the annotated screenshot
+or clear all notes. **Send** (or **⌘Return** in the pane) sends the pending notes. Delivered pins
+disappear once the message is sent or queued; failed sends and notes added or edited during
+delivery stay pending.
+
+**Start or Stop Simulator Recording**, **Show or Hide Simulator Touches** and **Open or Close
+Simulator Presenter Window** are commands too — in the command palette and the View menu, with no
+default shortcut; assign one in **Settings → Keyboard**.
 
 The device chip switches between available iPhones without creating another kind of window. A
 helper or Xcode compatibility failure stays in the tab, with a reason and retry; Threading never

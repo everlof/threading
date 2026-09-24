@@ -52,11 +52,15 @@ final class SimulatorStreamRecorder {
         self.height = evenHeight
     }
 
-    func append(image: CGImage, indicators: SimulatorTouchIndicators?) {
+    func append(
+        image: CGImage,
+        indicators: SimulatorTouchIndicators?,
+        style: SimulatorTouchStyle = .standard
+    ) {
         guard !finished, input.isReadyForMoreMediaData,
               let pool = adaptor.pixelBufferPool,
               let composited = Self.composite(
-                frame: image, indicators: indicators, width: width, height: height
+                frame: image, indicators: indicators, style: style, width: width, height: height
               ) else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
@@ -102,6 +106,7 @@ final class SimulatorStreamRecorder {
     private static func composite(
         frame: CGImage,
         indicators: SimulatorTouchIndicators?,
+        style: SimulatorTouchStyle,
         width: Int,
         height: Int
     ) -> CGImage? {
@@ -115,7 +120,7 @@ final class SimulatorStreamRecorder {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         NSImage(cgImage: frame, size: rect.size).draw(in: rect)
-        if let indicators { SimulatorTouchMarks.draw(indicators, in: rect) }
+        if let indicators { SimulatorTouchMarks.draw(indicators, in: rect, style: style) }
         NSGraphicsContext.restoreGraphicsState()
         return rep.cgImage
     }

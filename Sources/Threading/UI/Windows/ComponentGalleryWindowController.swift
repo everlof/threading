@@ -158,6 +158,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SidebarBackdropView",
         "SidebarBrandView",
         "SidebarEdgeRevealCoordinator",
+        "SimulatorRecordingBadge",
         "SimulatorScreenView",
         "SplitButtonView",
         "SplitIconButtonView",
@@ -2991,6 +2992,12 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSimulatorScreenSample()
                 ),
                 story(
+                    "SimulatorRecordingBadge",
+                    "A running recording over the device it records, and its stop control; "
+                        + "saving refuses a second stop.",
+                    makeRecordingBadgeSample()
+                ),
+                story(
                     "HoverPopoverScheduler",
                     "Hover timing as configured policy: instant, dwell, and dwell with a grace that holds.",
                     hoverPolicies
@@ -3402,6 +3409,20 @@ final class ComponentGalleryViewController: NSViewController {
             screen.heightAnchor.constraint(equalToConstant: 390)
         ])
         return screen
+    }
+
+    private func makeRecordingBadgeSample() -> NSView {
+        let recording = SimulatorRecordingBadge()
+        recording.phase = .recording(elapsedSeconds: 72)
+        recording.onPress = { [weak self] in
+            self?.showReceipt(L10n.string("SimulatorRecordingBadge stopped the recording."))
+        }
+        let saving = SimulatorRecordingBadge()
+        saving.phase = .finishing
+        let row = NSStackView(views: [recording, saving])
+        row.orientation = .horizontal
+        row.spacing = Design.Spacing.medium
+        return row
     }
 
     private func makeHoverTrackingSample() -> NSView {

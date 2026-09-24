@@ -452,6 +452,17 @@
         }
       }
     },
+    "%@ Simulator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Simulator"
+          }
+        }
+      }
+    },
     "%@ UI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2417,6 +2428,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld behöver uppmärksamhet"
+          }
+        }
+      }
+    },
+    "%lld notes waiting to be sent (right-click for options)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld anteckningar väntar på att skickas (högerklicka för alternativ)"
           }
         }
       }
@@ -4496,6 +4518,17 @@
         }
       }
     },
+    "A running recording over the device it records, and its stop control; saving refuses a second stop." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En pågående inspelning över enheten den spelar in, och dess stoppkontroll; när den sparas nekas ett andra stopp."
+          }
+        }
+      }
+    },
     "A safe extension is sandboxed and Foundation-only. A companion executable must declare each capability it wants, and Threading requests only the grants that its reviewed capabilities cover." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5046,6 +5079,17 @@
         }
       }
     },
+    "Accent Color" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accentfärg"
+          }
+        }
+      }
+    },
     "Accept" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5571,6 +5615,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till inloggning"
+          }
+        }
+      }
+    },
+    "Add Note Here" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till anteckning här"
           }
         }
       }
@@ -7121,6 +7176,17 @@
         }
       }
     },
+    "Annotate Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annotera enhet"
+          }
+        }
+      }
+    },
     "Annotate Page" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7172,17 +7238,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kommenterar"
-          }
-        }
-      }
-    },
-    "Annotating · Esc to finish" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kommenterar · Esc för att avsluta"
           }
         }
       }
@@ -11970,6 +12025,28 @@
         }
       }
     },
+    "Clear All" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa alla"
+          }
+        }
+      }
+    },
+    "Clear All Notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa alla anteckningar"
+          }
+        }
+      }
+    },
     "Clear Browsing Data" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12043,17 +12120,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rensa webbplatsdata för %@?"
-          }
-        }
-      }
-    },
-    "Clear all notes" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rensa alla anteckningar"
           }
         }
       }
@@ -12208,6 +12274,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klicka på kortkommandot för att ändra"
+          }
+        }
+      }
+    },
+    "Click the device to pin a note. Delete removes the pin under the pointer; Esc finishes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klicka på enheten för att fästa en anteckning. Delete tar bort nålen under pekaren; Esc avslutar."
           }
         }
       }
@@ -12390,6 +12467,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng uppblåsning"
+          }
+        }
+      }
+    },
+    "Close Presenter Window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng presentatörsfönstret"
           }
         }
       }
@@ -13079,6 +13167,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fällde ihop avancerade detaljer."
+          }
+        }
+      }
+    },
+    "Color" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Färg"
           }
         }
       }
@@ -14668,24 +14767,24 @@
         }
       }
     },
-    "Copied annotated frame" : {
+    "Copied annotated screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kopierade annoterad bild"
+            "value" : "Kopierade annoterad skärmbild"
           }
         }
       }
     },
-    "Copied snapshot" : {
+    "Copied screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kopierade ögonblicksbild"
+            "value" : "Kopierade skärmbild"
           }
         }
       }
@@ -14697,6 +14796,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera"
+          }
+        }
+      }
+    },
+    "Copy Annotated Screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera annoterad skärmbild"
           }
         }
       }
@@ -14921,6 +15031,17 @@
         }
       }
     },
+    "Copy Screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera skärmbild"
+          }
+        }
+      }
+    },
     "Copy Session ID" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14932,17 +15053,6 @@
         }
       }
     },
-    "Copy Snapshot" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kopiera ögonblicksbild"
-          }
-        }
-      }
-    },
     "Copy View-Only Link" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14950,17 +15060,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera endast-visningslänk"
-          }
-        }
-      }
-    },
-    "Copy annotated frame" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kopiera annoterad bild"
           }
         }
       }
@@ -15307,13 +15406,13 @@
         }
       }
     },
-    "Could not save the snapshot" : {
+    "Could not save the screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kunde inte spara ögonblicksbilden"
+            "value" : "Kunde inte spara skärmbilden"
           }
         }
       }
@@ -16831,6 +16930,17 @@
         }
       }
     },
+    "Delete Note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radera anteckning"
+          }
+        }
+      }
+    },
     "Delete Session" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17898,6 +18008,28 @@
         }
       }
     },
+    "Draw taps and swipes over the device, yours and the agent's" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rita tryck och svep över enheten, dina och agentens"
+          }
+        }
+      }
+    },
+    "Draws taps and swipes over the device, in the pane and when shared." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ritar tryck och svep över enheten, i panelen och när den delas."
+          }
+        }
+      }
+    },
     "Drive the user's Chrome automation profile inside an allowed origin list." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18114,6 +18246,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redigera anteckning %lld"
+          }
+        }
+      }
+    },
+    "Edit Note…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera anteckning…"
           }
         }
       }
@@ -20639,17 +20782,6 @@
         }
       }
     },
-    "Finishing recording…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Avslutar inspelning…"
-          }
-        }
-      }
-    },
     "First choice" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21186,6 +21318,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fullständigt namn"
+          }
+        }
+      }
+    },
+    "Full resolution from Simulator, without touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full upplösning från Simulator, utan tryck"
           }
         }
       }
@@ -22346,6 +22489,17 @@
         }
       }
     },
+    "Hide Touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dölj tryck"
+          }
+        }
+      }
+    },
     "Hide changed files" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23475,6 +23629,17 @@
         }
       }
     },
+    "Inspect Elements" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inspektera element"
+          }
+        }
+      }
+    },
     "Inspect Geometry" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24428,6 +24593,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Håll det under %@"
+          }
+        }
+      }
+    },
+    "Keep on Top" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Håll överst"
           }
         }
       }
@@ -29835,6 +30011,17 @@
         }
       }
     },
+    "Note %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anteckning %lld"
+          }
+        }
+      }
+    },
     "Nothing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31067,6 +31254,17 @@
         }
       }
     },
+    "Open Presenter Window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna presentatörsfönster"
+          }
+        }
+      }
+    },
     "Open Session Info" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31474,6 +31672,17 @@
         }
       }
     },
+    "Open or Close Simulator Presenter Window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna eller stäng simulatorns presentatörsfönster"
+          }
+        }
+      }
+    },
     "Open or search, optionally returning at commit or DOM readiness." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31602,6 +31811,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna dagens fönster när din dag börjar, inte när du hinner dit."
+          }
+        }
+      }
+    },
+    "Open the device alone in its own window, to share in Meet or Zoom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna enheten ensam i ett eget fönster, för att dela i Meet eller Zoom"
           }
         }
       }
@@ -31833,6 +32053,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Opus · 1M"
+          }
+        }
+      }
+    },
+    "Orange" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Orange"
           }
         }
       }
@@ -32703,6 +32934,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fäst egna anteckningar på enheten"
+          }
+        }
+      }
+    },
+    "Pink" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rosa"
           }
         }
       }
@@ -34847,6 +35089,17 @@
         }
       }
     },
+    "REC %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "REC %@"
+          }
+        }
+      }
+    },
     "Rain-blue chrome for long sessions." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35573,6 +35826,17 @@
         }
       }
     },
+    "Record High-Quality Video" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spela in video i hög kvalitet"
+          }
+        }
+      }
+    },
     "Record Video" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35584,24 +35848,13 @@
         }
       }
     },
-    "Record Video (High Quality)" : {
+    "Record a video of the device with its touches (right-click for options)" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Spela in video (hög kvalitet)"
-          }
-        }
-      }
-    },
-    "Record Video with Touches" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spela in video med tryck"
+            "value" : "Spela in en video av enheten med dess tryck (högerklicka för alternativ)"
           }
         }
       }
@@ -35661,6 +35914,17 @@
         }
       }
     },
+    "Recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spelar in"
+          }
+        }
+      }
+    },
     "Recording %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35668,6 +35932,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spelar in %@"
+          }
+        }
+      }
+    },
+    "Records the adopted Simulator with its touches." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spelar in den anslutna simulatorn med dess tryck."
           }
         }
       }
@@ -38711,35 +38986,35 @@
         }
       }
     },
-    "Save Snapshot" : {
+    "Save Screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Spara ögonblicksbild"
+            "value" : "Spara skärmbild"
           }
         }
       }
     },
-    "Save Snapshot As…" : {
+    "Save Screenshot As…" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Spara ögonblicksbild som…"
+            "value" : "Spara skärmbild som…"
           }
         }
       }
     },
-    "Save a snapshot of the device (hold Control to copy; right-click for options)" : {
+    "Save a screenshot of the device (hold Control to copy; right-click for options)" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Spara en ögonblicksbild av enheten (håll Control för att kopiera; högerklicka för alternativ)"
+            "value" : "Spara en skärmbild av enheten (håll ned Control för att kopiera; högerklicka för alternativ)"
           }
         }
       }
@@ -38788,17 +39063,6 @@
         }
       }
     },
-    "Save snapshot" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spara ögonblicksbild"
-          }
-        }
-      }
-    },
     "Saved" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38832,13 +39096,13 @@
         }
       }
     },
-    "Saved snapshot" : {
+    "Saved screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sparade ögonblicksbild"
+            "value" : "Sparade skärmbild"
           }
         }
       }
@@ -38905,6 +39169,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparande är fortfarande pausat; försök återställa igen."
+          }
+        }
+      }
+    },
+    "Saving recording…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparar inspelning…"
+          }
+        }
+      }
+    },
+    "Saving…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparar…"
           }
         }
       }
@@ -40098,6 +40384,17 @@
         }
       }
     },
+    "Send %lld Notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka %lld anteckningar"
+          }
+        }
+      }
+    },
     "Send (%lld)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40122,6 +40419,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka kod"
+          }
+        }
+      }
+    },
+    "Send Notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka anteckningar"
           }
         }
       }
@@ -41659,6 +41967,28 @@
         }
       }
     },
+    "Show Swipe Trail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa svepspår"
+          }
+        }
+      }
+    },
+    "Show Touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa tryck"
+          }
+        }
+      }
+    },
     "Show a Git Review with changed files first." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41996,6 +42326,17 @@
         }
       }
     },
+    "Show or Hide Simulator Touches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa eller dölj simulatortryck"
+          }
+        }
+      }
+    },
     "Show or Hide the Display Panel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42117,13 +42458,13 @@
         }
       }
     },
-    "Show taps and swipes on the device" : {
+    "Show taps and swipes on the device (right-click for style)" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Visa tryck och svep på enheten"
+            "value" : "Visa tryck och svep på enheten (högerklicka för stil)"
           }
         }
       }
@@ -42223,17 +42564,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa sessionens konfiguration och tokenanvändning"
-          }
-        }
-      }
-    },
-    "Show touches" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Visa tryck"
           }
         }
       }
@@ -42405,6 +42735,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visar “%@”"
+          }
+        }
+      }
+    },
+    "Shows the device alone in its own window, to share in Meet or Zoom." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar enheten ensam i ett eget fönster, för att dela i Meet eller Zoom."
           }
         }
       }
@@ -42860,6 +43201,28 @@
         }
       }
     },
+    "SimulatorRecordingBadge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorRecordingBadge"
+          }
+        }
+      }
+    },
+    "SimulatorRecordingBadge stopped the recording." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SimulatorRecordingBadge stoppade inspelningen."
+          }
+        }
+      }
+    },
     "SimulatorScreenView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42933,6 +43296,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En enda sida (.html)"
+          }
+        }
+      }
+    },
+    "Size" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Storlek"
           }
         }
       }
@@ -43021,6 +43395,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Långsammaste testerna"
+          }
+        }
+      }
+    },
+    "Small" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Liten"
           }
         }
       }
@@ -43795,6 +44180,17 @@
         }
       }
     },
+    "Start or Stop Simulator Recording" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta eller stoppa simulatorinspelning"
+          }
+        }
+      }
+    },
     "Start over with empty context; this session stays resumable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44202,6 +44598,17 @@
         }
       }
     },
+    "Stop Recording (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa inspelning (%@)"
+          }
+        }
+      }
+    },
     "Stop Sharing Chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44242,6 +44649,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stanna och vänta på mig"
+          }
+        }
+      }
+    },
+    "Stop annotating (Esc)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sluta annotera (Esc)"
           }
         }
       }
@@ -44303,17 +44721,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stoppa sidaladdning"
-          }
-        }
-      }
-    },
-    "Stop recording" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stoppa inspelning"
           }
         }
       }
@@ -53364,6 +53771,17 @@
         }
       }
     },
+    "Touch Style" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryckstil"
+          }
+        }
+      }
+    },
     "Trace the session lifecycle" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56428,6 +56846,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vad notisen säger"
+          }
+        }
+      }
+    },
+    "What the pane shows, touches included" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det panelen visar, med tryck"
           }
         }
       }

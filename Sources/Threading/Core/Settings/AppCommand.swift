@@ -146,6 +146,9 @@ enum AppCommands {
         static let jumpToReviewFile = "review.jumpToFile"
         static let enableSimulatorAnnotations = "simulator.annotations.enable"
         static let disableSimulatorAnnotations = "simulator.annotations.disable"
+        static let toggleSimulatorRecording = "simulator.recording.toggle"
+        static let toggleSimulatorTouches = "simulator.touches.toggle"
+        static let toggleSimulatorPresenter = "simulator.presenter.toggle"
         static let saveBaseline = "view.saveBaseline"
         static let sessionInfo = "view.info"
         static let shell = "view.shell"
@@ -316,9 +319,23 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "j", modifiers: .command), isEditable: true,
                    scope: .session),
         AppCommand(id: ID.enableSimulatorAnnotations, group: .view, title: "Enable Simulator Annotations",
-                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "note.text"),
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "plus.bubble"),
         AppCommand(id: ID.disableSimulatorAnnotations, group: .view, title: "Disable Simulator Annotations",
-                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "note.text"),
+                   defaultShortcut: nil, isEditable: true, scope: .session, iconName: "plus.bubble"),
+        // No default chords: Simulator's own ⌘S/⌃⌘C would collide with app commands, and these
+        // earn a key only when someone assigns one on the shortcuts page.
+        AppCommand(id: ID.toggleSimulatorRecording, group: .view, title: "Start or Stop Simulator Recording",
+                   detail: "Records the adopted Simulator with its touches.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "record.circle"),
+        AppCommand(id: ID.toggleSimulatorTouches, group: .view, title: "Show or Hide Simulator Touches",
+                   detail: "Draws taps and swipes over the device, in the pane and when shared.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "hand.tap"),
+        AppCommand(id: ID.toggleSimulatorPresenter, group: .view, title: "Open or Close Simulator Presenter Window",
+                   detail: "Shows the device alone in its own window, to share in Meet or Zoom.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "macwindow.on.rectangle"),
         // No default chord. It is a real command with a real menu item, and the plan it comes from
         // is explicit that a baseline capture has not yet earned permanent space — not on the
         // browser strip, and not in the app's small stock of unclaimed two-modifier keys. The

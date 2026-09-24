@@ -115,6 +115,38 @@ final class SimulatorScreenView: ThemedControl {
         }
     }
 
+    /// How those marks look; the same value the recorder burns into a movie.
+    var touchStyle: SimulatorTouchStyle = .standard {
+        didSet {
+            guard touchStyle != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// While true the screen wears a ring in the live-status colour, so a running recording is
+    /// visible wherever the eye is on the device — not only on a toolbar button.
+    var isRecording = false {
+        didSet {
+            guard isRecording != oldValue else { return }
+            setAccessibilityValue(isRecording ? L10n.string("Recording") : nil)
+            needsDisplay = true
+        }
+    }
+
+    /// Where a secondary click (or Control-click) landed, for the feature's context menu.
+    struct ContextMenuRequest {
+        let anchor: ThemedMenuAnchor
+        /// The device point under the click, in the 0…1 tap space; nil off the framebuffer or
+        /// for a keyboard/accessibility request.
+        let point: CGPoint?
+        /// The note pin under the click, when there is one.
+        let noteID: ImageAnnotation.ID?
+    }
+
+    /// The screen's context menu. The feature decides what it offers — capture, recording, notes —
+    /// because those are its actions; returning false lets the click fall through.
+    var onContextMenu: ((ContextMenuRequest) -> Bool)?
+
     /// While on, a click pins or selects a note instead of touching the device.
     var isAnnotatingNotes = false {
         didSet {
@@ -226,9 +258,26 @@ final class SimulatorScreenView: ThemedControl {
         if let touchIndicators {
             NSGraphicsContext.saveGraphicsState()
             ThemedSurface.Shape(rect: target, radius: Design.Radius.control).path.addClip()
-            SimulatorTouchMarks.draw(touchIndicators, in: target)
+            SimulatorTouchMarks.draw(touchIndicators, in: target, style: touchStyle)
             NSGraphicsContext.restoreGraphicsState()
         }
+
+        if isRecording { drawRecordingRing(around: target) }
+    }
+
+    private static let recordingRingWidth: CGFloat = 2
+
+    /// Drawn inside the framebuffer's own corner so it reads as the screen's edge, and after every
+    /// overlay so nothing covers it.
+    private func drawRecordingRing(around target: NSRect) {
+        let width = Self.recordingRingWidth
+        let ring = ThemedSurface.Shape(
+            rect: target.insetBy(dx: width / 2, dy: width / 2),
+            radius: max(0, Design.Radius.control - width / 2)
+        ).path
+        ring.lineWidth = width
+        Design.Status.negative.setStroke()
+        ring.stroke()
     }
 
     /// The person's numbered note pins, in the app's shared annotation vocabulary. The view is not
@@ -454,8 +503,41 @@ final class SimulatorScreenView: ThemedControl {
         return best
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        guard !presentContextMenu(for: event) else { return }
+        super.rightMouseDown(with: event)
+    }
+
+    /// The pointerless route to the same menu, anchored to the screen itself.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let onContextMenu, image != nil else { return super.accessibilityPerformShowMenu() }
+        return onContextMenu(ContextMenuRequest(anchor: .control, point: nil, noteID: selectedNoteID))
+    }
+
+    private func presentContextMenu(for event: NSEvent) -> Bool {
+        guard let onContextMenu, image != nil else { return false }
+        let location = convert(event.locationInWindow, from: nil)
+        let point = normalizedPoint(location)
+        let noteID = imageRect.contains(location)
+            ? ImageAnnotationGeometry.annotationID(
+                at: location, among: noteMarks, in: imageRect, isFlipped: false
+              )
+            : nil
+        return onContextMenu(ContextMenuRequest(
+            anchor: .pointer(event.locationInWindow),
+            point: point,
+            noteID: noteID
+        ))
+    }
+
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
+
+        // Control-click is the Mac's secondary click; the device has no use for the modifier.
+        if event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .control,
+           presentContextMenu(for: event) {
+            return
+        }
 
         // Annotate mode pins or selects a note instead of touching the device.
         if isAnnotatingNotes || event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .option {

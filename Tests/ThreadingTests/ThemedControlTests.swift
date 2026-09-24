@@ -7978,6 +7978,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "SidebarBackdropView",
                 "SidebarBrandView",
                 "SidebarEdgeRevealCoordinator",
+                "SimulatorRecordingBadge",
                 "SimulatorScreenView",
                 "SplitButtonView",
                 "SplitIconButtonView",

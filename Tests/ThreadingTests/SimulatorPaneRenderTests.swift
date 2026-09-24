@@ -74,8 +74,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
             let capture = try XCTUnwrap(findCaptureButton(in: content))
             let originalTitle = capture.accessibilityTitle()
             sendModifiers(.control, to: fixture.window)
-            XCTAssertEqual(capture.accessibilityTitle(), L10n.string("Copy Snapshot"))
-            XCTAssertEqual(capture.toolTip, L10n.string("Copy Snapshot"))
+            XCTAssertEqual(capture.accessibilityTitle(), L10n.string("Copy Screenshot"))
+            XCTAssertEqual(capture.toolTip, L10n.string("Copy Screenshot"))
             settle(fixture.window)
             representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: representation)
@@ -92,6 +92,15 @@ final class SimulatorPaneRenderTests: XCTestCase {
 
             fixture.simulator.setAnnotatingNotes(true)
             settle(fixture.window)
+            let band = try XCTUnwrap(fixture.simulator.annotationBandForTesting)
+            let screenFrame = fixture.simulator.screenViewForTesting.convert(
+                fixture.simulator.screenViewForTesting.bounds, to: content
+            )
+            let bandFrame = band.convert(band.bounds, to: content)
+            XCTAssertFalse(
+                bandFrame.insetBy(dx: 1, dy: 1).intersects(screenFrame),
+                "The annotation band must push the device down, not cover it"
+            )
             representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: representation)
             try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
@@ -125,10 +134,116 @@ final class SimulatorPaneRenderTests: XCTestCase {
             )
             editor.onCancel?()
             XCTAssertTrue(screen.noteMarks.isEmpty)
+
+            // Recording, with touches drawn in a chosen style: the badge, the screen's ring and
+            // the status line all say so.
+            fixture.simulator.showRecordingPresentationForTesting(elapsedSeconds: 72)
+            screen.touchStyle = SimulatorTouchStyle(color: .yellow, size: .large, showsTrail: true)
+            screen.touchIndicators = Self.touchFixture
+            settle(fixture.window)
+            let badge = fixture.simulator.recordingBadgeForTesting
+            XCTAssertFalse(badge.isHidden)
+            XCTAssertEqual(badge.title, L10n.format("REC %@", "1:12"))
+            XCTAssertTrue(
+                screen.bounds.contains(badge.convert(badge.bounds, to: screen)),
+                "The recording badge must sit over the device it is recording"
+            )
+            XCTAssertTrue(screen.isRecording)
+            XCTAssertEqual(fixture.simulator.statusForTesting, L10n.format("Recording %@", "1:12"))
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-recording-system-\(appearance.name).png"
+                )
+            )
+            fixture.simulator.showRecordingPresentationForTesting(elapsedSeconds: nil)
+            screen.touchIndicators = nil
+            XCTAssertTrue(badge.isHidden)
+            XCTAssertFalse(screen.isRecording)
+
+            // The device's own right-click menu.
+            let secondary = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .rightMouseDown, location: location, modifierFlags: [],
+                timestamp: 0, windowNumber: fixture.window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+            screen.rightMouseDown(with: secondary)
+            settle(fixture.window)
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-menu-system-\(appearance.name).png"
+                )
+            )
         }
 
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
     }
+
+    /// The presenter window's content — the device alone, with touches — at the size it opens
+    /// at. Built and drawn offscreen: the window itself is never ordered on screen here.
+    func testRendersPresenterWindowContent() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory,
+            withIntermediateDirectories: true
+        )
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(.system)
+        let frame = try XCTUnwrap(NSImage(data: try makeDeviceFramePNG()))
+
+        for appearance in Render.appearances {
+            let content = SimulatorPresenterViewController()
+            let size = SimulatorPresenterViewController.contentSize(
+                forImageSize: frame.size,
+                height: 640
+            )
+            content.view.frame = NSRect(origin: .zero, size: size)
+            content.view.appearance = NSAppearance(named: appearance.value)
+            content.screenView.image = frame
+            content.screenView.touchStyle = SimulatorTouchStyle(color: .white, size: .medium, showsTrail: true)
+            content.screenView.touchIndicators = Self.touchFixture
+            AppThemeRefresh.repaint(content.view)
+            content.view.layoutSubtreeIfNeeded()
+
+            let screen = content.screenView
+            XCTAssertEqual(
+                screen.imageRect.width / screen.imageRect.height,
+                frame.size.width / frame.size.height,
+                accuracy: 0.01
+            )
+            XCTAssertEqual(
+                screen.imageRect.height, screen.bounds.height, accuracy: 1,
+                "A window sized for the device must show it without letterboxing"
+            )
+
+            let representation = try XCTUnwrap(
+                content.view.bitmapImageRepForCachingDisplay(in: content.view.bounds)
+            )
+            content.view.cacheDisplay(in: content.view.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-presenter-system-\(appearance.name).png"
+                )
+            )
+        }
+    }
+
+    /// A tap fading out and a finger mid-swipe with its trail.
+    private static let touchFixture = SimulatorTouchIndicators(
+        ripples: [.init(point: CGPoint(x: 0.3, y: 0.34), progress: 0.25)],
+        contact: .init(
+            point: CGPoint(x: 0.62, y: 0.62),
+            trail: [
+                CGPoint(x: 0.62, y: 0.44),
+                CGPoint(x: 0.62, y: 0.5),
+                CGPoint(x: 0.62, y: 0.56),
+                CGPoint(x: 0.62, y: 0.62),
+            ]
+        )
+    )
 
     /// The Push Test tab beside the same conversation, in the states a person meets:
     /// filled in from an agent's request in each theme, a refused request, and a shared chat

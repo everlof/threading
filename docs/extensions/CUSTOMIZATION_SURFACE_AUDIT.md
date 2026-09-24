@@ -70,6 +70,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls and command-line disclosure/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
 | Subagents navigator and child transcript | — | host-only | child identity/hierarchy, lifecycle and transcript availability, bounded paging, provider progress and usage truth, selection/reveal routing | Host-only |
 | In-panel iOS Simulator body | — | host-only | CoreSimulator device identity, boot lease and ownership, agent consent/routing, framebuffer/input authority, visibility budget and fallback truth | Host-only |
+| Simulator presenter window, recording badge and screen menu | — | host-only | The same device lease, consent route and stream demand as the pane; recording state; the touch style burned into shared and recorded pixels | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Private issue-report form | — | host-only | evidence selection and paste, review/removal, share-safe bounds, original-file custody, backend projection, delivery and outbox receipts | Host-only |
@@ -336,6 +337,15 @@ different device or claim live input while holding neither lease nor consent. Ex
 still decorate the surrounding `display.pane-header@1` and `display.tab-header@1`; a future safe
 device-status component begins with a typed brokered snapshot, not access to CoreSimulator or the
 framebuffer controller.
+
+The Simulator's presenter window, recording badge and screen context menu are host-only for the
+same reason: they are views of that one pane's truth, not new surfaces with their own. The
+presenter mirrors the pane's frames and hands its gestures back to the pane's consented input
+route, and it keeps the stream alive as a viewer; the badge is the stop control for a recording
+the pane owns; the menu's rows are the pane's own actions. A replacement could show a device the
+lease does not hold, or a "not recording" state over a running recording. The touch style is a
+user preference with fixed colours rather than a theme or extension seam, because it is burned
+into movies and shared pixels that outlive the app's theme.
 
 Image annotation persistence and publication remain deliberately host-owned inside the existing
 attachment-preview contract. A replacement preview may draw the file body, but it cannot replace

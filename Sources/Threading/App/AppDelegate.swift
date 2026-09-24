@@ -2590,6 +2590,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.saveBaseline, action: #selector(saveBrowserBaseline)))
         menu.addItem(commandItem(AppCommands.ID.enableSimulatorAnnotations, action: #selector(enableSimulatorAnnotations)))
         menu.addItem(commandItem(AppCommands.ID.disableSimulatorAnnotations, action: #selector(disableSimulatorAnnotations)))
+        menu.addItem(commandItem(AppCommands.ID.toggleSimulatorRecording, action: #selector(toggleSimulatorRecording)))
+        menu.addItem(commandItem(AppCommands.ID.toggleSimulatorTouches, action: #selector(toggleSimulatorTouches)))
+        menu.addItem(commandItem(AppCommands.ID.toggleSimulatorPresenter, action: #selector(toggleSimulatorPresenter)))
         menu.addItem(commandItem(AppCommands.ID.sessionInfo, action: #selector(openInfo)))
         menu.addItem(commandItem(AppCommands.ID.shell, action: #selector(toggleShell)))
         menu.addItem(commandItem(AppCommands.ID.displayPanel, action: #selector(toggleDisplayPanel)))
@@ -3092,6 +3095,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.displayPaneController.currentSimulator?.canAnnotateNotes == true else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
+        case AppCommands.ID.toggleSimulatorRecording:
+            guard let simulator = mainWindowController?.displayPaneController.currentSimulator,
+                  simulator.isRecordingForCommands || simulator.canRecord else {
+                return .unavailable(L10n.string("Show an adopted Simulator first."))
+            }
+        case AppCommands.ID.toggleSimulatorTouches:
+            guard mainWindowController?.displayPaneController.currentSimulator != nil else {
+                return .unavailable(L10n.string("Show an adopted Simulator first."))
+            }
+        case AppCommands.ID.toggleSimulatorPresenter:
+            guard let simulator = mainWindowController?.displayPaneController.currentSimulator,
+                  simulator.isPresenterWindowOpen || simulator.adoptedDevice != nil else {
+                return .unavailable(L10n.string("Show an adopted Simulator first."))
+            }
         case AppCommands.ID.saveBaseline:
             guard mainWindowController?.canSaveVisibleBrowserBaseline == true else {
                 return .unavailable(L10n.string("Show a browser before saving a baseline."))
@@ -3379,6 +3396,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(true)
         case AppCommands.ID.disableSimulatorAnnotations:
             mainWindowController?.displayPaneController.currentSimulator?.setAnnotatingNotes(false)
+        case AppCommands.ID.toggleSimulatorRecording:
+            mainWindowController?.displayPaneController.currentSimulator?.toggleRecording()
+        case AppCommands.ID.toggleSimulatorTouches:
+            mainWindowController?.displayPaneController.currentSimulator?.toggleShowTouches()
+        case AppCommands.ID.toggleSimulatorPresenter:
+            mainWindowController?.displayPaneController.currentSimulator?.togglePresenterWindow()
         case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
         case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
         case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()
@@ -3949,6 +3972,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func disableSimulatorAnnotations() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.disableSimulatorAnnotations)
+    }
+
+    @objc private func toggleSimulatorRecording() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.toggleSimulatorRecording)
+    }
+
+    @objc private func toggleSimulatorTouches() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.toggleSimulatorTouches)
+    }
+
+    @objc private func toggleSimulatorPresenter() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.toggleSimulatorPresenter)
     }
 
     @objc private func jumpToReviewFile() {

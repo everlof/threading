@@ -260,22 +260,90 @@ failed control request. The transport (H.264, JPEG, shared memory) is a diagnost
 the tooltip. A green "Live" label was removed: it made the default state the loudest thing in the
 pane, and it is what kept a frozen stream looking healthy.
 
-**Annotations have an explicit mode and a one-note gesture.** Option-click pins a note through
-exactly the same bounded editor without enabling the persistent annotation mode or emitting device
-HID. The persistent mode selects its toolbar button, claims a crosshair over the image, and shows
-an explicit finish control. Escape cancels the editor first, then exits the mode; focus returns to
-the device. Palette/menu enable and disable commands share the toolbar's setter and accept user
+**Annotations have an explicit mode and a one-note gesture.** Option-click (or the screen menu's
+**Add Note Here**) pins a note through exactly the same bounded editor without enabling the
+persistent annotation mode or emitting device HID. The persistent mode selects its toolbar button
+(the browser's own `DesignSymbols.annotate`/`annotating` glyphs, so the two surfaces read alike),
+claims a crosshair over the image, and shows a `PaneNoticeView` band between the toolbar and the
+device saying what a click does, how a pin is removed and that Esc finishes, offering Clear All
+once there are notes; its ✕ ends the mode (named "Stop Annotating" through `dismissTitle`). A
+bordered Done button was tried first and its plate reached the band's edge, because a notice places
+its edge-most control by the control's ink inset and a bordered button reports its title's. The band
+**pushes** the device down; it replaced a floating "Annotating · Esc to finish" button pinned over
+the device's top edge, which covered the status bar and read as part of the app under it. The band
+is rebuilt only when Clear All becomes meaningful or stops being so. Escape cancels the editor
+first, then exits the mode; focus returns to the device. A pin's own context menu edits or deletes
+that one note in any mode. Palette/menu enable and disable commands share the toolbar's setter and accept user
 shortcut overrides. Pending pins remain visible outside the mode, so quick notes can be sent.
 Successful or queued delivery removes only exact acknowledged note values from the captured device's
 store; failed sends and notes edited/added in flight survive. Notes are capped at twenty, and
 modifier/pointer handling never discovers devices or rebuilds a growing view tree. These remain
 host-owned actions and presentation, using the existing Design controls.
 
-**Control changes snapshot capture to copy.** The presented pane observes modifier changes
+**Control changes screenshot capture to copy.** The presented pane observes modifier changes
 without taking keyboard focus, updating the capture glyph, tooltip, accessibility title and
-action together. The button freezes the chosen action at mouse-down. Right-click retains
-the capture menu, and recording always takes precedence. Hidden/terminated panes remove
-the event monitor. Clipboard and recording behavior remain host-owned.
+action together. The button freezes the chosen action at mouse-down. Right-click offers Copy,
+Save and Save As…. Hidden/terminated panes remove the event monitor. Clipboard behavior remains
+host-owned.
+
+**The toolbar is grouped by what a control acts on**, and its glyphs are chosen against their
+neighbours (`SimulatorPaneSymbols`): capture (camera, record), what draws over the device
+(touches `hand.tap`, notes, element outlines `accessibility`), where it is shown (the presenter
+window), then the connection (control `cursorarrow.click`, crossed out after a denial; Refresh).
+The inspector was a viewfinder beside the camera and the control toggle was the tap glyph that now
+means touches. Appearance is a `simctl` device setting and sits with the hardware buttons under the
+screen, whose volume marks are `speaker.minus`/`speaker.plus` rather than two wave counts.
+
+**The device has a context menu.** Right-click or Control-click on `SimulatorScreenView` asks the
+pane for a `ThemedMenuPresenter` menu anchored at the pointer; VoiceOver's Show Menu reaches the
+same menu. It is built on each open from current state — a fixed list of about fifteen rows, with
+submenus for touch colour and size — and carries capture, recording, notes (Add Note Here at the
+clicked point; send, copy, clear), Show Touches and Touch Style, Inspect Elements, and the presenter
+window. Control-click was previously an ordinary tap; the device has no use for the modifier, and
+it is the Mac's secondary click.
+
+**Recording is shown where the eye is.** Recording has its own button rather than living in the
+screenshot button's right-click menu, where starting one was undiscoverable and a running one was
+visible only as that button's selected state and a word in the status line. While it runs, a
+`SimulatorRecordingBadge` (red dot, `REC m:ss`) floats over the device's top centre and is itself
+the stop control, the screen draws a ring in `Design.Status.negative`, the status line leads with
+"Recording" in the same colour, and the record button becomes a selected stop glyph. All four
+change in one method, `refreshRecordingPresentation`. Stopping shows "Saving…" until the file is
+finalized. Closing the tab or switching device finishes the movie, which was previously left
+unfinished and unplayable. A stream recording is also one of the viewers that keeps frames
+flowing (below), so switching session no longer freezes the movie.
+
+**Touch marks are proportional and styled.** `SimulatorTouchMarks` sizes every mark as a fraction
+of the screen's short side (a medium contact is 5%, about a fingertip on an iPhone). Fixed point
+radii made a finger in the movie — drawn at full framebuffer resolution — a third of the size it
+was in the pane. `SimulatorTouchStyle` (colour from a fixed list, size, swipe trail) is one value
+drawn by the pane, the presenter window and the recorder; its colours are fixed values in
+`Design.SimulatorTouch`, with an edge of opposite polarity, because marks are drawn over device
+content and burned into movies that outlive the theme (the accent is the one theme-derived choice,
+resolved at draw time). `SimulatorTouchPreferences` stores the style and the live Show Touches
+toggle through `PreferenceStore` as primitive keys and posts one notification, so every pane and
+presenter redraws together.
+
+**The presenter window mirrors; it does not own.** Screen-sharing tools share one window, and the
+pane lives in the main window beside the conversation. `SimulatorPresenterWindowController` holds
+the device alone, sized and aspect-locked to the frame, titled "‹device› Simulator" so it is the
+obvious row in a share picker. It is deliberately a titled, ordinary-level window with
+`sharingType = .readOnly`: pickers list those, while frameless or panel-level windows are what they
+tend to skip. Keep on Top is an explicit choice, since a picker captures an occluded window anyway.
+The window has no lease, stream or consent of its own. The pane fans every frame, interaction state
+and touch indicator out to it (`showFrame`, `setScreenInteraction`, `setTouchIndicators`), and the
+mirror's gestures, typing and Simulator chords call the pane's own handlers, so input from either
+window converges on one consented session; a consent sheet attaches to the presenter when that is
+the key window. Notes and the inspector stay in the pane. Closing the tab closes the window; ⌘W in
+the window closes only the window, because a nil-targeted Close Tab would otherwise walk past it to
+the main window (the failure `DetachedBrowserWindowController` documents).
+
+**Stream demand follows viewers, not pane visibility.** `wantsFrames` is the pane being presented,
+its presenter window being open, or a stream recording running. Hiding the pane releases frames
+only when none of the others holds them; closing the presenter or finishing a recording is then
+the last viewer leaving, which stops capture and starts the fifteen-second hidden-transport grace.
+Fallback polling, agent screenshots from the live frame and reconnects after a public transaction
+all ask the same question.
 
 **Touch-inclusive video keeps the framebuffer's row order.** The recorder composites live frames
 and touch marks in one bitmap, then draws that image directly into the H.264 writer's BGRA pixel

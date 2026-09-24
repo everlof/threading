@@ -120,7 +120,8 @@ final class PaneNoticeView: NSView, ThemedComponent {
     // MARK: - Initialization
 
     /// `onDismiss` is what the ✕ performs; a band without one carries no ✕ and the host owns
-    /// when it leaves.
+    /// when it leaves. `dismissTitle` names the ✕ for a band whose leaving means more than
+    /// hiding it — a mode band's ✕ ends the mode, and "Dismiss" would not say so.
     ///
     /// `accessory` is for a condition whose evidence is a picture — a colour pair the sentence
     /// can only spell out in hex. It sits between the sentence and the buttons, keeps its own
@@ -132,6 +133,7 @@ final class PaneNoticeView: NSView, ThemedComponent {
         message: String,
         accessory: NSView? = nil,
         actions: [PaneNoticeAction],
+        dismissTitle: String? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
         self.tone = tone
@@ -144,7 +146,12 @@ final class PaneNoticeView: NSView, ThemedComponent {
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
 
-        setupViews(accessory: accessory, actions: actions, onDismiss: onDismiss)
+        setupViews(
+            accessory: accessory,
+            actions: actions,
+            dismissTitle: dismissTitle ?? L10n.string("Dismiss"),
+            onDismiss: onDismiss
+        )
         applyMetrics()
         applyInk()
 
@@ -205,6 +212,7 @@ final class PaneNoticeView: NSView, ThemedComponent {
     private func setupViews(
         accessory: NSView?,
         actions: [PaneNoticeAction],
+        dismissTitle: String,
         onDismiss: (() -> Void)?
     ) {
         glyph.setSymbol(
@@ -279,9 +287,10 @@ final class PaneNoticeView: NSView, ThemedComponent {
         if let onDismiss {
             let close = ThemedIconButton(
                 symbolName: DesignSymbols.removeAttachment,
-                accessibility: L10n.string("Dismiss"),
+                accessibility: dismissTitle,
                 target: .inline
             )
+            close.toolTip = dismissTitle
             close.onPress = onDismiss
             close.setAccessibilityIdentifier(PaneNoticeDefaults.dismissIdentifier)
             addSubview(close)
