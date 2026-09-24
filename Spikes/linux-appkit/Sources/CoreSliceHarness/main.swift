@@ -85,6 +85,10 @@ func runContracts() throws {
 }
 
 do {
+    try runHandshakeContracts()
+    try runBindingContracts()
+    try runSocketContracts()
+    try runCreationContracts()
     try runContracts()
     try runRecoveryContracts()
     try runMigrationContracts()
