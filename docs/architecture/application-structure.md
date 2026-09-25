@@ -5,6 +5,13 @@ dependency direction. The compiler-isolated `ThreadingDomain` package is the sta
 kernel; architecture checks ratchet the remaining legacy edges while application capabilities are
 extracted one ownership boundary at a time.
 
+`scripts/check_ui_structure.py --report` inventories direct AppKit controller and view/window
+subclasses, constraint construction, and drawing references outside `UI/Design`. Its checked-in
+ceilings run in the ordinary architecture build phase: 83 direct controllers, 119 platform
+views/windows, 2,818 constraint sites, and 96 drawing sites on 2026-09-25. A reduction must
+lower the corresponding ceiling. This prevents growth while the semantic structural seam is
+built; it does not make the remaining feature-owned sites portable or certify their layout.
+
 The completed stabilization measurements and rationale are preserved in
 [`docs/archive/reviews/ARCHITECTURE_STABILIZATION-2026-08-15.md`](../archive/reviews/ARCHITECTURE_STABILIZATION-2026-08-15.md).
 Current structural debt lives in the short root [`IMPROVEMENTS.md`](../../IMPROVEMENTS.md). Refresh
@@ -118,7 +125,7 @@ The experimental Linux `WindowHarness --app` connects its project snapshot to th
 agent or terminal identity, with an eight-entry combined ceiling. The native window switches
 between projects, the selected project's saved-agent or saved-terminal list, and the visible
 terminal. Left from a project opens agents; Right opens terminals. Navigation does not create a
-new child or detach an existing one. The snapshot keeps at most the newest 512 identities of each
+new child or detach an existing one. The snapshot keeps at most 512 identities of each
 kind per project and the UI mounts only viewport rows. Only the visible terminal requests
 rendered frames; store work and terminal processing stay on workers. This remains a host-only diagnostic frontend,
 not the shipping Mac sidebar or a public extension surface. Graphical restoration across app
@@ -126,8 +133,9 @@ restarts is available through explicit `--attach STORE SOCKET TERMINAL_UUID` and
 in the project browser. A saved agent session has the same terminal renderer through explicit
 `--attach-agent STORE SOCKET SESSION_UUID` or the project's saved-agent picker; the host validates
 the agent record and keeps its typed daemon identity. The project-targeted launcher also attempts
-attach-only restoration of the saved selected agent when it belongs to that project, is within the
-recent window, has launched, is unarchived and has no recorded exit. Opening a different agent
+attach-only restoration of the saved selected agent when it belongs to that project, has launched,
+is unarchived and has no recorded exit. If it falls outside the recent window, one indexed read
+puts it in the picker without increasing the 512-row cap. Opening a different agent
 updates the selected ID on a worker before entering its terminal; opening a shell or saved terminal
 clears it on a writable store. Startup restoration never starts a child, and automatic terminal
 restoration remains missing. Explicit Codex picker selection can still resume a departed agent.

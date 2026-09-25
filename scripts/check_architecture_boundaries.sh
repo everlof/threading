@@ -62,6 +62,19 @@ if ! python3 "${script_directory}/check_module_boundaries.py" "${repository_dire
   failed=1
 fi
 
+# The Linux host needs semantic screens rather than a second tree of feature-owned AppKit
+# controllers and constraints. This ceiling holds the current Mac debt while components move
+# into the shared structural seam; a lower count must lower the checked-in baseline too.
+if ! python3 "${script_directory}/check_ui_structure.py" "${repository_directory}"; then
+  echo "architecture-boundary: keep new view, layout and drawing ownership in UI/Design" >&2
+  failed=1
+fi
+
+if ! python3 "${script_directory}/tests/test_ui_structure.py"; then
+  echo "architecture-boundary: UI structural-site checker regression tests failed" >&2
+  failed=1
+fi
+
 if ! python3 "${script_directory}/check_failopen_defaults.py" "${repository_directory}"; then
   echo "architecture-boundary: an unrecognised raw value must not become a specific case —" >&2
   echo "  give the type an explicit unknown case, or project it with an exhaustive switch" >&2
