@@ -25,6 +25,13 @@ public final class Bitmap: @unchecked Sendable {
         }
     }
 
+    /// A platform text leaf can compose into the already rendered frame without copying it.
+    /// The caller must finish its write before this closure returns.
+    public func withMutablePixels<Result>(_ body: (UnsafeMutableBufferPointer<UInt8>) throws -> Result)
+        rethrows -> Result {
+        try pixels.withUnsafeMutableBufferPointer { buffer in try body(buffer) }
+    }
+
     // MARK: - Compositing
 
     func blend(x: Int, y: Int, red: CGFloat, green: CGFloat, blue: CGFloat, coverage: CGFloat) {

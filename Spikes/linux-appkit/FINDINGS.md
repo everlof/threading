@@ -2270,3 +2270,23 @@ selected named login are legible. The complete `./window-smoke.sh` suite passed,
 terminal, agent, reattach and clean-profile journeys. The chooser's header-only follow-up is
 covered by a focused named-account rerun. Live account-list refresh, in-app sign-in, non-legacy
 credential stores, other providers and packaged distribution remain open.
+
+## 84. Native navigator text needs a platform leaf, even when row chrome is shared
+
+The real X11 capture rendered the Unicode project `Project06-界` as `Project06-?`: AT-SPI already
+published the original name, but the specimen bitmap font could not display it. The Linux window
+now keeps the specimen row background, selection mark and shared row rectangle while a Pango leaf
+shapes the title and only the mounted project, saved-runtime or account rows into that frame.
+The host caps names before encoding. The leaf validates UTF-8, frame and row bounds, accepts at
+most 33 labels and 32 KiB of text, and reuses one row-sized Cairo surface instead of creating
+offscreen views or a second full frame. Explicit grayscale antialiasing prevents colored fringes
+when the transparent row surface is composited over a selected row.
+
+The final 800×480 AT-SPI capture visibly renders `Project06-界` with clean selected-row text.
+A C pixel contract distinguishes Unicode from `?`, checks selection and clipping, and rejects
+invalid UTF-8 and excessive labels before touching the frame. In the accessibility journey,
+19 steady redraws with nine labels had a 0.920 ms median and 0.987 ms maximum; the first draw
+was 7.28 ms with font setup. The host still owns row identity, selection, persistence and
+accessibility actions. This is a diagnostic Linux renderer, not a Mac UI change or a finished
+shipping sidebar. Both the AT-SPI-only journey and the complete `./window-smoke.sh` suite passed;
+the architecture and theme boundary checks remained clean.

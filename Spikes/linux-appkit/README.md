@@ -252,18 +252,18 @@ With a Linux display and `libsdl2-dev` installed, run:
 swift run WindowHarness /path/to/existing/experimental/store
 ```
 
-The window is a platform-transport experiment, using the existing specimen views and the
-byte-identical production bitmap font. It is not the shipping sidebar or a selected final Linux
+The window is a platform-transport experiment, using the existing specimen views for row chrome
+and a bounded Pango leaf for Unicode navigator text. It is not the shipping sidebar or a selected final Linux
 backend. Up/Down and the wheel move selection; clicking a row selects it; Escape closes. The
 native title names the selected project's full path. Selection is local to the window; it does
 not change the store in this store-only diagnostic mode. Store open/recovery runs on a worker under the same exclusive lock as
 `LinuxHost`, then releases the lock and returns an immutable snapshot. No live reload is claimed.
 
-Only visible rows are mounted, and labels are bounded to 80 characters before drawing. The
+Only visible rows are mounted, and project labels are bounded to 80 Unicode scalars before drawing. The
 software-rendering experiment limits windows to 1280×900 pixels. The project-list mode does not provide terminal rendering/input. The separate terminal mode
 below adds the initial runtime surface; neither mode provides complete IME or AT-SPI coverage, production
-theme switching or extension composition. Unsupported
-bitmap-font characters visibly become `?`; the native title retains the original path.
+theme switching or extension composition. Navigator title and mounted rows retain Unicode through
+Pango shaping; the native window title retains the original path.
 Customization classification: this diagnostic harness is host-only and defines no durable product
 component or public API. Product navigation must still use the existing semantic component IDs,
 with identity, selection, commands, lifecycle truth and input authority retained by Threading.
@@ -441,7 +441,7 @@ complete graph; each project's embedded terminal array is decoded for the startu
 
 With a session accessibility bus, the native window publishes an AT-SPI application, frame and
 the currently mounted project/saved-runtime rows. Rows carry their durable IDs and retain Unicode
-names even where the diagnostic bitmap font draws `?`; selection state and `select`/`open` actions use the same native
+names in both native drawing and accessibility; selection state and `select`/`open` actions use the same native
 navigation route as pointer and keyboard input. The list describes its visible range and never
 materializes offscreen accessibility rows. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh`
 queries that tree with an AT-SPI client, scrolls a 15-project list, and opens a Unicode-named

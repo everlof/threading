@@ -143,6 +143,13 @@ offsets to the same fixed cell positions its Pango renderer uses; point queries 
 visible cells, not hidden scrollback. Bounds-change notifications, comprehensive focus behavior
 and complete selection semantics remain open accessibility work.
 
+The navigator keeps specimen row chrome and selection geometry, then passes only its mounted
+title and row labels to a Linux Pango text leaf over the opaque frame. That leaf validates the
+frame and label rectangles, shapes Unicode into one reusable row-sized surface, and clips each
+label to its existing row. The host caps labels before encoding; the leaf caps its shared UTF-8
+buffer, label count and per-label bytes. Neither the store nor the accessibility bridge owns
+glyph rendering, and navigation never shapes offscreen rows.
+
 Graphical restoration across app restarts is available through explicit
 `--attach STORE SOCKET TERMINAL_UUID` and through selection
 in the project browser. A saved agent session has the same terminal renderer through explicit
