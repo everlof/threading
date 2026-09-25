@@ -18,7 +18,7 @@ enum ProjectDatabaseLoadError: LocalizedError {
     }
 }
 
-/// A whole-graph write was refused because the store changed underneath the writer.
+/// A whole-graph write was refused because its source is stale or incomplete.
 ///
 /// `save(_:)` reconciles: it deletes every project and session the state it was handed does not
 /// mention. That is correct for the single writer `SingleInstanceLock` promises, and catastrophic
@@ -28,15 +28,19 @@ enum ProjectDatabaseLoadError: LocalizedError {
 ///
 /// The redirect in `StateManager` removes that writer. This is the backstop for the next one:
 /// reconciliation now proves it is working from the generation it last read, and refuses rather
-/// than prunes when it is not. Refusing costs one unsaved edit; pruning costs projects.
+/// than prunes when it is not. A targeted session lookup is also an incomplete graph and must
+/// never authorize reconciliation. Refusing costs one unsaved edit; pruning costs projects.
 enum ProjectDatabaseWriteError: LocalizedError {
     case staleGeneration(observed: Int, found: Int)
+    case partialReadRequiresFullLoad
 
     var errorDescription: String? {
         switch self {
         case .staleGeneration(let observed, let found):
             return "Refused a whole-graph write: the store moved from generation "
                 + "\(observed) to \(found) beneath this writer"
+        case .partialReadRequiresFullLoad:
+            return "Refused a whole-graph write after a targeted read; load the complete graph first"
         }
     }
 }
@@ -104,6 +108,14 @@ struct ProjectsStateLoad {
 /// interrupted halfway leaves the previous state rather than a truncated document.
 final class ProjectDatabase {
 
+    /// One indexed session and its owning project. The project payload deliberately has no
+    /// sessions; callers must use exact-row writes rather than reconcile from this partial view.
+    struct SessionRecord {
+        let session: AgentSession
+        let project: Project
+        let position: Int
+    }
+
     /// One existing project row whose payload changed without changing graph membership/order.
     struct ProjectWrite {
         let project: Project
@@ -127,6 +139,7 @@ final class ProjectDatabase {
     /// stale picture of the graph, so it adopts whatever it finds rather than refusing — that is
     /// the legacy-import and first-write path, not the hazard.
     private var observedGeneration: Int?
+    private var partialGraphRead = false
 
     // MARK: - Initialization
 
@@ -222,9 +235,6 @@ final class ProjectDatabase {
     }
 
     func load() throws -> ProjectsStateLoad {
-        typealias SessionColumn = ProjectDatabaseSchema.SessionLoadColumn
-        typealias ProjectColumn = ProjectDatabaseSchema.ProjectLoadColumn
-
         var projects: [Project] = []
         var sessionsByProject: [ProjectID: [AgentSession]] = [:]
         var pendingSessionRows: [StoredSessionRow] = []
@@ -233,34 +243,7 @@ final class ProjectDatabase {
         let sessions = try database.prepare(ProjectDatabaseSchema.selectSessions)
         defer { sessions.finalize() }
         while try sessions.step() {
-            let rawID = sessions.text(SessionColumn.id.read)
-            guard let rawID, let rowID = SessionID(uuidString: rawID) else {
-                throw corruptRow("session", id: rawID, reason: "invalid row identifier")
-            }
-            let rawProjectID = sessions.text(SessionColumn.projectID.read)
-            guard let rawProjectID, let projectID = ProjectID(uuidString: rawProjectID) else {
-                throw corruptRow(
-                    "session",
-                    id: rawID,
-                    reason: "invalid project identifier '\(rawProjectID ?? "NULL")'"
-                )
-            }
-            guard let storedKind = sessions.text(SessionColumn.kind.read) else {
-                throw corruptRow("session", id: rawID, reason: "missing indexed provider kind")
-            }
-            let storedLastActiveAt = sessions.double(SessionColumn.lastActiveAt.read)
-            guard let payload = sessions.data(SessionColumn.data.read) else {
-                throw corruptRow("session", id: rawID, reason: "missing JSON payload")
-            }
-
-            pendingSessionRows.append(StoredSessionRow(
-                rawID: rawID,
-                rowID: rowID,
-                projectID: projectID,
-                storedKind: storedKind,
-                storedLastActiveAt: storedLastActiveAt,
-                payload: payload
-            ))
+            pendingSessionRows.append(try storedSessionRow(from: sessions))
             if pendingSessionRows.count == Self.sessionDecodeWaveSize {
                 try appendDecodedSessions(
                     pendingSessionRows,
@@ -275,61 +258,10 @@ final class ProjectDatabase {
         defer { rows.finalize() }
         var loadedProjectIDs: Set<ProjectID> = []
         while try rows.step() {
-            let rawID = rows.text(ProjectColumn.id.read)
-            guard let rawID, let id = ProjectID(uuidString: rawID) else {
-                throw corruptRow("project", id: rawID, reason: "invalid row identifier")
-            }
-            guard let storedName = rows.text(ProjectColumn.name.read) else {
-                throw corruptRow("project", id: rawID, reason: "missing indexed name")
-            }
-            guard let storedPath = rows.text(ProjectColumn.folderPath.read) else {
-                throw corruptRow("project", id: rawID, reason: "missing indexed path")
-            }
-            guard let payload = rows.data(ProjectColumn.data.read) else {
-                throw corruptRow("project", id: rawID, reason: "missing JSON payload")
-            }
-
-            var project: Project
-            do {
-                project = try Self.decoder.decode(Project.self, from: payload)
-            } catch {
-                throw corruptRow(
-                    "project",
-                    id: rawID,
-                    reason: "invalid JSON payload: \(error.localizedDescription)"
-                )
-            }
-            guard project.id == id else {
-                throw corruptRow(
-                    "project",
-                    id: rawID,
-                    reason: "payload identifier is '\(project.id.uuidString)'"
-                )
-            }
-            guard project.name == storedName else {
-                throw corruptRow(
-                    "project",
-                    id: rawID,
-                    reason: "indexed name disagrees with payload"
-                )
-            }
-            guard project.folderPath == storedPath else {
-                throw corruptRow(
-                    "project",
-                    id: rawID,
-                    reason: "indexed path disagrees with payload"
-                )
-            }
-            guard project.sessions.isEmpty else {
-                throw corruptRow(
-                    "project",
-                    id: rawID,
-                    reason: "payload duplicates session rows"
-                )
-            }
-            project.sessions = sessionsByProject[id] ?? []
+            var project = try decodedProject(from: rows)
+            project.sessions = sessionsByProject[project.id] ?? []
             projects.append(project)
-            loadedProjectIDs.insert(id)
+            loadedProjectIDs.insert(project.id)
         }
 
         if let orphanedProjectID = sessionsByProject.keys.first(where: {
@@ -344,9 +276,9 @@ final class ProjectDatabase {
 
         // Read *after* the rows, so the generation this connection claims to hold can never be
         // newer than the graph it actually read.
-        observedGeneration = try storeGeneration()
+        let generation = try storeGeneration()
 
-        return ProjectsStateLoad(
+        let result = ProjectsStateLoad(
             state: ProjectsState(
                 projects: projects,
                 selectedSessionID: try selectedSessionID(),
@@ -361,12 +293,53 @@ final class ProjectDatabase {
                 )
             )
         )
+        observedGeneration = generation
+        partialGraphRead = false
+        return result
+    }
+
+    /// Reads one session by its primary key and decodes only it and its owning project. Selected
+    /// attach/resume and rollout discovery may run against stores with thousands of other sessions;
+    /// they do not need another whole-archive decode. An unrelated corrupt row is left untouched,
+    /// while either selected row still receives the same indexed/payload validation as `load()`.
+    /// This is a partial graph view and cannot authorize `save(_:)` on the connection.
+    func sessionRecord(id: SessionID) throws -> SessionRecord? {
+        partialGraphRead = true
+        let stored: (row: StoredSessionRow, position: Int)
+        do {
+            let statement = try database.prepare(ProjectDatabaseSchema.selectSessionByID)
+            defer { statement.finalize() }
+            statement.bind(1, id.uuidString)
+            guard try statement.step() else { return nil }
+            stored = (try storedSessionRow(from: statement),
+                      statement.int(Int32(ProjectDatabaseSchema.SessionLoadColumn.ordered.count)))
+        }
+
+        var sessionsByProject: [ProjectID: [AgentSession]] = [:]
+        try appendDecodedSessions([stored.row], to: &sessionsByProject)
+        guard let session = sessionsByProject[stored.row.projectID]?.first else {
+            throw corruptRow("session", id: id.uuidString, reason: "decoded session is missing")
+        }
+
+        let project: Project
+        do {
+            let statement = try database.prepare(ProjectDatabaseSchema.selectProjectByID)
+            defer { statement.finalize() }
+            statement.bind(1, stored.row.projectID.uuidString)
+            guard try statement.step() else {
+                throw corruptRow("session", id: id.uuidString,
+                                 reason: "references missing project '\(stored.row.projectID.uuidString)'")
+            }
+            project = try decodedProject(from: statement)
+        }
+        return SessionRecord(session: session, project: project, position: stored.position)
     }
 
     /// Brings the stored rows in line with the state, in one transaction: upsert what is there,
     /// delete what has gone. Not a truncate-and-rewrite — that would be the JSON document with
     /// extra steps, and would churn the write-ahead log for a renamed tab.
     func save(_ state: ProjectsState) throws {
+        guard !partialGraphRead else { throw ProjectDatabaseWriteError.partialReadRequiresFullLoad }
         try graphTransaction {
             // Inside the transaction, so the check and the reconcile it authorises cannot be
             // separated by another writer's commit.
@@ -1080,6 +1053,67 @@ final class ProjectDatabase {
 
     // MARK: - Private Methods — Coding
 
+    private func storedSessionRow(from statement: SQLiteDatabase.Statement) throws -> StoredSessionRow {
+        typealias Column = ProjectDatabaseSchema.SessionLoadColumn
+        let rawID = statement.text(Column.id.read)
+        guard let rawID, let rowID = SessionID(uuidString: rawID) else {
+            throw corruptRow("session", id: rawID, reason: "invalid row identifier")
+        }
+        let rawProjectID = statement.text(Column.projectID.read)
+        guard let rawProjectID, let projectID = ProjectID(uuidString: rawProjectID) else {
+            throw corruptRow("session", id: rawID,
+                             reason: "invalid project identifier '\(rawProjectID ?? "NULL")'")
+        }
+        guard let storedKind = statement.text(Column.kind.read) else {
+            throw corruptRow("session", id: rawID, reason: "missing indexed provider kind")
+        }
+        guard let payload = statement.data(Column.data.read) else {
+            throw corruptRow("session", id: rawID, reason: "missing JSON payload")
+        }
+        return StoredSessionRow(rawID: rawID, rowID: rowID, projectID: projectID,
+                                storedKind: storedKind,
+                                storedLastActiveAt: statement.double(Column.lastActiveAt.read),
+                                payload: payload)
+    }
+
+    private func decodedProject(from statement: SQLiteDatabase.Statement) throws -> Project {
+        typealias Column = ProjectDatabaseSchema.ProjectLoadColumn
+        let rawID = statement.text(Column.id.read)
+        guard let rawID, let id = ProjectID(uuidString: rawID) else {
+            throw corruptRow("project", id: rawID, reason: "invalid row identifier")
+        }
+        guard let storedName = statement.text(Column.name.read) else {
+            throw corruptRow("project", id: rawID, reason: "missing indexed name")
+        }
+        guard let storedPath = statement.text(Column.folderPath.read) else {
+            throw corruptRow("project", id: rawID, reason: "missing indexed path")
+        }
+        guard let payload = statement.data(Column.data.read) else {
+            throw corruptRow("project", id: rawID, reason: "missing JSON payload")
+        }
+        let project: Project
+        do {
+            project = try Self.decoder.decode(Project.self, from: payload)
+        } catch {
+            throw corruptRow("project", id: rawID,
+                             reason: "invalid JSON payload: \(error.localizedDescription)")
+        }
+        guard project.id == id else {
+            throw corruptRow("project", id: rawID,
+                             reason: "payload identifier is '\(project.id.uuidString)'")
+        }
+        guard project.name == storedName else {
+            throw corruptRow("project", id: rawID, reason: "indexed name disagrees with payload")
+        }
+        guard project.folderPath == storedPath else {
+            throw corruptRow("project", id: rawID, reason: "indexed path disagrees with payload")
+        }
+        guard project.sessions.isEmpty else {
+            throw corruptRow("project", id: rawID, reason: "payload duplicates session rows")
+        }
+        return project
+    }
+
     /// Indexed columns stay beside the JSON payload while a bounded group is decoded.
     ///
     /// `JSONDecoder.decode` creates a complete top-level parser for every invocation. Calling it
@@ -1564,6 +1598,13 @@ enum ProjectDatabaseSchema {
     /// The authoritative project rows, in sidebar order.
     static let selectProjects =
         "SELECT \(ProjectLoadColumn.list) FROM project ORDER BY position"
+
+    /// Targeted runtime reads use primary keys and retain the complete loader's column order so
+    /// one selected session never requires decoding every archived conversation.
+    static let selectSessionByID =
+        "SELECT \(SessionLoadColumn.list), position FROM session WHERE id = ?"
+    static let selectProjectByID =
+        "SELECT \(ProjectLoadColumn.list) FROM project WHERE id = ?"
 
     /// Every conversation's completion generation with each participant's position in it. A left
     /// join, because a conversation nobody has read yet still has a completion generation.

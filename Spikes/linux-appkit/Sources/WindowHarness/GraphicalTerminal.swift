@@ -179,9 +179,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
-        let projects = try database.load().state.projects
         switch kind {
         case .terminal:
+            let projects = try database.load().state.projects
             let id = TerminalID(uuid)
             guard projects.contains(where: { $0.terminals.contains(where: { $0.id == id }) }) else {
                 throw WindowFailure("terminal is not in this store")
@@ -189,7 +189,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             return PTYHostSessionIdentity(.projectTerminal(id))
         case .agent:
             let id = SessionID(uuid)
-            guard projects.contains(where: { $0.sessions.contains(where: { $0.id == id }) }) else {
+            guard try database.sessionRecord(id: id) != nil else {
                 throw WindowFailure("session is not in this store")
             }
             return .agentSession(id)
@@ -390,13 +390,11 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
-        var state = try database.load().state
-        guard let projectIndex = state.projects.firstIndex(where: { $0.sessions.contains(where: { $0.id == sessionID }) }),
-              let sessionIndex = state.projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID }),
-              state.projects[projectIndex].sessions[sessionIndex].resumeState == .awaitingIdentifier else { return false }
-        state.projects[projectIndex].sessions[sessionIndex].resumeState = .resumable(id)
-        try database.saveSession(state.projects[projectIndex].sessions[sessionIndex],
-                                 in: state.projects[projectIndex].id, position: sessionIndex)
+        guard let record = try database.sessionRecord(id: sessionID),
+              record.session.resumeState == .awaitingIdentifier else { return false }
+        var session = record.session
+        session.resumeState = .resumable(id)
+        try database.saveSession(session, in: record.project.id, position: record.position)
         return true
     }
     private static func resumeAgent(store: String, sessionID: SessionID, shell: String,
@@ -411,13 +409,13 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
-        let state = try database.load().state
-        guard let project = state.projects.first(where: { $0.sessions.contains(where: { $0.id == sessionID }) }),
-              let session = project.sessions.first(where: { $0.id == sessionID }),
-              session.kind == .codex,
-              session.resumeState.isResumable else {
+        guard let record = try database.sessionRecord(id: sessionID),
+              record.session.kind == .codex,
+              record.session.resumeState.isResumable else {
             throw WindowFailure("saved agent has no resumable Codex conversation")
         }
+        let project = record.project
+        let session = record.session
         guard session.accountHandle.isStandard else {
             throw WindowFailure("this Linux window cannot route a named Codex account")
         }
