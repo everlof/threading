@@ -168,6 +168,12 @@ The native experiment now starts standard-account Claude sessions and resumes ex
 after finding their exact transcript through the shared project-slug/path policy. This is a
 window and real PTY-daemon journey, not yet a packaged Linux app or an authenticated Claude run
 ([FINDINGS section 87](../../Spikes/linux-appkit/FINDINGS.md#87-the-native-linux-window-now-owns-a-claude-create-attach-and-resume-journey)).
+The later native lifecycle check records observed agent exits in the exact saved row and surveys
+the daemon before targeted startup restoration. A child that exited while the window was closed
+no longer opens as a false live attachment; explicit picker selection resumes it after transcript
+preflight. This still does not provide a packaged release or authenticated-provider evidence.
+The observed and offline exit cases are recorded in
+[FINDINGS section 90](../../Spikes/linux-appkit/FINDINGS.md#90-native-linux-agent-exits-survive-window-restarts).
 
 ## The boundary to build
 

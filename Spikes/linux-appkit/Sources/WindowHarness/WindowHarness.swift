@@ -27,6 +27,8 @@ struct WindowSnapshot: Sendable {
     let projects: [ProjectSnapshot]
     let selectedProjectIndex: Int
     let restoreAgentID: String?
+    let restoreAgentActivity: Date?
+    let restoreAgentProjectID: ProjectID?
 }
 struct WindowFailure: Error, CustomStringConvertible {
     let description: String
@@ -197,7 +199,7 @@ struct WindowHarness {
                 }
                 let requestedProject = targeted ? args[3] : nil
                 let snapshot = try await Task.detached {
-                    try loadSnapshot(args[0], selectingProjectAt: requestedProject)
+                    try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1])
                 }.value
                 try show(snapshot, launch: targeted ? Array(args.prefix(3)) : args)
                 return
@@ -223,7 +225,7 @@ struct WindowHarness {
                 }
                 let requestedProject = targeted ? args.last : nil
                 let prepared = try await Task.detached {
-                    (try loadSnapshot(args[0], selectingProjectAt: requestedProject),
+                    (try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1]),
                      codex == nil ? [.standard] : discoverAccounts(for: .codex),
                      claude == nil ? [.standard] : discoverAccounts(for: .claude))
                 }.value
@@ -320,7 +322,33 @@ struct WindowHarness {
         return PendingSelection(event: event, continuesOnRefusal: continuesOnRefusal, gate: gate)
     }
 
-    static func loadSnapshot(_ path: String, selectingProjectAt requestedPath: String? = nil) throws -> WindowSnapshot {
+    static func loadSnapshot(_ path: String, selectingProjectAt requestedPath: String? = nil,
+                             socket: String? = nil) throws -> WindowSnapshot {
+        let snapshot = try loadStoredSnapshot(path, selectingProjectAt: requestedPath)
+        guard let socket, let idText = snapshot.restoreAgentID,
+              let uuid = UUID(uuidString: idText) else { return snapshot }
+        switch GraphicalTerminal.agentPresence(socket: socket, id: SessionID(uuid)) {
+        case .running, .unavailable: return snapshot
+        case .absent: break
+        case .exited(let status):
+            do {
+                try GraphicalTerminal.recordAgentExit(store: path, id: SessionID(uuid),
+                    status: status, observedNow: false,
+                    expectedActivity: snapshot.restoreAgentActivity,
+                    expectedProject: snapshot.restoreAgentProjectID)
+            } catch {
+                FileHandle.standardError.write(Data("Agent exit reconciliation: \(error)\n".utf8))
+            }
+        }
+        // No daemon-held live child means startup must not open an unavailable terminal. A
+        // missing summary gives no exit status; explicit selection remains the resume route.
+        return WindowSnapshot(projects: snapshot.projects,
+            selectedProjectIndex: snapshot.selectedProjectIndex, restoreAgentID: nil,
+            restoreAgentActivity: nil, restoreAgentProjectID: nil)
+    }
+
+    private static func loadStoredSnapshot(_ path: String,
+                                           selectingProjectAt requestedPath: String?) throws -> WindowSnapshot {
         let root = URL(fileURLWithPath: path, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
         guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
@@ -359,6 +387,8 @@ struct WindowHarness {
         // Attach never starts a process. An older selected agent may lie outside the recent
         // window; fetch only that indexed row and keep the picker at its existing ceiling.
         let restoreAgentID: String?
+        let restoreAgentActivity: Date?
+        let restoreAgentProjectID: ProjectID?
         if requestedPath != nil, let selectedID = catalog.selectedSessionID {
             let selected: AgentSession?
             if let recent = catalog.projects[selectedIndex].recentSessions.first(where: {
@@ -382,14 +412,22 @@ struct WindowHarness {
                     }
                 }
                 restoreAgentID = selected.id.uuidString
+                restoreAgentActivity = selected.lastActiveAt
+                restoreAgentProjectID = catalog.projects[selectedIndex].id
             } else {
                 restoreAgentID = nil
+                restoreAgentActivity = nil
+                restoreAgentProjectID = nil
             }
         } else {
             restoreAgentID = nil
+            restoreAgentActivity = nil
+            restoreAgentProjectID = nil
         }
         return WindowSnapshot(projects: projects, selectedProjectIndex: selectedIndex,
-                              restoreAgentID: restoreAgentID)
+                              restoreAgentID: restoreAgentID,
+                              restoreAgentActivity: restoreAgentActivity,
+                              restoreAgentProjectID: restoreAgentProjectID)
     }
 
     static func modifiers(_ event: TWEvent) -> PTYEmulator.Modifiers {

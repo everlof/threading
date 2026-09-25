@@ -2426,3 +2426,28 @@ iPhone 17 Pro simulator because that device is not installed. A separate full mo
 the installed Threading iPhone 17 simulator built successfully but its boot check remained in
 CoreSimulator data migration for more than seven minutes, before XCTest launched. iOS tests are
 therefore unverified for this slice.
+
+## 90. Native Linux agent exits survive window restarts
+
+The graphical host previously kept a daemon `exited` frame only in its terminal instance. A
+targeted restart then read the saved session's still-empty `lastExitCode` and tried to attach an
+agent that had already ended. The host now writes an observed exit to that indexed session row
+under the store lock, preserving other rows. Before targeted startup restoration it releases the
+store lock, surveys the daemon on a worker, and attaches only a confirmed running child. A held
+exit updates the same row without inventing an activity time; an absent child opens the project
+list without inventing a status. Query failure keeps the existing attach-only failure route.
+
+Explicit saved-agent selection distinguishes a live child from a held exit or an absent child.
+It attaches the live one and starts a provider resume for the other two after the account and
+transcript checks. An existing session's launch record is cleared only after the daemon's
+`spawned` reply, so a rejected or competing spawn cannot erase the prior exit. The real Xvfb
+Claude fixture now checks an observed exit, targeted reopen, accepted resume, a child that exits
+while the window is closed, daemon-summary reconciliation, and another explicit resume under
+the same UUID. This is daemon and recorder evidence, not an authenticated Claude run.
+The complete native window smoke suite passed after this change, including the existing terminal,
+Codex, named-account, attach-refusal, and startup journeys.
+The daemon summary does not carry the exited frame's `signalled` flag, so reconciliation records
+its numeric status as sent; only an exit observed by the window can map a signal to `128 + status`.
+The full Mac target passed 9,521 tests (80 skipped, zero failures). The required `scripts/test.sh
+all` iOS leg did not start: Xcode could not resolve its default `iPhone 17 Pro` simulator
+destination on this machine. No shared Mac or iOS source changed in this slice.
