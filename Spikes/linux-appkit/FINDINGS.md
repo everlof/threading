@@ -2451,3 +2451,19 @@ its numeric status as sent; only an exit observed by the window can map a signal
 The full Mac target passed 9,521 tests (80 skipped, zero failures). The required `scripts/test.sh
 all` iOS leg did not start: Xcode could not resolve its default `iPhone 17 Pro` simulator
 destination on this machine. No shared Mac or iOS source changed in this slice.
+
+## 91. The Linux development app reopens from its saved project list
+
+`run-app.sh` previously required a directory on every invocation even though the native window
+already had a generic saved-project mode. The launcher now accepts no argument after the first
+project import, verifies the store exists before creating runtime state, reuses the same daemon,
+and opens the saved project navigator without importing or spawning a child. An explicit directory
+still imports and targets that project. Both terminal-only and provider-enabled generic modes use
+the same existing native window routes.
+
+The focused real Xvfb startup fixture first refuses a no-argument clean profile without creating
+data or a daemon. It then imports two projects, reopens without a path, confirms unchanged project
+and terminal counts, and reattaches the original child under the same daemon PID. A second
+no-argument reopen with both provider commands configured selects the other saved project without
+launching a child. `THREADING_LINUX_STARTUP_ONLY=1 ./window-smoke.sh` passed. This remains a
+source-tree launcher; it is not a packaged desktop entry point or an in-window project importer.

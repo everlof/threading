@@ -84,11 +84,14 @@ On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, ATK/AT-SPI, and 
 
 ```bash
 ./run-app.sh /absolute/path/to/an/existing/project
+./run-app.sh
 ```
 
-The development launcher builds the two host executables and `threading-ptyd`, imports the
-canonical project directory into a local store, starts or reuses one background daemon, and opens
-the native window with that project selected, even when the store contains other projects.
+The first command imports the canonical project directory into a local store and opens that
+project even when the store contains others. After one import, the no-argument command reopens
+the saved project list without importing a project or starting a child. With no existing store it
+refuses before creating state or starting a daemon. Both commands build the two host executables
+and `threading-ptyd` when needed, and start or reuse one background daemon.
 If its last selected agent is a launched, unarchived session without a recorded exit, the
 window checks the daemon after releasing the store lock. It attaches only when that exact child
 is still running. A held exit is saved to the selected row; an absent child opens the project

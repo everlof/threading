@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Development entry point for the native Linux window and its existing PTY daemon.
 set -euo pipefail
-if [[ $# != 1 || $(uname -s) != Linux ]]; then
-  echo 'usage (on Linux): ./run-app.sh EXISTING_PROJECT_DIRECTORY' >&2
+if [[ $# -gt 1 || $(uname -s) != Linux ]]; then
+  echo 'usage (on Linux): ./run-app.sh [EXISTING_PROJECT_DIRECTORY]' >&2
   exit 64
 fi
-project=$(realpath -e -- "$1")
+project=''
+if [[ $# == 1 ]]; then
+  project=$(realpath -e -- "$1")
+fi
 cd "$(dirname "${BASH_SOURCE[0]}")"
-if [[ ! -d "$project" ]]; then
+if [[ -n $project && ! -d $project ]]; then
   echo "run-app: project is not a directory: $project" >&2
   exit 1
 fi
@@ -23,6 +26,13 @@ for directory in "$data_dir" "$runtime_dir"; do
     echo "run-app: state paths must be absolute: $directory" >&2
     exit 1
   fi
+done
+store=$data_dir/store
+if [[ -z $project && ! -f $store/threading.db ]]; then
+  echo 'run-app: first launch needs an existing project directory' >&2
+  exit 1
+fi
+for directory in "$data_dir" "$runtime_dir"; do
   mkdir -p -m 700 -- "$directory"
   chmod 700 -- "$directory"
 done
@@ -54,7 +64,6 @@ for executable in "$host" "$window" "$daemon"; do
   fi
 done
 
-store=$data_dir/store
 state=$data_dir/daemon
 socket=$runtime_dir/pty.sock
 mkdir -p -m 700 -- "$state"
@@ -64,7 +73,9 @@ chmod 700 -- "$state"
 # whether a stale socket can be replaced.
 exec 9>"$runtime_dir/start.lock"
 flock -x 9
-"$host" --add-project "$store" "$project" >/dev/null
+if [[ -n $project ]]; then
+  "$host" --add-project "$store" "$project" >/dev/null
+fi
 if ! "$daemon" sessions --json --socket "$socket" >/dev/null 2>&1; then
   nohup "$daemon" --socket "$socket" --state "$state" >"$data_dir/daemon.log" 2>&1 </dev/null 9>&- &
   daemon_pid=$!
@@ -109,6 +120,12 @@ if [[ -n $claude ]]; then
   fi
 fi
 if [[ -n $codex || -n $claude ]]; then
-  exec "$window" --app-agents-project "$store" "$socket" "$shell_path" "${codex:--}" "${claude:--}" "$project"
+  if [[ -n $project ]]; then
+    exec "$window" --app-agents-project "$store" "$socket" "$shell_path" "${codex:--}" "${claude:--}" "$project"
+  fi
+  exec "$window" --app-agents "$store" "$socket" "$shell_path" "${codex:--}" "${claude:--}"
 fi
-exec "$window" --app-project "$store" "$socket" "$shell_path" "$project"
+if [[ -n $project ]]; then
+  exec "$window" --app-project "$store" "$socket" "$shell_path" "$project"
+fi
+exec "$window" --app "$store" "$socket" "$shell_path"

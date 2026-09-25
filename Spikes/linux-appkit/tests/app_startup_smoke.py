@@ -1,4 +1,4 @@
-"""A clean Linux profile imports a project, starts its daemon and reopens one native terminal."""
+"""A clean Linux profile imports a project, then reopens its saved navigator and terminal."""
 import json
 import os
 from pathlib import Path
@@ -58,9 +58,12 @@ def terminal_row():
     raise AssertionError('daemon did not retain the project terminal')
 
 
-def launch(log_name, project_argument=None, codex=None, claude=None):
+def launch(log_name, project_argument=project, codex=None, claude=None):
     log = (root / log_name).open('w+')
-    process = subprocess.Popen([script, project_argument or str(project)], cwd=root,
+    command = [script]
+    if project_argument is not None:
+        command.append(str(project_argument))
+    process = subprocess.Popen(command, cwd=root,
                                env=dict(environment, THREADING_LINUX_CODEX=codex or '',
                                         THREADING_LINUX_CLAUDE=claude or ''),
                                stdout=log, stderr=log)
@@ -71,6 +74,11 @@ daemon_pid = None
 process = None
 log = None
 try:
+    first_run = subprocess.run([script], cwd=root, env=environment,
+                               capture_output=True, text=True, timeout=5)
+    assert first_run.returncode == 1 and 'first launch needs an existing project directory' in first_run.stderr, first_run
+    assert not data.exists() and not runtime.exists(), 'no-argument first run created state'
+
     process, log = launch('startup-first.log')
     window = title(process, 'Threading experiment - ' + str(project))
     daemon_pid = int((runtime / 'daemon.pid').read_text())
@@ -123,7 +131,46 @@ try:
     title(process, 'Threading experiment - ' + str(project))
     key(window, 'Escape')
     assert process.wait(timeout=5) == 0
-    print('PASS clean-profile project targeting, daemon reuse and same-child native reattach', flush=True)
+    log.close()
+    process = None
+
+    # Reopening without a path uses the saved catalogue and does not import or start a child.
+    process, log = launch('startup-untargeted.log', project_argument=None)
+    window = title(process, 'Threading experiment - ' + str(project))
+    assert int((runtime / 'daemon.pid').read_text()) == daemon_pid
+    assert len(held()) == 1 and held()[0]['pid'] == first['pid'], held()
+    listing = subprocess.check_output([host, str(store), str(socket), 'list'], text=True, timeout=5)
+    assert listing.count(str(project)) == 1 and listing.count(str(other_project)) == 1, listing
+    assert sum(line.startswith('  ') for line in listing.splitlines()) == 1, listing
+    key(window, 'Right')
+    title(process, 'Threading terminals - ' + str(project))
+    key(window, 'Return')
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not any(
+            row['id'] == first['id'] and row['attached'] for row in held()):
+        time.sleep(.05)
+    assert next(row for row in held() if row['id'] == first['id'])['pid'] == first['pid']
+    key(window, 'ctrl+shift+p')
+    title(process, 'Threading terminals - ' + str(project))
+    key(window, 'Escape')
+    title(process, 'Threading experiment - ' + str(project))
+    key(window, 'Escape')
+    assert process.wait(timeout=5) == 0
+    log.close()
+    process = None
+
+    # The generic provider-enabled path also exposes every saved project without spawning.
+    process, log = launch('startup-untargeted-agents.log', project_argument=None,
+                          codex='/bin/true', claude='/bin/true')
+    window = title(process, 'Threading experiment - ' + str(project))
+    key(window, 'Down')
+    title(process, 'Threading experiment - ' + str(other_project))
+    key(window, 'Right')
+    title(process, 'Threading experiment - no saved terminals')
+    assert len(held()) == 1 and held()[0]['pid'] == first['pid'], held()
+    key(window, 'Escape')
+    assert process.wait(timeout=5) == 0
+    print('PASS clean-profile import, no-argument reopen, daemon reuse and same-child native reattach', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.kill()
