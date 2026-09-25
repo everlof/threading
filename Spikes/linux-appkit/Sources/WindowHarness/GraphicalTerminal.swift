@@ -153,6 +153,34 @@ final class GraphicalTerminal: @unchecked Sendable {
                resume: (shell, codex, width, height))
     }
     private enum SavedKind { case terminal, agent }
+    /// Navigation is durable before the UI enters a runtime. Keep the exact-row membership
+    /// check and scalar write off the UI actor; terminal selection clears a prior agent as on
+    /// macOS. The window keeps a failed choice in its picker or project list; a new shell still
+    /// reports its own launch failure if the same store refusal prevents it from starting.
+    static func selectRuntime(store: String, agentID: String?) throws {
+        let id: SessionID?
+        if let agentID {
+            guard let uuid = UUID(uuidString: agentID) else { throw WindowFailure("invalid session UUID") }
+            id = SessionID(uuid)
+        } else {
+            id = nil
+        }
+        let root = URL(fileURLWithPath: store, isDirectory: true)
+        let file = root.appendingPathComponent("threading.db")
+        guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
+        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
+        defer { Glibc.close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let database = try ProjectDatabase(url: file)
+        defer { database.close() }
+        if let id {
+            guard try database.sessionRecord(id: id) != nil else {
+                throw WindowFailure("session is not in this store")
+            }
+        }
+        try database.saveSelectedSessionID(id)
+    }
     private func attach(store: String, socket: String, savedID: String, kind: SavedKind,
                         resume: (String, String, Int, Int)? = nil) {
         worker.async { [self] in

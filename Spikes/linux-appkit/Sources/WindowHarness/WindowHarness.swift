@@ -26,6 +26,7 @@ struct ProjectSnapshot: Sendable {
 struct WindowSnapshot: Sendable {
     let projects: [ProjectSnapshot]
     let selectedProjectIndex: Int
+    let restoreAgentID: String?
 }
 struct WindowFailure: Error, CustomStringConvertible {
     let description: String
@@ -130,6 +131,40 @@ struct WindowHarness {
     }
 
     #if os(Linux)
+    /// SDL owns its renderer on the thread that opened it. Do not suspend the window loop across
+    /// a store write: Swift's Linux main-actor executor can resume it on another native thread.
+    /// The worker publishes one result, and the native loop polls only while that write is live.
+    private final class SelectionGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<Void, Error>?
+
+        func finish(_ value: Result<Void, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<Void, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private struct PendingSelection {
+        let event: TWEvent
+        let continuesOnRefusal: Bool
+        let gate: SelectionGate
+    }
+
+    private static func recordSelection(_ agentID: String?, store: String,
+                                        after event: TWEvent,
+                                        continuesOnRefusal: Bool = false) -> PendingSelection {
+        let gate = SelectionGate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            gate.finish(Result { try GraphicalTerminal.selectRuntime(store: store, agentID: agentID) })
+        }
+        return PendingSelection(event: event, continuesOnRefusal: continuesOnRefusal, gate: gate)
+    }
+
     static func loadSnapshot(_ path: String, selectingProjectAt requestedPath: String? = nil) throws -> WindowSnapshot {
         let root = URL(fileURLWithPath: path, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
@@ -168,7 +203,21 @@ struct WindowHarness {
                 path: project.folderPath, sessions: project.sessionCount,
                 terminalCount: project.terminalCount, recentAgents: agents, recentTerminals: terminals)
         }
-        return WindowSnapshot(projects: projects, selectedProjectIndex: selectedIndex)
+        // The development launcher names a project explicitly. Restore only its selected,
+        // launched agent; a selection from another project must not override that request.
+        // Attach never starts a process. An older selection outside the bounded picker is left
+        // alone until the navigator can reveal sessions beyond its recent window.
+        let restoreAgentID: String?
+        if requestedPath != nil, let selectedID = catalog.selectedSessionID,
+           let selected = catalog.projects[selectedIndex].recentSessions.first(where: {
+               $0.id == selectedID && $0.hasLaunched && !$0.isArchived && $0.lastExitCode == nil
+           }) {
+            restoreAgentID = selected.id.uuidString
+        } else {
+            restoreAgentID = nil
+        }
+        return WindowSnapshot(projects: projects, selectedProjectIndex: selectedIndex,
+                              restoreAgentID: restoreAgentID)
     }
 
     static func modifiers(_ event: TWEvent) -> PTYEmulator.Modifiers {
@@ -418,7 +467,21 @@ struct WindowHarness {
         var width = 800, height = 480, selected = snapshot.selectedProjectIndex, first = 0
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
+        var pendingSelection: PendingSelection?
         var dirty = true
+        if let id = snapshot.restoreAgentID, let launch,
+           let row = projects[selected].recentAgents.firstIndex(where: { $0.id == id }) {
+            let session = GraphicalTerminal()
+            restoredRuntimes[.agent(id)] = session
+            restoredProjectIDs.insert(projects[selected].id)
+            savedPicker = .agents(selected)
+            savedSelected = row
+            session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
+            guard let size = try runTerminal(session, window: window, width: width, height: height,
+                                             allowsProjects: true) else { return }
+            width = size.0; height = size.1
+            tw_project_mode(window)
+        }
         while true {
             if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                       pending: &pendingAgentProjects,
@@ -518,7 +581,42 @@ struct WindowHarness {
                 dirty = false
             }
             var event = TWEvent()
-            guard tw_next(window, &event) == 1 else { throw WindowFailure(String(cString: tw_error())) }
+            var selectionWasCommitted = false
+            if let pending = pendingSelection {
+                if let result = pending.gate.take() {
+                    pendingSelection = nil
+                    switch result {
+                    case .success:
+                        event = pending.event
+                        selectionWasCommitted = true
+                    case .failure(let error):
+                        print("SELECTION_REFUSED \(error)"); fflush(nil)
+                        if !pending.continuesOnRefusal {
+                            tw_title(window, "Threading experiment - could not save runtime selection")
+                            continue
+                        }
+                        // A new shell still owns its launch result. It can report the store
+                        // refusal on the existing unavailable surface instead of hiding it
+                        // at the project picker. Reusing a runtime requires a durable clear.
+                        event = pending.event
+                        selectionWasCommitted = true
+                    }
+                } else {
+                    if tw_next_timeout(window, &event, 33) == 1 {
+                        if event.kind == 5 { return }
+                        if event.kind == 1 {
+                            width = max(320, min(1280, Int(event.width)))
+                            height = max(180, min(900, Int(event.height)))
+                            dirty = true
+                        }
+                    }
+                    continue
+                }
+            } else {
+                guard tw_next(window, &event) == 1 else {
+                    throw WindowFailure(String(cString: tw_error()))
+                }
+            }
             switch event.kind {
             case 5: return
             case 12:
@@ -555,13 +653,21 @@ struct WindowHarness {
                     let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                     let session: GraphicalTerminal
                     let mayResume = savedPicker.isAgent && agentExecutable != nil
-                    if let existing = restoredRuntimes[key], !(mayResume && existing.canReplace) { session = existing }
+                    let existing = restoredRuntimes[key]
+                    let reuses = existing.map { !(mayResume && $0.canReplace) } ?? false
+                    guard reuses || existing != nil
+                            || terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                        tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                        break
+                    }
+                    if !selectionWasCommitted {
+                        pendingSelection = recordSelection(savedPicker.isAgent ? runtime.id : nil,
+                                                           store: launch[0], after: event)
+                        break
+                    }
+                    if reuses, let existing { session = existing }
                     else {
                         if let existing = restoredRuntimes.removeValue(forKey: key) { existing.stop() }
-                        guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
-                            tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
-                            break
-                        }
                         session = GraphicalTerminal()
                         restoredRuntimes[key] = session
                         restoredProjectIDs.insert(project.id)
@@ -584,6 +690,16 @@ struct WindowHarness {
                     break
                 }
                 let project = projects[selected]
+                guard terminals[project.id] != nil
+                        || terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
+                    tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                    break
+                }
+                if !selectionWasCommitted {
+                    pendingSelection = recordSelection(nil, store: launch[0], after: event,
+                                                       continuesOnRefusal: terminals[project.id] == nil)
+                    break
+                }
                 let session: GraphicalTerminal
                 if let existing = terminals[project.id] { session = existing }
                 else {
@@ -604,18 +720,24 @@ struct WindowHarness {
             case 9:
                 guard savedPicker == nil, let launch, !projects.isEmpty else { break }
                 let project = projects[selected]
+                if let existing = terminals[project.id], !existing.canReplace {
+                    tw_title(window, "Threading experiment - terminal may still be running")
+                    break
+                }
+                guard terminals.count + restoredRuntimes.count
+                        - (terminals[project.id] == nil ? 0 : 1) < maximumOpenRuntimes else {
+                    tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                    break
+                }
+                if !selectionWasCommitted {
+                    pendingSelection = recordSelection(nil, store: launch[0], after: event,
+                                                       continuesOnRefusal: true)
+                    break
+                }
                 if let existing = terminals[project.id] {
-                    guard existing.canReplace else {
-                        tw_title(window, "Threading experiment - terminal may still be running")
-                        break
-                    }
                     if existing.hasCreatedTerminal { previousTerminalCounts[project.id, default: 0] += 1 }
                     existing.stop()
                     terminals.removeValue(forKey: project.id)
-                }
-                guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
-                    tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
-                    break
                 }
                 let session = GraphicalTerminal()
                 terminals[project.id] = session

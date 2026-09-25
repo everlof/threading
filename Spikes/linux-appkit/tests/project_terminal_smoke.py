@@ -48,6 +48,11 @@ with open(Path(folder) / 'navigation.log', 'w+') as log:
         assert alpha['cwd'] == folder + '/Alpha'
         key('ctrl+shift+p')
         assert title('Threading experiment - ' + folder + '/Alpha') == window
+        with open(Path(store) / 'host.lock', 'a') as store_lock:
+            fcntl.flock(store_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            key('Return')
+            title('Threading experiment - could not save runtime selection')
+            assert json.loads((Path(folder) / 'Alpha/navigation-child.json').read_text()) == alpha
         key('ctrl+shift+n')
         title('Threading experiment - terminal may still be running')
         key('Return')
