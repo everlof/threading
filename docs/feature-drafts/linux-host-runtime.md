@@ -174,6 +174,11 @@ no longer opens as a false live attachment; explicit picker selection resumes it
 preflight. This still does not provide a packaged release or authenticated-provider evidence.
 The observed and offline exit cases are recorded in
 [FINDINGS section 90](../../Spikes/linux-appkit/FINDINGS.md#90-native-linux-agent-exits-survive-window-restarts).
+The source-tree launcher can also reopen the saved project navigator without a directory after
+the first import; the explicit-directory route still targets that project. This is a usable
+development lifecycle, not a packaged desktop entry point.
+The clean-profile and saved-project reopen checks are recorded in
+[FINDINGS section 91](../../Spikes/linux-appkit/FINDINGS.md#91-the-linux-development-app-reopens-from-its-saved-project-list).
 
 ## The boundary to build
 
