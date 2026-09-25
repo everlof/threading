@@ -968,6 +968,38 @@ final class GitTurnCheckpointTests: XCTestCase {
         )
     }
 
+    func testStartupRefInventoryReadsEachRepositoryOnce() throws {
+        let secondRoot = container.appendingPathComponent("second-repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
+        try initializeRepository(at: secondRoot, withCommit: true)
+
+        let firstRef = GitTurnCheckpointRefs.pair(
+            sessionID: SessionID(), checkpointID: GitTurnCheckpointID()
+        ).before
+        let secondRef = GitTurnCheckpointRefs.pair(
+            sessionID: SessionID(), checkpointID: GitTurnCheckpointID()
+        ).after
+        _ = try output("update-ref", firstRef, try output("rev-parse", "HEAD"), in: root)
+        _ = try output(
+            "update-ref", secondRef, try output("rev-parse", "HEAD", in: secondRoot),
+            in: secondRoot
+        )
+
+        let result: Result<[GitReviewReader.CheckpointRefInventory], GitFailure> = try perform {
+            completion in
+            GitReviewReader.checkpointRefs(
+                in: [root, root, secondRoot, secondRoot], completion: completion
+            )
+        }
+        let inventories = try result.get()
+        XCTAssertEqual(inventories.count, 2)
+        let refsByRoot = try Dictionary(uniqueKeysWithValues: inventories.map {
+            ($0.root.path, try $0.result.get())
+        })
+        XCTAssertEqual(refsByRoot[root.path], [firstRef])
+        XCTAssertEqual(refsByRoot[secondRoot.path], [secondRef])
+    }
+
     func testRefNamespaceRejectsLookalikesAndUserRefs() {
         let session = SessionID()
         let checkpoint = GitTurnCheckpointID()

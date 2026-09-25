@@ -2053,6 +2053,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Removes history files belonging to sessions that no longer exist.
     @MainActor
     private func cleanupOrphanedHistoryFiles() {
+        let span = PerformanceRecorder.shared.begin(
+            "app.launch.history-cleanup", category: "lifecycle"
+        )
+        defer { span.end() }
         // An empty project list caused by a failed load is not evidence that every history
         // file is orphaned. Preserve all histories for this launch so recovery stays possible.
         guard ProjectStore.shared.didLoadStateSuccessfully else {
@@ -2081,6 +2085,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// not evidence that every terminal history is.
     @MainActor
     private func cleanupOrphanedTurnCheckpoints() {
+        let span = PerformanceRecorder.shared.begin(
+            "app.launch.checkpoint-cleanup", category: "lifecycle"
+        )
+        defer { span.end() }
         guard ProjectStore.shared.didLoadStateSuccessfully else {
             ThreadingLogger.git.error(
                 "Skipping orphaned turn checkpoint cleanup because project state failed to load"
@@ -2092,12 +2100,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let store = GitTurnBaselineStore.shared
         store.retainOnly(sessionIDs: sessionIDs)
 
-        var checkouts = projects.map { URL(fileURLWithPath: $0.folderPath) }
-        checkouts.append(contentsOf: sessionIDs.compactMap {
-            ProjectStore.shared.executionProject(forSessionID: $0)
-                .map { URL(fileURLWithPath: $0.folderPath) }
+        // A catalog can hold thousands of sessions in a few checkouts. Collect their distinct
+        // paths directly from the project snapshot instead of copying a Project for every row.
+        let checkoutPaths = Set(projects.flatMap { project in
+            [project.folderPath] + project.sessions.map { $0.workingDirectory(in: project) }
         })
-        store.garbageCollectOrphanedRefs(in: checkouts)
+        store.garbageCollectOrphanedRefs(
+            in: checkoutPaths.map { URL(fileURLWithPath: $0) }
+        )
     }
 
     // MARK: - Menu Setup

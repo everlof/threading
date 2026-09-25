@@ -378,7 +378,9 @@ still exists. Only permanent session/project deletion collects them. Normal star
 the private namespace in every reachable catalog repository and removes well-formed app refs that
 no metadata record owns. That reconciliation is what keeps retention bounded after metadata
 quarantine or an exit between the two halves of collection; it cannot name a branch, tag, remote,
-or any ref outside the private prefix.
+or any ref outside the private prefix. Startup snapshots distinct checkout paths on main, then
+discovers repositories and reads their private refs on a serial utility queue. This keeps a large
+session catalog from launching a burst of Git processes during the first usable window.
 
 **The checkpoints are read-only, and putting the worktree back is a separate decision.** The store
 publishes and reads trees; nothing here restores one, which is the checkpoint half of the same rule

@@ -765,43 +765,40 @@ final class GitTurnBaselineStore {
     /// UUID-shaped Threading refs, and the retained set is recomputed after the asynchronous read
     /// so a turn admitted during startup cannot be mistaken for an orphan.
     func garbageCollectOrphanedRefs(in checkouts: [URL]) {
-        var repositories: [String: URL] = [:]
-        for checkout in checkouts {
-            guard let root = GitInfo.repositoryRoot(for: checkout.path),
-                  let location = GitInfo.worktreeLocation(for: root.path) else { continue }
-            repositories[location.repositoryIdentity] = root
-        }
-
-        for (repositoryIdentity, root) in repositories {
-            GitReviewReader.checkpointRefs(
-                expectedRepositoryIdentity: repositoryIdentity,
-                in: root
-            ) { [weak self] result in
-                guard let self else { return }
-                switch result {
-                case .success(let refs):
-                    let retained = Set(self.archive.checkpoints.flatMap {
-                        [$0.beforeRef, $0.afterRef].compactMap { $0 }
-                    })
-                    let orphaned = refs.filter { !retained.contains($0) }
-                    guard !orphaned.isEmpty else { return }
-                    GitReviewReader.deleteCheckpointRefs(
-                        orphaned,
-                        expectedRepositoryIdentity: repositoryIdentity,
-                        in: root
-                    ) { deletion in
-                        if case .failure(let failure) = deletion {
-                            ThreadingLogger.git.error(
-                                "Orphaned checkpoint ref collection failed: \(failure.localizedDescription, privacy: .private(mask: .hash))"
-                            )
+        GitReviewReader.checkpointRefs(in: checkouts) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let inventories):
+                let retained = Set(self.archive.checkpoints.flatMap {
+                    [$0.beforeRef, $0.afterRef].compactMap { $0 }
+                })
+                for inventory in inventories {
+                    switch inventory.result {
+                    case .success(let refs):
+                        let orphaned = refs.filter { !retained.contains($0) }
+                        guard !orphaned.isEmpty else { continue }
+                        GitReviewReader.deleteCheckpointRefs(
+                            orphaned,
+                            expectedRepositoryIdentity: inventory.repositoryIdentity,
+                            in: inventory.root
+                        ) { deletion in
+                            if case .failure(let failure) = deletion {
+                                ThreadingLogger.git.error(
+                                    "Orphaned checkpoint ref collection failed: \(failure.localizedDescription, privacy: .private(mask: .hash))"
+                                )
+                            }
                         }
-                    }
 
-                case .failure(let failure):
-                    ThreadingLogger.git.error(
-                        "Checkpoint ref reconciliation failed: \(failure.localizedDescription, privacy: .private(mask: .hash))"
-                    )
+                    case .failure(let failure):
+                        ThreadingLogger.git.error(
+                            "Checkpoint ref reconciliation failed: \(failure.localizedDescription, privacy: .private(mask: .hash))"
+                        )
+                    }
                 }
+            case .failure(let failure):
+                ThreadingLogger.git.error(
+                    "Checkpoint ref reconciliation failed: \(failure.localizedDescription, privacy: .private(mask: .hash))"
+                )
             }
         }
     }
@@ -1083,9 +1080,13 @@ final class GitTurnBaselineStore {
 
         var metadataOnly: [GitTurnCheckpoint] = []
         var batchesByRepository: [String: RefBatch] = [:]
+        let checkpointsByID = Dictionary(
+            uniqueKeysWithValues: archive.checkpoints.map { ($0.id, $0) }
+        )
+        var resolvedRoots: [String: URL] = [:]
 
         for checkpointID in checkpointIDs where !garbageCollectionsInFlight.contains(checkpointID) {
-            guard let record = checkpoint(id: checkpointID),
+            guard let record = checkpointsByID[checkpointID],
                   activeCheckpointIDs[record.sessionID] != checkpointID else { continue }
             let refs = [record.beforeRef, record.afterRef].compactMap { $0 }
             guard !refs.isEmpty else {
@@ -1093,12 +1094,13 @@ final class GitTurnBaselineStore {
                 continue
             }
             guard let repositoryIdentity = record.repositoryIdentity,
-                  let root = repositoryRoot(for: record) else {
+                  let root = resolvedRoots[repositoryIdentity] ?? repositoryRoot(for: record) else {
                 ThreadingLogger.git.error(
                     "Keeping checkpoint metadata because its repository is unavailable: \(checkpointID.uuidString, privacy: .public)"
                 )
                 continue
             }
+            resolvedRoots[repositoryIdentity] = root
 
             var batch = batchesByRepository[repositoryIdentity] ?? RefBatch(root: root)
             batch.records.append(record)

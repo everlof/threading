@@ -4,6 +4,26 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Startup checkpoint reconciliation, 2026-09-25
+
+The installed Release HUD recorded three launch stalls of 681, 274 and 299 ms. The first had
+only the broad `app.launch` span, so its exact stack is unproven. The later two overlapped Git
+checkpoint work; those cross-queue spans alone do not prove that Git blocked main. The owner
+catalog at the time held 33 projects, 1,152 sessions and 1,216 checkpoint records, including 429
+records for deleted sessions. Startup copied a whole `Project` for every session, resolved Git
+roots synchronously on main, repeatedly searched the checkpoint archive by ID, and then started
+one user-initiated Git process per repository at once.
+
+Startup now collects distinct checkout paths from one catalog snapshot, resolves those paths on
+a utility worker, and reads private refs serially on that worker. Checkpoint discard builds an
+ID index once and reuses a verified root per repository. The scaling unit for Git discovery and
+process work is now the distinct checkout/repository, rather than the stored session or record.
+The asynchronous result still recomputes retained refs before deleting anything, so a newly
+admitted turn remains protected. The first stall needs a new installed Release launch capture to
+confirm its owner and the after latency; the saved trace had no narrower main-thread span. Coarse
+`app.launch.history-cleanup` and `app.launch.checkpoint-cleanup` spans now separate those two
+main-thread launch phases if another stall occurs.
+
 ## Percentage curfew observations, 2026-09-18
 
 An account usage update evaluates only sessions with an armed percentage curfew on that account.

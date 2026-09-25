@@ -51,6 +51,19 @@ enum GitReviewReader {
         attributes: .concurrent
     )
 
+    /// Startup reconciliation is housekeeping across every known repository. Keep its git
+    /// processes serial and below interactive review/capture work, regardless of catalog size.
+    private static let checkpointRefScanQueue = DispatchQueue(
+        label: "codes.threading.git-turn-ref-scan",
+        qos: .utility
+    )
+
+    struct CheckpointRefInventory: Sendable {
+        let repositoryIdentity: String
+        let root: URL
+        let result: Result<[String], Failure>
+    }
+
     /// Status summaries feed navigation chrome and must not wait behind a megabyte-scale review
     /// diff already being parsed on `queue`. They are intentionally independent reads: both are
     /// read-only (`--no-optional-locks`), while making this serial with the review made switching
@@ -633,22 +646,52 @@ enum GitReviewReader {
         }
     }
 
-    /// Lists only well-formed refs in Threading's private namespace for startup reconciliation.
-    /// Repository identity is checked before the namespace is read, matching capture and delete.
+    /// Discovers reachable repositories and reads their private refs off main, one git process at
+    /// a time. A failure in one repository does not prevent reconciliation of the others.
     static func checkpointRefs(
-        expectedRepositoryIdentity: String,
-        in root: URL,
-        completion: @escaping @MainActor @Sendable (Result<[String], Failure>) -> Void
+        in checkouts: [URL],
+        completion: @escaping @MainActor @Sendable (Result<[CheckpointRefInventory], Failure>) -> Void
     ) {
-        perform("git.read.turn-checkpoint-refs", on: snapshotQueue, completion) {
-            guard GitInfo.worktreeLocation(for: root.path)?.repositoryIdentity
-                    == expectedRepositoryIdentity else {
-                throw Failure.checkpointRepositoryMismatch
+        perform(
+            "git.read.turn-checkpoint-refs",
+            on: checkpointRefScanQueue,
+            metadata: ["checkouts": String(checkouts.count)],
+            completion
+        ) {
+            var repositories: [String: URL] = [:]
+            for checkout in checkouts {
+                guard let root = GitInfo.repositoryRoot(for: checkout.path),
+                      let location = GitInfo.worktreeLocation(for: root.path) else { continue }
+                repositories[location.repositoryIdentity] = root
             }
-            return GitDiffParser.decode(try run(GitReviewCommands.checkpointRefs(), in: root))
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .map(String.init)
-                .filter(GitTurnCheckpointRefs.isOwned)
+
+            return repositories.sorted { $0.key < $1.key }.map { entry in
+                let repositoryIdentity = entry.key
+                let root = entry.value
+                let result: Result<[String], Failure>
+                do {
+                    guard GitInfo.worktreeLocation(for: root.path)?.repositoryIdentity
+                            == repositoryIdentity else {
+                        throw Failure.checkpointRepositoryMismatch
+                    }
+                    let refs = GitDiffParser.decode(
+                        try run(GitReviewCommands.checkpointRefs(), in: root)
+                    )
+                    result = .success(refs
+                        .split(separator: "\n", omittingEmptySubsequences: true)
+                        .map(String.init)
+                        .filter(GitTurnCheckpointRefs.isOwned))
+                } catch let failure as Failure {
+                    result = .failure(failure)
+                } catch {
+                    result = .failure(.gitFailed(error.localizedDescription))
+                }
+                return CheckpointRefInventory(
+                    repositoryIdentity: repositoryIdentity,
+                    root: root,
+                    result: result
+                )
+            }
         }
     }
 
