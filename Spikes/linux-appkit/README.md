@@ -90,8 +90,10 @@ The development launcher builds the two host executables and `threading-ptyd`, i
 canonical project directory into a local store, starts or reuses one background daemon, and opens
 the native window with that project selected, even when the store contains other projects.
 If its last selected agent is a launched, unarchived session without a recorded exit, the
-window attempts an attach to that identity. This never spawns a child; an unavailable child shows
-the existing failure view and Ctrl+Shift+P returns to its agent picker. A selected agent older
+window checks the daemon after releasing the store lock. It attaches only when that exact child
+is still running. A held exit is saved to the selected row; an absent child opens the project
+list without inventing an exit code. A failed daemon query still attempts attach and surfaces
+its failure. Startup never spawns a child. A selected agent older
 than the recent window is fetched by identity and shown within the 512-row picker limit.
 Otherwise the project list opens without starting a child. Enter opens a shell; the saved-agent
 and saved-terminal pickers can reattach other runtimes. It keeps data under
@@ -455,9 +457,9 @@ opens its account picker, which offers the standard home and at most 31 verified
 `THREADING_LINUX_CLAUDE_ACCOUNT=claude-work` can also set the initial choice. Its caller-minted
 UUID and chosen handle are stored before spawn. The standard route clears an inherited
 `CLAUDE_CONFIG_DIR`; a named route sets that variable to its exact `HOME/.claude-*` directory.
-The saved-agent picker first reattaches a daemon-held child; after exit it resumes the same UUID
-only when the exact transcript exists in the recorded project's saved account. A missing login
-or transcript refuses the resume without creating another chat. Hooks and authenticated-provider
+The saved-agent picker reattaches a live daemon-held child; when the child has exited or is absent,
+it resumes the same UUID only when the exact transcript exists in the recorded project's saved
+account. A missing login or transcript refuses the resume without creating another chat. Hooks and authenticated-provider
 execution are not yet covered by this Linux experiment. The native action uses the same host-owned
 session and PTY
 paths as Codex; it adds no public extension presentation component.

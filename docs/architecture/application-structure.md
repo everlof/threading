@@ -92,8 +92,8 @@ hosts share it; the macOS local launcher still owns hooks and fork handling. The
 a fresh standard-account Claude session and records its caller-minted UUID before spawn; the native
 Linux window can also resume an exited one after a worker checks the exact transcript path.
 `ClaudeTranscriptPath` owns that portable path and project-slug encoding for both hosts, while
-account discovery and transcript source selection remain host-owned. The headless CLI does not
-yet offer exited-session resume.
+account discovery and transcript source selection remain host-owned. The headless Linux CLI also
+resumes a saved Claude row after exact account and transcript preflight.
 
 `AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
 store and UI. macOS and the Linux host share it; host adapters retain account/model admission,
@@ -165,9 +165,14 @@ Graphical restoration across app restarts is available through explicit
 `--attach STORE SOCKET TERMINAL_UUID` and through selection
 in the project browser. A saved agent session has the same terminal renderer through explicit
 `--attach-agent STORE SOCKET SESSION_UUID` or the project's saved-agent picker; the host validates
-the agent record and keeps its typed daemon identity. The project-targeted launcher also attempts
+the agent record and keeps its typed daemon identity. The project-targeted launcher considers
 attach-only restoration of the saved selected agent when it belongs to that project, has launched,
-is unarchived and has no recorded exit. If it falls outside the recent window, one indexed read
+is unarchived and has no recorded exit. After releasing the store lock, it surveys the daemon
+once: a running child is attached, a held exit updates only that saved row, and an absent child
+opens the project list without inventing an exit status. A failed survey preserves the attach-only
+failure route. An observed in-window exit also updates the exact saved row, while an exited
+child's explicit picker selection resumes after preflight and records its launch only when the
+daemon accepts spawn. If the agent falls outside the recent window, one indexed read
 puts it in the picker without increasing the 512-row cap. Opening a different agent
 updates the selected ID on a worker before entering its terminal; opening a shell or saved terminal
 clears it on a writable store. Startup restoration never starts a child, and automatic terminal

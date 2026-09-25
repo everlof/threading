@@ -10,6 +10,53 @@ import ThreadingPTYHostKit
 /// Experimental host-only terminal surface. Threading retains store identity, process ownership,
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
+    enum AgentPresence {
+        case running
+        case exited(Int32)
+        case absent
+        case unavailable
+    }
+    private final class AgentSurvey: @unchecked Sendable {
+        private let lock = NSLock()
+        private let semaphore = DispatchSemaphore(value: 0)
+        private var result: AgentPresence?
+
+        func finish(_ value: AgentPresence) {
+            lock.lock()
+            guard result == nil else { lock.unlock(); return }
+            result = value
+            lock.unlock()
+            semaphore.signal()
+        }
+        func wait() -> AgentPresence {
+            guard semaphore.wait(timeout: .now() + 2) == .success else { return .unavailable }
+            lock.lock(); defer { lock.unlock() }
+            return result ?? .unavailable
+        }
+    }
+    /// Bounded off-window daemon survey, called only on startup or explicit agent selection.
+    /// Expect tens of held children; at 1,000, the protocol's 1 MiB frame cap bounds the list
+    /// and an oversized answer is unavailable. Only one typed identity survives decoding.
+    /// A failed query never becomes evidence that a child has exited.
+    static func agentPresence(socket: String, id: SessionID) -> AgentPresence {
+        let survey = AgentSurvey()
+        let identity = PTYHostSessionIdentity.agentSession(id)
+        let client = PTYHostClient(socketPath: socket, build: "linux-native-window",
+            events: .init(frame: { frame in
+                guard case .sessions(let summaries) = frame else { return }
+                guard let summary = summaries.first(where: { $0.id == identity }) else {
+                    survey.finish(.absent); return
+                }
+                if let exit = summary.exit { survey.finish(.exited(exit)) }
+                else { survey.finish(.running) }
+            }, closed: { _ in survey.finish(.unavailable) }), journal: { _, _ in })
+        defer { client.close() }
+        do {
+            try client.connect()
+            try client.list()
+            return survey.wait()
+        } catch { return .unavailable }
+    }
     private static let cellWidth = Int(TW_TERMINAL_CELL_WIDTH)
     private static let cellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
     static let maximumPasteBytes = 64 * 1024
@@ -83,6 +130,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var replayRemaining: Int?
     private var replayLabel = ""
     private var attachmentViewportApplied = false
+    private var savedAgent: (store: String, id: SessionID)?
+    private var pendingResumeRecording: (store: String, id: SessionID, plan: AgentLaunchPlan)?
     private var codexDiscovery: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)?
     private var agentResume: (store: String, socket: String, shell: String, codex: String?,
                               claude: String?, sessionID: SessionID, width: Int, height: Int)?
@@ -117,6 +166,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let environment = Self.launchEnvironment()
                 let identity = PTYHostSessionIdentity.agentSession(id)
                 self.identity = identity
+                savedAgent = (store, id)
                 if kind == .codex { codexDiscovery = (store, directory, accountPath, id, Date()) }
                 lastWidth = width; lastHeight = height
                 lock.lock(); createdAgent = true; spawnMayBeLive = true; lock.unlock()
@@ -221,14 +271,30 @@ final class GraphicalTerminal: @unchecked Sendable {
         worker.async { [self] in
             do {
                 attaching = true
-                lock.lock(); spawnMayBeLive = true; lock.unlock()
                 let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind)
                 identity = id
+                if kind == .agent, let uuid = UUID(uuidString: savedID) {
+                    savedAgent = (store, SessionID(uuid))
+                }
                 if let resume, let uuid = UUID(uuidString: savedID) {
-                    agentResume = (store, socket, resume.0, resume.1, resume.2,
-                                   SessionID(uuid), resume.3, resume.4)
+                    let details = (store: store, socket: socket, shell: resume.0,
+                                   codex: resume.1, claude: resume.2,
+                                   sessionID: SessionID(uuid), width: resume.3, height: resume.4)
+                    agentResume = details
+                    switch Self.agentPresence(socket: socket, id: SessionID(uuid)) {
+                    case .exited(let status):
+                        try Self.recordAgentExit(store: store, id: SessionID(uuid),
+                                                 status: status, observedNow: false)
+                        try spawnResumedAgent(details)
+                        return
+                    case .absent:
+                        try spawnResumedAgent(details)
+                        return
+                    case .running, .unavailable: break
+                    }
                 }
                 let link = try connect(socket: socket)
+                lock.lock(); spawnMayBeLive = true; lock.unlock()
                 try link.attach(PTYHostAttach(id: id))
                 worker.asyncAfter(deadline: .now() + Self.exitWaitSeconds) { [weak self] in
                     guard let self, self.replayRemaining != 0 else { return }
@@ -400,6 +466,12 @@ final class GraphicalTerminal: @unchecked Sendable {
             dirty = true
         case .spawned(let value):
             guard !attaching, value.id == identity else { fail(WindowFailure("spawn identity mismatch")); return }
+            if let pending = pendingResumeRecording {
+                do {
+                    try Self.recordAdmittedResume(pending.plan, store: pending.store, id: pending.id)
+                    pendingResumeRecording = nil
+                } catch { fail(error); return }
+            }
             lock.lock(); running = true; lock.unlock(); dirty = true
             if let discovery = codexDiscovery {
                 codexDiscovery = nil
@@ -410,8 +482,14 @@ final class GraphicalTerminal: @unchecked Sendable {
             guard !attaching || replayRemaining == 0 else { fail(WindowFailure("exit before completed replay")); return }
             exitStatus = value.signalled ? 128 + value.status : value.status
             lock.lock(); running = false; spawnMayBeLive = false; finished = true; lock.unlock(); dirty = true
+            if let savedAgent, let exitStatus {
+                do { try Self.recordAgentExit(store: savedAgent.store, id: savedAgent.id,
+                                              status: exitStatus, observedNow: true) }
+                catch { fail(WindowFailure("could not save agent exit: \(error)")) }
+            }
         case .spawnRefused(let value):
             guard value.id == identity else { fail(WindowFailure("spawn refusal identity mismatch")); return }
+            pendingResumeRecording = nil
             if value.reason != .alreadyExists {
                 lock.lock(); spawnMayBeLive = false; lock.unlock()
             }
@@ -427,27 +505,33 @@ final class GraphicalTerminal: @unchecked Sendable {
             }
         case .error(let value) where value.code == .unknownSession && value.detail == "attach" && attaching:
             guard let resume = agentResume else { fail(WindowFailure("PTY: \(value)")); return }
-            agentResume = nil
-            do {
-                let (plan, directory) = try Self.resumeAgent(store: resume.store,
-                    sessionID: resume.sessionID, shell: resume.shell,
-                    codex: resume.codex, claude: resume.claude)
-                let columns = max(2, resume.width / Self.cellWidth), rows = max(1, resume.height / Self.cellHeight)
-                connectionGeneration += 1
-                client?.close()
-                client = nil
-                let link = try connect(socket: resume.socket, columns: columns, rows: rows)
-                lastWidth = resume.width; lastHeight = resume.height
-                attaching = false
-                lock.lock(); spawnMayBeLive = true; lock.unlock()
-                try link.spawn(PTYHostSpawnRequest(id: .agentSession(resume.sessionID),
-                    channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
-                    executable: plan.executable, arguments: plan.arguments,
-                    environment: Self.launchEnvironment(), cwd: directory))
-            } catch { fail(error) }
+            lock.lock(); spawnMayBeLive = false; lock.unlock()
+            do { try spawnResumedAgent(resume) } catch { fail(error) }
         case .error(let value): fail(WindowFailure("PTY: \(value)"))
         default: break
         }
+    }
+    private func spawnResumedAgent(
+        _ resume: (store: String, socket: String, shell: String, codex: String?,
+                   claude: String?, sessionID: SessionID, width: Int, height: Int)
+    ) throws {
+        let (plan, directory) = try Self.resumeAgent(store: resume.store,
+            sessionID: resume.sessionID, shell: resume.shell,
+            codex: resume.codex, claude: resume.claude)
+        let columns = max(2, resume.width / Self.cellWidth), rows = max(1, resume.height / Self.cellHeight)
+        connectionGeneration += 1
+        client?.close()
+        client = nil
+        let link = try connect(socket: resume.socket, columns: columns, rows: rows)
+        lastWidth = resume.width; lastHeight = resume.height
+        attaching = false
+        agentResume = nil
+        pendingResumeRecording = (resume.store, resume.sessionID, plan)
+        lock.lock(); spawnMayBeLive = true; lock.unlock()
+        try link.spawn(PTYHostSpawnRequest(id: .agentSession(resume.sessionID),
+            channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
+            executable: plan.executable, arguments: plan.arguments,
+            environment: Self.launchEnvironment(), cwd: directory))
     }
     private static func discoverCodexSession(
         _ launch: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)
@@ -472,19 +556,52 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
     }
     private static func persistCodexID(_ id: TranscriptID, in store: String, for sessionID: SessionID) throws -> Bool {
+        try updateSavedAgent(store: store, id: sessionID) { session, _ in
+            guard session.resumeState == .awaitingIdentifier else { return false }
+            session.resumeState = .resumable(id)
+            return true
+        }
+    }
+    @discardableResult
+    private static func updateSavedAgent(
+        store: String, id: SessionID,
+        _ mutate: (inout AgentSession, ProjectDatabase.SessionRecord) -> Bool
+    ) throws -> Bool {
         let root = URL(fileURLWithPath: store, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: root.appendingPathComponent("threading.db").path) else {
+            throw WindowFailure("store does not exist")
+        }
         let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
         defer { Glibc.close(fd) }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
-        guard let record = try database.sessionRecord(id: sessionID),
-              record.session.resumeState == .awaitingIdentifier else { return false }
+        guard let record = try database.sessionRecord(id: id) else { return false }
         var session = record.session
-        session.resumeState = .resumable(id)
+        guard mutate(&session, record) else { return false }
         try database.saveSession(session, in: record.project.id, position: record.position)
         return true
+    }
+    private static func recordAdmittedResume(_ plan: AgentLaunchPlan, store: String, id: SessionID) throws {
+        guard try updateSavedAgent(store: store, id: id, { session, _ in
+            guard session.hasLaunched, session.resumeState.isResumable else { return false }
+            AgentLaunchRecording.apply(plan, to: &session, at: Date())
+            return true
+        }) else { throw WindowFailure("saved agent changed before resume admission") }
+    }
+    @discardableResult
+    static func recordAgentExit(store: String, id: SessionID, status: Int32,
+                                observedNow: Bool, expectedActivity: Date? = nil,
+                                expectedProject: ProjectID? = nil) throws -> Bool {
+        try updateSavedAgent(store: store, id: id) { session, record in
+            guard session.hasLaunched, session.lastExitCode == nil,
+                  expectedActivity.map({ session.lastActiveAt == $0 }) ?? true,
+                  expectedProject.map({ record.project.id == $0 }) ?? true else { return false }
+            session.lastExitCode = status
+            if observedNow { session.lastActiveAt = Date() }
+            return true
+        }
     }
     private static func resumeAgent(store: String, sessionID: SessionID, shell: String,
                                     codex: String?, claude: String?) throws -> (AgentLaunchPlan, String) {
@@ -501,7 +618,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             throw WindowFailure("saved agent has no resumable conversation")
         }
         let project = record.project
-        var session = record.session
+        let session = record.session
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: project.folderPath, isDirectory: &isDirectory),
               isDirectory.boolValue else { throw WindowFailure("project directory does not exist") }
@@ -550,8 +667,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         command.append(contentsOf: agentCommand)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: project.folderPath,
             shellPath: shell, resumeState: resumeState)
-        AgentLaunchRecording.apply(plan, to: &session, at: Date())
-        try database.saveSession(session, in: project.id, position: record.position)
+        // This standing row changes only after the daemon accepts spawn. A duplicate-live
+        // refusal or failed connection must preserve the old exit/activity state exactly.
         return (plan, project.folderPath)
     }
     private func fail(_ error: Error) {

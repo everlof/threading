@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -17,9 +18,10 @@ home = root / 'native-claude-home'
 home.mkdir()
 child = root / 'native-claude-child'
 child.write_text('''#!/usr/bin/python3
-import json, os, sys, tty
+import json, os, signal, sys, tty
 from pathlib import Path
 tty.setraw(0)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(7))
 assert 'CLAUDE_CONFIG_DIR' not in os.environ, os.environ['CLAUDE_CONFIG_DIR']
 units = os.getcwd().encode('utf-16-le')
 slug = ''.join(chr(int.from_bytes(units[i:i+2], 'little'))
@@ -41,7 +43,8 @@ if '--session-id' in args:
 elif '--resume' in args:
     identifier = args[args.index('--resume') + 1]
     assert (account / 'projects' / slug / (identifier + '.jsonl')).exists()
-    Path('claude-resumed.json').write_text(json.dumps({'id': identifier, 'argv': args}))
+    Path('claude-resumed.json').write_text(json.dumps({
+        'id': identifier, 'argv': args, 'pid': os.getpid()}))
     os.write(1, b'\\x1b]0;CLAUDE RESUMED\\x07')
 else:
     raise AssertionError(args)
@@ -78,6 +81,17 @@ def session_rows():
         return database.execute('SELECT id, data FROM session').fetchall()
 
 
+def saved_record():
+    return json.loads(session_rows()[0][1])
+
+
+def daemon_row(saved_id):
+    result = subprocess.run([daemon, 'sessions', '--json', '--socket', endpoint],
+                            check=True, capture_output=True, text=True, timeout=8)
+    return next((item for item in json.loads(result.stdout)
+                 if saved_id.lower() in item['id'].lower()), None)
+
+
 def await_release(saved_id):
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
@@ -89,11 +103,14 @@ def await_release(saved_id):
     raise AssertionError('daemon retained exited Claude session')
 
 
-def visit(name, action):
+def visit(name, action, targeted=False):
     log = root / name
     with log.open('w+') as output:
-        process = subprocess.Popen([window_binary, '--app-agents', store, endpoint,
-                                    '/bin/sh', '/bin/true', str(child)], env=environment,
+        command = [window_binary, '--app-agents-project' if targeted else '--app-agents',
+                   store, endpoint, '/bin/sh', '/bin/true', str(child)]
+        if targeted:
+            command.append(str(project))
+        process = subprocess.Popen(command, env=environment,
                                    stdout=output, stderr=output)
         try:
             window = title(process, 'Threading experiment - ' + str(project), log)
@@ -172,6 +189,14 @@ with reattach_log.open('w+') as output:
             process.kill()
         process.wait(timeout=3)
 await_release(saved_id)
+assert saved_record()['lastExitCode'] == 0, saved_record()
+
+
+def reopened_after_exit(process, window, log):
+    assert saved_record()['lastExitCode'] == 0
+
+
+visit('native-claude-reopen-after-exit.log', reopened_after_exit, targeted=True)
 
 
 def open_saved(process, window, log, expected):
@@ -183,6 +208,7 @@ def open_saved(process, window, log, expected):
 
 def resume(process, window, log):
     open_saved(process, window, log, 'CLAUDE RESUMED')
+    assert saved_record().get('lastExitCode') is None, saved_record()
     resumed = json.loads((project / 'claude-resumed.json').read_text())
     assert resumed['id'] == created['id'], resumed
     assert resumed['argv'] == ['--permission-mode', 'manual', '--resume', created['id']], resumed
@@ -194,8 +220,47 @@ def resume(process, window, log):
     title(process, 'Threading experiment - ' + str(project), log)
 
 
-visit('native-claude-resume.log', resume)
+visit('native-claude-resume.log', resume, targeted=True)
 assert len(session_rows()) == 1
+await_release(saved_id)
+assert saved_record()['lastExitCode'] == 0, saved_record()
+
+
+def leave_child_with_daemon(process, window, log):
+    open_saved(process, window, log, 'CLAUDE RESUMED')
+    assert saved_record().get('lastExitCode') is None, saved_record()
+    key(window, 'ctrl+shift+p')
+    title(process, 'Threading agents - ' + str(project), log)
+    key(window, 'Escape')
+    title(process, 'Threading experiment - ' + str(project), log)
+
+
+visit('native-claude-background-child.log', leave_child_with_daemon)
+background = json.loads((project / 'claude-resumed.json').read_text())
+os.kill(background['pid'], signal.SIGTERM)
+deadline = time.monotonic() + 10
+while True:
+    held = daemon_row(saved_id)
+    if held is not None and held['exit'] == 7:
+        break
+    assert time.monotonic() < deadline, held
+    time.sleep(.05)
+assert saved_record().get('lastExitCode') is None, saved_record()
+
+
+def reconcile_and_resume(process, window, log):
+    assert saved_record()['lastExitCode'] == 7, saved_record()
+    open_saved(process, window, log, 'CLAUDE RESUMED')
+    assert saved_record().get('lastExitCode') is None, saved_record()
+    key(window, 'q')
+    title(process, 'Threading terminal - exited 0', log)
+    key(window, 'ctrl+shift+p')
+    title(process, 'Threading agents - ' + str(project), log)
+    key(window, 'Escape')
+    title(process, 'Threading experiment - ' + str(project), log)
+
+
+visit('native-claude-background-reconcile.log', reconcile_and_resume, targeted=True)
 await_release(saved_id)
 resumed_bytes = (project / 'claude-resumed.json').read_bytes()
 Path(created['transcript']).unlink()
@@ -212,5 +277,6 @@ def refuse(process, window, log):
 
 visit('native-claude-missing.log', refuse)
 assert len(session_rows()) == 1
-print('PASS native Claude create, same-child reattach, exact resume and missing-transcript refusal',
+print('PASS native Claude create, same-child reattach, durable foreground/background exits, '
+      'accepted resume and missing-transcript refusal',
       flush=True)
