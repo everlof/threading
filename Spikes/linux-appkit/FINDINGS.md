@@ -2242,3 +2242,31 @@ truth rather than extending the daemon's bounded exit retention.
 The complete `./window-smoke.sh` suite then passed with the final resolver and live fixture,
 including standard and named Codex creation/resume, saved-agent reattach, terminal input and
 rendering, and clean-profile startup.
+
+## 83. A Linux window can choose a Codex login without an environment edit
+
+The diagnostic window now opens a bounded native Codex login chooser with Ctrl+Shift+I from the
+project list. It offers the standard home and up to 31 legacy named homes validated by the shared
+`CodexAccountLocations` rule. A one-time worker scan streams the home directory, retains only the
+first 31 valid names in lexical order and publishes immutable handles to the UI. Empty `.codex-*`
+directories do not spend a picker slot. The renderer mounts only viewport rows and publishes their
+same handles through AT-SPI. Arrow keys and pointer select a row; Enter makes it the new-session
+choice. The configured `THREADING_LINUX_CODEX_ACCOUNT` remains the initial choice, including when
+it is unavailable, so a missing explicit login is never silently replaced by the standard one.
+
+Launch resolves the chosen handle again before creating a session, while resume continues to use
+the handle in that session's stored record. The window's pending-session entry captures its launch
+handle, so choosing another login while a child starts cannot relabel its saved row. The project
+header shows the current new-session choice even after a shell exits. This chooser is host-only
+diagnostic UI: identity, marker admission, persistence, process routing and revalidation remain
+host responsibilities. It does not add a Mac controller or a new extension surface.
+
+The Ubuntu ARM/Xvfb smoke started with an invalid configured handle, presented a real two-row
+chooser despite 40 earlier-sorting unverified `.codex-*` folders, selected `codex-work`, and
+created a session under `HOME/.codex-work` with the exact persisted handle and provider ID. A new
+window resumed that provider ID through the same home; missing-marker and wrong-`HOME` resumes
+were refused before spawn. I inspected the captured 800×480 account picker: both rows and the
+selected named login are legible. The complete `./window-smoke.sh` suite passed, including the
+terminal, agent, reattach and clean-profile journeys. The chooser's header-only follow-up is
+covered by a focused named-account rerun. Live account-list refresh, in-app sign-in, non-legacy
+credential stores, other providers and packaged distribution remain open.

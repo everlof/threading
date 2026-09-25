@@ -101,6 +101,12 @@ private to the user. If `codex` resolves to an absolute executable, the window a
 managed Codex action. Set `THREADING_LINUX_CODEX=` to run the terminal-only mode, or set it to an
 absolute executable to choose a particular CLI. Closing the window leaves running children with
 the daemon; running the command again opens the same stored projects and can reattach them.
+In a Codex-enabled project list, Ctrl+Shift+I opens the native login chooser; Up/Down and Enter
+select the login used by the next Ctrl+Shift+A launch. It lists the standard home and up to 31
+marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window opens. An explicit
+`THREADING_LINUX_CODEX_ACCOUNT` chooses the initial handle, including one that is unavailable;
+the chooser can replace it. The selection lasts for this window only. Saved sessions retain their
+own account handle, so opening one never follows a later chooser change.
 
 This is a source-tree development entry point, not a packaged Linux release. The startup command,
 project import, store lock, daemon rendezvous and process ownership are host-owned; it publishes
@@ -423,9 +429,10 @@ and adds its saved identity to the agent picker. The picker reattaches daemon-he
 when the daemon no longer holds one, resumes the exact stored provider ID after finding its
 rollout under the recorded Codex account. It refuses an unavailable login or a missing or
 known-broken rollout before spawning. `env -u CODEX_HOME` prevents an inherited alternate login
-from silently taking over a standard-account record. To create on a legacy named login, start
-the window with `THREADING_LINUX_CODEX_ACCOUNT=codex-work`; the account must already exist at
-`HOME/.codex-work` with `auth.json`. This is an explicit diagnostic choice, not an in-app picker.
+from silently taking over a standard-account record. Ctrl+Shift+I opens the account picker in
+the project list; it can choose a legacy login such as `codex-work` after finding
+`HOME/.codex-work/auth.json`. `THREADING_LINUX_CODEX_ACCOUNT=codex-work` can still select the
+initial handle without opening the picker. Selection affects new sessions only.
 The initial project-window snapshot reads indexed session counts and at most 512 recent session
 payloads per project. A selected agent outside that window adds one indexed read and replaces
 one picker entry. Selected-agent attach, rollout-ID persistence, resume, and opening an agent

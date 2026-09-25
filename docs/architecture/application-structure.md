@@ -187,10 +187,12 @@ a worker. The targeted launcher reads one selected agent by primary key when it 
 that recent window; an eligible agent replaces one picker slot without expanding the 512-row cap.
 It does not decode other dormant sessions outside the window. Project terminal records still
 live in each project payload, so terminal identity lookup searches those embedded records.
-The visible experiment has no agent-account or model picker. An explicit
-`THREADING_LINUX_CODEX_ACCOUNT=codex-work` selects a legacy named Codex login for new sessions;
-the stored handle sends later resumes back to that exact `HOME/.codex-work` after login-marker,
-rollout-ID and mixed-ordinal checks. Without the variable, new sessions use `HOME/.codex`.
+The visible experiment has a bounded Codex login chooser (Ctrl+Shift+I), but no provider or model
+picker. A worker discovers up to 31 legacy marker-backed homes once per window, alongside the
+standard home. `THREADING_LINUX_CODEX_ACCOUNT=codex-work` sets the initial new-session choice;
+the window can change it without changing saved sessions. The stored handle sends later resumes
+back to that exact `HOME/.codex-work` after login-marker, rollout-ID and mixed-ordinal checks.
+Without the variable, new sessions use `HOME/.codex`.
 Registered keyring locations and other providers are still unsupported on Linux. A source-tree
 Linux launcher can import an existing project into the same durable store without a daemon,
 then start or reuse the daemon before opening this window with the requested project selected.

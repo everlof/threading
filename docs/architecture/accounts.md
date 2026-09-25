@@ -23,7 +23,9 @@ always means `HOME/.codex`, because launch clears an inherited `CODEX_HOME`. Leg
 handles require their exact `HOME/.codex-*` directory and `auth.json`; a verified macOS registry
 location can stand in for the marker when the CLI uses the keyring. Duplicate handles at
 different homes are withheld instead of choosing a login by discovery order. Linux does not
-read the macOS registry or credentials.
+read the macOS registry or credentials. Its diagnostic window discovers at most 31 named legacy
+homes on a worker at startup and presents them beside the standard home in a native picker.
+Choosing one changes only future launches; a stored session keeps its own handle on resume.
 
 Background title readers use `allAccountsAfterDiscovery` / `discoverAccount`: main captures the
 bounded registry records, one serial worker performs cold filesystem discovery through the shared
