@@ -36,6 +36,7 @@ Sources/Threading/Models/RemoteHostRecord.swift
 Sources/Threading/Models/SessionReadReceiptState.swift
 Sources/Threading/Models/AccountUsage.swift
 Sources/Threading/Core/Agent/AgentLaunchPlan.swift
+Sources/Threading/Core/Agent/AgentLaunchRecording.swift
 Sources/Threading/Core/Agent/AgentAccountRoute.swift
 Sources/Threading/Core/Agent/ShellCommand.swift
 Sources/Threading/Core/Agent/CodexLaunchCommand.swift

@@ -1948,3 +1948,23 @@ copy leaked a control byte to it. The captured native frames were inspected in b
 selected cells painted `(55,100,142)` against the adjacent terminal background `(23,25,29)`.
 The complete Docker/Xvfb `window-smoke.sh` suite passed on the final code. DEC motion/drag
 reports, word/row click gestures, IME and non-X11 clipboard behavior remain outside this slice.
+
+## 72. Terminal launches record the same durable attempt on macOS and Linux
+
+The graphical Linux host created a Codex record with an awaiting provider identifier but left
+`hasLaunched` false. A saved Linux session therefore disagreed with the macOS terminal launch
+path about whether its process had started. The Linux resume path also left an old exit code
+standing when it spawned a new process. `AgentLaunchRecording` now applies the resolved plan to
+one record before persistence: it marks the attempt launched, stamps activity, clears the old
+exit code and stores the plan's resume state. The macOS terminal controller, Linux CLI host and
+Linux native window use that same byte-identical helper; the native window writes the standing
+session row before a provider resume. Admission, database transaction scope, daemon acknowledgement
+and recovery remain host-owned, so this is still short of a shared creation transaction.
+
+The CoreSlice grew to 46 production files. Its Linux contract passed the shared transition,
+and the full Docker/Xvfb `window-smoke.sh` passed, including a fresh managed Codex record with
+`hasLaunched=true` and a separate-window resume that removed an injected stale exit code without
+changing the provider ID. The shipping macOS app built and `AgentSessionCreationTests` passed
+all three focused cases; the repository's architecture gates ran cleanly in that build. A prior
+launch failure deliberately remains visible until the runtime survives startup. The smoke uses
+an argument-recording Codex stand-in rather than an authenticated provider installation.

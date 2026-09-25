@@ -47,12 +47,14 @@ project-graph slice and runs fifteen on-disk contracts:
 | Future-schema refusal for checkpointed and live-WAL stores | 2 | 34 |
 | Pinned-WAL move refusal and relocation of healthy/damaged project stores | 2 | 35 |
 | Fresh-session capabilities, defaults and handoff admission | 1 | 41 |
+| Shared terminal launch recording | 1 | 72 |
 | Shared Unix connector modes, descriptor inheritance and path refusals | 1 | 43 |
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 45 production files are byte-identical to their sources. Fresh-session record assembly,
-launch values, account command routing and bounded Codex rollout checks are shared with the app.
+The 46 production files are byte-identical to their sources. Fresh-session record assembly,
+terminal launch recording, launch values, account command routing and bounded Codex rollout checks
+are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
 agent runtime. The debug harness uses
 `@testable import CoreSlice` without widening the production APIs. Commit-refusal fixtures use
