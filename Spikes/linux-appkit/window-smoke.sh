@@ -83,10 +83,12 @@ if [[ "$THREADING_LINUX_AGENT_ONLY" == 1 ]]; then
   python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
   python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/native_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
+  python3 tests/named_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   exit 0
 fi
 if [[ "$THREADING_LINUX_NAMED_ONLY" == 1 ]]; then
   python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
+  python3 tests/named_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   exit 0
 fi
 for project in Alpha Beta Gamma; do
@@ -349,6 +351,7 @@ python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixt
 python3 tests/agent_create_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/native_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
+python3 tests/named_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
 python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
 

@@ -25,7 +25,7 @@ void tw_close(TWWindow *);
 void tw_terminal_mode(TWWindow *);
 // Optional host navigation: kind 8 activates/returns, 9 requests a fresh terminal,
 // 10/11 drill in/back, 12 is keyboard cancel, 13 requests fresh Codex,
-// 20 chooses a Codex account, and 21 requests fresh Claude.
+// 20 chooses a Codex account, 21 requests fresh Claude, 22 chooses a Claude account.
 // In terminal mode, kind 14 requests a clipboard paste. The caller reads a bounded UTF-8
 // payload only after this event; the bridge never puts unbounded clipboard text in TWEvent.
 void tw_project_navigation(TWWindow *, int enabled);

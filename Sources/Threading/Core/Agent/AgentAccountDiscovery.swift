@@ -214,40 +214,18 @@ enum AgentAccountDiscovery {
     ) -> [AgentAccount] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let aliases = ShellAliasReader.accountAliasesByConfigPath()
-        var accounts: [AgentAccount] = []
-
-        let defaultDirectory = home.appendingPathComponent(AgentAccountDefaults.claudeDefaultDirectory)
-        if isDirectory(defaultDirectory) {
-            accounts.append(makeAccount(
-                provider: .claude,
-                handle: .standard,
-                directory: defaultDirectory,
-                aliases: aliases
-            ))
+        let verified = records.map {
+            ClaudeAccountLocation(handle: $0.handle, configPath: $0.configPath)
         }
-
-        for directory in directories ?? alternateDirectories(prefix: AgentAccountDefaults.claudeDirectoryPrefix) {
-            guard !isClaudeScienceDataDirectory(directory) else { continue }
-            guard AgentAccountDefaults.claudeConfigMarkers.contains(where: {
-                isFile(directory.appendingPathComponent($0))
-            }) else { continue }
-
-            accounts.append(makeAccount(
-                provider: .claude,
-                handle: handle(for: directory),
-                directory: directory,
-                aliases: aliases
-            ))
+        return ClaudeAccountLocations.discover(
+            home: home,
+            candidates: directories ?? alternateDirectories(prefix: AgentAccountDefaults.claudeDirectoryPrefix),
+            verified: verified
+        ).map {
+            makeAccount(provider: .claude, handle: $0.handle,
+                        directory: URL(fileURLWithPath: $0.configPath, isDirectory: true),
+                        aliases: aliases)
         }
-
-        appendRegisteredAccounts(
-            for: .claude,
-            records: records,
-            aliases: aliases,
-            to: &accounts
-        )
-
-        return accounts
     }
 
     /// Whether a directory is Claude Science's data root rather than a Claude Code login.
@@ -255,19 +233,7 @@ enum AgentAccountDiscovery {
     /// The reserved name matches outright. A custom root must show every structural marker,
     /// so an ordinary config directory is never excluded merely for holding common files.
     nonisolated static func isClaudeScienceDataDirectory(_ directory: URL) -> Bool {
-        guard isDirectory(directory) else { return false }
-
-        if directory.lastPathComponent == AgentAccountDefaults.claudeScienceDirectory {
-            return true
-        }
-
-        guard isFile(directory.appendingPathComponent(AgentAccountDefaults.claudeScienceFileMarker)) else {
-            return false
-        }
-
-        return AgentAccountDefaults.claudeScienceDirectoryMarkers.allSatisfy {
-            isDirectory(directory.appendingPathComponent($0))
-        }
+        ClaudeAccountLocations.isScienceDataDirectory(directory)
     }
 
     // MARK: - Codex
@@ -399,29 +365,6 @@ enum AgentAccountDiscovery {
         )
     }
 
-    /// Merges locations verified through Threading's setup flow with marker-based legacy
-    /// discovery. This is what keeps a Codex login visible when its CLI uses the OS keyring and
-    /// therefore has no `auth.json` marker for a filesystem-only scan to find.
-    nonisolated private static func appendRegisteredAccounts(
-        for provider: AgentKind,
-        records: [AgentAccountLocationRecord],
-        aliases: [String: String],
-        to accounts: inout [AgentAccount]
-    ) {
-        var seen = Set(accounts.map { URL(fileURLWithPath: $0.configPath).standardizedFileURL.path })
-        for record in records {
-            let directory = URL(fileURLWithPath: record.configPath).standardizedFileURL
-            guard isDirectory(directory), seen.insert(directory.path).inserted else { continue }
-            if provider == .claude, isClaudeScienceDataDirectory(directory) { continue }
-            accounts.append(makeAccount(
-                provider: provider,
-                handle: record.handle,
-                directory: directory,
-                aliases: aliases
-            ))
-        }
-    }
-
     private static func applyingPreferences(to account: AgentAccount) -> AgentAccount {
         let preferences = AccountPreferencesStore.shared
         let displayNameOverride = preferences.displayNameOverride(for: account.id)
@@ -436,21 +379,10 @@ enum AgentAccountDiscovery {
         )
     }
 
-    /// The directory name minus its leading dot, e.g. `.claude-nhartley` becomes `claude-nhartley`.
-    nonisolated private static func handle(for directory: URL) -> AccountHandle {
-        .named(String(directory.lastPathComponent.dropFirst()))
-    }
-
     nonisolated private static func isDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && isDirectory.boolValue
-    }
-
-    nonisolated private static func isFile(_ url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        return exists && !isDirectory.boolValue
     }
 }
 

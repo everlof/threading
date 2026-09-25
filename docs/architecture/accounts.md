@@ -18,13 +18,21 @@ exist, rejects duplicates and never reads credential material. Two things are de
 excluded: Claude Science data roots
 (`~/.claude-science`, or any root carrying `install-id` + `runtime/` + `orgs/`), which hold
 Claude-shaped state but are not login slots; and aliases that set no config directory.
-Codex's portable location rule also routes the experimental Linux host: the standard handle
-always means `HOME/.codex`, because launch clears an inherited `CODEX_HOME`. Legacy named
-handles require their exact `HOME/.codex-*` directory and `auth.json`; a verified macOS registry
-location can stand in for the marker when the CLI uses the keyring. Duplicate handles at
-different homes are withheld instead of choosing a login by discovery order. Linux does not
-read the macOS registry or credentials. Its diagnostic window discovers at most 31 named legacy
-homes on a worker at startup and presents them beside the standard home in a native picker.
+Claude and Codex use portable location rules shared with the experimental Linux host. Claude
+Science roots are refused even if a settings marker is present; a legacy named Claude handle
+requires its exact `HOME/.claude-*` directory and `.claude.json` or `settings.json`. A verified
+macOS registry location may use another directory without a marker. The standard Claude handle
+always means `HOME/.claude`, because launch clears inherited `CLAUDE_CONFIG_DIR`. Codex's
+standard handle always means `HOME/.codex`, because launch clears inherited `CODEX_HOME`.
+Legacy named Codex handles require their exact `HOME/.codex-*` directory and `auth.json`; a
+verified macOS registry location can stand in for the marker when the CLI uses the keyring.
+Duplicate handles at different homes are withheld instead of choosing a login by discovery order.
+If a verified Claude record uses a new handle for a marker-backed legacy home, discovery keeps
+the legacy handle at that path so sessions already storing it remain routable. The registry alias
+does not create a second visible account.
+Linux reads neither the macOS registry nor credentials. Its diagnostic window discovers at most
+31 named legacy homes per provider on a worker at startup and presents them beside the standard
+home in a native picker.
 Choosing one changes only future launches; a stored session keeps its own handle on resume.
 
 `AgentAccountSetupCoordinator` is the only writer of those records. It derives a bounded alternate

@@ -33,7 +33,7 @@ func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
     let addingProject = args.first == "--add-project"
     try check(addingProject ? args.count == 3 : args.count >= 3,
-        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT | attach-agent SESSION_UUID")
+        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | attach-agent SESSION_UUID")
     let importFolder = addingProject ? try projectDirectory(args[2]) : nil
     // Establish the signal mask before database decoding can create worker threads.
     let terminalControl: LocalTerminal? = addingProject || args[2] == "list" ? nil : try LocalTerminal()
@@ -73,8 +73,8 @@ func run() throws -> Int32 {
     try link.connect()
     if args[2] == "codex" || args[2] == "claude" {
         let isCodex = args[2] == "codex"
-        try check(args.count == 7 || (isCodex && args.count == 8),
-                  "managed agent requires DIRECTORY SHELL EXECUTABLE PROMPT; Codex also accepts ACCOUNT_HANDLE")
+        try check(args.count == 7 || args.count == 8,
+                  "managed agent requires DIRECTORY SHELL EXECUTABLE PROMPT [ACCOUNT_HANDLE]")
         try check(args[4].hasPrefix("/") && args[5].hasPrefix("/"),
                   "shell and agent executable must be absolute paths")
         let folder = try projectDirectory(args[3])
@@ -90,8 +90,11 @@ func run() throws -> Int32 {
             }
             accountPath = account.configPath
         } else {
-            accountPath = URL(fileURLWithPath: home, isDirectory: true)
-                .appendingPathComponent(AgentAccountDefaults.claudeDefaultDirectory).path
+            guard let account = ClaudeAccountLocations.resolve(handle,
+                home: URL(fileURLWithPath: home, isDirectory: true)) else {
+                throw HostFailure.refused("Claude account is unavailable")
+            }
+            accountPath = account.configPath
         }
         // The same fresh-record admission/defaults as macOS. This host has no model/effort
         // override and starts in Manual rather than inheriting a permissive CLI default.

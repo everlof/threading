@@ -129,7 +129,7 @@ LinuxHost /path/to/experimental-store /path/to/ptyd.sock run /path/to/project /b
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach TERMINAL_UUID
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock login-run /path/to/project /bin/sh python3 --version
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock codex /path/to/project /bin/sh /absolute/path/to/codex 'Inspect this project' [codex-work]
-LinuxHost /path/to/experimental-store /path/to/ptyd.sock claude /path/to/project /bin/sh /absolute/path/to/claude 'Inspect this project'
+LinuxHost /path/to/experimental-store /path/to/ptyd.sock claude /path/to/project /bin/sh /absolute/path/to/claude 'Inspect this project' [claude-work]
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach-agent SESSION_UUID
 ```
 
@@ -170,8 +170,10 @@ experiment.
 `claude` creates a durable Claude Code session record with the same portable command pair used by the
 macOS remote host. It records its UUID as the provider session ID before spawning, passes the
 shared Manual permission flag, and clears an inherited `CLAUDE_CONFIG_DIR` so the standard
-handle means `HOME/.claude`. The headless command supports only that standard login and does not
-yet resume an exited conversation; `attach-agent` still reconnects a daemon-held child. Its
+handle means `HOME/.claude`. An optional legacy handle such as `claude-work` routes through
+`HOME/.claude-work` only when it contains `.claude.json` or `settings.json`; an unavailable
+handle refuses before writing a session. The headless command does not yet resume an exited
+conversation; `attach-agent` still reconnects a daemon-held child. Its
 recorder smoke verifies the child arguments, environment, durable selection and exact-row writes,
 not an authenticated Claude installation.
 
@@ -445,13 +447,16 @@ from silently taking over a standard-account record. Ctrl+Shift+I opens the acco
 the project list; it can choose a legacy login such as `codex-work` after finding
 `HOME/.codex-work/auth.json`. `THREADING_LINUX_CODEX_ACCOUNT=codex-work` can still select the
 initial handle without opening the picker. Selection affects new sessions only.
-Ctrl+Shift+L starts a fresh standard-account Claude session when a Claude executable is configured.
-Its caller-minted UUID is stored before spawn, and `env -u CLAUDE_CONFIG_DIR` keeps an inherited
-alternate login from taking over `HOME/.claude`. The saved-agent picker first reattaches a
-daemon-held child; after exit it resumes the same UUID only when the exact transcript exists in
-the recorded project's Claude storage slot. A missing transcript refuses the resume without
-creating another chat. Named Claude accounts, hooks and authenticated-provider execution are not
-yet covered by this Linux experiment. The native action uses the same host-owned session and PTY
+Ctrl+Shift+L starts a fresh Claude session when a Claude executable is configured. Ctrl+Shift+O
+opens its account picker, which offers the standard home and at most 31 verified legacy homes;
+`THREADING_LINUX_CLAUDE_ACCOUNT=claude-work` can also set the initial choice. Its caller-minted
+UUID and chosen handle are stored before spawn. The standard route clears an inherited
+`CLAUDE_CONFIG_DIR`; a named route sets that variable to its exact `HOME/.claude-*` directory.
+The saved-agent picker first reattaches a daemon-held child; after exit it resumes the same UUID
+only when the exact transcript exists in the recorded project's saved account. A missing login
+or transcript refuses the resume without creating another chat. Hooks and authenticated-provider
+execution are not yet covered by this Linux experiment. The native action uses the same host-owned
+session and PTY
 paths as Codex; it adds no public extension presentation component.
 The initial project-window snapshot reads indexed session counts and at most 512 recent session
 payloads per project. A selected agent outside that window adds one indexed read and replaces
@@ -496,7 +501,7 @@ explicit selection. `--attach` and `--attach-agent` remain available below.
 
 Run `THREADING_LINUX_AGENT_ONLY=1 ./window-smoke.sh` for focused native agent selection, Codex
 account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NAMED_ONLY=1
-./window-smoke.sh` isolates named Codex creation and exact resume. The ordinary
+./window-smoke.sh` isolates named Codex and Claude creation and exact resume. The ordinary
 `./window-smoke.sh` runs the complete Xvfb suite.
 
 The project catalogue is an initial snapshot plus this window's newly created terminal counts
