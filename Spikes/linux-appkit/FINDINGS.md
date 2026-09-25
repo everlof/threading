@@ -1891,3 +1891,31 @@ off to X10/SGR and then VT200/SGR while native X clicks and wheel events arrived
 bytes in the off state and exact press, release and wheel escape sequences in the enabled states.
 Motion/drag reporting, local selection/copy and normal-buffer scrollback are still missing; this
 test does not establish pointer behavior under IME or a non-X11 compositor.
+
+## 70. The Linux terminal can browse normal-buffer history without losing the live screen
+
+SwiftTerm already retained 2,000 normal-buffer rows for the native terminal, but SDL wheel
+events were discarded whenever a child had not enabled DEC mouse tracking. A shared viewport
+operation now moves through that bounded history under the terminal lock and sets SwiftTerm's
+existing `userScrolling` state. New PTY output therefore leaves a held viewport on its rows;
+returning to the live end resumes following output. The renderer draws only the visible grid,
+hides the live cursor while historical rows are shown, and marks that state in the diagnostic
+window title. Wheel input is processed on the serial terminal worker; each native event is
+limited to eight steps and each step moves three rows. Frame requests remain bounded to one
+outstanding render.
+
+The live mouse mode still wins when a child asks for reports. An alternate-screen child gets
+cursor keys from wheel steps when alternate scrolling is enabled, rather than normal-buffer
+history. Alt requests local scrolling; Shift bypasses mouse reporting unless the child has
+requested shift capture. This is behavior of the existing host-only diagnostic terminal, not a
+new extension component: Threading still owns the viewport, input routing and PTY authority.
+
+The portable emulator contract checked changed rows, a hidden historical cursor, stable rows
+after new output, return to the live cursor and alternate-screen cursor-key input. A real PTY
+child under Docker/Xvfb then supplied 60 numbered lines; native SDL wheel events moved the
+rendered viewport into history and back. The captured held view showed rows 025–048, and the
+returned live view showed rows 038–060. The held view stayed in scrollback after the child wrote
+row 060. Captured frames were inspected in the real SDL window. Local text
+selection/copy, a visible scroll indicator and behavior under a non-X11 compositor remain
+unverified. The complete Docker/Xvfb `window-smoke.sh` suite passed on the final code, and
+the macOS SwiftTerm `ScrollbackEndTests` suite passed all three tests.

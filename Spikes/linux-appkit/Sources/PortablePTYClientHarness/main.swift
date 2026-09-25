@@ -147,10 +147,37 @@ func checkKeyboard() throws {
     print("PASS shared keyboard encoder: live cursor mode, modifiers, kitty repeat/release and ordered text")
 }
 
+func checkScrollback() throws {
+    var sent = Data()
+    let emulator = try PTYEmulator(columns: 10, rows: 3) { sent.append($0) }
+    for index in 0..<8 { emulator.feed(Data("R\(index)\r\n".utf8)) }
+    let live = emulator.snapshot()
+    try check(live.atLiveEnd && live.cursorColumn >= 0, "live viewport or cursor missing")
+    try check(emulator.mouseWheel(x: 5, y: 5, steps: 1, modifiers: []), "wheel did not move into history")
+    let held = emulator.snapshot()
+    try check(!held.atLiveEnd && held.cursorColumn == -1, "historical viewport drew live cursor")
+    try check(held.cells[1].text != live.cells[1].text, "historical viewport did not change rows")
+    emulator.feed(Data("R8\r\n".utf8))
+    let afterOutput = emulator.snapshot()
+    try check(afterOutput.cells[1].text == held.cells[1].text && !afterOutput.atLiveEnd,
+              "new output pulled a held viewport to the live end")
+    try check(emulator.mouseWheel(x: 5, y: 5, steps: -8, modifiers: []), "wheel did not return to live end")
+    let returned = emulator.snapshot()
+    try check(returned.atLiveEnd && returned.cursorColumn >= 0,
+              "cursor did not return at the live viewport")
+    emulator.feed(Data("\u{1b}[?1049h".utf8))
+    sent.removeAll()
+    try check(!emulator.mouseWheel(x: 5, y: 5, steps: 1, modifiers: []),
+              "alternate screen scrolled its own buffer")
+    try check(sent == Data("\u{1b}[A".utf8), "alternate screen did not receive a cursor key")
+    print("PASS Linux viewport: bounded history, held output, live cursor and alternate-screen wheel")
+}
+
 func run() throws {
     try checkInbox()
     try checkEmulator()
     try checkKeyboard()
+    try checkScrollback()
     guard CommandLine.arguments.count == 2 else { throw Failure(message: "usage: PortablePTYClientHarness SOCKET") }
     let socketPath = CommandLine.arguments[1]
     try checkLiveEmulation(socketPath)

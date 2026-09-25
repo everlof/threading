@@ -40,17 +40,32 @@ final class PTYEmulator: TerminalDelegate {
             terminal.sendEvent(buttonFlags: flags, x: hit.column, y: hit.row, pixelX: x, pixelY: y)
         }
     }
-    func mouseWheel(x: Int, y: Int, steps: Int, modifiers: Modifiers) {
+    @discardableResult
+    func mouseWheel(x: Int, y: Int, steps: Int, modifiers: Modifiers) -> Bool {
         terminal.terminalLock.withLock {
-            guard terminal.mouseMode != .off,
-                  !(modifiers.contains(.shift) && !terminal.mouseShiftCapture),
-                  steps != 0, let hit = mouseHit(x: x, y: y) else { return }
-            let flags = terminal.encodeButton(button: steps > 0 ? 4 : 5, release: false,
-                shift: modifiers.contains(.shift), meta: modifiers.contains(.alt),
-                control: modifiers.contains(.ctrl))
-            for _ in 0..<min(8, abs(steps)) {
-                terminal.sendEvent(buttonFlags: flags, x: hit.column, y: hit.row, pixelX: x, pixelY: y)
+            guard steps != 0, let hit = mouseHit(x: x, y: y) else { return false }
+            let count = min(8, abs(steps))
+            let local = modifiers.contains(.alt)
+                || (modifiers.contains(.shift) && !terminal.mouseShiftCapture)
+            if !local && terminal.mouseMode != .off {
+                let flags = terminal.encodeButton(button: steps > 0 ? 4 : 5, release: false,
+                    shift: modifiers.contains(.shift), meta: modifiers.contains(.alt),
+                    control: modifiers.contains(.ctrl))
+                for _ in 0..<count {
+                    terminal.sendEvent(buttonFlags: flags, x: hit.column, y: hit.row, pixelX: x, pixelY: y)
+                }
+                return false
             }
+            if terminal.isCurrentBufferAlternate {
+                guard !local && terminal.alternateScrollMode else { return false }
+                for _ in 0..<count {
+                    if let bytes = terminal.encodedFunctionalKey(steps > 0 ? .up : .down) {
+                        terminal.sendUserInput(bytes[...])
+                    }
+                }
+                return false
+            }
+            return terminal.scrollViewport(by: (steps > 0 ? -1 : 1) * count * 3)
         }
     }
     private func mouseHit(x: Int, y: Int) -> (column: Int, row: Int)? {
@@ -71,6 +86,7 @@ final class PTYEmulator: TerminalDelegate {
         let cursorColumn: Int
         let cursorRow: Int
         let title: String
+        let atLiveEnd: Bool
     }
     enum Failure: Error { case invalidGrid }
     private let sendBytes: (Data) -> Void
@@ -119,8 +135,10 @@ final class PTYEmulator: TerminalDelegate {
                                       width: Int(value.width), attribute: value.attribute, foregroundRGB: fg, backgroundRGB: bg))
                 }
             }
+            let atLiveEnd = terminal.isViewportAtLiveEnd()
             return Snapshot(columns: terminal.cols, rows: terminal.rows, cells: cells,
-                            cursorColumn: cursorVisible ? terminal.buffer.x : -1, cursorRow: terminal.buffer.y, title: title)
+                            cursorColumn: cursorVisible && atLiveEnd ? terminal.buffer.x : -1,
+                            cursorRow: terminal.buffer.y, title: title, atLiveEnd: atLiveEnd)
         }
     }
     private func color(_ value: Attribute.Color, foreground: Bool) -> UInt32 {

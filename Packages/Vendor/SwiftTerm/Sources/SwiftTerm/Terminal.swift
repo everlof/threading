@@ -7634,6 +7634,36 @@ open class Terminal {
         buffer.yDisp = newValue
     }
 
+    /// Moves a host-owned viewport by buffer lines, without changing the child screen.
+    /// Call under `terminalLock`. The normal buffer is clamped to its retained history;
+    /// alternate-screen wheel routing remains the host's decision. Holding a historical row
+    /// sets the same `userScrolling` state used by the existing AppKit viewport, so new output
+    /// cannot silently jump the view to the live end.
+    @discardableResult
+    public func scrollViewport(by lines: Int) -> Bool
+    {
+        terminalLock.preconditionLocked()
+        guard !isDisplayBufferAlternate else { return false }
+        let maximum = maximumViewYDisp()
+        let current = max(0, min(buffer.yDisp, maximum))
+        let target = lines >= 0
+            ? current + min(lines, maximum - current)
+            : current + max(lines, -current)
+        userScrolling = target < maximum
+        guard target != buffer.yDisp else { return false }
+        setViewYDisp(target)
+        refresh(startRow: 0, endRow: rows)
+        return true
+    }
+
+    /// Whether a host should draw the live cursor rather than a held historical viewport.
+    /// Call under `terminalLock`.
+    public func isViewportAtLiveEnd() -> Bool
+    {
+        terminalLock.preconditionLocked()
+        return isDisplayBufferAlternate || buffer.yDisp >= maximumViewYDisp()
+    }
+
     /// The greatest normal-buffer row the viewport may use as its top edge.
     ///
     /// The standard terminal answer is `lines.count - rows`, which preserves

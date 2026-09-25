@@ -283,7 +283,7 @@ scrollback to 2,000 lines; snapshots copy the visible grid only. A window consum
 snapshots at display cadence with one outstanding request, rather than copying per output chunk.
 
 The portable harness verifies byte-fragmented UTF-8, wide and combining characters, SGR color,
-alternate-screen restoration, cursor replies and resize. It also connects this emulator to the
+alternate-screen restoration, cursor replies, resize and local viewport navigation. It also connects this emulator to the
 production client and a real Linux PTY child: the child validates the cursor reply, accepts a key,
 reads its new 100×30 grid and exits 7. These are cell/runtime checks, not text-shaping or rendered
 window evidence. The native terminal mode below consumes these snapshots and forwards keyboard input.
@@ -319,14 +319,18 @@ Backspace, Escape, Delete, arrows, Home/End, Page Up/Down and F1–F12) use Swif
 including modifiers and press/repeat/release. This honors application-cursor and negotiated kitty
 modes for those keys. Complete enhanced printable-key, keypad, Insert and IME support remains
 outstanding; this is not full keyboard-protocol parity. Pango shapes individual cell graphemes: cross-cell
-joining, full IME composition, clipboard copy/selection, scrollback navigation,
+joining, full IME composition, clipboard copy/selection,
 accessibility and live profile/theme configuration remain outstanding.
 
 The native pointer sends button presses, releases and bounded wheel steps through SwiftTerm's
 live DEC mouse mode and encoding. X10 sends presses only; VT200-style modes send releases too.
-With tracking off, pointer events do not reach the child. Shift bypasses reporting unless the
-child requested shift capture. Project-list clicks and wheel navigation keep their own route.
-Drag/motion reports, local text selection/copy and scrollback navigation are still absent.
+With tracking off, button events do not reach the child. On the normal screen, wheel input
+instead moves through the retained 2,000-line history, holding the viewed rows as new output
+arrives and hiding the live cursor until the viewport returns to the end. The alternate screen
+turns wheel steps into cursor keys when its alternate-scroll mode is enabled. Shift bypasses
+mouse reporting unless the child requested shift capture; Alt requests local wheel scrolling.
+Project-list clicks and wheel navigation keep their own route. Drag/motion reports, local text
+selection/copy and a visible scroll indicator are still absent.
 
 Ctrl+Shift+V pastes UTF-8 text from the native clipboard. The host accepts at most 64 KiB per
 gesture, refuses larger or invalid text without sending a prefix, and forwards the accepted bytes
