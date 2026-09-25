@@ -1968,3 +1968,23 @@ changing the provider ID. The shipping macOS app built and `AgentSessionCreation
 all three focused cases; the repository's architecture gates ran cleanly in that build. A prior
 launch failure deliberately remains visible until the runtime survives startup. The smoke uses
 an argument-recording Codex stand-in rather than an authenticated provider installation.
+
+## 73. The Linux launcher opens the project it was given
+
+With two projects in the durable store, `run-app.sh PROJECT` imported the requested folder but
+the window selected row zero. A later invocation for a different checkout could therefore open
+the earlier project's shell. The launcher now passes its canonical project path to the window in
+both shell and Codex modes. The worker that loads the startup graph resolves that path against
+the stored canonical project identities and returns a selected index; a missing project is an
+explicit refusal. The UI mounts only its existing viewport rows, and selecting a project still
+does not start a child. This is startup navigation in the diagnostic Linux host, not a new
+product sidebar or extension surface.
+
+The full Docker/Xvfb `window-smoke.sh` passed on the final code. Its clean-profile journey
+opened project A and kept its shell child in the daemon, launched the same store for project B
+with a configured Codex executable and observed B selected without another child, then launched
+for A again and reattached the original PID. The captured B frame was inspected: B's row was
+visibly selected. Existing native-window, terminal, agent and attach smoke cases also passed.
+The startup snapshot still decodes the complete graph on a worker; choosing its project adds one
+worker-side project lookup and no per-frame scan. Automatic restoration of the last agent or
+terminal remains unfinished.

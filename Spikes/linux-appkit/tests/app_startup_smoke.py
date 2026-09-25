@@ -11,6 +11,8 @@ script, host, daemon, bin_dir, fixture = sys.argv[1:]
 root = Path(fixture)
 project = root / 'StartupProject'
 project.mkdir()
+other_project = root / 'StartupOtherProject'
+other_project.mkdir()
 data = root / 'startup-data'
 runtime = root / 'startup-runtime'
 socket = runtime / 'pty.sock'
@@ -56,10 +58,11 @@ def terminal_row():
     raise AssertionError('daemon did not retain the project terminal')
 
 
-def launch(log_name, project_argument=None):
+def launch(log_name, project_argument=None, codex=None):
     log = (root / log_name).open('w+')
     process = subprocess.Popen([script, project_argument or str(project)], cwd=root,
-                               env=environment, stdout=log, stderr=log)
+                               env=dict(environment, THREADING_LINUX_CODEX=codex or ''),
+                               stdout=log, stderr=log)
     return process, log
 
 
@@ -84,6 +87,19 @@ try:
     log.close()
     process = None
 
+    # A configured provider uses the other targeted entry point, even before an agent starts.
+    process, log = launch('startup-other-project.log', other_project.name, codex='/bin/true')
+    window = title(process, 'Threading experiment - ' + str(other_project))
+    assert int((runtime / 'daemon.pid').read_text()) == daemon_pid, 'relaunch replaced the live daemon'
+    subprocess.run(['import', '-window', window, 'out/startup-target-project.png'], check=True, timeout=5)
+    assert next(row for row in held() if row['id'] == first['id'])['pid'] == first['pid']
+    assert sum(line.startswith('  ') for line in subprocess.check_output(
+        [host, str(store), str(socket), 'list'], text=True, timeout=5).splitlines()) == 1
+    key(window, 'Escape')
+    assert process.wait(timeout=5) == 0
+    log.close()
+    process = None
+
     process, log = launch('startup-second.log', project.name)
     window = title(process, 'Threading experiment - ' + str(project))
     assert int((runtime / 'daemon.pid').read_text()) == daemon_pid, 'relaunch replaced the live daemon'
@@ -97,14 +113,15 @@ try:
     second = next(row for row in held() if row['id'] == first['id'])
     assert second['pid'] == first['pid'] and second['attached'], (first, second)
     after = subprocess.check_output([host, str(store), str(socket), 'list'], text=True, timeout=5)
-    assert after == listing, 'reopening created another project or terminal'
+    assert after.count(str(project)) == 1 and after.count(str(other_project)) == 1, after
+    assert sum(line.startswith('  ') for line in after.splitlines()) == 1, after
     key(window, 'ctrl+shift+p')
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
     key(window, 'Escape')
     assert process.wait(timeout=5) == 0
-    print('PASS clean-profile project import, daemon startup/reuse and same-child native reattach', flush=True)
+    print('PASS clean-profile project targeting, daemon reuse and same-child native reattach', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.kill()

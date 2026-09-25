@@ -82,7 +82,9 @@ On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, and `flock` inst
 
 The development launcher builds the two host executables and `threading-ptyd`, imports the
 canonical project directory into a local store, starts or reuses one background daemon, and opens
-the native project window. It keeps data under
+the native window with that project selected, even when the store contains other projects.
+Selecting a project does not start a child; Enter opens its shell or the saved-agent and
+saved-terminal pickers can reattach one. It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
 `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
 private to the user. If `codex` resolves to an absolute executable, the window also offers the
