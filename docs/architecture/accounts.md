@@ -18,6 +18,12 @@ exist, rejects duplicates and never reads credential material. Two things are de
 excluded: Claude Science data roots
 (`~/.claude-science`, or any root carrying `install-id` + `runtime/` + `orgs/`), which hold
 Claude-shaped state but are not login slots; and aliases that set no config directory.
+Codex's portable location rule also routes the experimental Linux host: the standard handle
+always means `HOME/.codex`, because launch clears an inherited `CODEX_HOME`. Legacy named
+handles require their exact `HOME/.codex-*` directory and `auth.json`; a verified macOS registry
+location can stand in for the marker when the CLI uses the keyring. Duplicate handles at
+different homes are withheld instead of choosing a login by discovery order. Linux does not
+read the macOS registry or credentials.
 
 Background title readers use `allAccountsAfterDiscovery` / `discoverAccount`: main captures the
 bounded registry records, one serial worker performs cold filesystem discovery through the shared

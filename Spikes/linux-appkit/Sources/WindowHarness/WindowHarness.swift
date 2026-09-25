@@ -88,10 +88,18 @@ struct WindowHarness {
         case terminal(String)
     }
 
+    private static func savedAgentTitle(_ title: String, accountHandle: AccountHandle) -> String {
+        let account = accountHandle.isStandard ? "" :
+            " [\(String(accountHandle.name.unicodeScalars.prefix(64)))]"
+        let visibleTitle = String(title.unicodeScalars.prefix(
+            max(0, maximumPersistedRuntimeTitleScalars - account.unicodeScalars.count)))
+        return visibleTitle + account
+    }
+
     private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
         let title = session.title.isEmpty ? session.kind.rawValue : session.title
         return .init(id: session.id.uuidString,
-                     title: String(title.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)))
+                     title: savedAgentTitle(title, accountHandle: session.accountHandle))
     }
 
     @MainActor static func main() async {
@@ -505,7 +513,8 @@ struct WindowHarness {
         projects: inout [ProjectSnapshot],
         runtimes: inout [SavedRuntimeKey: GraphicalTerminal],
         pending: inout [String: Int],
-        retainedProjects: inout Set<String>
+        retainedProjects: inout Set<String>,
+        accountHandle: AccountHandle
     ) -> Bool {
         var changed = false
         for (id, projectIndex) in Array(pending) {
@@ -513,7 +522,9 @@ struct WindowHarness {
             guard let runtime = runtimes[key] else { pending.removeValue(forKey: id); continue }
             if runtime.hasCreatedAgent {
                 projects[projectIndex].sessions += 1
-                projects[projectIndex].recentAgents.insert(.init(id: id, title: "codex"), at: 0)
+                projects[projectIndex].recentAgents.insert(
+                    .init(id: id, title: savedAgentTitle("codex", accountHandle: accountHandle)),
+                    at: 0)
                 if projects[projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
                     projects[projectIndex].recentAgents.removeLast()
                 }
@@ -532,6 +543,8 @@ struct WindowHarness {
 
     @MainActor static func show(_ snapshot: WindowSnapshot, launch: [String]? = nil,
                                 agentExecutable: String? = nil) throws {
+        let codexAccount = AccountHandle(storedName:
+            ProcessInfo.processInfo.environment["THREADING_LINUX_CODEX_ACCOUNT"])
         var projects = snapshot.projects
         guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
             throw WindowFailure(String(cString: tw_error()))
@@ -567,7 +580,8 @@ struct WindowHarness {
         while true {
             if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                       pending: &pendingAgentProjects,
-                                      retainedProjects: &restoredProjectIDs) { dirty = true }
+                                      retainedProjects: &restoredProjectIDs,
+                                      accountHandle: codexAccount) { dirty = true }
             let count = max(1, (height / 2 - 32) / Int(navigatorRowStride))
             if let savedPicker {
                 let project = projects[savedPicker.projectIndex]
@@ -611,7 +625,11 @@ struct WindowHarness {
                         root.title = width >= 700 ? "Projects - Enter: shell; Left: agents; Right: terminals" : "Projects - Enter: shell"
                     }
                     if agentExecutable != nil {
-                        root.title = width >= 700 ? "Enter: shell; Left/Right: saved; C-S-A: new Codex" : "Ctrl+Shift+A: new Codex"
+                        let accountName = codexAccount.isStandard ? "Codex" :
+                            "Codex \(String(codexAccount.name.prefix(16)))"
+                        root.title = width >= 700
+                            ? "Enter: shell; Left/Right: saved; C-S-A: \(accountName)"
+                            : "Ctrl+Shift+A: \(accountName)"
                     }
                     if !projects.isEmpty, terminals[projects[selected].id]?.canReplace == true {
                         root.title = agentExecutable == nil
@@ -875,7 +893,8 @@ struct WindowHarness {
                 restoredRuntimes[.agent(savedID)] = session
                 pendingAgentProjects[savedID] = selected
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
-                                   shell: launch[2], codex: agentExecutable, id: id,
+                                   shell: launch[2], codex: agentExecutable,
+                                   accountHandle: codexAccount, id: id,
                                    width: width, height: height)
                 guard let size = try runTerminal(session, window: window, width: width, height: height,
                                                  allowsProjects: true) else { return }
@@ -909,7 +928,8 @@ struct WindowHarness {
                 } else if launch != nil, !projects.isEmpty {
                     if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                               pending: &pendingAgentProjects,
-                                              retainedProjects: &restoredProjectIDs) { dirty = true }
+                                              retainedProjects: &restoredProjectIDs,
+                                              accountHandle: codexAccount) { dirty = true }
                     guard !projects[selected].recentAgents.isEmpty else {
                         let pending = pendingAgentProjects.values.contains(selected)
                         tw_title(window, pending ? "Threading experiment - agent starting"

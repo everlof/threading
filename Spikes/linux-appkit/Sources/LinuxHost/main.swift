@@ -33,7 +33,7 @@ func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
     let addingProject = args.first == "--add-project"
     try check(addingProject ? args.count == 3 : args.count >= 3,
-        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT | attach-agent SESSION_UUID")
+        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | attach-agent SESSION_UUID")
     let importFolder = addingProject ? try projectDirectory(args[2]) : nil
     // Establish the signal mask before database decoding can create worker threads.
     let terminalControl: LocalTerminal? = addingProject || args[2] == "list" ? nil : try LocalTerminal()
@@ -72,17 +72,27 @@ func run() throws -> Int32 {
     defer { link.close() }
     try link.connect()
     if args[2] == "codex" {
-        try check(args.count == 7, "codex requires DIRECTORY SHELL CODEX_EXECUTABLE PROMPT")
+        try check(args.count == 7 || args.count == 8,
+                  "codex requires DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE]")
         try check(args[4].hasPrefix("/") && args[5].hasPrefix("/"), "shell and Codex executable must be absolute paths")
         let folder = try projectDirectory(args[3])
+        let handle = args.count == 8 ? AccountHandle(storedName: args[7]) : .standard
+        guard let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/"),
+              let account = CodexAccountLocations.resolve(handle,
+                  home: URL(fileURLWithPath: home, isDirectory: true)) else {
+            throw HostFailure.refused("Codex account is unavailable")
+        }
         // The same fresh-record admission/defaults as macOS. This host has no model/effort
         // override and starts read-only/manual rather than inheriting a permissive CLI default.
-        guard var session = AgentSessionCreation.makeRecord(kind: .codex, permissionMode: .manual) else {
+        guard var session = AgentSessionCreation.makeRecord(kind: .codex,
+                                                            accountHandle: handle,
+                                                            permissionMode: .manual) else {
             throw HostFailure.refused("unsupported session configuration")
         }
         let (codexCommand, resumeState) = CodexLaunchCommand.terminal(executable: args[5], model: nil,
             permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: args[6])
-        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
+        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle,
+                                               configPath: account.configPath)
         command.append(contentsOf: codexCommand)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: args[4], resumeState: resumeState)

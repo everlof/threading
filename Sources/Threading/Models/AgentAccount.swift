@@ -89,34 +89,3 @@ extension AgentSession {
         return account.presentation(in: .sidebar).visibleName
     }
 }
-
-// MARK: - Agent Account Defaults
-
-enum AgentAccountDefaults {
-    /// Label shown for the standard account when no alias names it.
-    static let defaultDisplayName = "Default"
-
-    static let claudeDirectoryPrefix = ".claude-"
-    static let codexDirectoryPrefix = ".codex-"
-
-    static let claudeDefaultDirectory = ".claude"
-    static let codexDefaultDirectory = ".codex"
-
-    /// Files proving a directory is a real Claude config directory.
-    static let claudeConfigMarkers = [".claude.json", "settings.json"]
-
-    /// File proving a Codex home holds a completed login.
-    static let codexAuthMarker = "auth.json"
-
-    /// Claude Science's reserved data root. It carries Claude-shaped state but is not a
-    /// login slot, so it must never appear as an account.
-    static let claudeScienceDirectory = ".claude-science"
-
-    /// Structural markers identifying a Claude Science data root under a custom name.
-    /// All must be present, so an ordinary config directory is never excluded by accident.
-    static let claudeScienceFileMarker = "install-id"
-    static let claudeScienceDirectoryMarkers = ["runtime", "orgs"]
-
-    /// Subdirectory holding recorded sessions, relative to an account's config directory.
-    static let sessionsSubdirectory = "sessions"
-}

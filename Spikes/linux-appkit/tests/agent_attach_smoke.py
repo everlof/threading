@@ -34,8 +34,38 @@ sys.exit(9)
 ''')
 child.chmod(0o700)
 log_path = root / 'agent-window.log'
-subprocess.run([host, store, endpoint, 'codex', str(project), '/bin/sh', '/bin/true',
-                'older session'], input=b'', check=True, capture_output=True, timeout=15)
+older_child = root / 'agent-older-child'
+older_child.write_text('''#!/usr/bin/python3
+import json, os, sys, tty
+from pathlib import Path
+tty.setraw(0)
+Path('older-agent-child.json').write_text(json.dumps({'pid': os.getpid()}))
+os.write(1, b'\\x1b]0;OLDER AGENT READY\\x07')
+assert os.read(0, 1) == b'q'
+sys.exit(0)
+''')
+older_child.chmod(0o700)
+# An observed exited PTY is retained for only five seconds. Seed a live older agent so
+# this picker test exercises two durable identities regardless of test-machine speed.
+with (root / 'agent-older-host.log').open('w+') as older_log:
+    older_cli = subprocess.Popen([host, store, endpoint, 'codex', str(project), '/bin/sh',
+                                  str(older_child), 'older session'], stdin=subprocess.PIPE,
+                                 stdout=older_log, stderr=older_log)
+    try:
+        deadline = time.monotonic() + 15
+        older_marker = project / 'older-agent-child.json'
+        while not older_marker.exists():
+            assert older_cli.poll() is None and time.monotonic() < deadline, 'older agent did not start'
+            time.sleep(.05)
+        older_pid = json.loads(older_marker.read_text())['pid']
+        older_cli.send_signal(signal.SIGTERM)
+        assert older_cli.wait(timeout=5) == 143
+        older_cli.stdin.close()
+        os.kill(older_pid, 0)
+    finally:
+        if older_cli.poll() is None:
+            older_cli.kill()
+        older_cli.wait(timeout=3)
 
 
 def xdo(*args):
@@ -136,8 +166,11 @@ with log_path.open('w+') as log:
                 assert xdo('windowfocus', window, 'key', 'Down').returncode == 0
                 await_selection(app_log_path, agents[0], previous_count)
                 assert xdo('windowfocus', window, 'key', 'Return').returncode == 0
-                await_title(process, 'Threading terminal - exited 0 [no history]', app_log_path)
+                await_title(process, 'Threading terminal - OLDER AGENT READY [history cut]', app_log_path)
                 assert selected_session() == agents[0], 'opening an older agent did not save selection'
+                os.kill(older_pid, 0)
+                assert xdo('windowfocus', window, 'key', 'q').returncode == 0
+                await_title(process, 'Threading terminal - exited 0 [history cut]', app_log_path)
                 assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
                 await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 previous_count = app_log_path.read_text().count('AGENT_PICKER_FRAME ')

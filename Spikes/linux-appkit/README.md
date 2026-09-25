@@ -121,7 +121,7 @@ LinuxHost /path/to/experimental-store /path/to/ptyd.sock list
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock run /path/to/project /bin/sh -c 'pwd; stty size'
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach TERMINAL_UUID
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock login-run /path/to/project /bin/sh python3 --version
-LinuxHost /path/to/experimental-store /path/to/ptyd.sock codex /path/to/project /bin/sh /absolute/path/to/codex 'Inspect this project'
+LinuxHost /path/to/experimental-store /path/to/ptyd.sock codex /path/to/project /bin/sh /absolute/path/to/codex 'Inspect this project' [codex-work]
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach-agent SESSION_UUID
 ```
 
@@ -150,11 +150,13 @@ policy; a manually invoked CLI remains a project terminal, not a managed agent s
 `codex` creates a genuine Codex agent record and uses the shared production command builder with
 explicit Manual/read-only permission flags. It preserves the Linux caller's environment through
 the shared inherited-identity filter and clears an inherited `CODEX_HOME` for the stored standard
-account. `attach-agent` reconnects that persisted agent identity. The smoke uses an explicit
+account. An optional legacy handle such as `codex-work` routes through the matching
+`HOME/.codex-work` only when it has an `auth.json` marker. `attach-agent` reconnects that
+persisted agent identity. The smoke uses an explicit
 argument recorder, not an authenticated Codex installation: it verifies flags, prompt quoting,
 storage and daemon identity, not provider execution. The headless `codex` command does not discover
 a provider ID or offer resume; the graphical `--app-codex` path below does. No macOS credentials
-are copied; Threading-managed credentials, multi-account routing, MCP and hook integration are
+are copied; Threading-managed credentials, a native account picker, MCP and hook integration are
 unavailable in this experiment.
 
 Current CLI-host limits: incomplete provider/account launch policy, no graphical presentation,
@@ -419,9 +421,11 @@ In `--app-codex` mode, Ctrl+Shift+A on a project creates a fresh managed Codex s
 shared Manual permission and read-only sandbox defaults, opens it in the same terminal window,
 and adds its saved identity to the agent picker. The picker reattaches daemon-held children and,
 when the daemon no longer holds one, resumes the exact stored provider ID after finding its
-rollout under the standard Codex account. It refuses a missing or known-broken rollout before
-spawning. `env -u CODEX_HOME` prevents an inherited alternate login from silently taking over
-that standard-account record.
+rollout under the recorded Codex account. It refuses an unavailable login or a missing or
+known-broken rollout before spawning. `env -u CODEX_HOME` prevents an inherited alternate login
+from silently taking over a standard-account record. To create on a legacy named login, start
+the window with `THREADING_LINUX_CODEX_ACCOUNT=codex-work`; the account must already exist at
+`HOME/.codex-work` with `auth.json`. This is an explicit diagnostic choice, not an in-app picker.
 The initial project-window snapshot reads indexed session counts and at most 512 recent session
 payloads per project. A selected agent outside that window adds one indexed read and replaces
 one picker entry. Selected-agent attach, rollout-ID persistence, resume, and opening an agent
@@ -461,7 +465,8 @@ on macOS. The generic `--app` mode starts at the project list, and saved termina
 explicit selection. `--attach` and `--attach-agent` remain available below.
 
 Run `THREADING_LINUX_AGENT_ONLY=1 ./window-smoke.sh` for the focused native agent-selection and
-startup reattach journey; the ordinary `./window-smoke.sh` runs the complete Xvfb suite.
+startup reattach journey. `THREADING_LINUX_NAMED_ONLY=1 ./window-smoke.sh` isolates named Codex
+creation and exact resume. The ordinary `./window-smoke.sh` runs the complete Xvfb suite.
 
 The project catalogue is an initial snapshot plus this window's newly created terminal counts
 and agent sessions; external store changes are not live-synchronized. Closing the window

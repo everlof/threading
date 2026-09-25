@@ -103,14 +103,17 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
     }
     func startAgent(store: String, socket: String, directory: String, shell: String,
-                    codex: String, id: SessionID, width: Int, height: Int) {
+                    codex: String, accountHandle: AccountHandle, id: SessionID,
+                    width: Int, height: Int) {
         worker.async { [self] in
             do {
                 let columns = max(2, width / Self.cellWidth), rows = max(1, height / Self.cellHeight)
                 let link = try connect(socket: socket, columns: columns, rows: rows)
-                let home = try Self.standardCodexHome()
+                let home = try Self.codexHome(for: accountHandle)
                 let plan = try Self.createAgent(store: store, directory: directory,
-                                                shell: shell, codex: codex, id: id)
+                                                shell: shell, codex: codex,
+                                                accountHandle: accountHandle,
+                                                accountPath: home.path, id: id)
                 let environment = Self.launchEnvironment()
                 let identity = PTYHostSessionIdentity.agentSession(id)
                 self.identity = identity
@@ -131,12 +134,15 @@ final class GraphicalTerminal: @unchecked Sendable {
         environment["LANG"] = environment["LANG"] ?? "C.UTF-8"
         return environment.map { "\($0.key)=\($0.value)" }
     }
-    private static func standardCodexHome() throws -> URL {
+    private static func codexHome(for handle: AccountHandle) throws -> URL {
         guard let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/") else {
-            throw WindowFailure("an absolute HOME is required for the default Codex account")
+            throw WindowFailure("an absolute HOME is required for Codex account routing")
         }
-        return URL(fileURLWithPath: home, isDirectory: true)
-            .appendingPathComponent(".codex", isDirectory: true)
+        guard let location = CodexAccountLocations.resolve(
+            handle, home: URL(fileURLWithPath: home, isDirectory: true)) else {
+            throw WindowFailure("saved Codex account is unavailable: \(handle.name)")
+        }
+        return URL(fileURLWithPath: location.configPath, isDirectory: true)
     }
     private func connect(socket: String, columns: Int = 80, rows: Int = 24) throws -> PTYHostClient {
         connectionGeneration += 1
@@ -299,7 +305,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
     private static func createAgent(store: String, directory: String, shell: String,
-                                    codex: String, id: SessionID) throws -> AgentLaunchPlan {
+                                    codex: String, accountHandle: AccountHandle,
+                                    accountPath: String, id: SessionID) throws -> AgentLaunchPlan {
         guard shell.hasPrefix("/"), codex.hasPrefix("/") else {
             throw WindowFailure("shell and Codex executable must be absolute paths")
         }
@@ -323,12 +330,14 @@ final class GraphicalTerminal: @unchecked Sendable {
             throw WindowFailure("session identity already exists")
         }
         guard var session = AgentSessionCreation.makeRecord(kind: .codex,
+                                                            accountHandle: accountHandle,
                                                             permissionMode: .manual, id: id) else {
             throw WindowFailure("unsupported session configuration")
         }
         let (codexCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex, model: nil,
             permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: nil)
-        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
+        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle,
+                                               configPath: accountPath)
         command.append(contentsOf: codexCommand)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: shell, resumeState: resumeState)
@@ -472,17 +481,16 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
         let project = record.project
         var session = record.session
-        guard session.accountHandle.isStandard else {
-            throw WindowFailure("this Linux window cannot route a named Codex account")
-        }
+        let home = try codexHome(for: session.accountHandle)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: project.folderPath, isDirectory: &isDirectory),
               isDirectory.boolValue else { throw WindowFailure("project directory does not exist") }
         guard let id = session.resumeState.transcriptID,
               let rollout = CodexRolloutIdentity.rolloutURL(for: id, projectPath: project.folderPath,
-                  sessionsDirectory: try Self.standardCodexHome().appendingPathComponent("sessions", isDirectory: true),
+                  sessionsDirectory: home.appendingPathComponent(
+                    AgentAccountDefaults.sessionsSubdirectory, isDirectory: true),
                   launchedAt: session.createdAt) else {
-            throw WindowFailure("saved Codex conversation is missing from the default account")
+            throw WindowFailure("saved Codex conversation is missing from its account")
         }
         guard !CodexRolloutNumbering.isMixed(at: rollout) else {
             throw WindowFailure("saved Codex conversation has broken record numbering")
@@ -490,7 +498,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         let (codexCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex,
             model: session.model, permissionMode: session.permissionMode,
             resumeState: session.resumeState, prompt: nil)
-        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
+        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle,
+                                               configPath: home.path)
         command.append(contentsOf: codexCommand)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: project.folderPath,
             shellPath: shell, resumeState: resumeState)
