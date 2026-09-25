@@ -145,8 +145,11 @@ frames remain gated until replay completes; old or invalid peers fail explicitly
 deadline.
 An explicit native clipboard gesture forwards at most 64 KiB of valid UTF-8 on the same ordered
 terminal worker, with the emulator's live bracketed-paste mode deciding the framing. The host
-keeps shortcut routing and clipboard refusal. Local selection and explicit copy work there;
-IME is not implemented.
+keeps shortcut routing and clipboard refusal. Local selection and explicit copy work there.
+For the native terminal, SDL text-editing events carry bounded, uncommitted IME text to a
+Pango-drawn preview by the emulator cursor; committed text-input events enter the ordered PTY queue.
+The X11/IBus Pinyin smoke verifies that the child receives no preedit bytes and receives the
+committed UTF-8 once. This is one platform/input-method path, not general Linux IME parity.
 An integrated terminal failure stops only its client and remains navigable as a failed entry;
 returning to projects preserves other runtimes. Revisiting does not silently retry. The failed
 view waits on native events and bounds its diagnostic text before drawing. The standalone

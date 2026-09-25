@@ -4,7 +4,14 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-struct TWWindow { SDL_Window *window; SDL_Renderer *renderer; SDL_Texture *texture; int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate; };
+struct TWWindow {
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    SDL_Texture *texture;
+    int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate;
+    int composing;
+    uint8_t suppressedKeyups[SDL_NUM_SCANCODES];
+};
 static int tw_modifiers(SDL_Keymod mods) {
     return ((mods & KMOD_SHIFT) ? 1 : 0) | ((mods & KMOD_ALT) ? 2 : 0)
         | ((mods & KMOD_CTRL) ? 4 : 0) | ((mods & KMOD_GUI) ? 8 : 0)
@@ -20,6 +27,9 @@ void tw_close(TWWindow *w) {
     SDL_Quit();
 }
 TWWindow *tw_open(const char *title, int width, int height) {
+    // The legacy 32-byte editing event silently truncates long compositions. SDL's extended
+    // event keeps the whole preedit available for an explicit bounded projection below.
+    SDL_SetHint(SDL_HINT_IME_SUPPORT_EXTENDED_TEXT, "1");
     if (SDL_Init(SDL_INIT_VIDEO) != 0) return NULL;
     TWWindow *w = calloc(1, sizeof(*w));
     if (!w) { SDL_Quit(); return NULL; }
@@ -64,9 +74,26 @@ int tw_resize(TWWindow *w, int width, int height) {
     w->explicitSurfaceUpdate = 1;
     return 0;
 }
-void tw_terminal_mode(TWWindow *w) { w->terminal = 1; SDL_StartTextInput(); }
+void tw_terminal_mode(TWWindow *w) {
+    w->terminal = 1;
+    w->composing = 0;
+    memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
+    SDL_Rect caret = {0, 0, 10, 22};
+    SDL_SetTextInputRect(&caret);
+    SDL_StartTextInput();
+}
 void tw_project_navigation(TWWindow *w, int enabled) { w->projectNavigation = enabled; }
-void tw_project_mode(TWWindow *w) { w->terminal = 0; SDL_StopTextInput(); }
+void tw_project_mode(TWWindow *w) {
+    w->terminal = 0;
+    w->composing = 0;
+    memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
+    SDL_StopTextInput();
+}
+void tw_text_input_rect(TWWindow *w, int x, int y, int width, int height) {
+    if (!w || !w->terminal) return;
+    SDL_Rect caret = {x, y, width, height};
+    SDL_SetTextInputRect(&caret);
+}
 const char *tw_event_text(const TWEvent *e) { return e->text; }
 int tw_clipboard_read(uint8_t *destination, int capacity) {
     if (!destination || capacity < 1 || capacity > 65536) return -2;
@@ -91,6 +118,10 @@ int tw_next(TWWindow *w, TWEvent *out) { return tw_next_timeout(w, out, -1); }
 int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
     SDL_Event e;
     while (SDL_WaitEventTimeout(&e, milliseconds)) {
+        if (!w->terminal && e.type == SDL_TEXTEDITING_EXT) {
+            SDL_free(e.editExt.text);
+            continue;
+        }
         *out = (TWEvent){0};
         SDL_GetWindowSize(w->window, &out->width, &out->height);
         if (e.type == SDL_QUIT) out->kind = 5;
@@ -120,11 +151,46 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->suppressActivation && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && e.key.keysym.sym == w->suppressActivation) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;
+        } else if (w->terminal && e.type == SDL_TEXTEDITING) {
+            out->kind = 19;
+            memcpy(out->text, e.edit.text, sizeof(e.edit.text));
+            out->text[sizeof(e.edit.text) - 1] = 0;
+            out->textCursor = e.edit.start;
+            out->textSelectionLength = e.edit.length;
+            w->composing = out->text[0] != 0;
+        } else if (w->terminal && e.type == SDL_TEXTEDITING_EXT) {
+            const size_t length = strnlen(e.editExt.text, sizeof(out->text));
+            out->kind = 19;
+            if (length == sizeof(out->text)) {
+                // This is visible as an explicit preview refusal. Committed input still arrives
+                // through the complete TEXTINPUT stream, never as a truncated prefix here.
+                strcpy(out->text, "[composition exceeds 1 KiB]");
+                out->textCursor = 0;
+                out->textSelectionLength = 0;
+            } else {
+                memcpy(out->text, e.editExt.text, length + 1);
+                out->textCursor = e.editExt.start;
+                out->textSelectionLength = e.editExt.length;
+            }
+            w->composing = out->text[0] != 0;
+            SDL_free(e.editExt.text);
         } else if (w->terminal && (w->suppressActivation == SDLK_v || w->suppressActivation == SDLK_c)
                    && e.type == SDL_TEXTINPUT) {
             // A shortcut must not also type its printable key into the PTY.
         } else if (w->terminal && e.type == SDL_TEXTINPUT) {
-            out->kind = 6; memcpy(out->text, e.text.text, sizeof(out->text));
+            out->kind = 6;
+            out->action = w->composing ? 1 : 0;
+            w->composing = 0;
+            memcpy(out->text, e.text.text, sizeof(e.text.text));
+            out->text[sizeof(e.text.text) - 1] = 0;
+        } else if (w->terminal && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
+                   && (w->composing || (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES
+                                         && w->suppressedKeyups[e.key.keysym.scancode]))) {
+            // Enter, Backspace and arrows are IME editing gestures until commit/cancel. Their
+            // keyup must stay suppressed even if an empty EDIT or INPUT ended composition first.
+            if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES) {
+                w->suppressedKeyups[e.key.keysym.scancode] = e.type == SDL_KEYDOWN;
+            }
         } else if (w->terminal && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)) {
             if (e.key.keysym.sym == SDLK_v && (e.key.keysym.mod & KMOD_CTRL)
                 && (e.key.keysym.mod & KMOD_SHIFT)) {
