@@ -1,4 +1,5 @@
 #include "LinuxWindowBridge.h"
+#include "AccessibilityInternal.h"
 #ifdef __linux__
 #include <SDL2/SDL.h>
 #include <limits.h>
@@ -20,6 +21,7 @@ static int tw_modifiers(SDL_Keymod mods) {
 const char *tw_error(void) { return SDL_GetError(); }
 void tw_close(TWWindow *w) {
     if (!w) return;
+    tw_accessibility_close();
     SDL_DestroyTexture(w->texture);
     SDL_DestroyRenderer(w->renderer);
     SDL_DestroyWindow(w->window);
@@ -41,6 +43,7 @@ TWWindow *tw_open(const char *title, int width, int height) {
     SDL_SetWindowMaximumSize(w->window, 1280, 900);
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
     if (!w->renderer) { tw_close(w); return NULL; }
+    tw_accessibility_open();
     return w;
 }
 int tw_present(TWWindow *w, const uint8_t *rgba, int width, int height) {
@@ -65,7 +68,10 @@ int tw_repaint(TWWindow *w) {
     SDL_RenderPresent(w->renderer);
     return !w->explicitSurfaceUpdate || SDL_UpdateWindowSurface(w->window) == 0 ? 0 : -1;
 }
-void tw_title(TWWindow *w, const char *title) { SDL_SetWindowTitle(w->window, title); }
+void tw_title(TWWindow *w, const char *title) {
+    SDL_SetWindowTitle(w->window, title);
+    tw_accessibility_title(title);
+}
 int tw_resize(TWWindow *w, int width, int height) {
     int oldWidth, oldHeight;
     SDL_GetWindowSize(w->window, &oldWidth, &oldHeight);
@@ -114,9 +120,17 @@ int tw_clipboard_write(const uint8_t *source, int length) {
     free(text);
     return result;
 }
-int tw_next(TWWindow *w, TWEvent *out) { return tw_next_timeout(w, out, -1); }
+int tw_next(TWWindow *w, TWEvent *out) {
+    if (tw_accessibility_event_type() == UINT32_MAX) return tw_next_timeout(w, out, -1);
+    for (;;) {
+        SDL_ClearError();
+        int result = tw_next_timeout(w, out, 33);
+        if (result || SDL_GetError()[0]) return result ? result : -1;
+    }
+}
 int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
     SDL_Event e;
+    tw_accessibility_poll();
     while (SDL_WaitEventTimeout(&e, milliseconds)) {
         if (!w->terminal && e.type == SDL_TEXTEDITING_EXT) {
             SDL_free(e.editExt.text);
@@ -125,6 +139,14 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         *out = (TWEvent){0};
         SDL_GetWindowSize(w->window, &out->width, &out->height);
         if (e.type == SDL_QUIT) out->kind = 5;
+        else if (e.type == tw_accessibility_event_type()) {
+            if (!tw_accessibility_event_is_current((uint32_t)(uintptr_t)e.user.data2)) continue;
+            if (e.user.code == 1) {
+                out->kind = 2;
+                out->x = 20;
+                out->y = (28 + (int)(intptr_t)e.user.data1 * 24 + 10) * 2;
+            } else if (e.user.code == 2) out->kind = 8;
+        }
         else if (e.type == SDL_WINDOWEVENT) {
             if (e.window.event == SDL_WINDOWEVENT_CLOSE) out->kind = 5;
             else if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) out->kind = 1;

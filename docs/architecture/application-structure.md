@@ -128,8 +128,16 @@ terminal. Left from a project opens agents; Right opens terminals. Navigation do
 new child or detach an existing one. The snapshot keeps at most 512 identities of each
 kind per project and the UI mounts only viewport rows. Only the visible terminal requests
 rendered frames; store work and terminal processing stay on workers. This remains a host-only diagnostic frontend,
-not the shipping Mac sidebar or a public extension surface. Graphical restoration across app
-restarts is available through explicit `--attach STORE SOCKET TERMINAL_UUID` and through selection
+not the shipping Mac sidebar or a public extension surface.
+
+The Linux window's ATK bridge projects those mounted rows into AT-SPI, including durable IDs,
+bounded Unicode names, selected state and actions. Actions re-enter SDL's existing project-navigation
+events; the bridge neither reads the store nor owns runtime decisions. The terminal currently
+exposes a named placeholder without its screen text, and component geometry, focus and complete
+selection semantics remain open accessibility work.
+
+Graphical restoration across app restarts is available through explicit
+`--attach STORE SOCKET TERMINAL_UUID` and through selection
 in the project browser. A saved agent session has the same terminal renderer through explicit
 `--attach-agent STORE SOCKET SESSION_UUID` or the project's saved-agent picker; the host validates
 the agent record and keeps its typed daemon identity. The project-targeted launcher also attempts

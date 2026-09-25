@@ -2066,3 +2066,28 @@ mouse, clipboard, agent attach and clean-profile journeys.
 
 This verifies one X11 input method in the experimental terminal. Other engines, Wayland,
 accessibility, general text controls and complete enhanced keyboard protocols remain unverified.
+
+## 77. The native Linux navigator is discoverable through AT-SPI
+
+The SDL window's ATK bridge now publishes an application, frame and the currently mounted
+project or saved-runtime list to the session accessibility bus. List rows carry the durable
+project/runtime ID, bounded Unicode name, selection state and `select`/`open` actions. An action
+queues the same SDL events that pointer selection and Enter already use; ATK owns no store or
+runtime policy. The projection contains at most 32 rows and refuses names over 511 UTF-8 bytes;
+Swift supplies only the visible viewport with a 400-byte title prefix. The GLib side processes at
+most eight ready callbacks per event-loop pass. Without a session bus, the window continues to
+use its existing SDL route. This remains a host-only diagnostic navigator, not a new extension
+component.
+
+A live AT-SPI client under Ubuntu 24.04 ARM/Xvfb discovered eight rows from fifteen projects,
+read their roles, IDs and selected state, followed ten paced keyboard selections into the
+scrolled viewport, and found the original `Project06-界` name there. Invoking the row's AT-SPI
+actions changed the native selected project and opened its real PTY. The full Linux window suite
+passed with no session bus. The IBus Pinyin lane passed with the AT-SPI bridge active, including
+visible preedit, no early PTY bytes and the exact Unicode commit. A final focused AT-SPI rerun
+passed after the bridge's row-identity and shutdown handling changes.
+
+The terminal currently exposes its title and an explicit text-unavailable description, not its
+screen contents. Component geometry and hit testing, a full selection interface, focus/event
+semantics, actual screen-reader inspection and non-X11 desktop evidence remain open. The ATK
+bridge is a measured platform leaf; it does not settle the eventual Linux toolkit or packaging.

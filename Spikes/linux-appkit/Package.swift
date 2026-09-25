@@ -22,9 +22,12 @@ let package = Package(
         .systemLibrary(name: "CLinuxTerminal", path: "Sources/CLinuxTerminal"),
         .systemLibrary(name: "CSDL2", pkgConfig: "sdl2"),
         .systemLibrary(name: "CPango", pkgConfig: "pangocairo"),
+        .systemLibrary(name: "CAtk", pkgConfig: "atk-bridge-2.0"),
         .target(name: "LinuxWindowBridge", dependencies: [
             .target(name: "CSDL2", condition: .when(platforms: [.linux])),
-            .target(name: "CPango", condition: .when(platforms: [.linux]))]),
+            .target(name: "CPango", condition: .when(platforms: [.linux])),
+            .target(name: "CAtk", condition: .when(platforms: [.linux]))],
+            linkerSettings: [.linkedLibrary("atk-1.0", .when(platforms: [.linux]))]),
         .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime",
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
             .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))]),
