@@ -28,11 +28,11 @@ static void draw_preedit(cairo_t *cr, int width, int height, int cursorColumn, i
     int popupHeight = textHeight + 8;
     if (popupHeight < 28) popupHeight = 28;
     if (popupHeight > height - 8) popupHeight = height - 8;
-    int x = cursorColumn >= 0 ? cursorColumn * 10 : 8;
+    int x = cursorColumn >= 0 ? cursorColumn * TW_TERMINAL_CELL_WIDTH : 8;
     if (x > width - popupWidth - 4) x = width - popupWidth - 4;
     if (x < 4) x = 4;
-    int y = cursorColumn >= 0 ? cursorRow * 22 + 22 : height - popupHeight - 4;
-    if (y + popupHeight > height - 4) y = cursorRow * 22 - popupHeight;
+    int y = cursorColumn >= 0 ? (cursorRow + 1) * TW_TERMINAL_CELL_HEIGHT : height - popupHeight - 4;
+    if (y + popupHeight > height - 4) y = cursorRow * TW_TERMINAL_CELL_HEIGHT - popupHeight;
     if (y < 4) y = 4;
 
     PangoAttrList *attributes = pango_attr_list_new();
@@ -103,15 +103,15 @@ int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *cells
         for (int col = 0; col < columns; col++) {
             const TWCell *cell = &cells[row * columns + col];
             if (cell->offset < 0 || cell->length < 0 || cell->offset > textLength - cell->length) { result = -1; goto done; }
-            int x = col * 10, y = row * 22;
-            color(cr, cell->background); cairo_rectangle(cr, x, y, 10, 22); cairo_fill(cr);
+            int x = col * TW_TERMINAL_CELL_WIDTH, y = row * TW_TERMINAL_CELL_HEIGHT;
+            color(cr, cell->background); cairo_rectangle(cr, x, y, TW_TERMINAL_CELL_WIDTH, TW_TERMINAL_CELL_HEIGHT); cairo_fill(cr);
         }
         for (int col = 0; col < columns; col++) {
             const TWCell *cell = &cells[row * columns + col];
             if (!cell->width || !cell->length || (cell->length == 1 && text[cell->offset] == ' ')) continue;
-            int x = col * 10, y = row * 22;
+            int x = col * TW_TERMINAL_CELL_WIDTH, y = row * TW_TERMINAL_CELL_HEIGHT;
             cairo_save(cr);
-            cairo_rectangle(cr, x, y, cell->width * 10, 22); cairo_clip(cr);
+            cairo_rectangle(cr, x, y, cell->width * TW_TERMINAL_CELL_WIDTH, TW_TERMINAL_CELL_HEIGHT); cairo_clip(cr);
             PangoLayout *shaped = layout;
             unsigned char character = (unsigned char)text[cell->offset];
             if (cacheEnabled && cell->length == 1 && cell->width == 1 && character >= 32 && character <= 126) {
@@ -131,12 +131,14 @@ int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *cells
             }
             color(cr, cell->foreground); cairo_move_to(cr, x, y);
             pango_cairo_show_layout(cr, shaped);
-            if (cell->underline) { cairo_rectangle(cr, x, y + 20, cell->width * 10, 1); cairo_fill(cr); }
+            if (cell->underline) { cairo_rectangle(cr, x, y + TW_TERMINAL_CELL_HEIGHT - 2, cell->width * TW_TERMINAL_CELL_WIDTH, 1); cairo_fill(cr); }
             cairo_restore(cr);
         }
     }
     if (cursorColumn >= 0 && cursorColumn < columns && cursorRow >= 0 && cursorRow < rows) {
-        color(cr, 0xd4d4d4); cairo_rectangle(cr, cursorColumn * 10, cursorRow * 22 + 20, 10, 2); cairo_fill(cr);
+        color(cr, 0xd4d4d4); cairo_rectangle(cr, cursorColumn * TW_TERMINAL_CELL_WIDTH,
+            cursorRow * TW_TERMINAL_CELL_HEIGHT + TW_TERMINAL_CELL_HEIGHT - 2,
+            TW_TERMINAL_CELL_WIDTH, 2); cairo_fill(cr);
     }
     if (preeditLength > 0) {
         draw_preedit(cr, width, height, cursorColumn, cursorRow, preedit, preeditLength,

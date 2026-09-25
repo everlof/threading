@@ -10,7 +10,7 @@
 #include <string.h>
 
 enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
-       MAX_TERMINAL_TEXT = 64 * 1024 };
+       MAX_TERMINAL_TEXT = 64 * 1024, MAX_TERMINAL_RUNS = 128 * 40 + 40 };
 
 typedef struct {
     AtkObject parent;
@@ -35,6 +35,8 @@ typedef struct {
     ComponentNode parent;
     char *text;
     int length, characters, caret;
+    TWTextRun *runs;
+    int runCount;
 } TerminalNode;
 typedef struct { ComponentNodeClass parent; } TerminalNodeClass;
 static void text_interface_init(AtkTextIface *iface);
@@ -311,6 +313,61 @@ static gint terminal_caret(AtkText *text) {
     return ((TerminalNode *)text)->caret;
 }
 static gint terminal_selections(AtkText *text) { (void)text; return 0; }
+static void terminal_character_extents(AtkText *text, gint offset, gint *x, gint *y,
+                                       gint *width, gint *height, AtkCoordType coordinates) {
+    TerminalNode *node = (TerminalNode *)text;
+    int resultX = -1, resultY = -1, resultWidth = -1, resultHeight = -1;
+    if (hostWindow && node_mounted(ATK_OBJECT(node)) && offset >= 0 &&
+        offset < node->characters && node->runCount > 0 &&
+        (coordinates == ATK_XY_WINDOW || coordinates == ATK_XY_SCREEN || coordinates == ATK_XY_PARENT)) {
+        int low = 0, high = node->runCount;
+        while (low < high) {
+            int middle = low + (high - low) / 2;
+            if (node->runs[middle].offset + node->runs[middle].characters <= offset) low = middle + 1;
+            else high = middle;
+        }
+        if (low < node->runCount && node->runs[low].offset <= offset) {
+            TWTextRun run = node->runs[low];
+            resultX = run.column * TW_TERMINAL_CELL_WIDTH;
+            resultY = run.row * TW_TERMINAL_CELL_HEIGHT;
+            resultWidth = run.cells * TW_TERMINAL_CELL_WIDTH;
+            resultHeight = TW_TERMINAL_CELL_HEIGHT;
+            if (coordinates == ATK_XY_SCREEN) {
+                int originX, originY, windowWidth, windowHeight;
+                tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
+                resultX += originX; resultY += originY;
+            }
+        }
+    }
+    if (x) *x = resultX;
+    if (y) *y = resultY;
+    if (width) *width = resultWidth;
+    if (height) *height = resultHeight;
+}
+static gint terminal_offset_at_point(AtkText *text, gint x, gint y, AtkCoordType coordinates) {
+    TerminalNode *node = (TerminalNode *)text;
+    if (!hostWindow || !node_mounted(ATK_OBJECT(node)) || node->runCount == 0) return -1;
+    if (coordinates == ATK_XY_SCREEN) {
+        int originX, originY, windowWidth, windowHeight;
+        tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
+        x -= originX; y -= originY;
+    } else if (coordinates != ATK_XY_WINDOW && coordinates != ATK_XY_PARENT) return -1;
+    if (x < 0 || y < 0 || y / TW_TERMINAL_CELL_HEIGHT >= 40) return -1;
+    int row = y / TW_TERMINAL_CELL_HEIGHT;
+    int low = 0, high = node->runCount;
+    while (low < high) {
+        int middle = low + (high - low) / 2;
+        if (node->runs[middle].row < row) low = middle + 1;
+        else high = middle;
+    }
+    for (int i = low; i < node->runCount && node->runs[i].row == row; i++) {
+        TWTextRun run = node->runs[i];
+        int left = run.column * TW_TERMINAL_CELL_WIDTH;
+        if (run.cells > 0 && x >= left && x < left + run.cells * TW_TERMINAL_CELL_WIDTH)
+            return run.offset;
+    }
+    return -1;
+}
 static gboolean word_character(gunichar value) {
     return g_unichar_isalnum(value) || value == '_';
 }
@@ -363,10 +420,13 @@ static void text_interface_init(AtkTextIface *iface) {
     iface->get_character_count = terminal_character_count;
     iface->get_caret_offset = terminal_caret;
     iface->get_n_selections = terminal_selections;
+    iface->get_character_extents = terminal_character_extents;
+    iface->get_offset_at_point = terminal_offset_at_point;
     iface->get_string_at_offset = terminal_string_at;
 }
 static void terminal_node_finalize(GObject *object) {
     g_free(((TerminalNode *)object)->text);
+    g_free(((TerminalNode *)object)->runs);
     G_OBJECT_CLASS(terminal_node_parent_class)->finalize(object);
 }
 static void terminal_node_class_init(TerminalNodeClass *klass) {
@@ -376,13 +436,32 @@ static void terminal_node_init(TerminalNode *node) {
     node->text = g_strdup("");
     node->caret = -1;
 }
-static void set_terminal_text(const char *value, int length, int caret) {
+static void set_terminal_text(const char *value, int length, int caret,
+                              const TWTextRun *runs, int runCount) {
     if (!terminal) return;
-    if (!value) { value = ""; length = 0; caret = -1; }
+    if (!value) { value = ""; length = 0; caret = -1; runs = NULL; runCount = 0; }
     if (length < 0 || length > MAX_TERMINAL_TEXT ||
-        memchr(value, 0, (size_t)length) || !g_utf8_validate(value, length, NULL)) return;
+        memchr(value, 0, (size_t)length) || !g_utf8_validate(value, length, NULL) ||
+        runCount < 0 || runCount > MAX_TERMINAL_RUNS || (runCount && !runs)) return;
     int characters = (int)g_utf8_strlen(value, length);
     if (caret < -1 || caret > characters) caret = -1;
+    // Runs are ordered by displayed row and cover each Unicode scalar exactly once. The
+    // overflow notice intentionally has no geometry: it is not a rendered terminal cell.
+    int nextOffset = 0, previousRow = -1, previousColumn = -1;
+    for (int i = 0; i < runCount; i++) {
+        TWTextRun run = runs[i];
+        if (run.offset != nextOffset || run.characters <= 0 || run.characters > characters - nextOffset ||
+            run.row < 0 || run.row >= 40 || run.column < 0 || run.column > 128 ||
+            run.cells < 0 || run.cells > 2 || run.column + run.cells > 128 ||
+            run.row < previousRow || (run.row == previousRow && run.column < previousColumn)) return;
+        nextOffset += run.characters;
+        previousRow = run.row; previousColumn = run.column;
+    }
+    if (runCount && nextOffset != characters) return;
+    TWTextRun *newRuns = runCount ? g_memdup2(runs, (size_t)runCount * sizeof(*runs)) : NULL;
+    g_free(terminal->runs);
+    terminal->runs = newRuns;
+    terminal->runCount = runCount;
     int changed = terminal->length != length || memcmp(terminal->text, value, (size_t)length) != 0;
     int oldCaret = terminal->caret;
     if (changed) {
@@ -558,7 +637,7 @@ void tw_accessibility_end_list(TWWindow *window) {
     }
     show_content(list);
     refresh_focus();
-    set_terminal_text(NULL, 0, -1);
+    set_terminal_text(NULL, 0, -1, NULL, 0);
 }
 void tw_accessibility_show_terminal(TWWindow *window, const char *name) {
     (void)window;
@@ -567,9 +646,10 @@ void tw_accessibility_show_terminal(TWWindow *window, const char *name) {
         set_name_if_changed((AccessibleNode *)terminal, strnlen(name, 512) < 512 ? name : "[terminal title exceeds 512 bytes]");
     show_content((AccessibleNode *)terminal);
 }
-void tw_accessibility_terminal_text(TWWindow *window, const char *utf8, int length, int caret) {
+void tw_accessibility_terminal_text(TWWindow *window, const char *utf8, int length, int caret,
+                                    const TWTextRun *runs, int runCount) {
     (void)window;
     if (!bridgeReady) return;
-    set_terminal_text(utf8, length, caret);
+    set_terminal_text(utf8, length, caret, runs, runCount);
 }
 #endif

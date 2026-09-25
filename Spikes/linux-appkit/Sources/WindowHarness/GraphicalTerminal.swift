@@ -10,12 +10,21 @@ import ThreadingPTYHostKit
 /// Experimental host-only terminal surface. Threading retains store identity, process ownership,
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
+    private static let cellWidth = Int(TW_TERMINAL_CELL_WIDTH)
+    private static let cellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
     static let maximumPasteBytes = 64 * 1024
     static let maximumCopyBytes = 1024 * 1024
     private static let exitWaitSeconds: Double = 5
     private static let maximumReplayBytes = 4 * 1024 * 1024
     private static let maximumAttachColumns = 128
     private static let maximumAttachRows = 40
+    struct TextRun: Sendable {
+        let offset: Int32
+        let characters: Int32
+        let column: Int32
+        let row: Int32
+        let cells: Int32
+    }
     struct Frame: Sendable {
         let pixels: Data
         let width: Int
@@ -25,6 +34,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         let cursorRow: Int
         let accessibleText: String
         let accessibleCaret: Int
+        let accessibleRuns: [TextRun]
         let drawMilliseconds: Double
     }
     private struct Preedit: Equatable, Sendable {
@@ -96,7 +106,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                     codex: String, id: SessionID, width: Int, height: Int) {
         worker.async { [self] in
             do {
-                let columns = max(2, width / 10), rows = max(1, height / 22)
+                let columns = max(2, width / Self.cellWidth), rows = max(1, height / Self.cellHeight)
                 let link = try connect(socket: socket, columns: columns, rows: rows)
                 let home = try Self.standardCodexHome()
                 let plan = try Self.createAgent(store: store, directory: directory,
@@ -350,8 +360,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                 replayLabel = " [no history]"
             }
             // Adopt the daemon grid by sizing the window; attachment itself never sends resize.
-            lastWidth = max(320, value.grid.cols * 10)
-            lastHeight = max(180, value.grid.rows * 22)
+            lastWidth = max(320, value.grid.cols * Self.cellWidth)
+            lastHeight = max(180, value.grid.rows * Self.cellHeight)
             replayRemaining = count
             lock.lock(); initialViewport = (lastWidth, lastHeight); running = count == 0; lock.unlock()
             codexResume = nil
@@ -389,7 +399,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             do {
                 let (plan, directory) = try Self.resumeAgent(store: resume.store,
                     sessionID: resume.sessionID, shell: resume.shell, codex: resume.executable)
-                let columns = max(2, resume.width / 10), rows = max(1, resume.height / 22)
+                let columns = max(2, resume.width / Self.cellWidth), rows = max(1, resume.height / Self.cellHeight)
                 connectionGeneration += 1
                 client?.close()
                 client = nil
@@ -630,7 +640,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             guard let emulator, !attaching || (replayRemaining == 0 && attachmentViewportApplied) else { finish(nil); return }
             do {
                 if lastWidth != width || lastHeight != height {
-                    let columns = max(2, width / 10), rows = max(1, height / 22)
+                    let columns = max(2, width / Self.cellWidth), rows = max(1, height / Self.cellHeight)
                     try emulator.resize(columns: columns, rows: rows)
                     if let identity, exitStatus == nil {
                         try client?.resize(PTYHostResize(id: identity, grid: PTYHostGrid(cols: columns, rows: rows)))
@@ -658,7 +668,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private static func draw(_ snapshot: PTYEmulator.Snapshot, width: Int, height: Int,
                              title: String, preedit: Preedit?) throws -> Frame {
         let started = DispatchTime.now().uptimeNanoseconds
-        let (accessibleText, accessibleCaret) = accessibleScreen(snapshot)
+        let (accessibleText, accessibleCaret, accessibleRuns) = accessibleScreen(snapshot)
         var text = Data(), cells: [TWCell] = []
         cells.reserveCapacity(snapshot.cells.count)
         for cell in snapshot.cells {
@@ -690,19 +700,24 @@ final class GraphicalTerminal: @unchecked Sendable {
         return Frame(pixels: pixels, width: width, height: height, title: title,
                      cursorColumn: snapshot.cursorColumn, cursorRow: snapshot.cursorRow,
                      accessibleText: accessibleText, accessibleCaret: accessibleCaret,
+                     accessibleRuns: accessibleRuns,
                      drawMilliseconds: Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
     }
 
     /// Project the already-copied visible grid on the drawing worker. Keep terminal whitespace
     /// through the cursor, but omit unused columns and trailing blank rows. Conceal style must
     /// mask content here independently of the renderer's foreground/background colors.
-    private static func accessibleScreen(_ snapshot: PTYEmulator.Snapshot) -> (String, Int) {
+    private static func accessibleScreen(_ snapshot: PTYEmulator.Snapshot) -> (String, Int, [TextRun]) {
         var lines: [String] = []
+        var lineRuns: [[TextRun]] = []
         lines.reserveCapacity(snapshot.rows)
+        lineRuns.reserveCapacity(snapshot.rows)
         var caret = -1, characters = 0, bytes = 0
         for row in 0..<snapshot.rows {
             var parts: [String] = []
+            var runs: [TextRun] = []
             parts.reserveCapacity(snapshot.columns)
+            runs.reserveCapacity(snapshot.columns)
             var nonblank = 0, cursorEnd = 0, columnCharacters = 0
             for column in 0..<snapshot.columns {
                 if row == snapshot.cursorRow && column == snapshot.cursorColumn {
@@ -712,8 +727,12 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let cell = snapshot.cells[row * snapshot.columns + column]
                 guard cell.width != 0 else { continue }
                 let value = cell.attribute.style.contains(.invisible) ? " " : cell.text
+                let scalarCount = value.unicodeScalars.count
+                guard scalarCount > 0 else { continue }
                 parts.append(value)
-                columnCharacters += value.unicodeScalars.count
+                runs.append(TextRun(offset: Int32(columnCharacters), characters: Int32(scalarCount),
+                                    column: Int32(column), row: Int32(row), cells: Int32(cell.width)))
+                columnCharacters += scalarCount
                 if value != " " { nonblank = parts.count }
             }
             if row == snapshot.cursorRow && snapshot.cursorColumn == snapshot.columns {
@@ -723,14 +742,35 @@ final class GraphicalTerminal: @unchecked Sendable {
             let kept = max(nonblank, cursorEnd)
             let line = parts.prefix(kept).joined()
             lines.append(line)
+            lineRuns.append(Array(runs.prefix(kept)))
             bytes += line.utf8.count + (row == 0 ? 0 : 1)
-            if bytes > 64 * 1024 { return ("[visible terminal text exceeds 64 KiB]", -1) }
+            if bytes > 64 * 1024 { return ("[visible terminal text exceeds 64 KiB]", -1, []) }
             characters += line.unicodeScalars.count + 1
         }
         let last = max(lines.lastIndex(where: { !$0.isEmpty }) ?? -1,
                        snapshot.cursorColumn >= 0 ? snapshot.cursorRow : -1)
         let screen = last >= 0 ? lines.prefix(last + 1).joined(separator: "\n") : ""
-        return (screen, caret)
+        var mapped: [TextRun] = []
+        mapped.reserveCapacity(min(snapshot.cells.count, 128 * 40) + snapshot.rows)
+        var offset = 0
+        if last >= 0 {
+            for row in 0...last {
+                for run in lineRuns[row] {
+                    mapped.append(TextRun(offset: Int32(offset) + run.offset,
+                                          characters: run.characters, column: run.column,
+                                          row: run.row, cells: run.cells))
+                }
+                offset += lines[row].unicodeScalars.count
+                if row < last {
+                    let lastCell = lineRuns[row].last
+                    let endColumn = (lastCell?.column ?? 0) + (lastCell?.cells ?? 0)
+                    mapped.append(TextRun(offset: Int32(offset), characters: 1,
+                                          column: endColumn, row: Int32(row), cells: 0))
+                    offset += 1
+                }
+            }
+        }
+        return (screen, caret, mapped)
     }
 }
 #endif

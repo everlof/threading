@@ -138,9 +138,10 @@ concealed-cell masking and changed-span notifications. It does not traverse hidd
 SDL window focus is projected onto the mounted selected row or terminal without moving selection.
 The frame, mounted list rows and terminal expose window, screen and parent-coordinate component
 bounds from the live SDL window; one row rectangle supplies drawing, pointer hit testing and
-AT-SPI publication, and point lookup returns mounted children only. Character-level
-terminal geometry, comprehensive focus behavior and complete selection semantics remain open
-accessibility work.
+AT-SPI publication, and point lookup returns mounted children only. The terminal maps Unicode
+offsets to the same fixed cell positions its Pango renderer uses; point queries resolve only
+visible cells, not hidden scrollback. Bounds-change notifications, comprehensive focus behavior
+and complete selection semantics remain open accessibility work.
 
 Graphical restoration across app restarts is available through explicit
 `--attach STORE SOCKET TERMINAL_UUID` and through selection

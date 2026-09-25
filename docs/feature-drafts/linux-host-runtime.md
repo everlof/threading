@@ -308,8 +308,10 @@ a real project terminal. The terminal now projects its visible grid through read
 including Unicode character and caret offsets and changed-span notifications. Concealed cells
 are masked and hidden scrollback is omitted. The mounted selected row or terminal follows SDL
 window focus into AT-SPI state. Mounted rows and the terminal now have ATK Component bounds and
-point lookup tied to the native window. Character-level text geometry, comprehensive focus
-behavior, complete selection, screen-reader inspection and other product surfaces remain unproven.
+point lookup tied to the native window. Visible terminal text now has fixed-cell character
+rectangles and point-to-offset lookup, including two-column glyphs and combining scalars.
+Bounds-change notifications, comprehensive focus behavior, complete selection, screen-reader
+inspection and other product surfaces remain unproven.
 
 ## Evidence required
 

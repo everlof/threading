@@ -2163,6 +2163,41 @@ project clicks, saved-runtime pickers, terminal input, reattach and clean-profil
 a session bus. The final row-bound validation change affects only the AT-SPI-enabled path.
 I inspected its 960×600 project frame after the native click selected Gamma.
 
-Terminal character extents, bounds-change notifications, richer selection and actual
-screen-reader/magnifier inspection remain open. This geometry is for the current bounded
-diagnostic window, not a portable layout contract for the future product shell.
+The following slice adds visible terminal character extents. Bounds-change notifications,
+richer selection and actual screen-reader/magnifier inspection remain open. This geometry is
+for the current bounded diagnostic window, not a portable layout contract for the future
+product shell.
+
+## 81. Visible Linux terminal characters retain their rendered cell geometry
+
+The terminal's existing visible-grid projection now carries a bounded run for each retained
+display cell and line break alongside its Unicode text. ATK Text resolves an offset through
+those runs to the renderer's fixed 10×22-pixel cell rectangle; a point query returns the first
+Unicode scalar in the cell. A two-column glyph reports a 20-pixel rectangle, and the base and
+combining scalars of one grapheme report the same rectangle. Newline offsets have zero-width
+rectangles at the end of their displayed line. Screen coordinates add the live SDL window
+origin. The renderer, IME candidate placement, terminal viewport sizing and accessibility
+bridge now share the native cell-size constants. This is cell geometry, not a Pango glyph-ink
+measurement.
+
+The mapping is built from the same SwiftTerm snapshot and trimming decision as the text; it
+does not read hidden scrollback or reconstruct geometry from the flattened string. At most
+128×40 cells and 40 line breaks are retained per frame, under the existing 64 KiB text bound.
+Character lookup is logarithmic in that bounded run list; point lookup searches only the
+queried row. The synthetic overflow message has no character geometry because those words
+were never drawn. An unmounted terminal reports no hit or character extents even if an AT-SPI
+client keeps its old object reference.
+
+The Ubuntu 24.04 ARM/Xvfb AT-SPI client opened a real PTY through a project-row action and
+queried `界`, both scalars of `é`, the following newline, window/screen coordinates, hit
+offsets, live replacement text and a stale terminal reference after returning to projects.
+`THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh` passed. The bridge writes unavailable
+rectangles as `(-1, -1, -1, -1)`; the AT-SPI client normalizes the horizontal corners, so the
+fixture asserts the unavailable vertical extent rather than a wire-specific x/width pair.
+I inspected the captured real-window terminal frame. The fixed cell rectangles are useful for
+accessibility navigation and magnifier placement, but do not prove glyph-ink alignment,
+bounds-change notifications, a selection interface or actual screen-reader behavior.
+The full `./window-smoke.sh` suite also passed without an accessibility bus, covering native
+Unicode rendering, keyboard and pointer input, scrollback/copy, saved-terminal and agent
+reattach, launch refusals and clean-profile startup. I inspected its Unicode terminal capture;
+the glyphs and cell placement remain consistent with the fixed-grid renderer.
