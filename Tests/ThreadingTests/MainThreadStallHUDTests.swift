@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// Covers the DEBUG readout that says whether the main thread is keeping up.
+/// Covers the diagnostic readout that says whether the main thread is keeping up.
 ///
 /// It exists because this app could already *record* every main-queue freeze and had no way to
 /// *mention* one: the composer lag it was built for was found by reading incident JSON after the

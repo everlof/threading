@@ -25,7 +25,7 @@ enum MainThreadStallHUDDefaults {
     static let margin = Design.Spacing.large
 }
 
-/// A DEBUG-only pill that says whether the main thread is currently keeping up.
+/// An opt-in diagnostic pill that says whether the main thread is currently keeping up.
 ///
 /// This app already records every main-queue freeze — a bounded incident JSON plus a Chrome
 /// trace, both with the semantic spans that were in flight. What it had no way of doing was
@@ -40,16 +40,14 @@ enum MainThreadStallHUDDefaults {
 ///
 /// It costs nothing while nothing is wrong: it observes an event that is only posted after a
 /// stall, and the only repeating timer it runs is the one that settles it back afterwards.
-/// Debug-only by construction — `MainWindowController` installs it inside `#if DEBUG`, so its
-/// words are deliberately not localized: they name spans and durations for whoever is debugging
-/// the build, and putting developer diagnostics into the shipping string catalogue would ask
-/// translators for copy no user can ever reach.
+/// Debug builds show it by default; Release builds require a local developer preference. Its
+/// technical words name spans and durations for whoever is debugging, so they are not localized.
 /// A `ThemedControl` rather than a bare view because it answers a click: the boundary lint's
 /// point is that anything pressable inherits keyboard access, focus, enabled state and an
 /// accessibility role instead of re-deciding them, and a diagnostic readout is not a good reason
 /// to opt out of that. It lives under `UI/Views` rather than `UI/Design` for the same reason
 /// `AccountUsageItemView` does: the Component Gallery catalogues the reusable design vocabulary,
-/// and one DEBUG-only readout of this app's own main queue is a feature surface, not vocabulary
+/// and one diagnostic readout of this app's own main queue is a feature surface, not vocabulary
 /// anyone should be reaching for.
 final class MainThreadStallHUDView: ThemedControl {
 

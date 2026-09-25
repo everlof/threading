@@ -5654,6 +5654,22 @@ Terminal font and cursor, colour schemes, and AI provider configuration.
 
 ## Diagnostics
 
+#### Main-thread stall readout
+
+Debug builds show a small status pill at the bottom right of the main window. An installed
+Release build can show the same readout after you quit Threading and run:
+
+```bash
+defaults write codes.threading showsMainThreadStallHUD -bool true
+```
+
+Open Threading again from `/Applications`. The pill says “ok” while the main thread responds
+normally; after a stall it shows the duration and the active operation names. Click it to see
+recent stalls. To hide it again, quit Threading and run
+`defaults delete codes.threading showsMainThreadStallHUD`, then reopen the app. The stall records
+continue to be captured while the pill is hidden. This flag lives in the app's preferences;
+there is no need to edit the signed app bundle.
+
 **Threading > About Threading** is where the app describes itself: the mark, which draws itself in
 each time the window opens, the app's name, the version and build number with the build mark beside
 it, and then the readings a bug report tends to ask for — whether this copy was compiled **Debug**

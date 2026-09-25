@@ -51,6 +51,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Mobile connection details panel | — | host-only | active-route and address truth, endpoint ordering, certificate verdict, bounded network inspection, refresh authority and device-local clipboard policy | Host-only |
 | iOS saved-pairing recovery | — | host-only | protected-data availability, credential validation and custody, retry, write authority, selected Mac and deferred notification/widget navigation | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
+| Main-thread stall readout | — | host-only | main-queue watchdog truth, bounded incident and trace recording, local opt-in and disclosure of active semantic spans | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
 | All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, bounded scrolling and popover lifecycle | Host-only |

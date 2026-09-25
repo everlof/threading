@@ -44,4 +44,39 @@ final class ThreadingLaunchUITests: XCTestCase {
             of: window
         )
     }
+
+    /// The same typed setting that an installed Release app reads must reach the real window.
+    /// The scenario bootstrap writes it inside the isolated app process before that window opens.
+    func testMainThreadStallHUDRespectsTheLaunchPreference() throws {
+        let sandbox = try XCTUnwrap(sandbox)
+        let hiddenApp = XCUIApplication()
+        _ = sandbox.configure(hiddenApp)
+        hiddenApp.launchEnvironment["THREADING_UI_SCENARIO_STALL_HUD"] = "0"
+        application = hiddenApp
+        sandbox.launch(hiddenApp)
+        XCTAssertTrue(hiddenApp.windows.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(hiddenApp.buttons["debug.main-thread-hud"].exists)
+        hiddenApp.terminate()
+
+        let visibleApp = XCUIApplication()
+        _ = sandbox.configure(visibleApp)
+        visibleApp.launchEnvironment["THREADING_UI_SCENARIO_STALL_HUD"] = "1"
+        application = visibleApp
+        sandbox.launch(visibleApp)
+        let window = visibleApp.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            visibleApp.buttons["debug.main-thread-hud"].waitForExistence(timeout: 10),
+            "the opt-in must install the readout in the app window"
+        )
+        try recordScenarioScreenshot(
+            checkpoint: "main-thread-stall-readout",
+            order: 1,
+            title: "Main-thread stall readout",
+            description: "An explicit local preference shows the diagnostic pill in the real app window.",
+            journey: "Main-thread stall diagnostics",
+            in: sandbox,
+            of: window
+        )
+    }
 }

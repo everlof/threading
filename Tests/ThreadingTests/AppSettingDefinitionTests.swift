@@ -105,6 +105,26 @@ final class AppSettingDefinitionTests: XCTestCase {
     }
 
     @MainActor
+    func testMainThreadStallHUDUsesTheLocalPreferenceInBothBuilds() throws {
+        let suiteName = "AppSettingDefinitionTests.stallHUD.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let setting = AppSettingDefinitions.showsMainThreadStallHUD
+        let appSettings = AppSettings(defaults: defaults)
+
+#if DEBUG
+        XCTAssertTrue(appSettings.showsMainThreadStallHUD)
+#else
+        XCTAssertFalse(appSettings.showsMainThreadStallHUD)
+#endif
+        XCTAssertEqual(setting.remotePolicy, .hidden)
+        XCTAssertTrue(setting.write(true, to: defaults))
+        XCTAssertTrue(appSettings.showsMainThreadStallHUD)
+        XCTAssertTrue(setting.write(false, to: defaults))
+        XCTAssertFalse(appSettings.showsMainThreadStallHUD)
+    }
+
+    @MainActor
     func testMacNotificationActivityWindowDefaultsToTwoMinutesAndPersistsEveryChoice() throws {
         let suiteName = "AppSettingDefinitionTests.notificationActivity.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -227,6 +247,10 @@ final class AppSettingDefinitionTests: XCTestCase {
             ),
             .usesMCPStdioBridge: .init(
                 key: "mcpStdioBridgeEnabled",
+                valueType: .boolean
+            ),
+            .showsMainThreadStallHUD: .init(
+                key: "showsMainThreadStallHUD",
                 valueType: .boolean
             ),
             .ptyHostEnabled: .init(

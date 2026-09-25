@@ -195,10 +195,19 @@ behind the whole batch. That is the lag.
    observed in `start()`. Measuring per pulse could only ever confirm what an event had already
    delivered.
 
-3. **The `MainThreadStallHUDView`** (DEBUG only). The evidence for all of the above was on disk
-   the whole time and nobody was told. The pill is quiet when healthy and names the duration and
-   the open spans when not — including "no active span", the reading that actually located this
-   bug.
+3. **The `MainThreadStallHUDView`** (Debug by default, opt-in for Release). The evidence for all
+   of the above was on disk the whole time and nobody was told. The pill is quiet when healthy
+   and names the duration and the open spans when not — including "no active span", the reading
+   that actually located this bug.
+
+The monitor and its bounded incident/trace recording run in both build configurations. The HUD
+reads the local `showsMainThreadStallHUD` preference during startup after the first window is
+shown. Debug defaults to visible; Release defaults to hidden. Set
+`defaults write codes.threading showsMainThreadStallHUD -bool true`, then restart Threading to
+see it in an installed Release app. `defaults delete codes.threading showsMainThreadStallHUD`
+restores the build's default on the next launch. This uses the app's preferences domain rather
+than editing the signed bundle's `Info.plist`. The HUD stays host-owned because it reports the
+host's own watchdog and semantic spans; extensions receive no authority over this diagnostic.
 
 ### Two neighbours found by the same trace
 

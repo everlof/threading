@@ -1014,6 +1014,12 @@ final class AppSettings {
         }
     }
 
+    /// Local diagnostic overlay, read during startup after the first window is shown.
+    /// Debug defaults to on and Release to off; either accepts a preference on next launch.
+    var showsMainThreadStallHUD: Bool {
+        AppSettingDefinitions.showsMainThreadStallHUD.read(from: defaults) ?? false
+    }
+
     // MARK: - Background PTY Host
 
     /// Whether a session's PTY may live in the `threading-ptyd` background host rather than in

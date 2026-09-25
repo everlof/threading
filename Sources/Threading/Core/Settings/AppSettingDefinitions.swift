@@ -51,6 +51,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case disabledToolGroupIDs
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
+    case showsMainThreadStallHUD
     case ptyHostEnabled
     case developerRemoteHostBinaryDirectory
     case prependsCommandLineToolsToPATH
@@ -1019,6 +1020,20 @@ enum AppSettingDefinitions {
         persistenceKey: "mcpStdioBridgeEnabled",
         absence: .falseValue
     )
+    /// Developer diagnostic overlay. Debug builds show it by default; installed Release builds
+    /// require `defaults write codes.threading showsMainThreadStallHUD -bool true` and a relaunch.
+    /// This is local to the Mac and has no Settings row or remote mutation route.
+#if DEBUG
+    private static let stallHUDDefault: TypedAppSettingAbsence<Bool> = .registered(true)
+#else
+    private static let stallHUDDefault: TypedAppSettingAbsence<Bool> = .falseValue
+#endif
+    static let showsMainThreadStallHUD = AppSettingDescriptor<Bool>(
+        identity: .showsMainThreadStallHUD,
+        persistenceKey: "showsMainThreadStallHUD",
+        absence: stallHUDDefault,
+        notification: .none
+    )
     /// Whether a session's PTY may live in the `threading-ptyd` background host.
     ///
     /// Behavioural rather than presented: no `presentations`, so `remotePolicy` resolves to
@@ -1486,7 +1501,7 @@ enum AppSettingDefinitions {
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(sessionCheckoutAuthorityPolicy),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
-        .init(usesMCPStdioBridge), .init(ptyHostEnabled),
+        .init(usesMCPStdioBridge), .init(showsMainThreadStallHUD), .init(ptyHostEnabled),
         .init(developerRemoteHostBinaryDirectory),
         .init(prependsCommandLineToolsToPATH),
         .init(workspaceNavigatorSelection), .init(sourceControlProviderConnections),

@@ -619,9 +619,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             presentRecoveryMode(on: mainWindowController)
         }
         MainThreadStallMonitor.shared.start()
-#if DEBUG
-        installMainThreadStallHUD(on: mainWindowController)
-#endif
+        if AppSettings.shared.showsMainThreadStallHUD {
+            installMainThreadStallHUD(on: mainWindowController)
+        }
 
         // A command-line startup capture measures the normal path through the first usable
         // window, then stops before session restoration, extension processes, polling and other
@@ -4009,7 +4009,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.smallerText)
     }
 
-#if DEBUG
     /// Puts the main-thread readout in the window's bottom-trailing corner.
     ///
     /// Installed from here rather than from inside the window's own view tree, for two reasons:
@@ -4033,7 +4032,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             )
         ])
     }
-#endif
 }
 
 #if DEBUG
@@ -4060,6 +4058,7 @@ private enum UIScenarioBootstrap {
         static let resumeTape = "THREADING_UI_SCENARIO_RESUME_TAPE"
         static let title = "THREADING_UI_SCENARIO_TITLE"
         static let terminal = "THREADING_UI_SCENARIO_TERMINAL"
+        static let stallHUD = "THREADING_UI_SCENARIO_STALL_HUD"
     }
 
     private static let markerName = ".threading-ui-scenario-home"
@@ -4091,6 +4090,14 @@ private enum UIScenarioBootstrap {
         ) {
         case .installed: break
         case .refused(let reason): return .refused(reason)
+        }
+        if let stallHUD = environment[Key.stallHUD] {
+            guard stallHUD == "0" || stallHUD == "1" else {
+                return .refused("scenario stall HUD preference is invalid")
+            }
+            AppSettingDefinitions.showsMainThreadStallHUD.write(
+                stallHUD == "1", to: .standard, notifying: false
+            )
         }
         guard fixtureKeys.contains(where: { environment[$0] != nil }) else {
             return .installed
