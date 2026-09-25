@@ -2201,3 +2201,44 @@ The full `./window-smoke.sh` suite also passed without an accessibility bus, cov
 Unicode rendering, keyboard and pointer input, scrollback/copy, saved-terminal and agent
 reattach, launch refusals and clean-profile startup. I inspected its Unicode terminal capture;
 the glyphs and cell placement remain consistent with the fixed-grid renderer.
+
+## 82. A saved Linux Codex login now routes through its own home
+
+The Linux app window previously refused every named Codex session even though the durable
+session already records an account handle. The headless host could create only a standard
+record. `CODEX_HOME` inherited from the environment was already cleared for standard launches,
+but macOS discovery could still call the inherited override the standard login, making the
+displayed account disagree with the launch route.
+
+`CodexAccountLocations` now gives both hosts one Foundation-only rule. The standard handle
+means `HOME/.codex`. A legacy named handle such as `codex-work` requires the exact
+`HOME/.codex-work/auth.json` marker; macOS may also use its provider-verified registry for
+keyring-backed named locations. Duplicate handles or one path claimed by different handles
+are withheld. Resolution probes the selected legacy directory rather than enumerating every
+login on an input or resume path. Linux reads no macOS credential or preference store.
+
+`THREADING_LINUX_CODEX_ACCOUNT=codex-work` is the diagnostic window's explicit new-session
+choice; the headless `codex` command accepts the same handle as an optional final argument.
+Both persist it and launch with that account's `CODEX_HOME`. A dormant graphical session
+resolves its stored handle again, verifies its rollout in that account's `sessions/` tree,
+checks known-broken numbering, and only then sends the resume command. The saved-agent row
+labels a named account both immediately after creation and after reopening the window. This
+diagnostic control remains host-only; session identity, login admission and process routing
+remain host-owned if a future product picker becomes customizable.
+
+The Ubuntu ARM/Xvfb/PTY smoke created a named session despite an inherited foreign
+`CODEX_HOME`, persisted its handle and provider ID, reopened the exact conversation, and
+refused resumes with either a missing login marker or a different `HOME` before child spawn.
+It also exercised the optional headless command. I inspected the real 800×480 picker capture:
+`codex [codex-work]` is visible in the selected row. The two macOS resolver unit tests passed,
+as did the architecture, theme and main-actor latency ratchets. There is still no in-app
+account picker, Linux registry for keyring-backed logins, or support for other providers.
+
+The saved-agent picker smoke had seeded its older row with `/bin/true`. The daemon keeps an
+observed exit for five seconds, so on a slower run that row vanished before the picker could
+attach. The fixture now seeds a live older child and explicitly exits it after opening the row;
+the agent-only suite passed with that deterministic lifetime. This changes the test's source of
+truth rather than extending the daemon's bounded exit retention.
+The complete `./window-smoke.sh` suite then passed with the final resolver and live fixture,
+including standard and named Codex creation/resume, saved-agent reattach, terminal input and
+rendering, and clean-profile startup.

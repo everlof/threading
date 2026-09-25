@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
 mkdir -p out
-docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
+docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool xclip imagemagick >/dev/null
@@ -79,6 +79,11 @@ if [[ "$THREADING_LINUX_STARTUP_ONLY" == 1 ]]; then
 fi
 if [[ "$THREADING_LINUX_AGENT_ONLY" == 1 ]]; then
   python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
+  python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
+  exit 0
+fi
+if [[ "$THREADING_LINUX_NAMED_ONLY" == 1 ]]; then
+  python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   exit 0
 fi
 for project in Alpha Beta Gamma; do
@@ -339,6 +344,7 @@ python3 tests/project_retry_smoke.py "$bin/WindowHarness" "$fixture/store"
 python3 tests/project_terminal_picker_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
 python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
 python3 tests/agent_create_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
+python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
 python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
 

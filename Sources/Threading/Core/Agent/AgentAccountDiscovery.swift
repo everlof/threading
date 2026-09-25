@@ -272,8 +272,8 @@ enum AgentAccountDiscovery {
 
     // MARK: - Codex
 
-    /// The Codex home from the environment (or `~/.codex`) plus any `~/.codex-*` directory,
-    /// admitting only those holding a completed login.
+    /// The standard `~/.codex` home plus any verified alternate. The default launch clears
+    /// CODEX_HOME, so an inherited override cannot redefine the standard account here.
     private static func codexAccounts() -> [AgentAccount] {
         discoverCodexAccounts(records: AgentAccountLocationRegistry.shared.records(for: .codex))
     }
@@ -293,48 +293,18 @@ enum AgentAccountDiscovery {
     ) -> [AgentAccount] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let aliases = ShellAliasReader.accountAliasesByConfigPath()
-        var accounts: [AgentAccount] = []
-        var seen = Set<String>()
-
-        func admit(handle: AccountHandle, directory: URL) {
-            let path = directory.standardizedFileURL.path
-            guard !seen.contains(path),
-                  isFile(directory.appendingPathComponent(AgentAccountDefaults.codexAuthMarker))
-            else { return }
-
-            seen.insert(path)
-            accounts.append(makeAccount(
-                provider: .codex,
-                handle: handle,
-                directory: directory,
-                aliases: aliases
-            ))
+        let verified = records.filter { $0.provider == .codex }.map {
+            CodexAccountLocation(handle: $0.handle, configPath: $0.configPath)
         }
-
-        if let override = ProcessInfo.processInfo.environment["CODEX_HOME"], !override.isEmpty {
-            admit(
-                handle: .standard,
-                directory: URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
-            )
-        } else {
-            admit(
-                handle: .standard,
-                directory: home.appendingPathComponent(AgentAccountDefaults.codexDefaultDirectory)
-            )
+        return CodexAccountLocations.discover(
+            home: home,
+            candidates: directories ?? alternateDirectories(prefix: AgentAccountDefaults.codexDirectoryPrefix),
+            verified: verified
+        ).map {
+            makeAccount(provider: .codex, handle: $0.handle,
+                        directory: URL(fileURLWithPath: $0.configPath, isDirectory: true),
+                        aliases: aliases)
         }
-
-        for directory in directories ?? alternateDirectories(prefix: AgentAccountDefaults.codexDirectoryPrefix) {
-            admit(handle: handle(for: directory), directory: directory)
-        }
-
-        appendRegisteredAccounts(
-            for: .codex,
-            records: records,
-            aliases: aliases,
-            to: &accounts
-        )
-
-        return accounts
     }
 
     /// One utility worker scans at most 4,096 home entries. Capacity never discovers accounts
