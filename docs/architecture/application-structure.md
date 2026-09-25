@@ -140,8 +140,11 @@ The frame, mounted list rows and terminal expose window, screen and parent-coord
 bounds from the live SDL window; one row rectangle supplies drawing, pointer hit testing and
 AT-SPI publication, and point lookup returns mounted children only. The terminal maps Unicode
 offsets to the same fixed cell positions its Pango renderer uses; point queries resolve only
-visible cells, not hidden scrollback. Bounds-change notifications, comprehensive focus behavior
-and complete selection semantics remain open accessibility work.
+visible cells, not hidden scrollback. The list alone implements ATK's single-child Selection
+interface: reads project its selected row, and writes enqueue the same generation-checked
+navigation action as the row's accessible `select` action. The host remains the selection owner;
+clear and multiselect requests are refused. Bounds-change notifications, comprehensive focus
+behavior, terminal text selection and screen-reader inspection remain open accessibility work.
 
 The navigator keeps specimen row chrome and selection geometry, then passes only its mounted
 title and row labels to a Linux Pango text leaf over the opaque frame. That leaf validates the
