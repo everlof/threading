@@ -166,15 +166,19 @@ or corrupt payload joins the unreadable set and the write is refused. This remov
 of every saved panel and attachment list from launch without opening a data-loss race. A row whose
 `session_id` is not an identifier remains the necessary eager exception: no feature can ask for it
 by id later, so startup records `containsUnkeyedRows` and only skipping the table's prune can keep
-it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
-of record.
+it. An authoritative load of project and session rows stays all-or-nothing and eagerly decoded
+because those are the copy of record.
 
 Selected-session runtime operations have a narrower read contract than startup. An indexed
 `sessionRecord(id:)` reads one session row and its owning project row, validates both indexed
 columns against their model payloads, and leaves unrelated rows unread. The Linux native host uses
-that path for agent attach, Codex rollout-ID persistence and resume after its initial complete
-project-window snapshot. This does not relax the all-or-nothing contract for a complete graph:
-after a targeted read, `save(_:)` refuses reconciliation on that connection until `load()` succeeds.
+that path for agent attach, Codex rollout-ID persistence and resume after its initial project-window
+snapshot. The Linux project navigator uses a partial `navigationSnapshot` read: it counts indexed
+sessions and decodes only its requested recent window per project, while retaining the saved
+selected-session identity. Project terminals still require decoding each owning project payload
+because they are embedded there. This does not relax the all-or-nothing contract for a complete
+graph: after either partial read, `save(_:)` refuses reconciliation on that connection until
+`load()` succeeds.
 Exact-row `saveSession` remains allowed, so a newer unrelated payload is not decoded or rewritten
 by a selected-session update.
 

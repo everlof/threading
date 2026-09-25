@@ -150,8 +150,9 @@ standing session. The project terminal remains embedded in its owning project ro
 still grows with the number of terminals in that project.
 Selected agent attach, rollout discovery and resume read one indexed session and its validated
 owning project instead of decoding the full archive again. The initial project-window snapshot
-still performs the complete authoritative graph load on a worker, and terminal identity lookup
-still searches the embedded terminal records.
+reads project rows, indexed session counts and at most 512 recent session payloads per project on
+a worker. It does not decode dormant sessions outside the window. Project terminal records still
+live in each project payload, so terminal identity lookup searches those embedded records.
 The visible experiment has no agent-account or model picker. It resumes a dormant Codex record
 only after finding its exact provider rollout in the standard account and checking the known
 mixed-ordinal failure; named accounts and other providers are still unsupported. A source-tree

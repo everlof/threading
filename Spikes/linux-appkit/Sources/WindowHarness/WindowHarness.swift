@@ -140,30 +140,33 @@ struct WindowHarness {
         guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned by another host") }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
-        let state = try database.load().state
+        let catalog = try database.navigationSnapshot(
+            recentSessionLimit: maximumSelectableAgentsPerProject,
+            recentTerminalLimit: maximumSelectableTerminalsPerProject
+        )
         let selectedIndex: Int
         if let requestedPath {
             guard let folder = ProjectDirectory.existing(at: requestedPath),
-                  let index = state.projects.firstIndex(where: { $0.folderPath == folder.path }) else {
+                  let index = catalog.projects.firstIndex(where: { $0.folderPath == folder.path }) else {
                 throw WindowFailure("requested project is not in this store")
             }
             selectedIndex = index
         } else {
             selectedIndex = 0
         }
-        let projects = state.projects.map { project in
-            let agents = project.sessions.suffix(maximumSelectableAgentsPerProject).reversed().map {
+        let projects = catalog.projects.map { project in
+            let agents = project.recentSessions.map {
                 ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
                     title: String(($0.title.isEmpty ? $0.kind.rawValue : $0.title).unicodeScalars
                         .prefix(maximumPersistedRuntimeTitleScalars)))
             }
-            let terminals = project.terminals.suffix(maximumSelectableTerminalsPerProject).reversed().map {
+            let terminals = project.recentTerminals.map {
                 ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
                     title: String($0.displayTitle.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)))
             }
             return ProjectSnapshot(id: String(describing: project.id), name: project.name,
-                path: project.folderPath, sessions: project.sessions.count,
-                terminalCount: project.terminals.count, recentAgents: agents, recentTerminals: terminals)
+                path: project.folderPath, sessions: project.sessionCount,
+                terminalCount: project.terminalCount, recentAgents: agents, recentTerminals: terminals)
         }
         return WindowSnapshot(projects: projects, selectedProjectIndex: selectedIndex)
     }
