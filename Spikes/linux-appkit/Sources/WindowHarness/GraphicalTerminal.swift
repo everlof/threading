@@ -281,9 +281,9 @@ final class GraphicalTerminal: @unchecked Sendable {
             permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: nil)
         var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
         command.append(contentsOf: codexCommand)
-        session.resumeState = resumeState
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: shell, resumeState: resumeState)
+        AgentLaunchRecording.apply(plan, to: &session, at: Date())
         let project = state.projects[projectIndex]
         try database.addSession(session, to: project.id, position: project.sessions.count,
                                 selectNewSession: true)
@@ -422,7 +422,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             throw WindowFailure("saved agent has no resumable Codex conversation")
         }
         let project = record.project
-        let session = record.session
+        var session = record.session
         guard session.accountHandle.isStandard else {
             throw WindowFailure("this Linux window cannot route a named Codex account")
         }
@@ -443,8 +443,11 @@ final class GraphicalTerminal: @unchecked Sendable {
             resumeState: session.resumeState, prompt: nil)
         var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
         command.append(contentsOf: codexCommand)
-        return (AgentLaunchPlan.inLoginShell(command: command, in: project.folderPath,
-            shellPath: shell, resumeState: resumeState), project.folderPath)
+        let plan = AgentLaunchPlan.inLoginShell(command: command, in: project.folderPath,
+            shellPath: shell, resumeState: resumeState)
+        AgentLaunchRecording.apply(plan, to: &session, at: Date())
+        try database.saveSession(session, in: project.id, position: record.position)
+        return (plan, project.folderPath)
     }
     private func fail(_ error: Error) {
         lock.lock(); if !closed && failure == nil { failure = String(describing: error) }; lock.unlock()

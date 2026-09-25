@@ -84,9 +84,9 @@ func run() throws -> Int32 {
             permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: args[6])
         var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle, configPath: "")
         command.append(contentsOf: codexCommand)
-        session.resumeState = resumeState
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: args[4], resumeState: resumeState)
+        AgentLaunchRecording.apply(plan, to: &session, at: Date())
         if let existing = state.projects.firstIndex(where: { $0.folderPath == folder.path }) {
             let project = state.projects[existing]
             try database.addSession(session, to: project.id, position: project.sessions.count,

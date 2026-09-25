@@ -143,6 +143,7 @@ with log_path.open('w+') as log:
             assert len(rows) == 1 and rows[0][1] == 'codex', rows
             payload = json.loads(rows[0][2])
             assert payload['permissionMode'] == 'manual' and payload['title'] == '', payload
+            assert payload['hasLaunched'] is True and payload.get('lastExitCode') is None, payload
             assert database.execute("SELECT value FROM app_state WHERE key='selectedSessionID'").fetchone()[0] == rows[0][0]
         saved_id = rows[0][0]
         deadline = time.monotonic() + 5
@@ -231,6 +232,11 @@ print('PASS wrong Codex home refuses resume before spawning', flush=True)
 
 # After the first process exits, a new app window attaches if the daemon still has a child,
 # otherwise resumes this exact provider conversation under the same Threading identity.
+with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+    saved = json.loads(database.execute('SELECT data FROM session WHERE id = ?', (saved_id,)).fetchone()[0])
+    saved['lastExitCode'] = 6
+    database.execute('UPDATE session SET data = ? WHERE id = ?',
+                     (json.dumps(saved, sort_keys=True, separators=(',', ':')), saved_id))
 with (root / 'agent-resume-window.log').open('w+') as log:
     process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
                                stdout=log, stderr=log, env=environment)
@@ -248,6 +254,11 @@ with (root / 'agent-resume-window.log').open('w+') as log:
         resumed = json.loads((project / 'resumed-agent.json').read_text())
         assert resumed['provider_id'] == report['provider_id'], resumed
         assert resumed['argv'][-2:] == ['resume', report['provider_id']], resumed
+        with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+            reopened = json.loads(database.execute('SELECT data FROM session WHERE id = ?',
+                                                   (saved_id,)).fetchone()[0])
+        assert reopened['hasLaunched'] is True and reopened.get('lastExitCode') is None, reopened
+        assert reopened['agentSessionID'] == report['provider_id'], reopened
         key(window, 'q')
         title(process, 'Threading terminal - exited 0', root / 'agent-resume-window.log')
         key(window, 'ctrl+shift+p')

@@ -86,9 +86,11 @@ routing, local hooks, fork handling and transcript existence checks remain host-
 `AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
 store and UI. macOS and the Linux host share it; host adapters retain account/model admission,
 project/identity checks, fallback branch lookup, persistence and notification delivery. This is
-not yet a shared session-creation transaction or runtime coordinator. `AgentLaunchRecording`
-applies the resolved plan to one durable session before persistence and spawn; admission,
-transaction scope and process-start acknowledgement stay with the host.
+not yet a shared session-creation transaction or runtime coordinator.
+`AgentLaunchRecording` applies a terminal plan's durable launch facts before either host hands
+it to a process owner. Both hosts mark the attempt launched, stamp activity, clear a previous
+exit code and store the plan's resume state; admission and the exact database write remain with
+each host. A prior launch failure remains until the runtime survives its startup check.
 
 `AgentSessionRowPresentation` carries typed identity, title precedence and attention precedence
 (scheduled, woke, then snoozed). `SessionRowView.configure` assembles it from the existing
@@ -129,7 +131,8 @@ responses for the announced replay byte prefix and marks cut history. Input and 
 gated until replay completes; old or invalid peers fail explicitly under an attach deadline.
 An explicit native clipboard gesture forwards at most 64 KiB of valid UTF-8 on the same ordered
 terminal worker, with the emulator's live bracketed-paste mode deciding the framing. The host
-keeps shortcut routing and clipboard refusal; selection/copy and IME are not implemented there.
+keeps shortcut routing and clipboard refusal. Local selection and explicit copy work there;
+IME is not implemented.
 An integrated terminal failure stops only its client and remains navigable as a failed entry;
 returning to projects preserves other runtimes. Revisiting does not silently retry. The failed
 view waits on native events and bounds its diagnostic text before drawing. The standalone

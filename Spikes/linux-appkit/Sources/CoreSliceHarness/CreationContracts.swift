@@ -24,4 +24,17 @@ func runCreationContracts() throws {
     try require(AgentSessionCreation.makeRecord(kind: .codex, handoff: handoff, id: id)?.handoff == handoff,
                 "valid handoff retained")
     print("PASS shared fresh-session creation: capabilities, defaults and handoff admission")
+
+    guard var launched = AgentSessionCreation.makeRecord(kind: .codex) else {
+        throw ContractFailure.failed("Codex launch record fixture")
+    }
+    launched.lastExitCode = 9
+    let launchedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let plan = AgentLaunchPlan(executable: "/bin/sh", arguments: [], resumeState: .awaitingIdentifier)
+    AgentLaunchRecording.apply(plan, to: &launched, at: launchedAt)
+    try require(launched.hasLaunched && launched.lastActiveAt == launchedAt,
+                "launch transition records execution")
+    try require(launched.lastExitCode == nil && launched.resumeState == plan.resumeState,
+                "launch transition follows plan and clears stale exit")
+    print("PASS shared terminal launch recording")
 }
