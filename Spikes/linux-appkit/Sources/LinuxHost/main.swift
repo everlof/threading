@@ -1,6 +1,7 @@
 // Experimental headless host. The native app remains the goal; this exercises its storage/PTY seam.
 @testable import CoreSlice
 import Foundation
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 #if os(Linux)
 import Glibc
@@ -272,7 +273,7 @@ func run() throws -> Int32 {
         }
         if polls[0].revents != 0 {
             for event in try inbox.take() {
-                let delivery: PTYHostHandshake.Delivery
+                let delivery: HostEventInbox.Delivery
                 switch event {
                 case .delivery(let value): delivery = value
                 case .closed(let error):

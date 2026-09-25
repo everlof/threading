@@ -2,14 +2,19 @@
 @testable import CoreSlice
 import Foundation
 import Glibc
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 /// Bridges the shared client's serial callbacks into the CLI's poll loop. One connection owns
 /// one inbox; output rate and lifetime are unbounded, retained work is not. Overflow is fatal,
 /// never a dropped byte followed by a success status. No callback waits for the consumer.
 final class HostEventInbox: @unchecked Sendable {
+    enum Delivery {
+        case control(PTYHostFrame)
+        case output(Data, standardError: Bool)
+    }
     enum Event {
-        case delivery(PTYHostHandshake.Delivery)
+        case delivery(Delivery)
         case closed(PTYHostClientError?)
     }
     enum Failure: Error { case notification(Int32), overflow, controlEncoding }

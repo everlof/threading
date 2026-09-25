@@ -1,4 +1,5 @@
 @testable import CoreSlice
+@testable import ThreadingPTYClient
 import Foundation
 import ThreadingPTYHostKit
 

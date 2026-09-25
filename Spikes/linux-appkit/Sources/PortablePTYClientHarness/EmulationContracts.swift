@@ -3,6 +3,7 @@
 @testable import TerminalRuntime
 import Dispatch
 import Foundation
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 /// Test owner: serializes every emulator operation and never parses on the UI actor.

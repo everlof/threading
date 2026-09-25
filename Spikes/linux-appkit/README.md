@@ -2,7 +2,8 @@
 
 > **An experimental Linux host, not a packaged app.** No Xcode target references this directory,
 > and no standard Mac build gate runs it. Shared portable changes live in the product's `Sources/`
-> and `Tests/` and are copied here byte-for-byte. `docs/feature-drafts/linux-host-runtime.md`
+> and `Tests/`, or in local packages; the core slice copies its selected app sources byte-for-byte.
+> `docs/feature-drafts/linux-host-runtime.md`
 > remains the decision record; this directory holds the measurements and Linux host prototype.
 
 ## The question
@@ -53,7 +54,7 @@ project-graph slice and runs the on-disk contracts below:
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 50 production files are byte-identical to their sources. Fresh-session record assembly,
+The 44 production files are byte-identical to their sources. Fresh-session record assembly,
 terminal launch recording, launch values, account command routing, bounded Codex rollout checks
 and Claude transcript paths are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
@@ -296,8 +297,8 @@ its caller's terminal colour/pager claims because it does not yet own a graphica
 
 ### Full production PTY client on Linux
 
-The host smoke also builds `PortablePTYClientHarness`, which drives the byte-identical
-`PTYHostClient` against the real Linux daemon: spawn, disconnect, replay/reattach to the same
+The host smoke also builds `PortablePTYClientHarness`, which drives the shared
+`ThreadingPTYClient` package against the real Linux daemon: spawn, disconnect, replay/reattach to the same
 child, input, drain and authoritative exit. It checks write-queue overflow, a stalled socket's
 write deadline, a closed peer without a process-global SIGPIPE override, and queued-write
 cancellation. The CLI now uses this same production client; its former synchronous socket,
@@ -309,7 +310,7 @@ flood with no consumer. The real-daemon smoke also checks an exact 2 MiB live ou
 The graphical terminal mode consumes the same event interface on its serial worker. CLI stdout
 may still block its consumer, and libdispatch's internal read buffering has not been measured.
 
-The Mac journal/availability adapter is `PTYHostClientHost.swift`; client limits are portable.
+The Mac journal/diagnostic/availability adapter is `PTYHostClientHost.swift`; client limits are portable.
 macOS retains DispatchIO writes. Linux uses a serial socket writer with a separately owned
 descriptor, per-send SIGPIPE suppression and a whole-frame deadline. The production client
 retains its aggregate queue bound. Many-client Linux throughput and shutdown latency remain
