@@ -247,6 +247,26 @@ for attempt in $(seq 1 200); do
 done
 xdotool getwindowname "$id" | grep 'SCROLL READY \[scrollback\]$'
 import -window "$id" out/terminal-scrollback-held.png
+select_and_copy_row() {
+  local row=$1 expected=$2 capture=$3
+  local y=$((row * 22 + 5))
+  xdotool mousemove --window "$id" 5 "$y" mousedown 1
+  sleep .05
+  xdotool mousemove --window "$id" 75 "$y"
+  sleep .05
+  xdotool mouseup 1
+  sleep .2
+  import -window "$id" "out/terminal-selection-$capture.png"
+  xdotool key ctrl+shift+c
+  for attempt in $(seq 1 100); do
+    [[ $(timeout 5 xclip -selection clipboard -o 2>/dev/null) == "$expected" ]] && return 0
+    kill -0 "$window_pid" || return 1
+    sleep .05
+  done
+  echo "selected text did not reach the native clipboard: $expected" >&2
+  return 1
+}
+select_and_copy_row 0 'ROW 025' held
 xdotool type --clearmodifiers '.'
 for attempt in $(seq 1 200); do
   xdotool getwindowname "$id" | grep -q 'SCROLL NEW \[scrollback\]$' && break
@@ -269,10 +289,12 @@ for attempt in $(seq 1 200); do
   sleep .05
 done
 xdotool getwindowname "$id" | grep 'exited 0$'
+printf stale | xclip -selection clipboard -i
+select_and_copy_row 0 'ROW 038' exited
 xdotool key alt+F4
 wait "$window_pid"
 window_pid=''
-echo 'PASS native scrollback: wheel navigation, held output, live return and PTY input'
+echo 'PASS native scrollback and copy: held rows, live return, selection, clipboard and exited child'
 python3 tests/terminal_clipboard_smoke.py "$bin/WindowHarness" "$fixture/store" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_exit_smoke.py "$bin/WindowHarness"
 python3 tests/project_terminal_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/store" "$fixture/pty.sock" "$fixture" "$PWD/tests/project_terminal_child.py"

@@ -173,11 +173,44 @@ func checkScrollback() throws {
     print("PASS Linux viewport: bounded history, held output, live cursor and alternate-screen wheel")
 }
 
+func checkSelection() throws {
+    var sent = Data()
+    let emulator = try PTYEmulator(columns: 20, rows: 3) { sent.append($0) }
+    emulator.feed(Data("copy 界\r\nnext line".utf8))
+    try check(emulator.mouseButton(x: 5, y: 5, button: 0, release: false, modifiers: []),
+              "local selection did not start")
+    try check(emulator.mouseMotion(x: 75, y: 5), "local drag did not move")
+    try check(emulator.mouseButton(x: 75, y: 5, button: 0, release: true, modifiers: []),
+              "local selection did not finish")
+    let selected = emulator.snapshot()
+    try check(selected.cells[0].backgroundRGB == 0x37648e && selected.cells[7].backgroundRGB != 0x37648e,
+              "selected cells were not painted from the shared range")
+    guard case .text(let copied) = emulator.copySelection(maximumBytes: 1024) else {
+        throw Failure(message: "local selection had no copy text")
+    }
+    try check(copied == Data("copy 界".utf8) && sent.isEmpty, "copy text or PTY isolation differed")
+    emulator.feed(Data("\u{1b}[?1000h\u{1b}[?1006h".utf8))
+    sent.removeAll()
+    try check(emulator.mouseButton(x: 5, y: 27, button: 0, release: false, modifiers: [.shift]),
+              "Shift did not claim local selection under mouse tracking")
+    _ = emulator.mouseMotion(x: 95, y: 27)
+    _ = emulator.mouseButton(x: 95, y: 27, button: 0, release: true, modifiers: [])
+    guard case .text(let shifted) = emulator.copySelection(maximumBytes: 1024) else {
+        throw Failure(message: "Shift-selected text was missing")
+    }
+    try check(shifted == Data("next line".utf8) && sent.isEmpty,
+              "Shift selection leaked a mouse report")
+    _ = emulator.mouseButton(x: 5, y: 27, button: 0, release: false, modifiers: [])
+    try check(!sent.isEmpty, "ordinary tracking click did not reach the child")
+    print("PASS Linux selection: Unicode copy, visible highlight, Shift bypass and mouse authority")
+}
+
 func run() throws {
     try checkInbox()
     try checkEmulator()
     try checkKeyboard()
     try checkScrollback()
+    try checkSelection()
     guard CommandLine.arguments.count == 2 else { throw Failure(message: "usage: PortablePTYClientHarness SOCKET") }
     let socketPath = CommandLine.arguments[1]
     try checkLiveEmulation(socketPath)

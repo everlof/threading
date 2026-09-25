@@ -2,8 +2,9 @@
 #include <stdint.h>
 typedef struct TWWindow TWWindow;
 // 1 repaint/resize, 2 project click, 3/4 project navigation, 5 window quit.
-// Terminal kinds 15/16 carry button (key 0/1/2, action 1 press/3 release) and wheel (signed
-// key, one notch per unit). Coordinates are window pixels; the host maps them to grid cells.
+// Terminal kinds 15/16/17 carry button (key 0/1/2, action 1 press/3 release), wheel (signed
+// key, one notch per unit), and held-left-button motion. Coordinates are window pixels;
+// the host maps them to grid cells. Kind 18 requests copying the current local selection.
 typedef struct { int kind, x, y, width, height; char text[32]; int key, modifiers, action; } TWEvent;
 TWWindow *tw_open(const char *title, int width, int height);
 const char *tw_error(void);
@@ -25,6 +26,8 @@ int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);
 const char *tw_event_text(const TWEvent *);
 // Returns byte count, -1 for content over capacity, -2 for a clipboard error.
 int tw_clipboard_read(uint8_t *destination, int capacity);
+// Copies at most 1 MiB of UTF-8 to the native clipboard. Returns 0 on success.
+int tw_clipboard_write(const uint8_t *source, int length);
 typedef struct { int offset, length, width; uint32_t foreground, background; int bold, underline; } TWCell;
 // Worker-only Pango/Cairo renderer. Output is RGBA, in fixed 10x22 pixel terminal cells.
 int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *, int columns, int rows,

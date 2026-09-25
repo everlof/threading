@@ -269,6 +269,15 @@ public class SelectionService: CustomDebugStringConvertible {
         }
         return lowerBound..<upperBound
     }
+
+    /// The selected columns in one absolute buffer row, for hosts that draw cells themselves.
+    /// Call under `terminal.terminalLock`. The result is bounded by that row's visible width;
+    /// callers should request it once per visible row, not once per cell.
+    public func selectedColumns(inBufferRow row: Int, columns: Int) -> Range<Int>? {
+        terminal.terminalLock.preconditionLocked()
+        guard active else { return nil }
+        return selectedColumnsRange(row: row, cols: columns)
+    }
     
     /**
      * Controls whether the selection is active or not.   Changing the value will invoke the `selectionChanged`

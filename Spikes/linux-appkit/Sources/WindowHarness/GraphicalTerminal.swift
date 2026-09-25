@@ -11,6 +11,7 @@ import ThreadingPTYHostKit
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
     static let maximumPasteBytes = 64 * 1024
+    static let maximumCopyBytes = 1024 * 1024
     private static let exitWaitSeconds: Double = 5
     private static let maximumReplayBytes = 4 * 1024 * 1024
     private static let maximumAttachColumns = 128
@@ -34,8 +35,12 @@ final class GraphicalTerminal: @unchecked Sendable {
         case key(PTYEmulator.Key, PTYEmulator.Modifiers, PTYEmulator.KeyAction)
         case mouseButton(Int, Int, Int, Bool, PTYEmulator.Modifiers)
         case mouseWheel(Int, Int, Int, PTYEmulator.Modifiers)
+        case copySelection
     }
     private var frame: Frame?
+    private var copyResult: PTYEmulator.CopyResult?
+    private var pendingSelectionMotion: (x: Int, y: Int)?
+    private var selectionMotionScheduled = false
     private var failure: String?
     private var running = false
     private var closed = false
@@ -458,12 +463,47 @@ final class GraphicalTerminal: @unchecked Sendable {
     func mouseButton(x: Int, y: Int, button: Int, release: Bool, modifiers: PTYEmulator.Modifiers) {
         submit(.mouseButton(x, y, button, release, modifiers))
     }
+    // Pointer motion can arrive faster than frames. Keep only its latest position and one
+    // worker hop; press/release and copy remain ordered in the ordinary input queue.
+    func mouseMotion(x: Int, y: Int) {
+        lock.lock()
+        guard !closed && failure == nil && (running || finished) else { lock.unlock(); return }
+        pendingSelectionMotion = (x, y)
+        guard !selectionMotionScheduled else { lock.unlock(); return }
+        selectionMotionScheduled = true
+        worker.async { [self] in
+            lock.lock()
+            let point = pendingSelectionMotion
+            pendingSelectionMotion = nil
+            selectionMotionScheduled = false
+            let admitted = !closed && failure == nil && (running || finished)
+            lock.unlock()
+            if admitted, let point, emulator?.mouseMotion(x: point.x, y: point.y) == true {
+                dirty = true
+            }
+        }
+        lock.unlock()
+    }
     func mouseWheel(x: Int, y: Int, steps: Int, modifiers: PTYEmulator.Modifiers) {
         submit(.mouseWheel(x, y, steps, modifiers))
     }
+    func requestCopySelection() { submit(.copySelection) }
+    func takeCopyResult() -> PTYEmulator.CopyResult? {
+        lock.lock(); defer { lock.unlock() }
+        let result = copyResult
+        copyResult = nil
+        return result
+    }
     private func submit(_ input: Input) {
+        let localWhenFinished: Bool
+        switch input {
+        case .mouseButton, .mouseWheel, .copySelection: localWhenFinished = true
+        default: localWhenFinished = false
+        }
         lock.lock()
-        guard running && !closed && failure == nil else { lock.unlock(); return }
+        guard !closed && failure == nil && (running || (finished && localWhenFinished)) else {
+            lock.unlock(); return
+        }
         // Text and functional events share one ordered worker hop. Native key repeat cannot
         // create an unbounded queue while output parsing is busy; overflow is explicit.
         guard pendingInputCount < 256 else {
@@ -473,7 +513,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         worker.async { [self] in
             lock.lock()
             pendingInputCount -= 1
-            let admitted = running && !closed && failure == nil
+            let admitted = !closed && failure == nil && (running || (finished && localWhenFinished))
+            let childFinished = finished
             lock.unlock()
             guard admitted else { return }
             switch input {
@@ -481,11 +522,18 @@ final class GraphicalTerminal: @unchecked Sendable {
             case .paste(let bytes): emulator?.paste(bytes)
             case .key(let key, let modifiers, let action): emulator?.key(key, modifiers: modifiers, action: action)
             case .mouseButton(let x, let y, let button, let release, let modifiers):
-                emulator?.mouseButton(x: x, y: y, button: button, release: release, modifiers: modifiers)
-            case .mouseWheel(let x, let y, let steps, let modifiers):
-                if emulator?.mouseWheel(x: x, y: y, steps: steps, modifiers: modifiers) == true {
+                if emulator?.mouseButton(x: x, y: y, button: button, release: release,
+                                         modifiers: modifiers, forceLocal: childFinished) == true {
                     dirty = true
                 }
+            case .mouseWheel(let x, let y, let steps, let modifiers):
+                if emulator?.mouseWheel(x: x, y: y, steps: steps, modifiers: modifiers,
+                                        forceLocal: childFinished) == true {
+                    dirty = true
+                }
+            case .copySelection:
+                let result = emulator?.copySelection(maximumBytes: Self.maximumCopyBytes) ?? .empty
+                lock.lock(); copyResult = result; lock.unlock()
             }
         }
         lock.unlock()
