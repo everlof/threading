@@ -1988,3 +1988,29 @@ visibly selected. Existing native-window, terminal, agent and attach smoke cases
 The startup snapshot still decodes the complete graph on a worker; choosing its project adds one
 worker-side project lookup and no per-frame scan. Automatic restoration of the last agent or
 terminal remains unfinished.
+
+## 74. Linux startup navigation reads a bounded session window
+
+The project window displayed at most 512 saved agents per project but decoded every saved session
+to make that list. `ProjectDatabase.navigationSnapshot` now counts session rows with the indexed
+`project_id` column, reads each project's most recent 512 session payloads through the
+`(project_id, position)` index, and carries the saved selected-session ID. The Linux startup worker
+maps that read into the same visible project and picker rows. A partial navigator read cannot
+authorize `save(_:)`'s whole-graph reconciliation; exact-row writes remain available. The selected
+ID is exposed by storage but is not used for automatic restoration yet, because Linux browsing
+does not keep that selection current.
+
+The opt-in `./coreslice.sh --navigation-stress` built the production storage slice in Release on
+arm64 Linux. On one disposable store with 5,100 sessions across two projects and about 165-byte
+titles, five warmed reads gave **45.3 ms median / 50.7 ms max** for the old full-graph path and
+**8.1 ms median / 8.7 ms max** for the navigator. Fixture creation and save took 252.5 ms and
+were excluded. The navigator decoded 612 recent payloads, while its count query still examined
+all 5,100 indexed identities. This is an isolated storage comparison, not a native-window launch
+time measurement. The ordinary Linux storage contracts passed with two projects, per-project
+newest-first windows, selection, terminals, a dormant corrupt session and the partial-read write
+fence. The focused macOS `ProjectDatabaseTests` case passed. The full Docker/Xvfb native window
+journey passed, and its selected-project frame was inspected.
+
+Project terminals are still embedded in each project's JSON payload, so this read decodes every
+terminal in each project before returning at most 512. A very large project count also multiplies
+the per-project window. Automatic restoration of a selected agent or terminal remains unfinished.

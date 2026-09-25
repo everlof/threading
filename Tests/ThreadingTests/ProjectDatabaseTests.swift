@@ -1096,6 +1096,42 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.projects.map(\.name), ["Persisted"])
     }
 
+    func testNavigationSnapshotBoundsPayloadsAndCannotAuthorizeGraphSave() throws {
+        let database = try makeDatabase()
+        let sessions = (0..<4).map { AgentSession(kind: .codex, title: "Chat \($0)") }
+        var project = makeProject("alpha", sessions: sessions)
+        project.terminals = (0..<3).map { index in
+            ProjectTerminal(id: TerminalID(), title: "Shell \(index)", customTitle: nil,
+                            currentDirectory: project.folderPath, branch: nil, themeID: nil,
+                            soundOverrides: nil, createdAt: Date())
+        }
+        try database.save(ProjectsState(projects: [project], selectedSessionID: sessions[0].id))
+
+        let snapshot = try database.navigationSnapshot(recentSessionLimit: 2, recentTerminalLimit: 1)
+        XCTAssertEqual(snapshot.selectedSessionID, sessions[0].id)
+        XCTAssertEqual(snapshot.projects.count, 1)
+        XCTAssertEqual(snapshot.projects[0].sessionCount, 4)
+        XCTAssertEqual(snapshot.projects[0].terminalCount, 3)
+        XCTAssertEqual(snapshot.projects[0].recentSessions.map(\.id), [sessions[3].id, sessions[2].id])
+        XCTAssertEqual(snapshot.projects[0].recentTerminals.map(\.id), [project.terminals[2].id])
+        XCTAssertThrowsError(try database.save(ProjectsState(projects: []))) { error in
+            guard case ProjectDatabaseWriteError.partialReadRequiresFullLoad = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { raw.close() }
+        try raw.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, "{ unreadable older conversation")
+            .bind(2, sessions[0].id.uuidString)
+            .run()
+        XCTAssertEqual(try database.navigationSnapshot(recentSessionLimit: 2,
+                                                        recentTerminalLimit: 1)
+                        .projects[0].recentSessions.map(\.id), [sessions[3].id, sessions[2].id])
+        XCTAssertThrowsError(try database.load())
+    }
+
     func testOneSessionCanBeRemovedWithoutRewritingTheGraph() throws {
         let database = try makeDatabase()
         let first = AgentSession(kind: .claude, title: "First")

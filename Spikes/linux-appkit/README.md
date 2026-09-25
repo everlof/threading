@@ -37,7 +37,7 @@ resolve, and select `Harness` independently of the core slice. Both refuse faile
 `coreslice.sh` verifies the vendored sources before starting Docker, saves complete build/run
 logs under `out/`, and runs the already-built executable only after a successful build. It requests
 `linux/arm64` explicitly and prints the actual architecture. Without arguments it builds the full
-project-graph slice and runs fifteen on-disk contracts:
+project-graph slice and runs the on-disk contracts below:
 
 | Group | Checks | FINDINGS section |
 |---|---:|---:|
@@ -48,6 +48,7 @@ project-graph slice and runs fifteen on-disk contracts:
 | Pinned-WAL move refusal and relocation of healthy/damaged project stores | 2 | 35 |
 | Fresh-session capabilities, defaults and handoff admission | 1 | 41 |
 | Shared terminal launch recording | 1 | 72 |
+| Bounded project navigation, selected identity and partial-read write fence | 1 | 74 |
 | Shared Unix connector modes, descriptor inheritance and path refusals | 1 | 43 |
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
@@ -60,6 +61,11 @@ agent runtime. The debug harness uses
 `@testable import CoreSlice` without widening the production APIs. Commit-refusal fixtures use
 the existing preflight injection seam; no test fills the host disk. StateManager's quarantine and
 recovery policy remain outside this executable.
+
+`./coreslice.sh --navigation-stress` makes a disposable 5,100-session store and compares the
+old complete startup read with the bounded project navigator on that same store in a Release
+build. Fixture creation is reported separately. This is an opt-in scaling check, not a launch
+time measurement of the native window or a replacement for the behavioral contracts.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound

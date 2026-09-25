@@ -84,11 +84,22 @@ func runContracts() throws {
     print("5 project persistence contracts passed")
 }
 
+if CommandLine.arguments.contains("--navigation-stress") {
+    do {
+        try runNavigationStress()
+    } catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
 do {
     try runHandshakeContracts()
     try runBindingContracts()
     try runSocketContracts()
     try runCreationContracts()
+    try runNavigationContracts()
     try runContracts()
     try runRecoveryContracts()
     try runMigrationContracts()

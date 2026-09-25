@@ -6990,3 +6990,20 @@ same `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` and `xcrun xctest` setup used by
 case. `RealDevicePaneTests` checks actual snapshot/movie output, immediate stop, rotation,
 disconnect, hidden recording demand and presenter/input revocation. The physical-iPhone evidence
 entry renders the toolbar, device menu and recording state in the product shell.
+
+## Linux project navigator read, measured 2026-09-25
+
+The experimental Linux project window used a background `ProjectDatabase.load()` for startup,
+then showed at most 512 recent agents per project. The output cap did not cap session decoding.
+The new `navigationSnapshot` counts all session identities through an index and decodes only the
+requested recent window. The UI still mounts only its existing visible rows. The exact interaction
+contract is newest-first saved-agent navigation and project counts, including when older payloads
+cannot decode; the connection's whole-graph save fence remains in force for this partial read.
+
+The opt-in `Spikes/linux-appkit/coreslice.sh --navigation-stress` generated 5,100 sessions in two
+projects with about 165-byte titles. On arm64 Linux, a Release build took five warmed samples of
+each read on the same store. Full-graph read: **45.3 ms median, 50.7 ms max**. Bounded navigation:
+**8.1 ms median, 8.7 ms max**, decoding 612 payloads while counting 5,100 indexed rows. Fixture
+save took 252.5 ms separately. This isolates the storage phase and does not claim a whole-window
+launch result. Project terminal arrays still live inside project payloads, and a large number of
+projects still multiplies the 512-session window; those are the remaining scaling boundaries.

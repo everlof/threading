@@ -40,7 +40,7 @@ enum ProjectDatabaseWriteError: LocalizedError {
             return "Refused a whole-graph write: the store moved from generation "
                 + "\(observed) to \(found) beneath this writer"
         case .partialReadRequiresFullLoad:
-            return "Refused a whole-graph write after a targeted read; load the complete graph first"
+            return "Refused a whole-graph write after a partial read; load the complete graph first"
         }
     }
 }
@@ -89,6 +89,23 @@ struct UnreadableAuxiliaryRows {
 struct ProjectsStateLoad {
     let state: ProjectsState
     let unreadable: UnreadableAuxiliaryRows
+}
+
+/// A read-only project navigator projection. Session payloads outside each recent window are
+/// never decoded, and this incomplete view cannot authorize a whole-graph save.
+struct ProjectNavigationSnapshot {
+    let projects: [ProjectNavigationEntry]
+    let selectedSessionID: SessionID?
+}
+
+struct ProjectNavigationEntry {
+    let id: ProjectID
+    let name: String
+    let folderPath: String
+    let sessionCount: Int
+    let terminalCount: Int
+    let recentSessions: [AgentSession]
+    let recentTerminals: [ProjectTerminal]
 }
 
 /// The projects and sessions store, in SQLite.
@@ -296,6 +313,61 @@ final class ProjectDatabase {
         observedGeneration = generation
         partialGraphRead = false
         return result
+    }
+
+    /// Reads the project navigator without decoding every conversation in the store. Counts scan
+    /// the indexed session identities once; each recent window uses the `(project_id, position)`
+    /// index and reads at most its requested number of payloads. Project terminals still live in
+    /// their owning project payload and therefore require that one project's complete decode.
+    func navigationSnapshot(
+        recentSessionLimit: Int,
+        recentTerminalLimit: Int
+    ) throws -> ProjectNavigationSnapshot {
+        precondition(recentSessionLimit >= 0 && recentTerminalLimit >= 0)
+        partialGraphRead = true
+
+        var countsByProject: [ProjectID: Int] = [:]
+        let counts = try database.prepare(ProjectDatabaseSchema.selectSessionCountsByProject)
+        defer { counts.finalize() }
+        while try counts.step() {
+            let rawID = counts.text(0)
+            guard let rawID, let id = ProjectID(uuidString: rawID) else {
+                throw corruptRow("session", id: rawID, reason: "invalid indexed project identifier")
+            }
+            countsByProject[id] = counts.int(1)
+        }
+
+        let rows = try database.prepare(ProjectDatabaseSchema.selectProjects)
+        defer { rows.finalize() }
+        let recent = try database.prepare(ProjectDatabaseSchema.selectRecentSessionsByProject)
+        defer { recent.finalize() }
+        var projects: [ProjectNavigationEntry] = []
+        while try rows.step() {
+            let project = try decodedProject(from: rows)
+            try recent.reset()
+            recent.bind(1, project.id.uuidString).bind(2, recentSessionLimit)
+            var stored: [StoredSessionRow] = []
+            while try recent.step() {
+                stored.append(try storedSessionRow(from: recent))
+            }
+            var decoded: [ProjectID: [AgentSession]] = [:]
+            try appendDecodedSessions(stored, to: &decoded)
+            projects.append(ProjectNavigationEntry(
+                id: project.id,
+                name: project.name,
+                folderPath: project.folderPath,
+                sessionCount: countsByProject.removeValue(forKey: project.id) ?? 0,
+                terminalCount: project.terminals.count,
+                recentSessions: decoded[project.id] ?? [],
+                recentTerminals: Array(project.terminals.suffix(recentTerminalLimit).reversed())
+            ))
+        }
+        if let orphanedID = countsByProject.keys.first {
+            throw corruptRow("session", id: nil,
+                             reason: "references missing project '\(orphanedID.uuidString)'")
+        }
+        return ProjectNavigationSnapshot(projects: projects,
+                                         selectedSessionID: try selectedSessionID())
     }
 
     /// Reads one session by its primary key and decodes only it and its owning project. Selected
@@ -1605,6 +1677,13 @@ enum ProjectDatabaseSchema {
         "SELECT \(SessionLoadColumn.list), position FROM session WHERE id = ?"
     static let selectProjectByID =
         "SELECT \(ProjectLoadColumn.list) FROM project WHERE id = ?"
+
+    static let selectSessionCountsByProject =
+        "SELECT project_id, COUNT(*) FROM session GROUP BY project_id"
+    static let selectRecentSessionsByProject = """
+        SELECT \(SessionLoadColumn.list)
+        FROM session WHERE project_id = ? ORDER BY position DESC LIMIT ?
+        """
 
     /// Every conversation's completion generation with each participant's position in it. A left
     /// join, because a conversation nobody has read yet still has a completion generation.
