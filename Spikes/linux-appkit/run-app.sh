@@ -96,6 +96,6 @@ if [[ -n $codex ]]; then
     echo "run-app: Codex must be an absolute executable: $codex" >&2
     exit 1
   fi
-  exec "$window" --app-codex "$store" "$socket" "$shell_path" "$codex"
+  exec "$window" --app-codex-project "$store" "$socket" "$shell_path" "$codex" "$project"
 fi
-exec "$window" --app "$store" "$socket" "$shell_path"
+exec "$window" --app-project "$store" "$socket" "$shell_path" "$project"

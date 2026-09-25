@@ -156,8 +156,10 @@ The visible experiment has no agent-account or model picker. It resumes a dorman
 only after finding its exact provider rollout in the standard account and checking the known
 mixed-ordinal failure; named accounts and other providers are still unsupported. A source-tree
 Linux launcher can import an existing project into the same durable store without a daemon,
-then start or reuse the daemon before opening this window. The import uses the same canonical
-project-directory identity as macOS, so a symlink spelling does not create a second project.
+then start or reuse the daemon before opening this window with the requested project selected.
+The import and worker-built startup snapshot use the same canonical project-directory identity
+as macOS, so a symlink spelling does not create or select a second project. Selecting a project
+alone does not start another child.
 Explicit replacement is a separate project action. Once a spawn send is attempted, the runtime
 assumes a child may exist until a matching exit or definitive refusal proves otherwise. A missing
 reply, disconnect, write failure or `alreadyExists` refusal cannot authorize a replacement. The

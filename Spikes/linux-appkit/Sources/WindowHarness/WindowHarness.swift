@@ -23,6 +23,10 @@ struct ProjectSnapshot: Sendable {
     var recentAgents: [SavedRuntime]
     let recentTerminals: [SavedRuntime]
 }
+struct WindowSnapshot: Sendable {
+    let projects: [ProjectSnapshot]
+    let selectedProjectIndex: Int
+}
 struct WindowFailure: Error, CustomStringConvertible {
     let description: String
     init(_ text: String) { description = text }
@@ -67,46 +71,55 @@ struct WindowHarness {
     @MainActor static func main() async {
         do {
             #if os(Linux)
-            if CommandLine.arguments.dropFirst().first == "--attach" {
+            let mode = CommandLine.arguments.dropFirst().first
+            if mode == "--attach" {
                 let args = Array(CommandLine.arguments.dropFirst(2))
                 guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach STORE SOCKET TERMINAL_UUID") }
                 try showAttachment(args)
                 return
             }
-            if CommandLine.arguments.dropFirst().first == "--attach-agent" {
+            if mode == "--attach-agent" {
                 let args = Array(CommandLine.arguments.dropFirst(2))
                 guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach-agent STORE SOCKET SESSION_UUID") }
                 try showAttachment(args, agent: true)
                 return
             }
-            if CommandLine.arguments.dropFirst().first == "--terminal" {
+            if mode == "--terminal" {
                 try showTerminal(Array(CommandLine.arguments.dropFirst(2)))
                 return
             }
-            if CommandLine.arguments.dropFirst().first == "--app" {
+            if mode == "--app" || mode == "--app-project" {
                 let args = Array(CommandLine.arguments.dropFirst(2))
-                guard args.count >= 3, args[2].hasPrefix("/") else {
-                    throw WindowFailure("usage: WindowHarness --app EXISTING_STORE SOCKET ABS_SHELL [ARG ...]")
+                let targeted = mode == "--app-project"
+                guard (targeted ? args.count == 4 : args.count >= 3), args[2].hasPrefix("/") else {
+                    throw WindowFailure("usage: WindowHarness --app EXISTING_STORE SOCKET ABS_SHELL [ARG ...] | --app-project EXISTING_STORE SOCKET ABS_SHELL PROJECT")
                 }
-                let projects = try await Task.detached { try loadSnapshot(args[0]) }.value
-                try show(projects, launch: args)
+                let requestedProject = targeted ? args[3] : nil
+                let snapshot = try await Task.detached {
+                    try loadSnapshot(args[0], selectingProjectAt: requestedProject)
+                }.value
+                try show(snapshot, launch: targeted ? Array(args.prefix(3)) : args)
                 return
             }
-            if CommandLine.arguments.dropFirst().first == "--app-codex" {
+            if mode == "--app-codex" || mode == "--app-codex-project" {
                 let args = Array(CommandLine.arguments.dropFirst(2))
-                guard args.count == 4, args[2].hasPrefix("/"), args[3].hasPrefix("/") else {
-                    throw WindowFailure("usage: WindowHarness --app-codex EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX")
+                let targeted = mode == "--app-codex-project"
+                guard args.count == (targeted ? 5 : 4), args[2].hasPrefix("/"), args[3].hasPrefix("/") else {
+                    throw WindowFailure("usage: WindowHarness --app-codex EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX | --app-codex-project EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX PROJECT")
                 }
-                let projects = try await Task.detached { try loadSnapshot(args[0]) }.value
-                try show(projects, launch: Array(args.prefix(3)), agentExecutable: args[3])
+                let requestedProject = targeted ? args[4] : nil
+                let snapshot = try await Task.detached {
+                    try loadSnapshot(args[0], selectingProjectAt: requestedProject)
+                }.value
+                try show(snapshot, launch: Array(args.prefix(3)), agentExecutable: args[3])
                 return
             }
             guard CommandLine.arguments.count == 2 else { throw WindowFailure("usage: WindowHarness EXISTING_STORE") }
             let path = CommandLine.arguments[1]
             // Database open, recovery and graph decoding never run on the UI actor. Only immutable
             // values cross back. The snapshot is deliberately fixed for this window's lifetime.
-            let projects = try await Task.detached { try loadSnapshot(path) }.value
-            try show(projects)
+            let snapshot = try await Task.detached { try loadSnapshot(path) }.value
+            try show(snapshot)
             #else
             throw WindowFailure("WindowHarness requires Linux")
             #endif
@@ -117,7 +130,7 @@ struct WindowHarness {
     }
 
     #if os(Linux)
-    static func loadSnapshot(_ path: String) throws -> [ProjectSnapshot] {
+    static func loadSnapshot(_ path: String, selectingProjectAt requestedPath: String? = nil) throws -> WindowSnapshot {
         let root = URL(fileURLWithPath: path, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
         guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
@@ -127,7 +140,18 @@ struct WindowHarness {
         guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned by another host") }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
-        return try database.load().state.projects.map { project in
+        let state = try database.load().state
+        let selectedIndex: Int
+        if let requestedPath {
+            guard let folder = ProjectDirectory.existing(at: requestedPath),
+                  let index = state.projects.firstIndex(where: { $0.folderPath == folder.path }) else {
+                throw WindowFailure("requested project is not in this store")
+            }
+            selectedIndex = index
+        } else {
+            selectedIndex = 0
+        }
+        let projects = state.projects.map { project in
             let agents = project.sessions.suffix(maximumSelectableAgentsPerProject).reversed().map {
                 ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
                     title: String(($0.title.isEmpty ? $0.kind.rawValue : $0.title).unicodeScalars
@@ -141,6 +165,7 @@ struct WindowHarness {
                 path: project.folderPath, sessions: project.sessions.count,
                 terminalCount: project.terminals.count, recentAgents: agents, recentTerminals: terminals)
         }
+        return WindowSnapshot(projects: projects, selectedProjectIndex: selectedIndex)
     }
 
     static func modifiers(_ event: TWEvent) -> PTYEmulator.Modifiers {
@@ -371,9 +396,9 @@ struct WindowHarness {
         return changed
     }
 
-    @MainActor static func show(_ initialProjects: [ProjectSnapshot], launch: [String]? = nil,
+    @MainActor static func show(_ snapshot: WindowSnapshot, launch: [String]? = nil,
                                 agentExecutable: String? = nil) throws {
-        var projects = initialProjects
+        var projects = snapshot.projects
         guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
             throw WindowFailure(String(cString: tw_error()))
         }
@@ -387,7 +412,7 @@ struct WindowHarness {
             for terminal in terminals.values { terminal.stop() }
             for terminal in restoredRuntimes.values { terminal.stop() }
         }
-        var width = 800, height = 480, selected = 0, first = 0
+        var width = 800, height = 480, selected = snapshot.selectedProjectIndex, first = 0
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
         var dirty = true
