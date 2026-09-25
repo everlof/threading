@@ -164,7 +164,30 @@ with log_path.open('w+') as log:
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=3)
-        # The targeted launcher restores the saved, live agent with attach-only semantics.
+        # Put the selected live agent beyond the 512-row recent window. The targeted launcher
+        # must find this one identity without decoding or mounting the rest of the archive.
+        with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+            project_id, kind, active_at, payload = database.execute(
+                'SELECT project_id, kind, last_active_at, data FROM session WHERE id = ?',
+                (agents[-1],)).fetchone()
+            next_position = database.execute(
+                'SELECT MAX(position) + 1 FROM session WHERE project_id = ?',
+                (project_id,)).fetchone()[0]
+            for offset in range(513):
+                filler_id = str(uuid.uuid4()).upper()
+                filler = json.loads(payload)
+                filler['id'] = filler_id
+                filler['title'] = f'Dormant fixture {offset}'
+                filler['hasLaunched'] = False
+                database.execute(
+                    'INSERT INTO session (id, project_id, position, kind, last_active_at, data) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (filler_id, project_id, next_position + offset, kind, active_at,
+                     json.dumps(filler)))
+            assert database.execute('SELECT COUNT(*) FROM session WHERE project_id = ?',
+                                    (project_id,)).fetchone()[0] == 515
+        filled_listing = listing()
+        # Restoration is attach-only, even when the selected agent is outside the recent page.
         with (root / 'agent-reopened.log').open('w+') as reopened_log:
             process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh', str(project)],
                                        stdout=reopened_log, stderr=reopened_log)
@@ -177,6 +200,14 @@ with log_path.open('w+') as log:
                             root / 'agent-reopened.log')
                 assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
                 await_title(process, 'Threading agents - ' + str(project), root / 'agent-reopened.log')
+                deadline = time.monotonic() + 5
+                while not any(f'selected={agents[-1]} total=515 capped=1' in line
+                              for line in (root / 'agent-reopened.log').read_text().splitlines()
+                              if line.startswith('AGENT_PICKER_FRAME ')):
+                    assert time.monotonic() < deadline, (root / 'agent-reopened.log').read_text()
+                    time.sleep(.05)
+                subprocess.run(['import', '-window', window, 'out/agent-deep-selection.png'],
+                               check=True, timeout=5)
                 assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
                 await_title(process, 'Threading experiment - ' + str(project), root / 'agent-reopened.log')
                 assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
@@ -189,7 +220,7 @@ with log_path.open('w+') as log:
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=3)
-        assert listing() == saved, 'graphical attach changed the saved agent record'
+        assert listing() == filled_listing, 'graphical attach changed the saved agent records'
         other_project = root / 'OtherAgentProject'
         other_project.mkdir()
         subprocess.run([host, '--add-project', store, str(other_project)], check=True,

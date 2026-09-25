@@ -157,7 +157,9 @@ still grows with the number of terminals in that project.
 Selected agent attach, rollout discovery and resume read one indexed session and its validated
 owning project instead of decoding the full archive again. The initial project-window snapshot
 reads project rows, indexed session counts and at most 512 recent session payloads per project on
-a worker. It does not decode dormant sessions outside the window. Project terminal records still
+a worker. The targeted launcher reads one selected agent by primary key when it falls outside
+that recent window; an eligible agent replaces one picker slot without expanding the 512-row cap.
+It does not decode other dormant sessions outside the window. Project terminal records still
 live in each project payload, so terminal identity lookup searches those embedded records.
 The visible experiment has no agent-account or model picker. It resumes a dormant Codex record
 only after finding its exact provider rollout in the standard account and checking the known
