@@ -341,6 +341,7 @@ struct WindowHarness {
                                       allowsProjects: Bool) throws -> (Int, Int)? {
         tw_terminal_mode(window)
         tw_project_navigation(window, allowsProjects ? 1 : 0)
+        tw_accessibility_show_terminal(window, "Terminal starting")
         session.setPreedit(nil)
         defer { session.setPreedit(nil) }
         session.invalidateFrame()
@@ -388,6 +389,7 @@ struct WindowHarness {
                     tw_present(window, $0.bindMemory(to: UInt8.self).baseAddress, Int32(width), Int32(height))
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+                frame.title.withCString { tw_accessibility_show_terminal(window, $0) }
                 let caretX = frame.cursorColumn >= 0 ? frame.cursorColumn * 10 : 8
                 let caretY = frame.cursorColumn >= 0 ? frame.cursorRow * 22 : height - 22
                 tw_text_input_rect(window, Int32(max(0, min(width - 10, caretX))),
@@ -446,6 +448,8 @@ struct WindowHarness {
 
     @MainActor static func showTerminalFailure(_ message: String, window: OpaquePointer,
                                               width: Int, height: Int) throws {
+        let accessible = "Terminal unavailable: \(boundedAccessibilityLabel(message))"
+        accessible.withCString { tw_accessibility_show_terminal(window, $0) }
         let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
         root.title = "Terminal unavailable"
         root.addSubview(Specimen.Message(frame: NSRect(x: 12, y: 8,
@@ -612,12 +616,34 @@ struct WindowHarness {
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     let total = savedPicker.isAgent ? project.sessions : project.terminalCount
+                    let listName = "Saved \(savedPicker.isAgent ? "agents" : "terminals") (\(saved.count) of \(total))"
+                    listName.withCString {
+                        tw_accessibility_begin_list(window, $0, Int32(savedFirst), Int32(saved.count), launch == nil ? 0 : 1)
+                    }
+                    for index in savedFirst..<end {
+                        let runtime = saved[index]
+                        let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
+                        let label = "\(boundedAccessibilityLabel(runtime.title)) [\(String(runtime.id.prefix(8)))]\(restoredRuntimes[key] == nil ? "" : " retained")"
+                        try publishAccessibleRow(window, id: runtime.id, label: label, selected: index == savedSelected)
+                    }
+                    tw_accessibility_end_list(window)
                     tw_title(window, "Threading \(savedPicker.isAgent ? "agents" : "terminals") - \(project.path)")
                     let selectedID = saved.isEmpty ? "none" : saved[savedSelected].id
                     let capped = total > saved.count ? 1 : 0
                     let label = savedPicker.isAgent ? "AGENT_PICKER_FRAME" : "TERMINAL_PICKER_FRAME"
                     print("\(label) \(width)x\(height) mounted=\(end - savedFirst) selected=\(selectedID) total=\(total) capped=\(capped)")
                 } else {
+                    tw_accessibility_begin_list(window, "Projects", Int32(first), Int32(projects.count), launch == nil ? 0 : 1)
+                    for index in first..<end {
+                        let project = projects[index]
+                        let opened = terminals[project.id]
+                        let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
+                            + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
+                        let retained = opened != nil || restoredProjectIDs.contains(project.id)
+                        let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " retained" : "")"
+                        try publishAccessibleRow(window, id: project.id, label: label, selected: index == selected)
+                    }
+                    tw_accessibility_end_list(window)
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
                     tw_title(window, title)
                     print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id)")
@@ -854,6 +880,30 @@ struct WindowHarness {
             default: break
             }
         }
+    }
+
+    // The accessibility bridge receives the same viewport rows as the renderer. Stop at a byte
+    // boundary so a long grapheme or externally supplied title cannot expand its C projection.
+    private static func boundedAccessibilityLabel(_ value: String) -> String {
+        var result = "", bytes = 0
+        for scalar in value.unicodeScalars {
+            let part = String(scalar)
+            let length = part.utf8.count
+            if bytes + length > 400 { break }
+            result.append(part)
+            bytes += length
+        }
+        return result
+    }
+
+    @MainActor private static func publishAccessibleRow(_ window: OpaquePointer, id: String,
+                                                         label: String, selected: Bool) throws {
+        let result = id.withCString { identifier in
+            label.withCString { name in
+                tw_accessibility_add_row(window, identifier, name, selected ? 1 : 0)
+            }
+        }
+        guard result == 0 else { throw WindowFailure("native accessibility row exceeds its bound") }
     }
     #endif
 }

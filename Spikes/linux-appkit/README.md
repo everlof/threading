@@ -80,7 +80,7 @@ model encoding, or the complete application's recovery path.
 
 ### Start the native window from a clean Linux profile
 
-On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, and `flock` installed:
+On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, ATK/AT-SPI, and `flock` installed:
 
 ```bash
 ./run-app.sh /absolute/path/to/an/existing/project
@@ -253,7 +253,7 @@ not change the store in this store-only diagnostic mode. Store open/recovery run
 
 Only visible rows are mounted, and labels are bounded to 80 characters before drawing. The
 software-rendering experiment limits windows to 1280×900 pixels. The project-list mode does not provide terminal rendering/input. The separate terminal mode
-below adds the initial runtime surface; neither mode provides complete IME coverage, AT-SPI, production
+below adds the initial runtime surface; neither mode provides complete IME or AT-SPI coverage, production
 theme switching or extension composition. Unsupported
 bitmap-font characters visibly become `?`; the native title retains the original path.
 Customization classification: this diagnostic harness is host-only and defines no durable product
@@ -427,6 +427,17 @@ payloads per project. A selected agent outside that window adds one indexed read
 one picker entry. Selected-agent attach, rollout-ID persistence, resume, and opening an agent
 read only its indexed session and owning project. Saved-terminal identity lookup still loads the
 complete graph; each project's embedded terminal array is decoded for the startup snapshot.
+
+With a session accessibility bus, the native window publishes an AT-SPI application, frame and
+the currently mounted project/saved-runtime rows. Rows carry their durable IDs and retain Unicode
+names even where the diagnostic bitmap font draws `?`; selection state and `select`/`open` actions use the same native
+navigation route as pointer and keyboard input. The list describes its visible range and never
+materializes offscreen accessibility rows. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh`
+queries that tree with an AT-SPI client, scrolls a 15-project list, and opens a Unicode-named
+project into a real PTY through the row action. The terminal node states that its text is not yet
+exposed. This is initial navigator accessibility, not screen-reader parity: terminal text,
+component geometry and hit testing, a complete selection interface, and focus/event coverage
+remain open.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new

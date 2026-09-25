@@ -29,6 +29,12 @@ void tw_terminal_mode(TWWindow *);
 // payload only after this event; the bridge never puts unbounded clipboard text in TWEvent.
 void tw_project_navigation(TWWindow *, int enabled);
 void tw_project_mode(TWWindow *);
+// The diagnostic host publishes only currently mounted rows. A row action re-enters the
+// ordinary SDL click/Enter route; accessibility never mutates project or session state.
+void tw_accessibility_begin_list(TWWindow *, const char *name, int first, int total, int canOpen);
+int tw_accessibility_add_row(TWWindow *, const char *id, const char *name, int selected);
+void tw_accessibility_end_list(TWWindow *);
+void tw_accessibility_show_terminal(TWWindow *, const char *name);
 // Candidate windows follow the current terminal cursor. Coordinates are window pixels.
 void tw_text_input_rect(TWWindow *, int x, int y, int width, int height);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);
