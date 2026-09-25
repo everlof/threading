@@ -159,6 +159,11 @@ assembly. The Linux `codex` operation persists a real agent session with explici
 policy and spawns its typed identity; [FINDINGS section 39](../../Spikes/linux-appkit/FINDINGS.md#39-managed-codex-sessions-share-production-command-assembly)
 distinguishes argument-recorder evidence from an authenticated provider run. Account resolution,
 transcript discovery and native UI remain unfinished.
+The later Linux host now also creates a standard-account Claude Code session from the same
+portable fresh/resume command pair used by the macOS remote host. It stores the caller-minted
+UUID and launches through the real daemon; the recorder verifies flags, account environment and
+durable exact-row writes. The native Linux window still has no Claude creation/resume path, and
+no authenticated provider run is claimed ([FINDINGS section 86](../../Spikes/linux-appkit/FINDINGS.md#86-a-linux-host-can-create-a-real-claude-session-without-a-second-command-policy)).
 
 ## The boundary to build
 

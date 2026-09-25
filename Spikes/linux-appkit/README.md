@@ -128,6 +128,7 @@ LinuxHost /path/to/experimental-store /path/to/ptyd.sock run /path/to/project /b
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach TERMINAL_UUID
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock login-run /path/to/project /bin/sh python3 --version
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock codex /path/to/project /bin/sh /absolute/path/to/codex 'Inspect this project' [codex-work]
+LinuxHost /path/to/experimental-store /path/to/ptyd.sock claude /path/to/project /bin/sh /absolute/path/to/claude 'Inspect this project'
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach-agent SESSION_UUID
 ```
 
@@ -162,8 +163,16 @@ persisted agent identity. The smoke uses an explicit
 argument recorder, not an authenticated Codex installation: it verifies flags, prompt quoting,
 storage and daemon identity, not provider execution. The headless `codex` command does not discover
 a provider ID or offer resume; the graphical `--app-codex` path below does. No macOS credentials
-are copied; Threading-managed credentials, a native account picker, MCP and hook integration are
-unavailable in this experiment.
+are copied; Threading-managed credentials, MCP and hook integration are unavailable in this
+experiment.
+
+`claude` creates a durable Claude Code session record with the same portable command pair used by the
+macOS remote host. It records its UUID as the provider session ID before spawning, passes the
+shared Manual permission flag, and clears an inherited `CLAUDE_CONFIG_DIR` so the standard
+handle means `HOME/.claude`. The headless command supports only that standard login and does not
+yet resume an exited conversation; `attach-agent` still reconnects a daemon-held child. Its
+recorder smoke verifies the child arguments, environment, durable selection and exact-row writes,
+not an authenticated Claude installation.
 
 Current CLI-host limits: incomplete provider/account launch policy, no graphical presentation,
 and no app-level recovery. EOF sends the terminal's

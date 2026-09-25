@@ -1,5 +1,6 @@
 """Real Linux launches must not rewrite retained projects or conversations."""
 import json
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -53,6 +54,33 @@ created = after_session_ids - before_session_ids
 assert len(created) == 1
 assert rows("SELECT value FROM app_state WHERE key = 'selectedSessionID'")[0][0] == created.pop()
 
+claude_recorder = Path(folder) / 'incremental-claude-recorder'
+claude_capture = Path(folder) / 'claude-launch.txt'
+claude_home = root / 'claude-home'
+claude_home.mkdir()
+claude_recorder.write_text(
+    '#!/bin/sh\n'
+    'printf "%s\\n" "$@" > "$THREADING_CLAUDE_CAPTURE"\n'
+    'printf "config=%s\\n" "${CLAUDE_CONFIG_DIR-unset}" >> "$THREADING_CLAUDE_CAPTURE"\n'
+    'printf "home=%s\\n" "$HOME" >> "$THREADING_CLAUDE_CAPTURE"\n'
+)
+claude_recorder.chmod(0o700)
+environment = dict(os.environ, THREADING_CLAUDE_CAPTURE=str(claude_capture),
+                   CLAUDE_CONFIG_DIR=str(root / 'wrong-claude-login'), HOME=str(claude_home))
+before_claude = {row[0] for row in rows('SELECT id FROM session')}
+result = subprocess.run([host, store, socket, 'claude', folder, '/bin/sh',
+                         str(claude_recorder), '-prompt with spaces'],
+                        input=b'', capture_output=True, timeout=20, env=environment)
+assert result.returncode == 0, (result.returncode, result.stderr)
+preserve_standing_rows()
+created_claude = {row[0] for row in rows('SELECT id FROM session')} - before_claude
+assert len(created_claude) == 1
+claude_id = created_claude.pop()
+assert rows("SELECT value FROM app_state WHERE key = 'selectedSessionID'")[0][0] == claude_id
+arguments = claude_capture.read_text().splitlines()
+assert arguments == ['--permission-mode', 'manual', '--session-id', claude_id.lower(),
+                     '--', '-prompt with spaces', 'config=unset', f'home={claude_home}'], arguments
+
 for directory in (folder, str(fresh)):
     result = subprocess.run([host, store, socket, 'run', directory, '/bin/true'],
                             input=b'', capture_output=True, timeout=20)
@@ -69,4 +97,4 @@ new_rows = rows('SELECT project.id, session.id FROM project JOIN session ON sess
                 'WHERE project.folder_path = ?', (str(fresh_codex),))
 assert len(new_rows) == 1, 'new project and first agent were not saved together'
 assert rows("SELECT value FROM app_state WHERE key = 'selectedSessionID'")[0][0] == new_rows[0][1]
-print('PASS real Codex and terminal launches change only their rows; standing payloads survive', flush=True)
+print('PASS real Claude, Codex and terminal launches change only their rows; standing payloads survive', flush=True)
