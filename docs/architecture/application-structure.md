@@ -125,10 +125,16 @@ not the shipping Mac sidebar or a public extension surface. Graphical restoratio
 restarts is available through explicit `--attach STORE SOCKET TERMINAL_UUID` and through selection
 in the project browser. A saved agent session has the same terminal renderer through explicit
 `--attach-agent STORE SOCKET SESSION_UUID` or the project's saved-agent picker; the host validates
-the agent record and keeps its typed daemon identity. Automatic restoration is still missing. Attach validates
-store membership on a worker, adopts the daemon grid without resizing the child, suppresses query
-responses for the announced replay byte prefix and marks cut history. Input and frames remain
-gated until replay completes; old or invalid peers fail explicitly under an attach deadline.
+the agent record and keeps its typed daemon identity. The project-targeted launcher also attempts
+attach-only restoration of the saved selected agent when it belongs to that project, is within the
+recent window, has launched, is unarchived and has no recorded exit. Opening a different agent
+updates the selected ID on a worker before entering its terminal; opening a shell or saved terminal
+clears it on a writable store. Startup restoration never starts a child, and automatic terminal
+restoration remains missing. Explicit Codex picker selection can still resume a departed agent.
+Attach validates store membership on a worker, adopts the daemon grid without resizing the child,
+suppresses query responses for the announced replay byte prefix and marks cut history. Input and
+frames remain gated until replay completes; old or invalid peers fail explicitly under an attach
+deadline.
 An explicit native clipboard gesture forwards at most 64 KiB of valid UTF-8 on the same ordered
 terminal worker, with the emulator's live bracketed-paste mode deciding the framing. The host
 keeps shortcut routing and clipboard refusal. Local selection and explicit copy work there;

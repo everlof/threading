@@ -1,9 +1,11 @@
 """A saved agent session survives its CLI client and reopens in the native window."""
 import json
+import fcntl
 import os
 from pathlib import Path
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -54,6 +56,12 @@ def await_title(process, expected, output=log_path):
 def listing():
     return subprocess.run([host, store, endpoint, 'list'], check=True, capture_output=True,
                           text=True, timeout=8).stdout
+
+
+def selected_session():
+    with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+        row = database.execute("SELECT value FROM app_state WHERE key='selectedSessionID'").fetchone()
+        return row[0] if row else None
 
 
 def await_selection(output, expected, previous_count):
@@ -116,20 +124,32 @@ with log_path.open('w+') as log:
                 while f'AGENT_PICKER_FRAME 800x480 mounted=2 selected={agents[-1]} total=2 capped=0' not in app_log_path.read_text():
                     assert time.monotonic() < deadline, app_log_path.read_text()
                     time.sleep(.05)
+                with (Path(store) / 'host.lock').open('rb') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    assert xdo('windowfocus', window, 'key', 'Return').returncode == 0
+                    deadline = time.monotonic() + 8
+                    while 'SELECTION_REFUSED' not in app_log_path.read_text():
+                        assert time.monotonic() < deadline, app_log_path.read_text()
+                        time.sleep(.05)
+                    assert selected_session() == agents[-1], 'refused selection changed the store'
                 previous_count = app_log_path.read_text().count('AGENT_PICKER_FRAME ')
                 assert xdo('windowfocus', window, 'key', 'Down').returncode == 0
                 await_selection(app_log_path, agents[0], previous_count)
+                assert xdo('windowfocus', window, 'key', 'Return').returncode == 0
+                await_title(process, 'Threading terminal - exited 0 [no history]', app_log_path)
+                assert selected_session() == agents[0], 'opening an older agent did not save selection'
+                assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
+                await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 previous_count = app_log_path.read_text().count('AGENT_PICKER_FRAME ')
                 assert xdo('windowfocus', window, 'key', 'Up').returncode == 0
                 await_selection(app_log_path, agents[-1], previous_count)
                 subprocess.run(['import', '-window', window, 'out/agent-picker.png'], check=True, timeout=5)
                 assert xdo('windowfocus', window, 'key', 'Return').returncode == 0
                 await_title(process, 'Threading terminal - AGENT READY [history cut]', app_log_path)
+                assert selected_session() == agents[-1], 'reopening the live agent did not save selection'
                 assert json.loads(marker.read_text()) == original
                 assert xdo('windowfocus', window, 'key', 'p').returncode == 0
                 await_title(process, 'Threading terminal - AGENT LIVE [history cut]', app_log_path)
-                assert xdo('windowfocus', window, 'key', 'q').returncode == 0
-                await_title(process, 'Threading terminal - exited 9 [history cut]', app_log_path)
                 assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
                 await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
@@ -144,11 +164,88 @@ with log_path.open('w+') as log:
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=3)
+        # The targeted launcher restores the saved, live agent with attach-only semantics.
+        with (root / 'agent-reopened.log').open('w+') as reopened_log:
+            process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh', str(project)],
+                                       stdout=reopened_log, stderr=reopened_log)
+            try:
+                window = await_title(process, 'Threading terminal - AGENT LIVE [history cut]',
+                                     root / 'agent-reopened.log')
+                assert json.loads(marker.read_text()) == original, 'startup spawned a replacement child'
+                assert xdo('windowfocus', window, 'key', 'q').returncode == 0
+                await_title(process, 'Threading terminal - exited 9 [history cut]',
+                            root / 'agent-reopened.log')
+                assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
+                await_title(process, 'Threading agents - ' + str(project), root / 'agent-reopened.log')
+                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                await_title(process, 'Threading experiment - ' + str(project), root / 'agent-reopened.log')
+                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert process.wait(timeout=5) == 0
+            except BaseException:
+                reopened_log.flush()
+                print((root / 'agent-reopened.log').read_text(), file=sys.stderr)
+                raise
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
         assert listing() == saved, 'graphical attach changed the saved agent record'
+        other_project = root / 'OtherAgentProject'
+        other_project.mkdir()
+        subprocess.run([host, '--add-project', store, str(other_project)], check=True,
+                       capture_output=True, timeout=8)
+        with (root / 'agent-other-project.log').open('w+') as other_log:
+            process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh',
+                                        str(other_project)], stdout=other_log, stderr=other_log)
+            try:
+                window = await_title(process, 'Threading experiment - ' + str(other_project),
+                                     root / 'agent-other-project.log')
+                assert selected_session() == agents[-1], 'project targeting changed agent selection'
+                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert process.wait(timeout=5) == 0
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
+        # A shell takes selection away from the prior agent, so the next targeted launch opens
+        # the project instead of restoring a conversation that is no longer selected.
+        with (root / 'agent-to-shell.log').open('w+') as shell_log:
+            process = subprocess.Popen([binary, '--app', store, endpoint, '/bin/sh'],
+                                       stdout=shell_log, stderr=shell_log)
+            try:
+                window = await_title(process, 'Threading experiment - ' + str(project),
+                                     root / 'agent-to-shell.log')
+                assert xdo('windowfocus', window, 'key', 'Return').returncode == 0
+                await_title(process, 'Threading terminal - running', root / 'agent-to-shell.log')
+                deadline = time.monotonic() + 8
+                while selected_session() is not None:
+                    assert time.monotonic() < deadline, 'shell did not clear selected agent'
+                    time.sleep(.05)
+                assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
+                await_title(process, 'Threading experiment - ' + str(project),
+                            root / 'agent-to-shell.log')
+                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert process.wait(timeout=5) == 0
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
+        with (root / 'agent-cleared-reopen.log').open('w+') as cleared_log:
+            process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh', str(project)],
+                                       stdout=cleared_log, stderr=cleared_log)
+            try:
+                window = await_title(process, 'Threading experiment - ' + str(project),
+                                     root / 'agent-cleared-reopen.log')
+                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert process.wait(timeout=5) == 0
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
         missing = subprocess.run([binary, '--attach-agent', store, endpoint, str(uuid.uuid4())],
                                  capture_output=True, timeout=8)
         assert missing.returncode != 0 and b'session is not in this store' in missing.stderr, missing
-        print('PASS graphical agent picker: newest-first selection, standalone and in-app attach, same child, replay, input and exit 9', flush=True)
+        print('PASS graphical agent picker: durable selection, attach-only startup, shell clearing, same child and exit 9', flush=True)
     except BaseException:
         log.flush()
         print(log_path.read_text(), file=sys.stderr)

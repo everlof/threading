@@ -2014,3 +2014,34 @@ journey passed, and its selected-project frame was inspected.
 Project terminals are still embedded in each project's JSON payload, so this read decodes every
 terminal in each project before returning at most 512. A very large project count also multiplies
 the per-project window. Automatic restoration of a selected agent or terminal remains unfinished.
+
+## 75. A targeted Linux relaunch reattaches its selected live agent
+
+The project launcher used to return to a project list even when its selected agent still ran in
+the retained PTY daemon. The native window now persists a saved-agent choice through the shared
+database's exact session read and scalar selection write on a worker. Opening a shell or saved
+terminal clears the agent selection when the store accepts the write, matching macOS navigation.
+On a targeted relaunch, the startup snapshot accepts a selected agent only if it belongs to the
+requested project, lies in the bounded recent window, has launched, is not archived and has no
+recorded exit. It then attaches to that typed daemon identity. This startup path never resumes or
+spawns a process; an unavailable child reaches the existing failure view, from which the agent
+picker remains reachable. Generic `--app` still opens the project list, and terminals do not yet
+restore automatically.
+
+The first implementation awaited the selection write inside SDL's event loop. On Linux the Swift
+main actor resumed that loop on another native thread; SDL then refused its renderer context with
+`BadAccess`. The corrected loop never suspends after opening the window. One worker performs the
+store operation, publishes a locked result, and the SDL thread polls only while that write is
+pending before continuing the captured action. A refused agent or retained-terminal selection
+leaves the picker or project list in place. A new shell still reports its own launch refusal on
+the existing unavailable view when a competing owner holds the store.
+
+The focused Docker/Xvfb journey verified a competing-owner selection refusal, durable movement
+from an older saved agent to the live one, targeted relaunch to the **same child PID** without a
+new spawn, an explicit different-project launch remaining on that project's list, and shell
+selection clearing the agent ID before another targeted relaunch. The full
+`window-smoke.sh` suite passed on the final code, including the project-terminal failure path,
+saved-terminal picker, Codex resume, attach refusals and clean-profile launcher. The saved-agent
+picker frame was inspected in the native window. The recent-window limit, missing automatic
+terminal restoration, incomplete provider coverage, IME and accessibility remain outside this
+slice.

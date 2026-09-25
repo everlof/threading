@@ -179,6 +179,11 @@ selected-session identity. Project terminals still require decoding each owning 
 because they are embedded there. This does not relax the all-or-nothing contract for a complete
 graph: after either partial read, `save(_:)` refuses reconciliation on that connection until
 `load()` succeeds.
+The Linux project window persists an opened saved agent as the selected session through an exact
+targeted validation and scalar write on a worker. Opening a shell or saved terminal clears that
+selection when the store accepts the write. A project-targeted relaunch can attempt attach-only
+restoration of the matching recent agent without authorizing a whole-graph rewrite or a new child
+process.
 Exact-row `saveSession` remains allowed, so a newer unrelated payload is not decoded or rewritten
 by a selected-session update.
 
