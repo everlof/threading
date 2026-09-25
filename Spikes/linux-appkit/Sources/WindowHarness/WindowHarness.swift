@@ -70,6 +70,67 @@ struct WindowHarness {
                 Int32(row.width * 2), Int32(row.height * 2))
     }
 
+    private struct NavigatorTextRow {
+        let text: String
+        let x: Int32
+        let y: Int32
+        let width: Int32
+        let height: Int32
+        let inset: Int32
+        let selected: Bool
+    }
+
+    private static func readableNavigatorText(_ text: String) -> String {
+        text.unicodeScalars.prefix(256).map { scalar -> String in
+            if CharacterSet.controlCharacters.contains(scalar) ||
+                scalar.properties.generalCategory == .format { return "�" }
+            return String(scalar)
+        }.joined()
+    }
+
+    @MainActor private static func addNavigatorRow(
+        _ text: String, index: Int, width: Int, height: Int,
+        accent: NSColor, selected: Bool, root: Specimen.Window,
+        textRows: inout [NavigatorTextRow]
+    ) {
+        let frame = navigatorRowRect(index, width: width, height: height)
+        root.addSubview(Specimen.Row(frame: frame, text: "", accent: accent, selected: selected))
+        let pixels = navigatorRowPixels(index, width: width, height: height)
+        textRows.append(NavigatorTextRow(text: readableNavigatorText(text), x: pixels.x, y: pixels.y,
+                                         width: pixels.width, height: pixels.height,
+                                         inset: 52,
+                                         selected: selected))
+    }
+
+    @MainActor private static func drawNavigatorText(_ rows: [NavigatorTextRow],
+                                                     into bitmap: Bitmap) throws {
+        var bytes: [UInt8] = []
+        var labels: [TWNavigatorLabel] = []
+        labels.reserveCapacity(rows.count)
+        for row in rows {
+            let encoded = Array(row.text.utf8)
+            guard encoded.count <= 1024, bytes.count <= 32768 - encoded.count else {
+                throw WindowFailure("navigator label exceeds text budget")
+            }
+            labels.append(TWNavigatorLabel(x: row.x, y: row.y,
+                                           width: row.width, height: row.height,
+                                           inset: row.inset,
+                                           offset: Int32(bytes.count), length: Int32(encoded.count),
+                                           selected: row.selected ? 1 : 0))
+            bytes.append(contentsOf: encoded)
+        }
+        let result = bitmap.withMutablePixels { pixels in
+            bytes.withUnsafeBufferPointer { content in
+                labels.withUnsafeBufferPointer { descriptors in
+                    tw_draw_navigator_labels(pixels.baseAddress, Int32(bitmap.width), Int32(bitmap.height),
+                                             content.baseAddress, Int32(content.count),
+                                             descriptors.baseAddress, Int32(descriptors.count))
+                }
+            }
+        }
+        guard result == 0 else { throw WindowFailure("navigator text renderer refused a frame") }
+    }
+
     private enum SavedPicker {
         case agents(Int)
         case terminals(Int)
@@ -640,6 +701,8 @@ struct WindowHarness {
                 // At most viewport/count row objects, even for a large persisted catalogue.
                 let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
                 let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
+                var textRows: [NavigatorTextRow] = []
+                textRows.reserveCapacity(min(count, 32))
                 let end: Int
                 if accountPicker {
                     root.title = "Codex login - Enter: choose; Esc: back"
@@ -649,9 +712,10 @@ struct WindowHarness {
                         let name = handle.isStandard ? "Default Codex" :
                             "Codex [\(String(handle.name.prefix(48)))]"
                         let text = name + (handle == codexAccount ? " *" : "")
-                        root.addSubview(Specimen.Row(frame: navigatorRowRect(index - accountFirst,
-                            width: width, height: height),
-                            text: text, accent: accent, selected: index == accountSelected))
+                        addNavigatorRow(text, index: index - accountFirst, width: width,
+                                        height: height, accent: accent,
+                                        selected: index == accountSelected,
+                                        root: root, textRows: &textRows)
                     }
                 } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
@@ -662,17 +726,14 @@ struct WindowHarness {
                     end = min(saved.count, savedFirst + count)
                     for index in savedFirst..<end {
                         let runtime = saved[index]
-                        // The specimen face is ASCII. Make unsupported text visibly explicit rather
-                        // than silently drawing a blank; real shaping remains a platform requirement.
-                        let display = String(runtime.title.prefix(68)).unicodeScalars.map {
-                            $0.value >= 32 && $0.value <= 126 ? String($0) : "?"
-                        }.joined()
+                        let display = String(runtime.title.unicodeScalars.prefix(68))
                         let identity = String(runtime.id.prefix(8))
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let text = "\(display) [\(identity)]\(restoredRuntimes[key] == nil ? "" : " *")"
-                        root.addSubview(Specimen.Row(frame: navigatorRowRect(index - savedFirst,
-                            width: width, height: height),
-                            text: text, accent: accent, selected: index == savedSelected))
+                        addNavigatorRow(text, index: index - savedFirst, width: width,
+                                        height: height, accent: accent,
+                                        selected: index == savedSelected,
+                                        root: root, textRows: &textRows)
                     }
                 } else {
                     let accountName = codexAccount.isStandard ? "Codex" :
@@ -693,24 +754,33 @@ struct WindowHarness {
                     end = min(projects.count, first + count)
                     for index in first..<end {
                         let project = projects[index]
-                        let display = String(project.name.prefix(80)).unicodeScalars.map {
-                            $0.value >= 32 && $0.value <= 126 ? String($0) : "?"
-                        }.joined()
+                        let display = String(project.name.unicodeScalars.prefix(80))
                         let opened = terminals[project.id]
                         let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
                             + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
                         let retained = opened != nil || restoredProjectIDs.contains(project.id)
                         let text = "\(display) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " *" : "")"
-                        root.addSubview(Specimen.Row(frame: navigatorRowRect(index - first,
-                            width: width, height: height),
-                            text: text, accent: accent, selected: index == selected))
+                        addNavigatorRow(text, index: index - first, width: width,
+                                        height: height, accent: accent,
+                                        selected: index == selected,
+                                        root: root, textRows: &textRows)
                     }
                 }
+                let title = root.title
+                root.title = ""
+                textRows.append(NavigatorTextRow(text: readableNavigatorText(title), x: 0, y: 0,
+                                                 width: Int32(width),
+                                                 height: Int32(Specimen.Window.titleHeight * 2),
+                                                 inset: 24, selected: false))
                 let bitmap = Bitmap(width: width, height: height, background: (0.87, 0.87, 0.87, 1))
                 let context = NSGraphicsContext(bitmap: bitmap, scale: 2)
                 NSGraphicsContext.current = context
                 root.render(in: context)
                 NSGraphicsContext.current = nil
+                let textStarted = DispatchTime.now().uptimeNanoseconds
+                try drawNavigatorText(textRows, into: bitmap)
+                let textMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - textStarted) / 1_000_000
+                print("NAVIGATOR_TEXT mounted=\(textRows.count) drawMs=\(textMilliseconds)")
                 let result = bitmap.pixels.withUnsafeBufferPointer {
                     tw_present(window, $0.baseAddress, Int32(width), Int32(height))
                 }

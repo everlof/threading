@@ -21,8 +21,9 @@ swift build --package-path /repo/Targets/PTYHost --product threading-ptyd
 bin=$(swift build --show-bin-path)
 daemon=$(swift build --package-path /repo/Targets/PTYHost --show-bin-path)/threading-ptyd
 fixture=$(mktemp -d /tmp/lwindow.XXXXXX)
-clang -shared -fPIC Sources/LinuxWindowBridge/TerminalDrawing.c -I Sources/LinuxWindowBridge/include $(pkg-config --cflags --libs pangocairo) -o "$fixture/renderer.so"
+clang -shared -fPIC Sources/LinuxWindowBridge/TerminalDrawing.c Sources/LinuxWindowBridge/NavigatorDrawing.c -I Sources/LinuxWindowBridge/include $(pkg-config --cflags --libs pangocairo) -o "$fixture/renderer.so"
 python3 tests/terminal_renderer_contract.py "$fixture/renderer.so"
+python3 tests/navigator_renderer_contract.py "$fixture/renderer.so"
 mkdir "$fixture/daemon"
 "$daemon" --socket "$fixture/pty.sock" --state "$fixture/daemon" >"$fixture/daemon.log" 2>&1 &
 daemon_pid=$!
@@ -56,6 +57,7 @@ if [[ "$THREADING_LINUX_A11Y_ONLY" == 1 ]]; then
   done
   dbus-run-session -- python3 tests/accessibility_smoke.py "$bin/WindowHarness" \
     "$fixture/a11y-store" "$fixture/pty.sock" "$fixture"
+  cp "$fixture/accessibility-window.log" out/accessibility-window.log
   exit 0
 fi
 if [[ "$THREADING_LINUX_IME_ONLY" == 1 ]]; then

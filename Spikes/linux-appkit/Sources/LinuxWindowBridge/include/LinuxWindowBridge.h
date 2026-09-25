@@ -60,6 +60,13 @@ enum { TW_TERMINAL_CELL_WIDTH = 10, TW_TERMINAL_CELL_HEIGHT = 22 };
 int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *, int columns, int rows,
                        const char *text, int textLength, int cursorColumn, int cursorRow,
                        const char *preedit, int preeditLength, int preeditCursor, int preeditSelectionLength);
+// Navigator text is a bounded, shaped platform leaf for the title and mounted rows. Rectangles
+// use window pixels, and each offset/length points into the shared UTF-8 byte buffer. Backgrounds
+// and row marks are already present in the opaque RGBA frame; this function draws only text.
+typedef struct { int x, y, width, height, inset, offset, length, selected; } TWNavigatorLabel;
+int tw_draw_navigator_labels(uint8_t *rgba, int width, int height,
+                             const uint8_t *utf8, int byteCount,
+                             const TWNavigatorLabel *labels, int labelCount);
 
 int tw_repaint(TWWindow *);
 
