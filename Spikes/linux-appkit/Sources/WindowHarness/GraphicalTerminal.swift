@@ -23,6 +23,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         let title: String
         let cursorColumn: Int
         let cursorRow: Int
+        let accessibleText: String
+        let accessibleCaret: Int
         let drawMilliseconds: Double
     }
     private struct Preedit: Equatable, Sendable {
@@ -656,6 +658,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private static func draw(_ snapshot: PTYEmulator.Snapshot, width: Int, height: Int,
                              title: String, preedit: Preedit?) throws -> Frame {
         let started = DispatchTime.now().uptimeNanoseconds
+        let (accessibleText, accessibleCaret) = accessibleScreen(snapshot)
         var text = Data(), cells: [TWCell] = []
         cells.reserveCapacity(snapshot.cells.count)
         for cell in snapshot.cells {
@@ -686,7 +689,48 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard result == 0 else { throw WindowFailure("terminal rasterization failed") }
         return Frame(pixels: pixels, width: width, height: height, title: title,
                      cursorColumn: snapshot.cursorColumn, cursorRow: snapshot.cursorRow,
+                     accessibleText: accessibleText, accessibleCaret: accessibleCaret,
                      drawMilliseconds: Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
+    }
+
+    /// Project the already-copied visible grid on the drawing worker. Keep terminal whitespace
+    /// through the cursor, but omit unused columns and trailing blank rows. Conceal style must
+    /// mask content here independently of the renderer's foreground/background colors.
+    private static func accessibleScreen(_ snapshot: PTYEmulator.Snapshot) -> (String, Int) {
+        var lines: [String] = []
+        lines.reserveCapacity(snapshot.rows)
+        var caret = -1, characters = 0, bytes = 0
+        for row in 0..<snapshot.rows {
+            var parts: [String] = []
+            parts.reserveCapacity(snapshot.columns)
+            var nonblank = 0, cursorEnd = 0, columnCharacters = 0
+            for column in 0..<snapshot.columns {
+                if row == snapshot.cursorRow && column == snapshot.cursorColumn {
+                    cursorEnd = parts.count
+                    caret = characters + columnCharacters
+                }
+                let cell = snapshot.cells[row * snapshot.columns + column]
+                guard cell.width != 0 else { continue }
+                let value = cell.attribute.style.contains(.invisible) ? " " : cell.text
+                parts.append(value)
+                columnCharacters += value.unicodeScalars.count
+                if value != " " { nonblank = parts.count }
+            }
+            if row == snapshot.cursorRow && snapshot.cursorColumn == snapshot.columns {
+                cursorEnd = parts.count
+                caret = characters + columnCharacters
+            }
+            let kept = max(nonblank, cursorEnd)
+            let line = parts.prefix(kept).joined()
+            lines.append(line)
+            bytes += line.utf8.count + (row == 0 ? 0 : 1)
+            if bytes > 64 * 1024 { return ("[visible terminal text exceeds 64 KiB]", -1) }
+            characters += line.unicodeScalars.count + 1
+        }
+        let last = max(lines.lastIndex(where: { !$0.isEmpty }) ?? -1,
+                       snapshot.cursorColumn >= 0 ? snapshot.cursorRow : -1)
+        let screen = last >= 0 ? lines.prefix(last + 1).joined(separator: "\n") : ""
+        return (screen, caret)
     }
 }
 #endif

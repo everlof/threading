@@ -35,6 +35,9 @@ void tw_accessibility_begin_list(TWWindow *, const char *name, int first, int to
 int tw_accessibility_add_row(TWWindow *, const char *id, const char *name, int selected);
 void tw_accessibility_end_list(TWWindow *);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
+// Publish only the visible terminal grid. Offsets and caret count Unicode characters, not bytes.
+// NULL clears text when a terminal starts or fails. Content is capped at 64 KiB.
+void tw_accessibility_terminal_text(TWWindow *, const char *utf8, int length, int caret);
 // Candidate windows follow the current terminal cursor. Coordinates are window pixels.
 void tw_text_input_rect(TWWindow *, int x, int y, int width, int height);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);

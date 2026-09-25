@@ -110,12 +110,31 @@ with log_path.open('w+') as log:
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
         assert terminal.get_child_count() == 0
-        assert 'not yet exposed' in terminal.get_description()
+        assert terminal.get_description() == 'Visible terminal screen; read only.'
+        terminal_text = terminal.get_text_iface()
+        assert terminal_text is not None
+        def screen_text():
+            return Atspi.Text.get_text(terminal_text, 0, -1)
+        initial = eventually(lambda: screen_text()
+                             if 'VISIBLE 界 e\u0301' in screen_text() else None,
+                             'accessible visible Unicode text')
+        assert 'OFFSCREEN_ONLY' not in initial, initial
+        assert 'CONCEALED_MARKER' not in initial, initial
+        assert terminal_text.get_character_count() == len(initial)
+        assert terminal_text.get_character_at_offset(initial.index('界')) == ord('界')
+        assert 0 <= terminal_text.get_caret_offset() <= len(initial)
+        assert not terminal_text.set_caret_offset(0), 'read-only terminal accepted remote caret movement'
+        subprocess.run(['xdotool', 'key', 'x'], check=True, timeout=5)
+        updated = eventually(lambda: screen_text()
+                             if 'UPDATED VISIBLE' in screen_text() else None,
+                             'live accessible terminal update')
+        assert 'VISIBLE 界 e\u0301' not in updated, updated
+        assert terminal_text.get_character_count() == len(updated)
         assert re.search(r'TERMINAL_FRAME .*A11Y TERMINAL READY', log_path.read_text())
         subprocess.run(['xdotool', 'windowfocus', window_id,
                         'key', 'alt+F4'], check=True, timeout=5)
         assert process.wait(timeout=5) == 0
-        print('PASS AT-SPI: bounded native project list, selected state and action into live PTY',
+        print('PASS AT-SPI: bounded navigator and live visible terminal text, Unicode, concealment and caret',
               flush=True)
     except BaseException:
         log.flush()
