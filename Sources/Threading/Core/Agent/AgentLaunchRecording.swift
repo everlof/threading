@@ -1,8 +1,9 @@
 import Foundation
 
-/// The durable state of a terminal launch attempt, applied before handing its plan to a host.
-/// Hosts decide admission, persistence and process ownership; this transition is shared so a
-/// saved Linux session and a saved macOS session describe the same launch.
+/// The durable state of an admitted terminal launch attempt. A fresh record can be saved before
+/// spawn; an existing record can wait for the daemon's spawned reply so a duplicate-live refusal
+/// leaves it untouched. Hosts decide admission, persistence and process ownership; this shared
+/// transition keeps saved Linux and macOS sessions describing the same launch.
 enum AgentLaunchRecording {
     static func apply(_ plan: AgentLaunchPlan, to session: inout AgentSession, at date: Date) {
         session.hasLaunched = true
