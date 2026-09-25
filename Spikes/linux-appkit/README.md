@@ -319,8 +319,14 @@ Backspace, Escape, Delete, arrows, Home/End, Page Up/Down and F1–F12) use Swif
 including modifiers and press/repeat/release. This honors application-cursor and negotiated kitty
 modes for those keys. Complete enhanced printable-key, keypad, Insert and IME support remains
 outstanding; this is not full keyboard-protocol parity. Pango shapes individual cell graphemes: cross-cell
-joining, full IME composition, clipboard copy/selection, mouse reporting, scrollback navigation,
+joining, full IME composition, clipboard copy/selection, scrollback navigation,
 accessibility and live profile/theme configuration remain outstanding.
+
+The native pointer sends button presses, releases and bounded wheel steps through SwiftTerm's
+live DEC mouse mode and encoding. X10 sends presses only; VT200-style modes send releases too.
+With tracking off, pointer events do not reach the child. Shift bypasses reporting unless the
+child requested shift capture. Project-list clicks and wheel navigation keep their own route.
+Drag/motion reports, local text selection/copy and scrollback navigation are still absent.
 
 Ctrl+Shift+V pastes UTF-8 text from the native clipboard. The host accepts at most 64 KiB per
 gesture, refuses larger or invalid text without sending a prefix, and forwards the accepted bytes

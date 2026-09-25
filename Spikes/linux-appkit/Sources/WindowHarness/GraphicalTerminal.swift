@@ -32,6 +32,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         case text(Data)
         case paste(Data)
         case key(PTYEmulator.Key, PTYEmulator.Modifiers, PTYEmulator.KeyAction)
+        case mouseButton(Int, Int, Int, Bool, PTYEmulator.Modifiers)
+        case mouseWheel(Int, Int, Int, PTYEmulator.Modifiers)
     }
     private var frame: Frame?
     private var failure: String?
@@ -453,6 +455,12 @@ final class GraphicalTerminal: @unchecked Sendable {
     func key(_ key: PTYEmulator.Key, modifiers: PTYEmulator.Modifiers, action: PTYEmulator.KeyAction) {
         submit(.key(key, modifiers, action))
     }
+    func mouseButton(x: Int, y: Int, button: Int, release: Bool, modifiers: PTYEmulator.Modifiers) {
+        submit(.mouseButton(x, y, button, release, modifiers))
+    }
+    func mouseWheel(x: Int, y: Int, steps: Int, modifiers: PTYEmulator.Modifiers) {
+        submit(.mouseWheel(x, y, steps, modifiers))
+    }
     private func submit(_ input: Input) {
         lock.lock()
         guard running && !closed && failure == nil else { lock.unlock(); return }
@@ -472,6 +480,10 @@ final class GraphicalTerminal: @unchecked Sendable {
             case .text(let bytes): emulator?.input(bytes)
             case .paste(let bytes): emulator?.paste(bytes)
             case .key(let key, let modifiers, let action): emulator?.key(key, modifiers: modifiers, action: action)
+            case .mouseButton(let x, let y, let button, let release, let modifiers):
+                emulator?.mouseButton(x: x, y: y, button: button, release: release, modifiers: modifiers)
+            case .mouseWheel(let x, let y, let steps, let modifiers):
+                emulator?.mouseWheel(x: x, y: y, steps: steps, modifiers: modifiers)
             }
         }
         lock.unlock()

@@ -28,6 +28,35 @@ final class PTYEmulator: TerminalDelegate {
             }
         }
     }
+    func mouseButton(x: Int, y: Int, button: Int, release: Bool, modifiers: Modifiers) {
+        terminal.terminalLock.withLock {
+            let mode = terminal.mouseMode
+            guard mode != .off, !(modifiers.contains(.shift) && !terminal.mouseShiftCapture),
+                  !release || mode != .x10,
+                  (0...2).contains(button), let hit = mouseHit(x: x, y: y) else { return }
+            let flags = terminal.encodeButton(button: button, release: release,
+                shift: modifiers.contains(.shift), meta: modifiers.contains(.alt),
+                control: modifiers.contains(.ctrl))
+            terminal.sendEvent(buttonFlags: flags, x: hit.column, y: hit.row, pixelX: x, pixelY: y)
+        }
+    }
+    func mouseWheel(x: Int, y: Int, steps: Int, modifiers: Modifiers) {
+        terminal.terminalLock.withLock {
+            guard terminal.mouseMode != .off,
+                  !(modifiers.contains(.shift) && !terminal.mouseShiftCapture),
+                  steps != 0, let hit = mouseHit(x: x, y: y) else { return }
+            let flags = terminal.encodeButton(button: steps > 0 ? 4 : 5, release: false,
+                shift: modifiers.contains(.shift), meta: modifiers.contains(.alt),
+                control: modifiers.contains(.ctrl))
+            for _ in 0..<min(8, abs(steps)) {
+                terminal.sendEvent(buttonFlags: flags, x: hit.column, y: hit.row, pixelX: x, pixelY: y)
+            }
+        }
+    }
+    private func mouseHit(x: Int, y: Int) -> (column: Int, row: Int)? {
+        guard x >= 0, y >= 0, x < terminal.cols * 10, y < terminal.rows * 22 else { return nil }
+        return (x / 10, y / 22)
+    }
     struct Cell: Sendable {
         let text: String
         let width: Int
