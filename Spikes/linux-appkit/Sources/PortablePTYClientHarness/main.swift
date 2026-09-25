@@ -1,5 +1,6 @@
 @testable import CoreSlice
 @testable import TerminalRuntime
+@testable import ThreadingPTYClient
 import Dispatch
 import Foundation
 import ThreadingPTYHostKit

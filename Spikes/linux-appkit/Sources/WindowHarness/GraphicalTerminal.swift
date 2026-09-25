@@ -5,6 +5,7 @@ import Foundation
 import Dispatch
 import Glibc
 import LinuxWindowBridge
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 /// Experimental host-only terminal surface. Threading retains store identity, process ownership,

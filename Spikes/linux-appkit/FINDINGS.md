@@ -2467,3 +2467,29 @@ and terminal counts, and reattaches the original child under the same daemon PID
 no-argument reopen with both provider commands configured selects the other saved project without
 launching a child. `THREADING_LINUX_STARTUP_ONLY=1 ./window-smoke.sh` passed. This remains a
 source-tree launcher; it is not a packaged desktop entry point or an in-window project importer.
+
+## 92. The PTY client is one compiled module on Mac and Linux
+
+The Linux host previously compiled a copied `PTYHostClient` among its vendored core files.
+That let the native window exercise the same source text as macOS, but the two builds could
+still acquire different client changes between vendoring runs. The client, its Unix socket,
+handshake, binding and write policy now live in `Packages/ThreadingPTYClient`. Both the
+shipping Mac app and the experimental Linux host import that package; only the Mac adapter
+owns EventLog, OSLog diagnostics and the availability probe. Diagnostics cross the package
+boundary as typed events, preserving the Mac logger's privacy treatment.
+
+The package explicitly links `ThreadingDomain` alongside `ThreadingPTYHostKit`. Xcode's
+dynamic package products did not link the domain identity metadata transitively; the same
+direct dependency is present on the embedded macOS daemon. The Linux core slice now vendors
+44 production files instead of copying the seven client files.
+
+The package built independently on macOS. In a native aarch64 Linux VM, the real-daemon host
+smoke, the full Xvfb graphical window suite and all shared core-slice contracts passed; the
+vendored-file verification remained byte-identical. These checks cover spawn, detach and
+reattach, bounded output, saved-project reopen, agent resumes and exact session identity.
+The focused Mac PTY suite passed 48 tests (one skipped). The complete Mac target passed
+9,521 tests (83 skipped, zero failures). Architecture, theme and main-actor-latency
+boundaries passed. The required `scripts/test.sh all` iOS leg built for the installed
+Threading iPhone 17 simulator, but XCTest never launched: CoreSimulator did not report boot
+readiness after eight minutes, so the attempt was stopped. iOS tests remain unverified for
+this slice; no iOS source changed.

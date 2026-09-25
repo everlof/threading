@@ -11,6 +11,7 @@ let package = Package(
         // that claim on a platform it has never been compiled for.
         .package(path: "../../Packages/ThreadingDomain"),
         .package(path: "../../Packages/ThreadingPTYHostKit"),
+        .package(path: "../../Packages/ThreadingPTYClient"),
         .package(path: "../../Packages/Vendor/SwiftTerm")
     ],
     targets: [
@@ -30,6 +31,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("atk-1.0", .when(platforms: [.linux]))]),
         .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime",
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
+            .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))]),
         // Apple's Compression framework, reduced to the two symbols GzipWriter uses. See its header.
         .target(name: "Compression", dependencies: ["CZlib"]),
@@ -46,11 +48,14 @@ let package = Package(
             // The variable under test is the platform, so the language mode is held fixed.
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        .executableTarget(name: "CoreSliceHarness", dependencies: ["CoreSlice"]),
+        .executableTarget(name: "CoreSliceHarness", dependencies: ["CoreSlice",
+            .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient")]),
         .target(name: "TerminalRuntime", dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")]),
         .executableTarget(name: "PortablePTYClientHarness", dependencies: ["CoreSlice", "TerminalRuntime",
+            .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit")]),
         .executableTarget(name: "LinuxHost", dependencies: ["CoreSlice",
+            .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .target(name: "CLinuxTerminal", condition: .when(platforms: [.linux])),
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit")]),
         // Symlinks to the verified CoreSlice copies keep the production wrapper and logger exact.
