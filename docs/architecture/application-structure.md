@@ -136,7 +136,10 @@ events; the bridge neither reads the store nor owns runtime decisions. The termi
 exposes a read-only ATK Text projection of its visible, bounded grid, with Unicode offsets,
 concealed-cell masking and changed-span notifications. It does not traverse hidden scrollback.
 SDL window focus is projected onto the mounted selected row or terminal without moving selection.
-Component geometry, comprehensive focus behavior and complete selection semantics remain open
+The frame, mounted list rows and terminal expose window, screen and parent-coordinate component
+bounds from the live SDL window; one row rectangle supplies drawing, pointer hit testing and
+AT-SPI publication, and point lookup returns mounted children only. Character-level
+terminal geometry, comprehensive focus behavior and complete selection semantics remain open
 accessibility work.
 
 Graphical restoration across app restarts is available through explicit

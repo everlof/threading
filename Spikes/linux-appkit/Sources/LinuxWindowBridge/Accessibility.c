@@ -16,6 +16,7 @@ typedef struct {
     AtkObject parent;
     GPtrArray *children;
     char *id;
+    AtkRectangle bounds;
     int row, selected, canOpen, retired;
 } AccessibleNode;
 typedef struct { AtkObjectClass parent; } AccessibleNodeClass;
@@ -24,26 +25,34 @@ static void action_interface_init(AtkActionIface *iface);
 G_DEFINE_TYPE_WITH_CODE(AccessibleNode, accessible_node, ATK_TYPE_OBJECT,
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_ACTION, action_interface_init))
 
+typedef struct { AccessibleNode parent; } ComponentNode;
+typedef struct { AccessibleNodeClass parent; } ComponentNodeClass;
+static void component_interface_init(AtkComponentIface *iface);
+G_DEFINE_TYPE_WITH_CODE(ComponentNode, component_node, accessible_node_get_type(),
+                        G_IMPLEMENT_INTERFACE(ATK_TYPE_COMPONENT, component_interface_init))
+
 typedef struct {
-    AccessibleNode parent;
+    ComponentNode parent;
     char *text;
     int length, characters, caret;
 } TerminalNode;
-typedef struct { AccessibleNodeClass parent; } TerminalNodeClass;
+typedef struct { ComponentNodeClass parent; } TerminalNodeClass;
 static void text_interface_init(AtkTextIface *iface);
-G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, accessible_node_get_type(),
+G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, component_node_get_type(),
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, text_interface_init))
 
 static AccessibleNode *app, *frame, *list;
 static TerminalNode *terminal;
 static AccessibleNode *activeList;
 static AccessibleNode *focused;
+static TWWindow *hostWindow;
 static uint32_t eventType = UINT32_MAX, generation = 1;
 static int bridgeReady, windowFocused;
 static struct {
     char title[128];
     int first, total, count, canOpen;
-    struct { char id[MAX_ROW_ID], name[MAX_ROW_NAME]; int selected; } rows[MAX_VISIBLE_ROWS];
+    AtkRectangle bounds;
+    struct { char id[MAX_ROW_ID], name[MAX_ROW_NAME]; int selected; AtkRectangle bounds; } rows[MAX_VISIBLE_ROWS];
 } pending;
 
 static gint node_child_count(AtkObject *object) {
@@ -115,6 +124,12 @@ static void accessible_node_init(AccessibleNode *node) {
 }
 static AccessibleNode *new_node(AtkRole role, const char *name) {
     AccessibleNode *node = g_object_new(accessible_node_get_type(), NULL);
+    atk_object_set_role(ATK_OBJECT(node), role);
+    atk_object_set_name(ATK_OBJECT(node), name);
+    return node;
+}
+static AccessibleNode *new_component(AtkRole role, const char *name) {
+    AccessibleNode *node = g_object_new(component_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(node), role);
     atk_object_set_name(ATK_OBJECT(node), name);
     return node;
@@ -215,6 +230,65 @@ static void action_interface_init(AtkActionIface *iface) {
     iface->get_name = action_name;
     iface->do_action = action_do;
 }
+
+static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
+                               gint *x, gint *y, gint *width, gint *height) {
+    AccessibleNode *node = (AccessibleNode *)object;
+    if (!hostWindow || node->retired || !node_mounted(object)) return 0;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
+    if (object == ATK_OBJECT(frame) || object == ATK_OBJECT(terminal)) {
+        *x = 0; *y = 0; *width = windowWidth; *height = windowHeight;
+    } else if (object == ATK_OBJECT(list)) {
+        *x = node->bounds.x; *y = node->bounds.y;
+        *width = node->bounds.width; *height = node->bounds.height;
+    } else if (node->row >= 0 && atk_object_get_parent(object) == ATK_OBJECT(list)) {
+        *x = node->bounds.x; *y = node->bounds.y;
+        *width = node->bounds.width; *height = node->bounds.height;
+    } else return 0;
+    if (coordinates == ATK_XY_SCREEN) { *x += originX; *y += originY; }
+    else if (coordinates == ATK_XY_PARENT && node->row >= 0) {
+        *x -= list->bounds.x; *y -= list->bounds.y;
+    }
+    else if (coordinates != ATK_XY_WINDOW && coordinates != ATK_XY_PARENT) return 0;
+    return 1;
+}
+static void component_extents(AtkComponent *component, gint *x, gint *y,
+                              gint *width, gint *height, AtkCoordType coordinates) {
+    gint resultX, resultY, resultWidth, resultHeight;
+    if (!component_rectangle(ATK_OBJECT(component), coordinates,
+                             &resultX, &resultY, &resultWidth, &resultHeight)) {
+        resultX = resultY = resultWidth = resultHeight = -1;
+    }
+    if (x) *x = resultX;
+    if (y) *y = resultY;
+    if (width) *width = resultWidth;
+    if (height) *height = resultHeight;
+}
+static AtkObject *component_child_at(AtkComponent *component, gint x, gint y,
+                                      AtkCoordType coordinates) {
+    AccessibleNode *node = (AccessibleNode *)component;
+    if (!node_mounted(ATK_OBJECT(node))) return NULL;
+    // The only containers are the frame and list. Both parents start at the window origin;
+    // convert the caller's point once, then compare children in window coordinates.
+    if (coordinates == ATK_XY_SCREEN) {
+        int originX, originY, width, height;
+        tw_window_geometry(hostWindow, &originX, &originY, &width, &height);
+        x -= originX; y -= originY;
+    } else if (coordinates != ATK_XY_WINDOW && coordinates != ATK_XY_PARENT) return NULL;
+    for (guint i = 0; i < node->children->len; i++) {
+        AtkObject *child = g_ptr_array_index(node->children, i);
+        if (ATK_IS_COMPONENT(child) && atk_component_contains(ATK_COMPONENT(child), x, y, ATK_XY_WINDOW))
+            return g_object_ref(child);
+    }
+    return NULL;
+}
+static void component_interface_init(AtkComponentIface *iface) {
+    iface->get_extents = component_extents;
+    iface->ref_accessible_at_point = component_child_at;
+}
+static void component_node_class_init(ComponentNodeClass *klass) { (void)klass; }
+static void component_node_init(ComponentNode *node) { (void)node; }
 
 static gchar *terminal_get_text(AtkText *text, gint start, gint end) {
     TerminalNode *node = (TerminalNode *)text;
@@ -346,12 +420,13 @@ static void set_terminal_text(const char *value, int length, int caret) {
     if (oldCaret != caret) g_signal_emit_by_name(terminal, "text-caret-moved", caret);
 }
 
-void tw_accessibility_open(void) {
+void tw_accessibility_open(TWWindow *window) {
     if (!getenv("DBUS_SESSION_BUS_ADDRESS") || bridgeReady) return;
+    hostWindow = window;
     eventType = SDL_RegisterEvents(1);
     app = new_node(ATK_ROLE_APPLICATION, "Threading Linux");
-    frame = new_node(ATK_ROLE_FRAME, "Threading Linux window");
-    list = new_node(ATK_ROLE_LIST, "Projects");
+    frame = new_component(ATK_ROLE_FRAME, "Threading Linux window");
+    list = new_component(ATK_ROLE_LIST, "Projects");
     terminal = g_object_new(terminal_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
     atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
@@ -382,6 +457,7 @@ void tw_accessibility_close(void) {
     g_clear_object(&frame);
     g_clear_object(&list);
     g_clear_object(&terminal);
+    hostWindow = NULL;
     generation++;
 }
 void tw_accessibility_poll(void) {
@@ -395,6 +471,14 @@ void tw_accessibility_title(const char *title) {
 }
 uint32_t tw_accessibility_event_type(void) { return eventType; }
 int tw_accessibility_event_is_current(uint32_t value) { return bridgeReady && value == generation; }
+int tw_accessibility_row_center(int row, int *x, int *y) {
+    if (!bridgeReady || !activeList || row < 0 || (guint)row >= activeList->children->len) return 0;
+    AccessibleNode *node = g_ptr_array_index(activeList->children, (guint)row);
+    if (node->retired || node->bounds.width <= 0 || node->bounds.height <= 0) return 0;
+    *x = node->bounds.x + node->bounds.width / 2;
+    *y = node->bounds.y + node->bounds.height / 2;
+    return 1;
+}
 void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {
     (void)window;
     if (!bridgeReady || windowFocused == (hasFocus != 0)) return;
@@ -402,32 +486,40 @@ void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {
     refresh_focus();
 }
 
-void tw_accessibility_begin_list(TWWindow *window, const char *name, int first, int total, int canOpen) {
+void tw_accessibility_begin_list(TWWindow *window, const char *name, int first, int total, int canOpen,
+                                 int x, int y, int width, int height) {
     (void)window;
     if (!bridgeReady) return;
     pending.count = 0;
     pending.first = first;
     pending.total = total;
     pending.canOpen = canOpen;
+    pending.bounds = (AtkRectangle){x, y, width, height};
     g_strlcpy(pending.title, name ? name : "Items", sizeof(pending.title));
 }
-int tw_accessibility_add_row(TWWindow *window, const char *id, const char *name, int selected) {
-    (void)window;
+int tw_accessibility_add_row(TWWindow *window, const char *id, const char *name, int selected,
+                             int x, int y, int width, int height) {
     if (!bridgeReady) return 0;
+    int originX, originY, windowWidth, windowHeight;
+    tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
     if (!id || !name || pending.count >= MAX_VISIBLE_ROWS
         || strnlen(id, MAX_ROW_ID) == MAX_ROW_ID
         || strnlen(name, MAX_ROW_NAME) == MAX_ROW_NAME
-        || !g_utf8_validate(name, -1, NULL)) return -1;
+        || !g_utf8_validate(name, -1, NULL)
+        || x < 0 || x >= windowWidth || width <= 0 || width > windowWidth - x
+        || y < 0 || y >= windowHeight || height <= 0 || height > windowHeight - y) return -1;
     int index = pending.count++;
     strcpy(pending.rows[index].id, id);
     strcpy(pending.rows[index].name, name);
     pending.rows[index].selected = selected != 0;
+    pending.rows[index].bounds = (AtkRectangle){x, y, width, height};
     return 0;
 }
 void tw_accessibility_end_list(TWWindow *window) {
     (void)window;
     if (!bridgeReady) return;
     set_name_if_changed(list, pending.title);
+    list->bounds = pending.bounds;
     char description[128];
     snprintf(description, sizeof(description), "Showing %d through %d of %d items",
              pending.count ? pending.first + 1 : 0, pending.first + pending.count, pending.total);
@@ -441,12 +533,13 @@ void tw_accessibility_end_list(TWWindow *window) {
         set_focused(NULL);
         clear_children(list);
         for (int i = 0; i < pending.count; i++) {
-            AccessibleNode *row = new_node(ATK_ROLE_LIST_ITEM, pending.rows[i].name);
+            AccessibleNode *row = new_component(ATK_ROLE_LIST_ITEM, pending.rows[i].name);
             row->id = g_strdup(pending.rows[i].id);
             atk_object_set_accessible_id(ATK_OBJECT(row), row->id);
             row->row = i;
             row->selected = pending.rows[i].selected;
             row->canOpen = pending.canOpen;
+            row->bounds = pending.rows[i].bounds;
             add_child(list, row);
             g_object_unref(row);
         }
@@ -456,6 +549,7 @@ void tw_accessibility_end_list(TWWindow *window) {
             AccessibleNode *row = g_ptr_array_index(list->children, (guint)i);
             set_name_if_changed(row, pending.rows[i].name);
             row->canOpen = pending.canOpen;
+            row->bounds = pending.rows[i].bounds;
             if (row->selected != pending.rows[i].selected) {
                 row->selected = pending.rows[i].selected;
                 atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SELECTED, row->selected);

@@ -8,12 +8,14 @@ import Foundation
 enum Specimen {
 
     final class Window: NSView {
+        static let titleHeight: CGFloat = 26
         var title = "Threading on Linux"
         override func draw(_ dirtyRect: NSRect) {
             NSColor(white: 0.87, alpha: 1).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
             // Title bar.
-            let bar = NSRect(x: bounds.minX, y: bounds.maxY - 26, width: bounds.width, height: 26)
+            let bar = NSRect(x: bounds.minX, y: bounds.maxY - Self.titleHeight,
+                             width: bounds.width, height: Self.titleHeight)
             NSColor(white: 0.78, alpha: 1).setFill()
             bar.fill()
             NSColor(white: 0.45, alpha: 1).setStroke()

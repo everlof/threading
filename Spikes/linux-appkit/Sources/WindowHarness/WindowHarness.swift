@@ -50,6 +50,21 @@ struct WindowHarness {
     private static let maximumSelectableAgentsPerProject = 512
     private static let maximumSelectableTerminalsPerProject = 512
     private static let maximumPersistedRuntimeTitleScalars = 256
+    private static let navigatorRowHeight: CGFloat = 22
+    private static let navigatorRowStride: CGFloat = 24
+
+    @MainActor private static func navigatorRowRect(_ index: Int, width: Int, height: Int) -> NSRect {
+        let top = Specimen.Window.titleHeight + 2 + CGFloat(index) * navigatorRowStride
+        // The diagnostic root uses integer half-size bounds, even for an odd SDL pixel size.
+        return NSRect(x: 6, y: CGFloat(height / 2) - top - navigatorRowHeight,
+                      width: CGFloat(width / 2) - 12, height: navigatorRowHeight)
+    }
+    @MainActor private static func navigatorRowPixels(_ index: Int, width: Int, height: Int)
+        -> (x: Int32, y: Int32, width: Int32, height: Int32) {
+        let row = navigatorRowRect(index, width: width, height: height)
+        return (Int32(row.minX * 2), Int32((CGFloat(height / 2) - row.maxY) * 2),
+                Int32(row.width * 2), Int32(row.height * 2))
+    }
 
     private enum SavedPicker {
         case agents(Int)
@@ -541,7 +556,7 @@ struct WindowHarness {
             if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                       pending: &pendingAgentProjects,
                                       retainedProjects: &restoredProjectIDs) { dirty = true }
-            let count = max(1, (height / 2 - 32) / 24)
+            let count = max(1, (height / 2 - 32) / Int(navigatorRowStride))
             if let savedPicker {
                 let project = projects[savedPicker.projectIndex]
                 let savedCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
@@ -575,9 +590,8 @@ struct WindowHarness {
                         let identity = String(runtime.id.prefix(8))
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let text = "\(display) [\(identity)]\(restoredRuntimes[key] == nil ? "" : " *")"
-                        root.addSubview(Specimen.Row(frame: NSRect(x: 6,
-                            y: root.frame.height - 50 - CGFloat(index - savedFirst) * 24,
-                            width: root.frame.width - 12, height: 22),
+                        root.addSubview(Specimen.Row(frame: navigatorRowRect(index - savedFirst,
+                            width: width, height: height),
                             text: text, accent: accent, selected: index == savedSelected))
                     }
                 } else {
@@ -603,9 +617,8 @@ struct WindowHarness {
                             + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
                         let retained = opened != nil || restoredProjectIDs.contains(project.id)
                         let text = "\(display) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " *" : "")"
-                        root.addSubview(Specimen.Row(frame: NSRect(x: 6,
-                            y: root.frame.height - 50 - CGFloat(index - first) * 24,
-                            width: root.frame.width - 12, height: 22),
+                        root.addSubview(Specimen.Row(frame: navigatorRowRect(index - first,
+                            width: width, height: height),
                             text: text, accent: accent, selected: index == selected))
                     }
                 }
@@ -623,14 +636,19 @@ struct WindowHarness {
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     let total = savedPicker.isAgent ? project.sessions : project.terminalCount
                     let listName = "Saved \(savedPicker.isAgent ? "agents" : "terminals") (\(saved.count) of \(total))"
+                    let listY = Int32(Specimen.Window.titleHeight * 2)
                     listName.withCString {
-                        tw_accessibility_begin_list(window, $0, Int32(savedFirst), Int32(saved.count), launch == nil ? 0 : 1)
+                        tw_accessibility_begin_list(window, $0, Int32(savedFirst), Int32(saved.count),
+                                                    launch == nil ? 0 : 1, 0, listY,
+                                                    Int32(width), Int32(height) - listY)
                     }
                     for index in savedFirst..<end {
                         let runtime = saved[index]
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let label = "\(boundedAccessibilityLabel(runtime.title)) [\(String(runtime.id.prefix(8)))]\(restoredRuntimes[key] == nil ? "" : " retained")"
-                        try publishAccessibleRow(window, id: runtime.id, label: label, selected: index == savedSelected)
+                        try publishAccessibleRow(window, id: runtime.id, label: label,
+                                                 selected: index == savedSelected,
+                                                 visibleIndex: index - savedFirst, width: width, height: height)
                     }
                     tw_accessibility_end_list(window)
                     tw_title(window, "Threading \(savedPicker.isAgent ? "agents" : "terminals") - \(project.path)")
@@ -639,7 +657,10 @@ struct WindowHarness {
                     let label = savedPicker.isAgent ? "AGENT_PICKER_FRAME" : "TERMINAL_PICKER_FRAME"
                     print("\(label) \(width)x\(height) mounted=\(end - savedFirst) selected=\(selectedID) total=\(total) capped=\(capped)")
                 } else {
-                    tw_accessibility_begin_list(window, "Projects", Int32(first), Int32(projects.count), launch == nil ? 0 : 1)
+                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    tw_accessibility_begin_list(window, "Projects", Int32(first), Int32(projects.count),
+                                                launch == nil ? 0 : 1, 0, listY,
+                                                Int32(width), Int32(height) - listY)
                     for index in first..<end {
                         let project = projects[index]
                         let opened = terminals[project.id]
@@ -647,7 +668,9 @@ struct WindowHarness {
                             + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
                         let retained = opened != nil || restoredProjectIDs.contains(project.id)
                         let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " retained" : "")"
-                        try publishAccessibleRow(window, id: project.id, label: label, selected: index == selected)
+                        try publishAccessibleRow(window, id: project.id, label: label,
+                                                 selected: index == selected,
+                                                 visibleIndex: index - first, width: width, height: height)
                     }
                     tw_accessibility_end_list(window)
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
@@ -706,16 +729,19 @@ struct WindowHarness {
                 height = max(180, min(900, Int(event.height)))
                 dirty = true
             case 2:
-                let y = Int(event.y) / 2
                 let listFirst = savedPicker == nil ? first : savedFirst
                 let listCount: Int
                 if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     listCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
                 } else { listCount = projects.count }
-                let candidate = listFirst + (y - 28) / 24
-                if event.x >= 12 && event.x < width - 12 && y >= 28 && (y - 28) % 24 < 22
-                    && candidate < listCount && candidate < listFirst + count {
+                let visibleCount = max(0, min(listCount - listFirst, count))
+                if let mounted = (0..<visibleCount).first(where: { index in
+                    let row = navigatorRowPixels(index, width: width, height: height)
+                    return event.x >= row.x && event.x < row.x + row.width
+                        && event.y >= row.y && event.y < row.y + row.height
+                }) {
+                    let candidate = listFirst + mounted
                     if savedPicker == nil { selected = candidate }
                     else { savedSelected = candidate }
                     dirty = true
@@ -903,10 +929,13 @@ struct WindowHarness {
     }
 
     @MainActor private static func publishAccessibleRow(_ window: OpaquePointer, id: String,
-                                                         label: String, selected: Bool) throws {
+                                                         label: String, selected: Bool,
+                                                         visibleIndex: Int, width: Int, height: Int) throws {
+        let bounds = navigatorRowPixels(visibleIndex, width: width, height: height)
         let result = id.withCString { identifier in
             label.withCString { name in
-                tw_accessibility_add_row(window, identifier, name, selected ? 1 : 0)
+                tw_accessibility_add_row(window, identifier, name, selected ? 1 : 0,
+                                         bounds.x, bounds.y, bounds.width, bounds.height)
             }
         }
         guard result == 0 else { throw WindowFailure("native accessibility row exceeds its bound") }
