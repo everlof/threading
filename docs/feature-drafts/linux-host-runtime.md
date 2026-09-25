@@ -288,6 +288,13 @@ The structural layer must not turn the current virtual surfaces into eagerly bui
    useful target. It keeps unsupported surfaces visibly unavailable rather than presenting static
    lookalikes. Expand one complete surface at a time with real-shell evidence.
 
+The first structural ratchet is now in the macOS architecture build phase. On 2026-09-25,
+`scripts/check_ui_structure.py --report` counted 83 direct controller subclasses, 119 direct
+platform view/window subclasses, 2,818 constraint sites and 96 drawing sites outside `UI/Design`.
+The script rejects growth and requires reductions to lower its checked-in ceilings. These are
+source-level debt counts, not a portable renderer or completion of the macOS visual baselines,
+dual-render fixture, IME or accessibility gates above.
+
 ## Evidence required
 
 - The standard macOS build, architecture/theme/localization checks, and focused behavior tests stay
