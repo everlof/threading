@@ -3969,6 +3969,8 @@ over deliberately rather than detected.
 ### The shared browser
 
 **View ▸ Browser** (Cmd+Shift+B) opens a real browser tab belonging to the current session.
+You can also ask the agent to browse a site before opening the tab yourself; its first navigation
+creates the tab.
 It has an address bar, history controls, persistent cookies, responsive viewport testing, and the
 Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots, 50–200%
 zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar

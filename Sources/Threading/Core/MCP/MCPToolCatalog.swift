@@ -293,7 +293,7 @@ enum MCPToolCatalog {
     id: "browser",
     family: .browser,
     title: "Browser",
-    summary: "Let agents open, read, and act on live web pages in a browser tab.",
+    summary: "Browse and search the web, test sites, and interact with live pages in a shared tab.",
     symbol: "globe",
     tools: [],
     instruction: """
@@ -943,8 +943,8 @@ enum MCPToolCatalog {
 
     if toolNames.contains(MCPBuiltInTool.browserNavigate.rawValue) {
       sentences.append(
-        "Threading's Browser is connected: browser_navigate/browser_snapshot; do not "
-          + "bootstrap another runtime."
+        "Browse, search, or test sites in Threading's Browser: "
+          + "browser_navigate opens a tab; browser_snapshot reads it."
       )
     }
     if toolNames.contains(MCPBuiltInTool.watchSession.rawValue) {

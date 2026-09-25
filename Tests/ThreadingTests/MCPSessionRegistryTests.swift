@@ -1085,9 +1085,8 @@ final class MCPWireTests: XCTestCase {
     )
     XCTAssertTrue(prefix.contains("may load lazily"))
     XCTAssertTrue(prefix.contains("discover a matching tool"))
-    XCTAssertTrue(prefix.contains("Threading's Browser"))
-    XCTAssertTrue(prefix.contains("is connected"))
-    XCTAssertTrue(prefix.contains("do not bootstrap another runtime"))
+    XCTAssertTrue(prefix.contains("Browse, search, or test sites in Threading's Browser"))
+    XCTAssertTrue(prefix.contains("browser_navigate opens a tab"))
     XCTAssertTrue(prefix.contains("browser_navigate"))
     XCTAssertTrue(prefix.contains("browser_snapshot"))
     XCTAssertTrue(prefix.contains("another chat/session"))
@@ -1154,6 +1153,20 @@ final class MCPWireTests: XCTestCase {
     let definition = try XCTUnwrap(MCPTools.definition(for: .browserNavigate))
     XCTAssertTrue(definition.description.contains("creates this session's browser tab"))
     XCTAssertTrue(definition.description.contains("empty panel"))
+  }
+
+  func testClaudeLoadsOnlyBrowserEntryPointWithoutToolSearch() throws {
+    let navigate = try XCTUnwrap(MCPTools.definition(for: .browserNavigate))
+    let snapshot = try XCTUnwrap(MCPTools.definition(for: .browserSnapshot))
+    let navigateJSON = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(navigate)) as? [String: Any]
+    )
+    let snapshotJSON = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any]
+    )
+    let metadata = try XCTUnwrap(navigateJSON["_meta"] as? [String: Any])
+    XCTAssertEqual(metadata["anthropic/alwaysLoad"] as? Bool, true)
+    XCTAssertNil(snapshotJSON["_meta"])
   }
 
   /// The session the archive acts on is the one the call arrived on: the URL carries the

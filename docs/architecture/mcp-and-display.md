@@ -321,12 +321,21 @@ Threading's own Browser, visual output, the user's explicit request to rename or
 and safe disk-full recovery. A rename/re-title request names `set_session_name`: two observed
 Codex sessions otherwise answered that they could not rename the chat without ever discovering
 or calling the advertised tool, leaving the first-prompt title unchanged on both Mac and iPhone.
-The Browser route names `browser_navigate` and `browser_snapshot` because a
+The Browser route explicitly covers browsing, searching, and testing sites, and names
+`browser_navigate` and `browser_snapshot` because a
 generic browser integration can also be installed in the agent host; the word "browser" alone is
 not enough to select Threading's session-scoped surface. `browser_navigate` creates the session tab
 when none exists, so an empty panel is not a failed capability probe. A disabled group contributes
 no promise. Reordering whole groups to put one workflow first merely trades that miss for another
 and is not a discovery fix.
+
+Claude Code's [MCP tool search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search)
+also accepts `_meta["anthropic/alwaysLoad"]` on one tool descriptor. Threading sets it only on
+`browser_navigate`, the entry point that creates a tab and returns a snapshot. This makes the
+Browser actionable at the first turn without loading the entire browser catalogue or another
+browser runtime. The flag is emitted only when that tool is in the session's `tools/list`;
+disabling Browser still removes it. Codex's deferred MCP route continues to use the bounded
+server instructions and tool metadata for discovery.
 
 The 512-character budget applies to the server instructions, not separately to every tool
 description. Individual descriptions still begin with the action and the words a user is likely

@@ -2308,6 +2308,7 @@ struct MCPToolDefinition: Encodable, Sendable {
   let description: String
   let inputSchema: MCPToolInputSchema
   let annotations: MCPToolAnnotations?
+  let alwaysLoadForClaude: Bool
   let builtInGroupID: String?
   let builtInFamily: MCPBuiltInTool.Family?
   let builtInPresentation: MCPToolInfo?
@@ -2319,6 +2320,7 @@ struct MCPToolDefinition: Encodable, Sendable {
     groupID: String,
     family: MCPBuiltInTool.Family,
     annotations: MCPToolAnnotations,
+    alwaysLoadForClaude: Bool = false,
     title: String,
     detail: String,
     symbol: String,
@@ -2344,6 +2346,7 @@ struct MCPToolDefinition: Encodable, Sendable {
     self.description = description
     self.inputSchema = .builtIn(inputSchema)
     self.annotations = annotations
+    self.alwaysLoadForClaude = alwaysLoadForClaude
     self.builtInGroupID = groupID
     self.builtInFamily = family
     self.builtInPresentation = MCPToolInfo(
@@ -2381,6 +2384,7 @@ struct MCPToolDefinition: Encodable, Sendable {
     self.description = description
     self.inputSchema = .externalJSON(externalSchema)
     self.annotations = nil
+    self.alwaysLoadForClaude = false
     self.builtInGroupID = nil
     self.builtInFamily = nil
     self.builtInPresentation = nil
@@ -2389,6 +2393,7 @@ struct MCPToolDefinition: Encodable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case name, description, inputSchema, annotations
+    case meta = "_meta"
   }
 
   func encode(to encoder: Encoder) throws {
@@ -2397,6 +2402,9 @@ struct MCPToolDefinition: Encodable, Sendable {
     try container.encode(description, forKey: .description)
     try container.encode(inputSchema, forKey: .inputSchema)
     try container.encodeIfPresent(annotations, forKey: .annotations)
+    if alwaysLoadForClaude {
+      try container.encode(["anthropic/alwaysLoad": true], forKey: .meta)
+    }
   }
 }
 
@@ -3485,6 +3493,7 @@ enum MCPTools {
         idempotentHint: false,
         openWorldHint: true
       ),
+      alwaysLoadForClaude: true,
       title: "Open a page",
       detail: "Open or search, optionally returning at commit or DOM readiness.",
       symbol: "arrow.up.forward.app",

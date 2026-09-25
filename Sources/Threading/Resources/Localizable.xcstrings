@@ -9432,6 +9432,17 @@
         }
       }
     },
+    "Browse and search the web, test sites, and interact with live pages in a shared tab." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surfa och sök på webben, testa webbplatser och interagera med aktiva sidor i en delad flik."
+          }
+        }
+      }
+    },
     "Browse committed changes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25275,17 +25286,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låt agenter öppna en direktström av loggar från en simulator eller en ansluten iPhone."
-          }
-        }
-      }
-    },
-    "Let agents open, read, and act on live web pages in a browser tab." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Låt agenter öppna, läsa och agera på live webbsidor i en webbläsarflik."
           }
         }
       }
