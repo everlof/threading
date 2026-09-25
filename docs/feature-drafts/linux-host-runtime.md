@@ -295,6 +295,12 @@ The script rejects growth and requires reductions to lower its checked-in ceilin
 source-level debt counts, not a portable renderer or completion of the macOS visual baselines,
 dual-render fixture, IME or accessibility gates above.
 
+The experimental native terminal now has one measured IME path: SDL editing events render a
+bounded Pango preedit without PTY input, and a live X11/IBus Pinyin test commits `你好` exactly
+once to a child. A captured frame was inspected with the input method's own candidate panel
+disabled so its pixels could not stand in for the terminal preview. This proves neither a general
+text-control stack nor other IMEs, Wayland, accessibility, or release readiness.
+
 ## Evidence required
 
 - The standard macOS build, architecture/theme/localization checks, and focused behavior tests stay

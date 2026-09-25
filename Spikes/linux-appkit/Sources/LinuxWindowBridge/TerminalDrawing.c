@@ -6,9 +6,85 @@
 static void color(cairo_t *cr, uint32_t rgb) {
     cairo_set_source_rgb(cr, ((rgb >> 16) & 255) / 255.0, ((rgb >> 8) & 255) / 255.0, (rgb & 255) / 255.0);
 }
+static void draw_preedit(cairo_t *cr, int width, int height, int cursorColumn, int cursorRow,
+                         const char *text, int length, int cursor, int selectionLength) {
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoFontDescription *font = pango_font_description_from_string("DejaVu Sans 16");
+    pango_layout_set_font_description(layout, font);
+    pango_layout_set_single_paragraph_mode(layout, TRUE);
+    pango_layout_set_text(layout, text, length);
+
+    const int maximumTextWidth = width - 24;
+    int textWidth, textHeight;
+    pango_layout_get_pixel_size(layout, &textWidth, &textHeight);
+    if (textWidth > maximumTextWidth) {
+        pango_layout_set_width(layout, maximumTextWidth * PANGO_SCALE);
+        pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+        pango_layout_get_pixel_size(layout, &textWidth, &textHeight);
+    }
+    int popupWidth = textWidth + 12;
+    if (popupWidth < 32) popupWidth = 32;
+    if (popupWidth > width - 8) popupWidth = width - 8;
+    int popupHeight = textHeight + 8;
+    if (popupHeight < 28) popupHeight = 28;
+    if (popupHeight > height - 8) popupHeight = height - 8;
+    int x = cursorColumn >= 0 ? cursorColumn * 10 : 8;
+    if (x > width - popupWidth - 4) x = width - popupWidth - 4;
+    if (x < 4) x = 4;
+    int y = cursorColumn >= 0 ? cursorRow * 22 + 22 : height - popupHeight - 4;
+    if (y + popupHeight > height - 4) y = cursorRow * 22 - popupHeight;
+    if (y < 4) y = 4;
+
+    PangoAttrList *attributes = pango_attr_list_new();
+    PangoAttribute *underline = pango_attr_underline_new(PANGO_UNDERLINE_SINGLE);
+    underline->start_index = 0;
+    underline->end_index = (guint)length;
+    pango_attr_list_insert(attributes, underline);
+    const glong characters = g_utf8_strlen(text, length);
+    if (cursor < 0) cursor = 0;
+    if (cursor > characters) cursor = (int)characters;
+    if (selectionLength < 0) selectionLength = 0;
+    if (selectionLength > characters - cursor) selectionLength = (int)characters - cursor;
+    const char *cursorByte = g_utf8_offset_to_pointer(text, cursor);
+    if (selectionLength > 0) {
+        PangoAttribute *selection = pango_attr_background_new(0x2222, 0x6666, 0xbbbb);
+        selection->start_index = (guint)(cursorByte - text);
+        selection->end_index = (guint)(g_utf8_offset_to_pointer(cursorByte, selectionLength) - text);
+        pango_attr_list_insert(attributes, selection);
+    }
+    pango_layout_set_attributes(layout, attributes);
+
+    cairo_save(cr);
+    color(cr, 0x171f2b);
+    cairo_rectangle(cr, x, y, popupWidth, popupHeight);
+    cairo_fill(cr);
+    color(cr, 0x6ca8ff);
+    cairo_set_line_width(cr, 1);
+    cairo_rectangle(cr, x + 0.5, y + 0.5, popupWidth - 1, popupHeight - 1);
+    cairo_stroke(cr);
+    color(cr, 0xf4f7ff);
+    cairo_move_to(cr, x + 6, y + 4);
+    pango_cairo_show_layout(cr, layout);
+    if (selectionLength == 0) {
+        PangoRectangle caret;
+        pango_layout_get_cursor_pos(layout, (int)(cursorByte - text), &caret, NULL);
+        int caretX = x + 6 + caret.x / PANGO_SCALE;
+        if (caretX > x + popupWidth - 5) caretX = x + popupWidth - 5;
+        cairo_rectangle(cr, caretX, y + 3, 1, popupHeight - 6);
+        cairo_fill(cr);
+    }
+    cairo_restore(cr);
+    pango_attr_list_unref(attributes);
+    pango_font_description_free(font);
+    g_object_unref(layout);
+}
 int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *cells, int columns, int rows,
-                       const char *text, int textLength, int cursorColumn, int cursorRow) {
+                       const char *text, int textLength, int cursorColumn, int cursorRow,
+                       const char *preedit, int preeditLength, int preeditCursor, int preeditSelectionLength) {
     if (width < 1 || width > 1280 || height < 1 || height > 900 || columns < 2 || columns > 240 || rows < 1 || rows > 100) return -1;
+    if (preeditLength < 0 || preeditLength > 1023 || (preeditLength > 0 &&
+        (!preedit || !g_utf8_validate(preedit, preeditLength, NULL)))) return -1;
+    if (preeditLength > 0 && (width < 40 || height < 36)) return -1;
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
     cairo_t *cr = cairo_create(surface);
     color(cr, 0x17191d); cairo_paint(cr);
@@ -61,6 +137,10 @@ int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *cells
     }
     if (cursorColumn >= 0 && cursorColumn < columns && cursorRow >= 0 && cursorRow < rows) {
         color(cr, 0xd4d4d4); cairo_rectangle(cr, cursorColumn * 10, cursorRow * 22 + 20, 10, 2); cairo_fill(cr);
+    }
+    if (preeditLength > 0) {
+        draw_preedit(cr, width, height, cursorColumn, cursorRow, preedit, preeditLength,
+                     preeditCursor, preeditSelectionLength);
     }
     cairo_surface_flush(surface);
     unsigned char *pixels = cairo_image_surface_get_data(surface);

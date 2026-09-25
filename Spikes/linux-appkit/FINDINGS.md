@@ -2045,3 +2045,24 @@ saved-terminal picker, Codex resume, attach refusals and clean-profile launcher.
 picker frame was inspected in the native window. The recent-window limit, missing automatic
 terminal restoration, incomplete provider coverage, IME and accessibility remain outside this
 slice.
+
+## 76. Native Linux terminal composition stays out of the PTY until commit
+
+The SDL terminal bridge now distinguishes text-editing preedit from committed text input.
+Extended editing events preserve long UTF-8 compositions up to a 1 KiB preview bound; a longer
+preedit shows an explicit placeholder. Pango draws the preview, underline, selection and caret
+near the emulator cursor on the drawing worker, while SDL receives the cursor rectangle for its
+input-method candidate placement. Functional keys used during composition are withheld from the
+PTY, including their key releases after commit or cancellation. The durable terminal, input
+authority and daemon lifecycle remain unchanged.
+
+The renderer contract passed for Unicode preedit, cached/direct pixel parity and invalid UTF-8
+refusal. In the live Docker/Xvfb X11/IBus/libpinyin lane, the raw PTY child observed no bytes
+during composition and exactly the UTF-8 bytes for `你好` after selection. The captured native
+window showed the terminal's blue-bordered Chinese preview. The IBus candidate panel was disabled
+for the screenshot assertion so an overlapping input-method window could not satisfy it. The full
+`window-smoke.sh` suite also passed after the event-routing change, including normal keyboard,
+mouse, clipboard, agent attach and clean-profile journeys.
+
+This verifies one X11 input method in the experimental terminal. Other engines, Wayland,
+accessibility, general text controls and complete enhanced keyboard protocols remain unverified.

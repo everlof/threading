@@ -21,7 +21,14 @@ final class GraphicalTerminal: @unchecked Sendable {
         let width: Int
         let height: Int
         let title: String
+        let cursorColumn: Int
+        let cursorRow: Int
         let drawMilliseconds: Double
+    }
+    private struct Preedit: Equatable, Sendable {
+        let text: String
+        let cursor: Int
+        let selectionLength: Int
     }
     private let worker = DispatchQueue(label: "linux.terminal", qos: .userInteractive)
     private let drawing = DispatchQueue(label: "linux.terminal.drawing", qos: .userInteractive)
@@ -55,6 +62,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var connectionGeneration = 0
     private var identity: PTYHostSessionIdentity?
     private var dirty = true
+    // Worker-owned, uncommitted IME text. Preedit never enters the PTY queue.
+    private var preedit: Preedit?
     private var lastWidth = 0, lastHeight = 0
     private var exitStatus: Int32?
     private var waitingForExit = false
@@ -599,6 +608,18 @@ final class GraphicalTerminal: @unchecked Sendable {
     func invalidateFrame() {
         worker.async { [self] in dirty = true }
     }
+    func setPreedit(_ text: String?, cursor: Int = 0, selectionLength: Int = 0) {
+        worker.async { [self] in
+            let bounded = text.flatMap { value -> Preedit? in
+                guard !value.isEmpty else { return nil }
+                let visible = value.utf8.count <= 1023 ? value : "[composition exceeds 1 KiB]"
+                return Preedit(text: visible, cursor: cursor, selectionLength: selectionLength)
+            }
+            guard preedit != bounded else { return }
+            preedit = bounded
+            dirty = true
+        }
+    }
     func requestFrame(width: Int, height: Int) {
         lock.lock()
         guard !pendingFrame && !closed else { lock.unlock(); return }
@@ -620,8 +641,10 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let title = (exitStatus.map { "Threading terminal - exited \($0)" }
                     ?? "Threading terminal - \(snapshot.title.isEmpty ? "running" : snapshot.title)")
                     + replayLabel + (snapshot.atLiveEnd ? "" : " [scrollback]")
+                let preedit = self.preedit
                 drawing.async { [self] in
-                    do { finish(try Self.draw(snapshot, width: width, height: height, title: title)) }
+                    do { finish(try Self.draw(snapshot, width: width, height: height,
+                                              title: title, preedit: preedit)) }
                     catch { fail(error); finish(nil) }
                 }
             } catch { fail(error); finish(nil) }
@@ -630,7 +653,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     private func finish(_ value: Frame?) {
         lock.lock(); if !closed, let value { frame = value }; pendingFrame = false; lock.unlock()
     }
-    private static func draw(_ snapshot: PTYEmulator.Snapshot, width: Int, height: Int, title: String) throws -> Frame {
+    private static func draw(_ snapshot: PTYEmulator.Snapshot, width: Int, height: Int,
+                             title: String, preedit: Preedit?) throws -> Frame {
         let started = DispatchTime.now().uptimeNanoseconds
         var text = Data(), cells: [TWCell] = []
         cells.reserveCapacity(snapshot.cells.count)
@@ -644,18 +668,24 @@ final class GraphicalTerminal: @unchecked Sendable {
             text.append(bytes)
         }
         var pixels = Data(count: width * height * 4)
+        let preeditBytes = Data(preedit?.text.utf8 ?? "".utf8)
         let result = pixels.withUnsafeMutableBytes { pixels in
             text.withUnsafeBytes { text in
                 cells.withUnsafeBufferPointer { cells in
-                    tw_render_terminal(pixels.bindMemory(to: UInt8.self).baseAddress, Int32(width), Int32(height),
-                        cells.baseAddress, Int32(snapshot.columns), Int32(snapshot.rows),
-                        text.bindMemory(to: CChar.self).baseAddress, Int32(text.count),
-                        Int32(snapshot.cursorColumn), Int32(snapshot.cursorRow))
+                    preeditBytes.withUnsafeBytes { preeditBytes in
+                        tw_render_terminal(pixels.bindMemory(to: UInt8.self).baseAddress, Int32(width), Int32(height),
+                            cells.baseAddress, Int32(snapshot.columns), Int32(snapshot.rows),
+                            text.bindMemory(to: CChar.self).baseAddress, Int32(text.count),
+                            Int32(snapshot.cursorColumn), Int32(snapshot.cursorRow),
+                            preeditBytes.bindMemory(to: CChar.self).baseAddress, Int32(preeditBytes.count),
+                            Int32(preedit?.cursor ?? 0), Int32(preedit?.selectionLength ?? 0))
+                    }
                 }
             }
         }
         guard result == 0 else { throw WindowFailure("terminal rasterization failed") }
         return Frame(pixels: pixels, width: width, height: height, title: title,
+                     cursorColumn: snapshot.cursorColumn, cursorRow: snapshot.cursorRow,
                      drawMilliseconds: Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
     }
 }

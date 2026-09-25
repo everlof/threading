@@ -341,6 +341,8 @@ struct WindowHarness {
                                       allowsProjects: Bool) throws -> (Int, Int)? {
         tw_terminal_mode(window)
         tw_project_navigation(window, allowsProjects ? 1 : 0)
+        session.setPreedit(nil)
+        defer { session.setPreedit(nil) }
         session.invalidateFrame()
         var width = initialWidth, height = initialHeight
         var nextFrame: UInt64 = 0
@@ -386,6 +388,10 @@ struct WindowHarness {
                     tw_present(window, $0.bindMemory(to: UInt8.self).baseAddress, Int32(width), Int32(height))
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+                let caretX = frame.cursorColumn >= 0 ? frame.cursorColumn * 10 : 8
+                let caretY = frame.cursorColumn >= 0 ? frame.cursorRow * 22 : height - 22
+                tw_text_input_rect(window, Int32(max(0, min(width - 10, caretX))),
+                                   Int32(max(0, min(height - 22, caretY))), 10, 22)
                 tw_title(window, frame.title)
                 print("TERMINAL_FRAME \(width)x\(height) \(frame.title) drawMs=\(frame.drawMilliseconds) presentMs=\(Double(DispatchTime.now().uptimeNanoseconds - presentStarted) / 1_000_000)"); fflush(nil)
             }
@@ -405,7 +411,23 @@ struct WindowHarness {
                     failureNeedsDisplay = failure != nil
                 }
                 guard failure == nil else { continue }
-                if event.kind == 6 { session.send(Data(String(cString: tw_event_text(&event)).utf8)) }
+                if event.kind == 19 {
+                    let value = String(validatingCString: tw_event_text(&event)) ?? "[invalid composition]"
+                    session.setPreedit(value, cursor: Int(event.textCursor),
+                                       selectionLength: Int(event.textSelectionLength))
+                    print("IME_PREEDIT bytes=\(value.utf8.count)"); fflush(nil)
+                }
+                if event.kind == 6 {
+                    session.setPreedit(nil)
+                    if let value = String(validatingCString: tw_event_text(&event)) {
+                        session.send(Data(value.utf8))
+                        if event.action == 1 {
+                            print("IME_COMMIT bytes=\(value.utf8.count)"); fflush(nil)
+                        }
+                    } else {
+                        print("IME_REFUSED invalid UTF-8 commit"); fflush(nil)
+                    }
+                }
                 if event.kind == 7 { sendFunctional(event, to: session) }
                 if event.kind == 14 { pasteClipboard(into: session, window: window) }
                 if event.kind == 15 {

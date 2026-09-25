@@ -253,7 +253,7 @@ not change the store in this store-only diagnostic mode. Store open/recovery run
 
 Only visible rows are mounted, and labels are bounded to 80 characters before drawing. The
 software-rendering experiment limits windows to 1280×900 pixels. The project-list mode does not provide terminal rendering/input. The separate terminal mode
-below adds the initial runtime surface; neither mode provides complete IME, AT-SPI, production
+below adds the initial runtime surface; neither mode provides complete IME coverage, AT-SPI, production
 theme switching or extension composition. Unsupported
 bitmap-font characters visibly become `?`; the native title retains the original path.
 Customization classification: this diagnostic harness is host-only and defines no durable product
@@ -331,10 +331,13 @@ fallback, and the emulator's current colors. Its current window bounds imply at 
 UTF-8 committed text and legacy Ctrl-letter input are wired. Functional keys (Return, Tab,
 Backspace, Escape, Delete, arrows, Home/End, Page Up/Down and F1–F12) use SwiftTerm's live encoder,
 including modifiers and press/repeat/release. This honors application-cursor and negotiated kitty
-modes for those keys. Complete enhanced printable-key, keypad, Insert and IME support remains
-outstanding; this is not full keyboard-protocol parity. Pango shapes individual cell graphemes;
-cross-cell joining, full IME composition, accessibility and live profile/theme configuration
-remain outstanding.
+modes for those keys. Complete enhanced printable-key, keypad and Insert support remains
+outstanding; this is not full keyboard-protocol parity. SDL editing events now keep IME preedit
+off the PTY, and Pango draws a bounded Unicode preview beside the terminal cursor; committed
+text enters the same ordered input path as other text. `THREADING_LINUX_IME_ONLY=1
+./window-smoke.sh` checks X11/IBus Pinyin composition and the exact `你好` commit in a real child.
+Other IMEs and Wayland are unverified. Pango shapes individual cell graphemes; cross-cell joining,
+accessibility and live profile/theme configuration remain outstanding.
 
 The native pointer sends button presses, releases and bounded wheel steps through SwiftTerm's
 live DEC mouse mode and encoding. X10 sends presses only; VT200-style modes send releases too.
@@ -356,8 +359,8 @@ gesture, refuses larger or invalid text without sending a prefix, and forwards t
 on the ordered terminal worker. The live SwiftTerm mode decides whether to wrap them in bracketed
 paste markers; the shortcut key itself is not forwarded to the child. Clipboard retrieval is an
 SDL/X11 platform operation on explicit user input, not part of the frame loop; SDL may allocate the
-source text before the host can reject an oversized selection. Rich clipboard types and IME
-composition remain unimplemented.
+source text before the host can reject an oversized selection. Rich clipboard types remain
+unimplemented.
 
 Customization classification: this is a host-only diagnostic embedding of the terminal surface,
 not a new public extension component. Store identities, launch admission, input authority,

@@ -5,7 +5,14 @@ typedef struct TWWindow TWWindow;
 // Terminal kinds 15/16/17 carry button (key 0/1/2, action 1 press/3 release), wheel (signed
 // key, one notch per unit), and held-left-button motion. Coordinates are window pixels;
 // the host maps them to grid cells. Kind 18 requests copying the current local selection.
-typedef struct { int kind, x, y, width, height; char text[32]; int key, modifiers, action; } TWEvent;
+// Kind 19 is uncommitted IME text. textCursor/textSelectionLength are Unicode character
+// positions in that preedit, not bytes. It must never be sent to the PTY. A TEXTINPUT event
+// (kind 6) with action=1 is the subsequent commit; ordinary text uses action=0.
+typedef struct {
+    int kind, x, y, width, height;
+    char text[1024];
+    int key, modifiers, action, textCursor, textSelectionLength;
+} TWEvent;
 TWWindow *tw_open(const char *title, int width, int height);
 const char *tw_error(void);
 int tw_next(TWWindow *, TWEvent *);
@@ -22,6 +29,8 @@ void tw_terminal_mode(TWWindow *);
 // payload only after this event; the bridge never puts unbounded clipboard text in TWEvent.
 void tw_project_navigation(TWWindow *, int enabled);
 void tw_project_mode(TWWindow *);
+// Candidate windows follow the current terminal cursor. Coordinates are window pixels.
+void tw_text_input_rect(TWWindow *, int x, int y, int width, int height);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);
 const char *tw_event_text(const TWEvent *);
 // Returns byte count, -1 for content over capacity, -2 for a clipboard error.
@@ -31,7 +40,8 @@ int tw_clipboard_write(const uint8_t *source, int length);
 typedef struct { int offset, length, width; uint32_t foreground, background; int bold, underline; } TWCell;
 // Worker-only Pango/Cairo renderer. Output is RGBA, in fixed 10x22 pixel terminal cells.
 int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *, int columns, int rows,
-                       const char *text, int textLength, int cursorColumn, int cursorRow);
+                       const char *text, int textLength, int cursorColumn, int cursorRow,
+                       const char *preedit, int preeditLength, int preeditCursor, int preeditSelectionLength);
 
 int tw_repaint(TWWindow *);
 
