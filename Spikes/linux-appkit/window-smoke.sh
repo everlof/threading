@@ -188,6 +188,46 @@ xdotool key alt+F4
 wait "$window_pid"
 window_pid=''
 echo 'PASS native functional keys: normal/application modes, modifiers, kitty press/release and ordered editing'
+
+# Pointer events go through SwiftTerm's live DEC mouse mode and protocol encoder. Ordinary
+# project-list clicks still use their own navigation path.
+"$bin/WindowHarness" --terminal "$fixture/store" "$fixture/pty.sock" "$fixture/Alpha" \
+  /usr/bin/python3 "$PWD/tests/terminal_mouse_child.py" >"$fixture/window.log" 2>&1 &
+window_pid=$!
+for attempt in $(seq 1 200); do
+  id=$(xdotool search --name '^Threading terminal - MOUSE OFF$' 2>/dev/null | head -1) || true
+  [[ -n "$id" ]] && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+[[ -n "$id" ]]
+xdotool windowfocus "$id"
+mouse_stage() {
+  local name=$1
+  for attempt in $(seq 1 200); do
+    xdotool getwindowname "$id" | grep -q "MOUSE $name$" && return 0
+    kill -0 "$window_pid" || return 1
+    sleep .05
+  done
+  return 1
+}
+mouse_stage OFF
+xdotool type --clearmodifiers '.'
+xdotool mousemove --window "$id" 25 33 click 1 click 4
+mouse_stage X10
+xdotool mousemove --window "$id" 25 33 click 1
+mouse_stage VT200
+xdotool mousemove --window "$id" 25 33 click 1 click 4 click 5
+for attempt in $(seq 1 200); do
+  xdotool getwindowname "$id" | grep -q 'exited 0$' && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+xdotool getwindowname "$id" | grep 'exited 0$'
+xdotool key alt+F4
+wait "$window_pid"
+window_pid=''
+echo 'PASS native mouse: tracking-off refusal, X10 press, SGR press/release and wheel'
 python3 tests/terminal_clipboard_smoke.py "$bin/WindowHarness" "$fixture/store" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_exit_smoke.py "$bin/WindowHarness"
 python3 tests/project_terminal_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/store" "$fixture/pty.sock" "$fixture" "$PWD/tests/project_terminal_child.py"

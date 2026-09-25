@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 struct TWWindow { SDL_Window *window; SDL_Renderer *renderer; SDL_Texture *texture; int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate; };
+static int tw_modifiers(SDL_Keymod mods) {
+    return ((mods & KMOD_SHIFT) ? 1 : 0) | ((mods & KMOD_ALT) ? 2 : 0)
+        | ((mods & KMOD_CTRL) ? 4 : 0) | ((mods & KMOD_GUI) ? 8 : 0)
+        | ((mods & KMOD_CAPS) ? 16 : 0) | ((mods & KMOD_NUM) ? 32 : 0);
+}
 const char *tw_error(void) { return SDL_GetError(); }
 void tw_close(TWWindow *w) {
     if (!w) return;
@@ -81,11 +86,23 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         else if (e.type == SDL_WINDOWEVENT) {
             if (e.window.event == SDL_WINDOWEVENT_CLOSE) out->kind = 5;
             else if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) out->kind = 1;
+        } else if (w->terminal && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)) {
+            if (e.button.button == SDL_BUTTON_LEFT) out->key = 0;
+            else if (e.button.button == SDL_BUTTON_MIDDLE) out->key = 1;
+            else if (e.button.button == SDL_BUTTON_RIGHT) out->key = 2;
+            else continue;
+            out->kind = 15; out->x = e.button.x; out->y = e.button.y;
+            out->action = e.type == SDL_MOUSEBUTTONUP ? 3 : 1;
+            out->modifiers = tw_modifiers(SDL_GetModState());
         } else if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
             out->kind = 2; out->x = e.button.x; out->y = e.button.y;
         } else if (e.type == SDL_MOUSEWHEEL && e.wheel.y != 0) {
             int y = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
-            out->kind = y > 0 ? 3 : 4;
+            if (w->terminal) {
+                out->kind = 16; out->key = y > 8 ? 8 : (y < -8 ? -8 : y);
+                SDL_GetMouseState(&out->x, &out->y);
+                out->modifiers = tw_modifiers(SDL_GetModState());
+            } else out->kind = y > 0 ? 3 : 4;
         } else if (w->suppressActivation && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && e.key.keysym.sym == w->suppressActivation) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;
@@ -111,12 +128,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 continue;
             }
             out->action = e.type == SDL_KEYUP ? 3 : (e.key.repeat ? 2 : 1);
-            out->modifiers = ((e.key.keysym.mod & KMOD_SHIFT) ? 1 : 0)
-                | ((e.key.keysym.mod & KMOD_ALT) ? 2 : 0)
-                | ((e.key.keysym.mod & KMOD_CTRL) ? 4 : 0)
-                | ((e.key.keysym.mod & KMOD_GUI) ? 8 : 0)
-                | ((e.key.keysym.mod & KMOD_CAPS) ? 16 : 0)
-                | ((e.key.keysym.mod & KMOD_NUM) ? 32 : 0);
+            out->modifiers = tw_modifiers(e.key.keysym.mod);
             switch (e.key.keysym.sym) {
             case SDLK_ESCAPE: out->key = TW_KEY_ESCAPE; break;
             case SDLK_RETURN: case SDLK_KP_ENTER: out->key = TW_KEY_ENTER; break;

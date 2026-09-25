@@ -143,6 +143,17 @@ struct WindowHarness {
         }
     }
 
+    static func modifiers(_ event: TWEvent) -> PTYEmulator.Modifiers {
+        var result: PTYEmulator.Modifiers = []
+        if event.modifiers & 1 != 0 { result.insert(.shift) }
+        if event.modifiers & 2 != 0 { result.insert(.alt) }
+        if event.modifiers & 4 != 0 { result.insert(.ctrl) }
+        if event.modifiers & 8 != 0 { result.insert(.super) }
+        if event.modifiers & 16 != 0 { result.insert(.capsLock) }
+        if event.modifiers & 32 != 0 { result.insert(.numLock) }
+        return result
+    }
+
     @MainActor static func sendFunctional(_ event: TWEvent, to session: GraphicalTerminal) {
         let key: PTYEmulator.Key
         switch event.key {
@@ -173,15 +184,8 @@ struct WindowHarness {
         case Int32(TW_KEY_F12): key = .f12
         default: return
         }
-        var modifiers: PTYEmulator.Modifiers = []
-        if event.modifiers & 1 != 0 { modifiers.insert(.shift) }
-        if event.modifiers & 2 != 0 { modifiers.insert(.alt) }
-        if event.modifiers & 4 != 0 { modifiers.insert(.ctrl) }
-        if event.modifiers & 8 != 0 { modifiers.insert(.super) }
-        if event.modifiers & 16 != 0 { modifiers.insert(.capsLock) }
-        if event.modifiers & 32 != 0 { modifiers.insert(.numLock) }
         guard let action = PTYEmulator.KeyAction(rawValue: Int(event.action)) else { return }
-        session.key(key, modifiers: modifiers, action: action)
+        session.key(key, modifiers: modifiers(event), action: action)
     }
 
     @MainActor static func pasteClipboard(into session: GraphicalTerminal, window: OpaquePointer) {
@@ -291,6 +295,14 @@ struct WindowHarness {
                 if event.kind == 6 { session.send(Data(String(cString: tw_event_text(&event)).utf8)) }
                 if event.kind == 7 { sendFunctional(event, to: session) }
                 if event.kind == 14 { pasteClipboard(into: session, window: window) }
+                if event.kind == 15 {
+                    session.mouseButton(x: Int(event.x), y: Int(event.y), button: Int(event.key),
+                        release: event.action == 3, modifiers: modifiers(event))
+                }
+                if event.kind == 16 {
+                    session.mouseWheel(x: Int(event.x), y: Int(event.y), steps: Int(event.key),
+                        modifiers: modifiers(event))
+                }
             }
         }
     }

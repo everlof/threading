@@ -1,7 +1,9 @@
 #pragma once
 #include <stdint.h>
 typedef struct TWWindow TWWindow;
-// 1 repaint/resize, 2 click, 3 up, 4 down, 5 window quit. Coordinates are window pixels.
+// 1 repaint/resize, 2 project click, 3/4 project navigation, 5 window quit.
+// Terminal kinds 15/16 carry button (key 0/1/2, action 1 press/3 release) and wheel (signed
+// key, one notch per unit). Coordinates are window pixels; the host maps them to grid cells.
 typedef struct { int kind, x, y, width, height; char text[32]; int key, modifiers, action; } TWEvent;
 TWWindow *tw_open(const char *title, int width, int height);
 const char *tw_error(void);

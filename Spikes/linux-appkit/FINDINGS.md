@@ -1874,3 +1874,20 @@ The complete Mac test target passed 9,515 tests (83 skipped) on the refreshed st
 mobile target passed 898 tests (one skipped) on an explicit iOS Simulator destination; the
 runner's default device name was ambiguous among three installed simulators and never reached
 test execution. Neither test target exercises an authenticated Linux Codex installation.
+
+## 69. The Linux terminal routes native pointer input through the live mouse mode
+
+The native window had SDL button and wheel events, but terminal mode ignored them; only the
+project picker used pointer input. The terminal now admits left, middle and right button
+press/release and at most eight wheel steps per event into its existing bounded input queue.
+The serial emulator worker asks the shared SwiftTerm terminal for its current DEC tracking mode,
+modifier policy and wire encoding. Tracking-off events send nothing, X10 reports presses only,
+and VT200-style modes report releases. Shift bypasses reporting unless the child requested shift
+capture. Grid positions derive from the diagnostic renderer's fixed cell dimensions; events
+outside the visible grid are ignored. Project-list pointer behavior remains separate.
+
+The full Docker/Xvfb `window-smoke.sh` suite passed. Its new real PTY child switched from tracking
+off to X10/SGR and then VT200/SGR while native X clicks and wheel events arrived. It checked no
+bytes in the off state and exact press, release and wheel escape sequences in the enabled states.
+Motion/drag reporting, local selection/copy and normal-buffer scrollback are still missing; this
+test does not establish pointer behavior under IME or a non-X11 compositor.
