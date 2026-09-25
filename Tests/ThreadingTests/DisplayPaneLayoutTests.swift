@@ -1379,6 +1379,50 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         XCTAssertTrue(titles.contains(L10n.string("Copy Image")), "the rest should still be there")
     }
 
+    func testRightClickingDisplayedImageOpensItsFooterActions() throws {
+        let (content, url) = try imageOnDisk(size: NSSize(width: 160, height: 100))
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let pane = paneShowing(content)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = pane.view
+        pane.view.layoutSubtreeIfNeeded()
+        let preview = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.first
+        )
+
+        let point = NSPoint(x: preview.bounds.midX, y: preview.bounds.midY)
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: preview.convert(point, to: nil),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+        preview.rightMouseDown(with: event)
+        XCTAssertNotNil(pane.contentMenuSession)
+        XCTAssertEqual(
+            descendants(of: pane.view)
+                .filter { $0.accessibilityRole() == .menuItem }
+                .compactMap { $0.accessibilityTitle() },
+            pane.makeContentEntries().compactMap(\.itemTitle)
+        )
+
+        ThemedMenuPresenter.dismiss(pane.contentMenuSession)
+        XCTAssertTrue(preview.accessibilityPerformShowMenu())
+        XCTAssertNotNil(pane.contentMenuSession)
+        ThemedMenuPresenter.dismiss(pane.contentMenuSession)
+    }
+
     /// Focus, a key, a pointer and an accessibility action all reach the same place. Asserted
     /// through the *refusal* path — a file that is not there — because the success path opens a
     /// real system window, which is the one thing a test in `fast` must not do.

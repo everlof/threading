@@ -87,18 +87,25 @@ extension DisplayPaneController {
   }
 
   @objc func contentMenuButtonClicked(_ sender: ThemedButton) {
-    let entries = makeContentEntries()
-    guard entries.contains(where: \.isItem) else { return }
+    presentContentMenu(from: sender, anchor: .control)
+  }
 
-    // The button sits at the bottom edge of the pane; the presenter measures the room and
-    // opens the panel above it on its own.
+  /// The footer button and the image's secondary click share the same actions. The latter
+  /// anchors at the pointer (or at the image for Accessibility's Show Menu action).
+  @discardableResult
+  func presentContentMenu(from source: NSView, anchor: ThemedMenuAnchor) -> Bool {
+    let entries = makeContentEntries()
+    guard entries.contains(where: \.isItem) else { return false }
+
     contentMenuSession = ThemedMenuPresenter.present(
       ThemedMenuPresentation(entries: entries, minimumWidth: DisplayPaneDefaults.contentMenuWidth),
-      from: sender,
+      from: source,
+      anchor: anchor,
       selectedEntryIndex: nil,
       onChoose: { _, item in item.onChoose?() },
       onDismiss: { [weak self] in self?.contentMenuSession = nil }
     )
+    return contentMenuSession != nil
   }
 
   // MARK: Image Actions

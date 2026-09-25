@@ -590,6 +590,10 @@ final class DisplayPaneController: NSViewController {
     // both line-break modes here already say may be shortened. Below
     // `.fittingSizeCompression` they truncate instead of pushing, and the panel goes on
     // costing the window its own chrome and nothing else.
+    imageView.onContextMenu = { [weak self] anchor in
+      guard let self else { return false }
+      return self.presentContentMenu(from: self.imageView, anchor: anchor)
+    }
     view.addSubview(imageView)
     view.addSubview(captionLabel)
     view.addSubview(contentMenuButton)

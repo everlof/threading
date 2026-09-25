@@ -880,6 +880,8 @@ to inspect, so a click, Space/Return, the trackpad's preview gesture, VoiceOver'
 and Accessibility's Show Menu action report a semantic menu anchor to the host: in Attachments,
 the large preview therefore presents the exact same Open, Finder, Copy, comparison, and chat
 entries as its selected chronology row rather than owning a second file-action list in Design.
+For a plain image tab, the display pane passes that anchor to the same content-menu builder its
+footer `⋯` uses, so the pointer and Accessibility routes offer the footer's current image actions.
 The app-owned inspector begins fitted, toggles Fit/100% on double-click or Z, magnifies around the
 pointer, pans, and walks the source collection with arrows, swipes, or its thumbnail rail. Space,
 Escape, or a click on the dimmed window around it closes and restores the source's focus — the

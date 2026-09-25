@@ -4196,7 +4196,8 @@ panel, which has no back button or address bar to get you home again.
 
 The **⋯** button beside the caption acts on what is shown — copy the image or the HTML,
 reveal the file in Finder, or open the document in your browser when the panel is too narrow
-for it.
+for it. Right-click a displayed image for the same actions at the pointer; Accessibility's
+**Show Menu** action opens them from the image as well.
 
 The panel belongs to a session, not to the window. Each session keeps its own content, so
 switching sessions switches what the panel shows, and a session that has displayed nothing
