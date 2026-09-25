@@ -304,8 +304,10 @@ text-control stack nor other IMEs, Wayland, accessibility, or release readiness.
 The next Linux AT-SPI probe uses ATK's bridge in the native SDL window. It publishes the mounted
 project and saved-runtime rows with Unicode names, selection state and actions that enter the
 same navigation route as pointer input. A client can discover only the bounded viewport and open
-a real project terminal. The terminal advertises that its text is unavailable; geometry, focus,
-complete selection, screen-reader inspection and other product surfaces remain unproven.
+a real project terminal. The terminal now projects its visible grid through read-only ATK Text,
+including Unicode character and caret offsets and changed-span notifications. Concealed cells
+are masked and hidden scrollback is omitted. Geometry, focus, complete selection,
+screen-reader inspection and other product surfaces remain unproven.
 
 ## Evidence required
 

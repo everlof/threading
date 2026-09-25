@@ -342,6 +342,7 @@ struct WindowHarness {
         tw_terminal_mode(window)
         tw_project_navigation(window, allowsProjects ? 1 : 0)
         tw_accessibility_show_terminal(window, "Terminal starting")
+        tw_accessibility_terminal_text(window, nil, 0, -1)
         session.setPreedit(nil)
         defer { session.setPreedit(nil) }
         session.invalidateFrame()
@@ -390,6 +391,10 @@ struct WindowHarness {
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
                 frame.title.withCString { tw_accessibility_show_terminal(window, $0) }
+                frame.accessibleText.withCString {
+                    tw_accessibility_terminal_text(window, $0, Int32(frame.accessibleText.utf8.count),
+                                                   Int32(frame.accessibleCaret))
+                }
                 let caretX = frame.cursorColumn >= 0 ? frame.cursorColumn * 10 : 8
                 let caretY = frame.cursorColumn >= 0 ? frame.cursorRow * 22 : height - 22
                 tw_text_input_rect(window, Int32(max(0, min(width - 10, caretX))),
@@ -450,6 +455,7 @@ struct WindowHarness {
                                               width: Int, height: Int) throws {
         let accessible = "Terminal unavailable: \(boundedAccessibilityLabel(message))"
         accessible.withCString { tw_accessibility_show_terminal(window, $0) }
+        tw_accessibility_terminal_text(window, nil, 0, -1)
         let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
         root.title = "Terminal unavailable"
         root.addSubview(Specimen.Message(frame: NSRect(x: 12, y: 8,

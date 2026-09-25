@@ -2087,7 +2087,33 @@ passed with no session bus. The IBus Pinyin lane passed with the AT-SPI bridge a
 visible preedit, no early PTY bytes and the exact Unicode commit. A final focused AT-SPI rerun
 passed after the bridge's row-identity and shutdown handling changes.
 
-The terminal currently exposes its title and an explicit text-unavailable description, not its
+At this point the terminal exposed its title and an explicit text-unavailable description, not its
 screen contents. Component geometry and hit testing, a full selection interface, focus/event
 semantics, actual screen-reader inspection and non-X11 desktop evidence remain open. The ATK
 bridge is a measured platform leaf; it does not settle the eventual Linux toolkit or packaging.
+
+## 78. The Linux terminal projects its visible screen as AT-SPI text
+
+The terminal node now implements read-only ATK Text. Its content comes from the emulator snapshot
+already used by the Pango drawing worker, so it reflects only mounted viewport rows and does not
+walk scrollback on the UI thread. The worker drops unused trailing columns and rows, preserves
+whitespace through the cursor, skips wide-cell continuations, and replaces concealed cells with
+spaces before publishing. A separate 64 KiB text budget yields an explicit overflow message
+instead of an oversized AT-SPI reply. The C bridge validates UTF-8, maps Unicode character
+offsets, and emits insert/remove notifications for the changed span plus caret changes. Text is
+cleared when the terminal starts, fails, or yields to the navigator so a retained accessibility
+reference cannot read stale output.
+
+The Ubuntu 24.04 ARM/Xvfb AT-SPI client opened a project through the navigator action and read
+the live PTY's visible `界` and combining-accent text through the Text interface. It verified
+Unicode character count and lookup, a valid caret offset, refusal of remote caret movement,
+absence of concealed text and offscreen scrollback, then sent input and observed the updated
+screen without restarting the window. The focused `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh`
+lane passed.
+The full `./window-smoke.sh` suite also passed, covering the renderer, PTY, native input,
+scrollback, clipboard, saved-terminal and agent paths, reattach, and clean-profile startup with
+the text projection in every prepared frame.
+
+Component geometry and hit testing, selection, focus, IME preedit announcements, actual
+screen-reader inspection and non-X11 desktop evidence remain open. The published text is a
+bounded visible-screen projection, not a transcript or a full terminal accessibility model.

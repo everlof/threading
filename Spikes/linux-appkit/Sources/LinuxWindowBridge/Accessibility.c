@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64 };
+enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
+       MAX_TERMINAL_TEXT = 64 * 1024 };
 
 typedef struct {
     AtkObject parent;
@@ -23,7 +24,18 @@ static void action_interface_init(AtkActionIface *iface);
 G_DEFINE_TYPE_WITH_CODE(AccessibleNode, accessible_node, ATK_TYPE_OBJECT,
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_ACTION, action_interface_init))
 
-static AccessibleNode *app, *frame, *list, *terminal;
+typedef struct {
+    AccessibleNode parent;
+    char *text;
+    int length, characters, caret;
+} TerminalNode;
+typedef struct { AccessibleNodeClass parent; } TerminalNodeClass;
+static void text_interface_init(AtkTextIface *iface);
+G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, accessible_node_get_type(),
+                        G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, text_interface_init))
+
+static AccessibleNode *app, *frame, *list;
+static TerminalNode *terminal;
 static AccessibleNode *activeList;
 static uint32_t eventType = UINT32_MAX, generation = 1;
 static int bridgeReady;
@@ -169,15 +181,146 @@ static void action_interface_init(AtkActionIface *iface) {
     iface->do_action = action_do;
 }
 
+static gchar *terminal_get_text(AtkText *text, gint start, gint end) {
+    TerminalNode *node = (TerminalNode *)text;
+    if (start < 0 || start > node->characters || end < -1) return g_strdup("");
+    if (end == -1 || end > node->characters) end = node->characters;
+    if (end < start) return g_strdup("");
+    const char *first = g_utf8_offset_to_pointer(node->text, start);
+    const char *last = g_utf8_offset_to_pointer(first, end - start);
+    return g_strndup(first, (gsize)(last - first));
+}
+static gunichar terminal_character(AtkText *text, gint offset) {
+    TerminalNode *node = (TerminalNode *)text;
+    if (offset < 0 || offset >= node->characters) return 0;
+    return g_utf8_get_char(g_utf8_offset_to_pointer(node->text, offset));
+}
+static gint terminal_character_count(AtkText *text) {
+    return ((TerminalNode *)text)->characters;
+}
+static gint terminal_caret(AtkText *text) {
+    return ((TerminalNode *)text)->caret;
+}
+static gint terminal_selections(AtkText *text) { (void)text; return 0; }
+static gboolean word_character(gunichar value) {
+    return g_unichar_isalnum(value) || value == '_';
+}
+static gchar *terminal_string_at(AtkText *text, gint offset, AtkTextGranularity granularity,
+                                 gint *start, gint *end) {
+    TerminalNode *node = (TerminalNode *)text;
+    *start = *end = -1;
+    if (offset < 0 || offset >= node->characters) return NULL;
+    const char *begin = node->text;
+    const char *limit = begin + node->length;
+    const char *here = g_utf8_offset_to_pointer(begin, offset);
+    const char *left = here, *right = g_utf8_next_char(here);
+    int first = offset, last = offset + 1;
+    if (granularity == ATK_TEXT_GRANULARITY_WORD) {
+        if (!word_character(g_utf8_get_char(left)) && left > begin) {
+            left = g_utf8_prev_char(left); first--;
+        }
+        gboolean inWord = word_character(g_utf8_get_char(left));
+        right = left;
+        last = first;
+        while (left > begin) {
+            const char *previous = g_utf8_prev_char(left);
+            if (word_character(g_utf8_get_char(previous)) != inWord) break;
+            left = previous; first--;
+        }
+        while (right < limit && word_character(g_utf8_get_char(right)) == inWord) {
+            right = g_utf8_next_char(right); last++;
+        }
+    } else if (granularity == ATK_TEXT_GRANULARITY_LINE ||
+               granularity == ATK_TEXT_GRANULARITY_PARAGRAPH) {
+        while (left > begin) {
+            const char *previous = g_utf8_prev_char(left);
+            if (g_utf8_get_char(previous) == '\n') break;
+            left = previous; first--;
+        }
+        right = here; last = offset;
+        while (right < limit && g_utf8_get_char(right) != '\n') {
+            right = g_utf8_next_char(right); last++;
+        }
+        if (right < limit) { right++; last++; }
+    } else if (granularity != ATK_TEXT_GRANULARITY_CHAR) {
+        return NULL;
+    }
+    *start = first; *end = last;
+    return g_strndup(left, (gsize)(right - left));
+}
+static void text_interface_init(AtkTextIface *iface) {
+    iface->get_text = terminal_get_text;
+    iface->get_character_at_offset = terminal_character;
+    iface->get_character_count = terminal_character_count;
+    iface->get_caret_offset = terminal_caret;
+    iface->get_n_selections = terminal_selections;
+    iface->get_string_at_offset = terminal_string_at;
+}
+static void terminal_node_finalize(GObject *object) {
+    g_free(((TerminalNode *)object)->text);
+    G_OBJECT_CLASS(terminal_node_parent_class)->finalize(object);
+}
+static void terminal_node_class_init(TerminalNodeClass *klass) {
+    G_OBJECT_CLASS(klass)->finalize = terminal_node_finalize;
+}
+static void terminal_node_init(TerminalNode *node) {
+    node->text = g_strdup("");
+    node->caret = -1;
+}
+static void set_terminal_text(const char *value, int length, int caret) {
+    if (!terminal) return;
+    if (!value) { value = ""; length = 0; caret = -1; }
+    if (length < 0 || length > MAX_TERMINAL_TEXT ||
+        memchr(value, 0, (size_t)length) || !g_utf8_validate(value, length, NULL)) return;
+    int characters = (int)g_utf8_strlen(value, length);
+    if (caret < -1 || caret > characters) caret = -1;
+    int changed = terminal->length != length || memcmp(terminal->text, value, (size_t)length) != 0;
+    int oldCaret = terminal->caret;
+    if (changed) {
+        char *oldText = terminal->text;
+        const char *oldFirst = oldText, *newFirst = value;
+        const char *oldLast = oldText + terminal->length, *newLast = value + length;
+        int firstCharacter = 0;
+        while (oldFirst < oldLast && newFirst < newLast &&
+               g_utf8_get_char(oldFirst) == g_utf8_get_char(newFirst)) {
+            oldFirst = g_utf8_next_char(oldFirst);
+            newFirst = g_utf8_next_char(newFirst);
+            firstCharacter++;
+        }
+        while (oldLast > oldFirst && newLast > newFirst) {
+            const char *oldPrevious = g_utf8_prev_char(oldLast);
+            const char *newPrevious = g_utf8_prev_char(newLast);
+            if (g_utf8_get_char(oldPrevious) != g_utf8_get_char(newPrevious)) break;
+            oldLast = oldPrevious; newLast = newPrevious;
+        }
+        int removed = (int)g_utf8_strlen(oldFirst, oldLast - oldFirst);
+        int inserted = (int)g_utf8_strlen(newFirst, newLast - newFirst);
+        char *removedText = removed ? g_strndup(oldFirst, (gsize)(oldLast - oldFirst)) : NULL;
+        char *insertedText = inserted ? g_strndup(newFirst, (gsize)(newLast - newFirst)) : NULL;
+        terminal->text = g_strndup(value, (gsize)length);
+        terminal->length = length;
+        terminal->characters = characters;
+        // Emit only the changed Unicode span; the source is one bounded visible frame.
+        if (removed) g_signal_emit_by_name(terminal, "text-remove::system", firstCharacter, removed, removedText);
+        if (inserted) g_signal_emit_by_name(terminal, "text-insert::system", firstCharacter, inserted, insertedText);
+        g_free(removedText);
+        g_free(insertedText);
+        g_free(oldText);
+    }
+    terminal->caret = caret;
+    if (oldCaret != caret) g_signal_emit_by_name(terminal, "text-caret-moved", caret);
+}
+
 void tw_accessibility_open(void) {
     if (!getenv("DBUS_SESSION_BUS_ADDRESS") || bridgeReady) return;
     eventType = SDL_RegisterEvents(1);
     app = new_node(ATK_ROLE_APPLICATION, "Threading Linux");
     frame = new_node(ATK_ROLE_FRAME, "Threading Linux window");
     list = new_node(ATK_ROLE_LIST, "Projects");
-    terminal = new_node(ATK_ROLE_TERMINAL, "Terminal");
-    atk_object_set_description(ATK_OBJECT(terminal),
-        "Terminal text is not yet exposed to assistive technology.");
+    terminal = g_object_new(terminal_node_get_type(), NULL);
+    atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
+    atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
+    atk_object_set_description(ATK_OBJECT(terminal), "Visible terminal screen; read only.");
     add_child(app, frame);
     add_child(frame, list);
     activeList = list;
@@ -277,12 +420,18 @@ void tw_accessibility_end_list(TWWindow *window) {
         }
     }
     show_content(list);
+    set_terminal_text(NULL, 0, -1);
 }
 void tw_accessibility_show_terminal(TWWindow *window, const char *name) {
     (void)window;
     if (!bridgeReady) return;
     if (name)
-        set_name_if_changed(terminal, strnlen(name, 512) < 512 ? name : "[terminal title exceeds 512 bytes]");
-    show_content(terminal);
+        set_name_if_changed((AccessibleNode *)terminal, strnlen(name, 512) < 512 ? name : "[terminal title exceeds 512 bytes]");
+    show_content((AccessibleNode *)terminal);
+}
+void tw_accessibility_terminal_text(TWWindow *window, const char *utf8, int length, int caret) {
+    (void)window;
+    if (!bridgeReady) return;
+    set_terminal_text(utf8, length, caret);
 }
 #endif

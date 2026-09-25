@@ -337,7 +337,7 @@ off the PTY, and Pango draws a bounded Unicode preview beside the terminal curso
 text enters the same ordered input path as other text. `THREADING_LINUX_IME_ONLY=1
 ./window-smoke.sh` checks X11/IBus Pinyin composition and the exact `你好` commit in a real child.
 Other IMEs and Wayland are unverified. Pango shapes individual cell graphemes; cross-cell joining,
-accessibility and live profile/theme configuration remain outstanding.
+complete accessibility and live profile/theme configuration remain outstanding.
 
 The native pointer sends button presses, releases and bounded wheel steps through SwiftTerm's
 live DEC mouse mode and encoding. X10 sends presses only; VT200-style modes send releases too.
@@ -434,10 +434,13 @@ names even where the diagnostic bitmap font draws `?`; selection state and `sele
 navigation route as pointer and keyboard input. The list describes its visible range and never
 materializes offscreen accessibility rows. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh`
 queries that tree with an AT-SPI client, scrolls a 15-project list, and opens a Unicode-named
-project into a real PTY through the row action. The terminal node states that its text is not yet
-exposed. This is initial navigator accessibility, not screen-reader parity: terminal text,
-component geometry and hit testing, a complete selection interface, and focus/event coverage
-remain open.
+project into a real PTY through the row action. The terminal node exposes the current visible
+screen through the read-only ATK Text interface. Unicode character and caret offsets come from the
+same bounded grid as rendering; concealed cells are blanked, hidden scrollback is omitted, and
+text-change events carry only changed spans. The text projection is capped at 64 KiB, with an
+explicit overflow message. This is an initial accessibility path, not screen-reader parity:
+component geometry and hit testing, a complete selection interface, focus/event coverage,
+and native screen-reader inspection remain open.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new

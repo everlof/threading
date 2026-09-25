@@ -133,8 +133,9 @@ not the shipping Mac sidebar or a public extension surface.
 The Linux window's ATK bridge projects those mounted rows into AT-SPI, including durable IDs,
 bounded Unicode names, selected state and actions. Actions re-enter SDL's existing project-navigation
 events; the bridge neither reads the store nor owns runtime decisions. The terminal currently
-exposes a named placeholder without its screen text, and component geometry, focus and complete
-selection semantics remain open accessibility work.
+exposes a read-only ATK Text projection of its visible, bounded grid, with Unicode offsets,
+concealed-cell masking and changed-span notifications. It does not traverse hidden scrollback.
+Component geometry, focus and complete selection semantics remain open accessibility work.
 
 Graphical restoration across app restarts is available through explicit
 `--attach STORE SOCKET TERMINAL_UUID` and through selection
