@@ -2290,3 +2290,22 @@ was 7.28 ms with font setup. The host still owns row identity, selection, persis
 accessibility actions. This is a diagnostic Linux renderer, not a Mac UI change or a finished
 shipping sidebar. Both the AT-SPI-only journey and the complete `./window-smoke.sh` suite passed;
 the architecture and theme boundary checks remained clean.
+
+## 85. The native navigator has one AT-SPI selection owner
+
+The Linux list previously exposed `SELECTABLE` and `SELECTED` row states plus a row `select`
+action, but AT-SPI clients could not ask the list which child was selected or select one through
+the standard Selection interface. A dedicated ATK list type now exposes one selected child by
+mounted row index. Its selection write enqueues the existing generation-checked native row action;
+the window still owns pointer, keyboard and accessibility selection. Clearing or selecting every
+row is refused because nonempty project, saved-runtime and account lists use one current choice.
+Changes to mounted row identities or selected state emit one list selection-change notification;
+unchanged redraws emit none. A list hidden by the terminal refuses new remote selection, so an
+old accessibility proxy cannot take input ownership from the terminal.
+
+The real Xvfb/AT-SPI journey selected a project through the list interface, observed pointer and
+keyboard changes through that interface, retained one selected child while scrolling a 15-project
+catalogue, and verified the hidden-list refusal after opening the Unicode-named project into a
+real PTY. The focused `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh` passed along with the
+architecture and theme checks. This remains a bounded diagnostic list; terminal text selection,
+native screen-reader inspection and broader focus/event coverage remain open.

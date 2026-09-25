@@ -70,6 +70,15 @@ with log_path.open('w+') as log:
         assert first.get_role_name() == 'list item'
         assert re.fullmatch(r'[0-9A-Fa-f-]{36}', first.get_accessible_id())
         assert first.get_state_set().contains(Atspi.StateType.SELECTED)
+        selection = listed.get_selection_iface()
+        assert selection is not None
+        assert selection.get_n_selected_children() == 1
+        assert selection.get_selected_child(0).get_accessible_id() == first.get_accessible_id()
+        assert selection.is_child_selected(0)
+        assert not selection.is_child_selected(1)
+        assert not selection.clear_selection(), 'single-selection list accepted an empty selection'
+        assert not selection.deselect_child(0)
+        assert not selection.select_all(), 'single-selection list accepted all rows'
         window = subprocess.run(['xdotool', 'search', '--name', '^Threading experiment - '],
                                 capture_output=True, text=True, timeout=5)
         assert window.returncode == 0
@@ -98,12 +107,19 @@ with log_path.open('w+') as log:
             int(window_geometry['X']), int(window_geometry['Y']), 800, 480)
         assert rect(first_component, Atspi.CoordType.SCREEN) == (
             int(window_geometry['X']) + 12, int(window_geometry['Y']) + 56, 776, 44)
+        assert selection.select_child(1), 'AT-SPI list selection was refused'
+        eventually(lambda: window_title().endswith('/Project02'), 'AT-SPI list selected second project')
+        eventually(lambda: selection.get_selected_child(0)
+                   if selection.is_child_selected(1) else None, 'AT-SPI list selected-child projection')
+        assert selection.get_n_selected_children() == 1
+        assert not selection.is_child_selected(0)
         subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '124', 'click', '1'],
                        check=True, timeout=5)
         eventually(lambda: window_title().endswith('/Project02'), 'second row native click')
         subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '78', 'click', '1'],
                        check=True, timeout=5)
         eventually(lambda: window_title().endswith('/Project01'), 'first row native click')
+        eventually(lambda: selection.is_child_selected(0), 'pointer selection projected through AT-SPI')
         subprocess.run(['import', '-window', window_id,
                         str(Path.cwd() / 'out' / 'accessibility-list.png')], check=True, timeout=5)
         subprocess.run(['xdotool', 'windowsize', window_id, '801', '481'], check=True, timeout=5)
@@ -129,6 +145,8 @@ with log_path.open('w+') as log:
         assert listed.get_child_count() == 8
         assert listed.get_child_at_index(7).get_state_set().contains(Atspi.StateType.SELECTED)
         assert listed.get_child_at_index(7).get_state_set().contains(Atspi.StateType.FOCUSED)
+        assert selection.get_n_selected_children() == 1
+        assert selection.is_child_selected(7)
         target_index = next(index for index in range(listed.get_child_count())
                             if '界' in listed.get_child_at_index(index).get_name())
         target = listed.get_child_at_index(target_index)
@@ -149,9 +167,13 @@ with log_path.open('w+') as log:
                               'AT-SPI selection state')
         assert selected.get_name().startswith(name)
         assert selected.get_state_set().contains(Atspi.StateType.FOCUSED)
+        eventually(lambda: selection.is_child_selected(target_index),
+                   'row action projected through AT-SPI selection')
+        assert selection.get_selected_child(0).get_accessible_id() == target.get_accessible_id()
         assert selected.get_action_iface().do_action(1), 'AT-SPI open action was refused'
         terminal = eventually(lambda: content(app) if content(app).get_role_name() == 'terminal'
                               else None, 'terminal accessible after row action')
+        assert not selection.select_child(0), 'hidden list accepted selection while terminal owns input'
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
         assert terminal.get_child_count() == 0

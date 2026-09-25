@@ -31,6 +31,12 @@ static void component_interface_init(AtkComponentIface *iface);
 G_DEFINE_TYPE_WITH_CODE(ComponentNode, component_node, accessible_node_get_type(),
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_COMPONENT, component_interface_init))
 
+typedef struct { ComponentNode parent; } ListNode;
+typedef struct { ComponentNodeClass parent; } ListNodeClass;
+static void selection_interface_init(AtkSelectionIface *iface);
+G_DEFINE_TYPE_WITH_CODE(ListNode, list_node, component_node_get_type(),
+                        G_IMPLEMENT_INTERFACE(ATK_TYPE_SELECTION, selection_interface_init))
+
 typedef struct {
     ComponentNode parent;
     char *text;
@@ -232,6 +238,59 @@ static void action_interface_init(AtkActionIface *iface) {
     iface->get_name = action_name;
     iface->do_action = action_do;
 }
+
+static gint selected_row_index(void) {
+    if (!list) return -1;
+    for (guint i = 0; i < list->children->len; i++) {
+        AccessibleNode *row = g_ptr_array_index(list->children, i);
+        if (!row->retired && row->selected) return (gint)i;
+    }
+    return -1;
+}
+static gboolean list_select_child(AtkSelection *selection, gint index) {
+    (void)selection;
+    if (!list || activeList != list || index < 0 || (guint)index >= list->children->len) return FALSE;
+    AccessibleNode *row = g_ptr_array_index(list->children, (guint)index);
+    return row->selected || action_do(ATK_ACTION(row), 0);
+}
+static gboolean list_clear_selection(AtkSelection *selection) {
+    (void)selection;
+    return FALSE; // Navigation always has one selected row when the list is nonempty.
+}
+static AtkObject *list_ref_selection(AtkSelection *selection, gint index) {
+    (void)selection;
+    gint selected = selected_row_index();
+    return index == 0 && selected >= 0 ? node_ref_child(ATK_OBJECT(list), selected) : NULL;
+}
+static gint list_selection_count(AtkSelection *selection) {
+    (void)selection;
+    return selected_row_index() >= 0 ? 1 : 0;
+}
+static gboolean list_child_selected(AtkSelection *selection, gint index) {
+    (void)selection;
+    if (!list || index < 0 || (guint)index >= list->children->len) return FALSE;
+    AccessibleNode *row = g_ptr_array_index(list->children, (guint)index);
+    return !row->retired && row->selected;
+}
+static gboolean list_remove_selection(AtkSelection *selection, gint index) {
+    (void)selection; (void)index;
+    return FALSE;
+}
+static gboolean list_select_all(AtkSelection *selection) {
+    (void)selection;
+    return FALSE; // The project and picker lists are single-selection.
+}
+static void selection_interface_init(AtkSelectionIface *iface) {
+    iface->add_selection = list_select_child;
+    iface->clear_selection = list_clear_selection;
+    iface->ref_selection = list_ref_selection;
+    iface->get_selection_count = list_selection_count;
+    iface->is_child_selected = list_child_selected;
+    iface->remove_selection = list_remove_selection;
+    iface->select_all_selection = list_select_all;
+}
+static void list_node_class_init(ListNodeClass *klass) { (void)klass; }
+static void list_node_init(ListNode *node) { (void)node; }
 
 static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
                                gint *x, gint *y, gint *width, gint *height) {
@@ -505,7 +564,9 @@ void tw_accessibility_open(TWWindow *window) {
     eventType = SDL_RegisterEvents(1);
     app = new_node(ATK_ROLE_APPLICATION, "Threading Linux");
     frame = new_component(ATK_ROLE_FRAME, "Threading Linux window");
-    list = new_component(ATK_ROLE_LIST, "Projects");
+    list = g_object_new(list_node_get_type(), NULL);
+    atk_object_set_role(ATK_OBJECT(list), ATK_ROLE_LIST);
+    atk_object_set_name(ATK_OBJECT(list), "Projects");
     terminal = g_object_new(terminal_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
     atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
@@ -608,6 +669,7 @@ void tw_accessibility_end_list(TWWindow *window) {
         AccessibleNode *row = g_ptr_array_index(list->children, (guint)i);
         same = row->id && strcmp(row->id, pending.rows[i].id) == 0;
     }
+    int selectionChanged = !same;
     if (!same) {
         set_focused(NULL);
         clear_children(list);
@@ -632,11 +694,13 @@ void tw_accessibility_end_list(TWWindow *window) {
             if (row->selected != pending.rows[i].selected) {
                 row->selected = pending.rows[i].selected;
                 atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SELECTED, row->selected);
+                selectionChanged = 1;
             }
         }
     }
     show_content(list);
     refresh_focus();
+    if (selectionChanged) g_signal_emit_by_name(list, "selection-changed");
     set_terminal_text(NULL, 0, -1, NULL, 0);
 }
 void tw_accessibility_show_terminal(TWWindow *window, const char *name) {

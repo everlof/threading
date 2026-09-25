@@ -310,8 +310,10 @@ are masked and hidden scrollback is omitted. The mounted selected row or termina
 window focus into AT-SPI state. Mounted rows and the terminal now have ATK Component bounds and
 point lookup tied to the native window. Visible terminal text now has fixed-cell character
 rectangles and point-to-offset lookup, including two-column glyphs and combining scalars.
-Bounds-change notifications, comprehensive focus behavior, complete selection, screen-reader
-inspection and other product surfaces remain unproven.
+The bounded navigator now shapes mounted Unicode labels through Pango, and its ATK list exposes
+single-child selection through the native navigation route. Bounds-change notifications,
+comprehensive focus behavior, terminal text selection, screen-reader inspection and other product
+surfaces remain unproven.
 
 ## Evidence required
 
