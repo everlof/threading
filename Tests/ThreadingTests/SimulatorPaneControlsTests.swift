@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ThreadingSimulatorKit
 import XCTest
+import os
 @testable import Threading
 
 /// The pane's capture, recording, touch, annotation and presenter controls, driven through the
@@ -44,12 +45,12 @@ final class SimulatorPaneControlsTests: XCTestCase {
         XCTAssertFalse(preferences.showsLiveTouches, "A device screen is the person's content")
         XCTAssertEqual(preferences.style, .standard)
 
-        var notifications = 0
+        let notifications = OSAllocatedUnfairLock(initialState: 0)
         let observer = NotificationCenter.default.addObserver(
             forName: SimulatorTouchPreferences.didChange,
             object: preferences,
             queue: nil
-        ) { _ in notifications += 1 }
+        ) { _ in notifications.withLock { $0 += 1 } }
         defer { NotificationCenter.default.removeObserver(observer) }
 
         preferences.showsLiveTouches = true
@@ -59,7 +60,10 @@ final class SimulatorPaneControlsTests: XCTestCase {
         let reread = SimulatorTouchPreferences(defaults: defaults)
         XCTAssertTrue(reread.showsLiveTouches)
         XCTAssertEqual(reread.style, SimulatorTouchStyle(color: .yellow, size: .large, showsTrail: false))
-        XCTAssertEqual(notifications, 2, "An unchanged write must not redraw every pane")
+        XCTAssertEqual(
+            notifications.withLock { $0 }, 2,
+            "An unchanged write must not redraw every pane"
+        )
     }
 
     func testTouchToggleIsOneRememberedChoiceAcrossPanes() async throws {
