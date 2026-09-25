@@ -1,6 +1,35 @@
 import Foundation
 import ThreadingRemoteKit
 
+/// The part of a remote client that decides whether an attachment request still targets the
+/// route the model currently trusts.
+///
+/// An open workspace survives host recovery. SwiftUI therefore preserves its preview while its
+/// `RemoteClient` value moves from a dead origin to the recovered one. The load task uses this
+/// identity so that move is an observable retry boundary rather than merely a new value captured
+/// by a task that already ended.
+struct RemoteAttachmentRouteIdentity: Hashable {
+    let origin: URL
+    let endpointKind: RemoteHostEndpointKind
+
+    init(client: RemoteClient) {
+        origin = client.link.baseURL
+        endpointKind = client.endpointKind
+    }
+}
+
+/// A preview also retries when it becomes the current gallery page again. Keeping both reasons
+/// in one task identity preserves that lifecycle retry while adding route recovery.
+struct RemoteAttachmentPreviewTaskIdentity: Hashable {
+    let route: RemoteAttachmentRouteIdentity
+    let isCurrentPage: Bool
+
+    init(client: RemoteClient, isCurrentPage: Bool) {
+        route = RemoteAttachmentRouteIdentity(client: client)
+        self.isCurrentPage = isCurrentPage
+    }
+}
+
 /// When a preview page asks the paired Mac for one attachment's whole bytes.
 ///
 /// The rule is deliberately about *what the page holds*, never about whether an attempt is

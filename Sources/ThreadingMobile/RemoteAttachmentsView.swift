@@ -364,6 +364,10 @@ struct RemoteAttachmentPreviewContent: View {
     /// attachment list.
     private let onLoadedData: ((Data) -> Void)?
 
+    private var loadTaskIdentity: RemoteAttachmentPreviewTaskIdentity {
+        RemoteAttachmentPreviewTaskIdentity(client: client, isCurrentPage: isCurrentPage)
+    }
+
     init(
         sessionID: String,
         attachment: RemoteAttachmentDTO,
@@ -454,7 +458,10 @@ struct RemoteAttachmentPreviewContent: View {
             }
         }
         .background(theme.ground)
-        .task(id: isCurrentPage) { await load() }
+        // The workspace stays mounted while socket recovery replaces its route. Keying this
+        // task by that route gives a failed preview a fresh attempt through the recovered client;
+        // `load()` still returns immediately once the page already holds its bytes.
+        .task(id: loadTaskIdentity) { await load() }
     }
 
     private func reportImageSize(in data: Data) {

@@ -840,10 +840,11 @@ ledger's own store already separates a cancelled request from a failed one so th
 appearance retries, and cells reappear constantly while a page gets one chance.
 
 So the page takes its chance more than once. `RemoteAttachmentPreviewContent` runs its load as
-`.task(id: isCurrentPage)`, so the attachment a person is actually looking at asks again the
-moment it becomes the current page, and a page that already holds its bytes costs that nothing.
-Two overlapping requests for one 24 MB-bounded file cost a duplicate GET; a page that stops
-asking costs the person the file.
+an identified task keyed by both current-page state and the selected route. The attachment a
+person is actually looking at therefore asks again when it becomes current, and a preview still
+mounted over a failed origin asks through the recovered client when host refresh selects its
+replacement. A page that already holds its bytes costs that nothing. Two overlapping requests for
+one 24 MB-bounded file cost a duplicate GET; a page that stops asking costs the person the file.
 
 Browser approval requests appear automatically over the open iPhone chat as soon as the agent
 is waiting, and remain available in **Workspace → Browser**,

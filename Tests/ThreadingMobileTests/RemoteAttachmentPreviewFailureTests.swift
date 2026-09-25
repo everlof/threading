@@ -66,6 +66,39 @@ final class RemoteTransientTransportFailureTests: XCTestCase {
 
 final class RemoteAttachmentPreviewLoadTests: XCTestCase {
 
+    func testRouteRecoveryRestartsAnUnloadedPreviewTask() throws {
+        let hosted = RemoteClient(
+            link: try XCTUnwrap(RemoteConnectionLink(
+                baseURL: URL(string: "https://127.0.0.1:41001/")!,
+                token: "token"
+            )),
+            endpointKind: .hosted
+        )
+        let recovered = RemoteClient(
+            link: try XCTUnwrap(RemoteConnectionLink(
+                baseURL: URL(string: "https://127.0.0.1:41002/")!,
+                token: "token"
+            )),
+            endpointKind: .hosted
+        )
+
+        XCTAssertNotEqual(
+            RemoteAttachmentPreviewTaskIdentity(client: hosted, isCurrentPage: true),
+            RemoteAttachmentPreviewTaskIdentity(client: recovered, isCurrentPage: true),
+            "a mounted preview must ask through the replacement route"
+        )
+        XCTAssertNotEqual(
+            RemoteAttachmentPreviewTaskIdentity(client: recovered, isCurrentPage: false),
+            RemoteAttachmentPreviewTaskIdentity(client: recovered, isCurrentPage: true),
+            "becoming current remains an independent retry boundary"
+        )
+        XCTAssertEqual(
+            RemoteAttachmentPreviewTaskIdentity(client: recovered, isCurrentPage: true),
+            RemoteAttachmentPreviewTaskIdentity(client: recovered, isCurrentPage: true),
+            "an unchanged route and page state must not restart a completed task"
+        )
+    }
+
     /// The report this pins: an image whose ledger thumbnail arrived, whose page never did.
     ///
     /// A cancelled page releases its in-flight flag only after hopping back to the main actor,
