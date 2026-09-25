@@ -29,6 +29,10 @@ enum CurfewRule: Equatable, Sendable {
         windowID: String
     )
 
+    /// A one-shot ceiling on the named account/window's total reported usage.
+    /// It has no clock deadline until a fresh reading reaches the percentage.
+    case atUsage(percent: Int, armedAt: Date, accountID: AccountID, windowID: String)
+
     // MARK: - Stored Shape
 
     /// The tagged form on disk.
@@ -45,19 +49,22 @@ enum CurfewRule: Equatable, Sendable {
         let armedAt: Date?
         let accountID: AccountID?
         let windowID: String?
+        let percent: Int?
 
         init(
             kind: String,
             deadline: Date?,
             armedAt: Date? = nil,
             accountID: AccountID? = nil,
-            windowID: String? = nil
+            windowID: String? = nil,
+            percent: Int? = nil
         ) {
             self.kind = kind
             self.deadline = deadline
             self.armedAt = armedAt
             self.accountID = accountID
             self.windowID = windowID
+            self.percent = percent
         }
     }
 
@@ -67,6 +74,7 @@ enum CurfewRule: Equatable, Sendable {
         case exempt
         case until
         case untilUsageReset
+        case atUsage
     }
 
     /// Reads a stored rule, answering nil for anything this build does not recognise.
@@ -93,6 +101,15 @@ enum CurfewRule: Equatable, Sendable {
                 accountID: accountID,
                 windowID: windowID
             )
+        case .atUsage:
+            guard let percent = stored.percent,
+                  CurfewDefaults.usagePercentRange.contains(percent),
+                  let armedAt = stored.armedAt,
+                  let accountID = stored.accountID,
+                  let windowID = stored.windowID, !windowID.isEmpty else { return nil }
+            self = .atUsage(
+                percent: percent, armedAt: armedAt, accountID: accountID, windowID: windowID
+            )
         case nil:
             return nil
         }
@@ -100,6 +117,11 @@ enum CurfewRule: Equatable, Sendable {
 
     var stored: Stored {
         switch self {
+        case .atUsage(let percent, let armedAt, let accountID, let windowID):
+            return Stored(
+                kind: Kind.atUsage.rawValue, deadline: nil, armedAt: armedAt,
+                accountID: accountID, windowID: windowID, percent: percent
+            )
         case .exempt:
             return Stored(kind: Kind.exempt.rawValue, deadline: nil)
         case .until(let deadline):
@@ -120,7 +142,7 @@ enum CurfewRule: Equatable, Sendable {
         switch self {
         case .until(let deadline), .untilUsageReset(let deadline, _, _, _):
             return deadline
-        case .exempt:
+        case .exempt, .atUsage:
             return nil
         }
     }
@@ -169,6 +191,7 @@ enum CurfewOrigin: Codable, Equatable, Sendable {
     /// A provider observation proved that used capacity on the armed account was restored.
     /// `armedAt` links the state to the exact conditional rule that produced it.
     case usageReset(armedAt: Date, accountID: AccountID, windowID: String)
+    case usageThreshold(percent: Int, armedAt: Date, accountID: AccountID, windowID: String)
 }
 
 // MARK: - Curfew Receipt
@@ -385,6 +408,11 @@ struct SessionCurfewState: Codable, Equatable, Sendable {
 
 /// Every number and fixed string the curfew feature runs on.
 enum CurfewDefaults {
+
+    static let usagePercentRange = 1...100
+    static let defaultUsagePercent = 80
+    static let usagePercentPresets = [50, 60, 70, 80, 90, 95, 100]
+    static let maximumUsageAge = UsageDefaults.refreshInterval
 
     /// How long before the deadline the agent is asked to wrap up. Ten minutes is enough for a
     /// commit and a handoff note and short enough that it is still the same piece of work.

@@ -1,9 +1,9 @@
 # Spike: an `AppKit` module of our own, on Linux
 
-> **A spike, not a proposal.** It exists to replace one guess with one measurement, and it is
-> wired to nothing: no Xcode target references it, no gate runs it, and the macOS build does not
-> know it is here. `docs/feature-drafts/linux-host-runtime.md` is still the decision record; this
-> directory is evidence for one paragraph of it.
+> **An experimental Linux host, not a packaged app.** No Xcode target references this directory,
+> and no standard Mac build gate runs it. Shared portable changes live in the product's `Sources/`
+> and `Tests/` and are copied here byte-for-byte. `docs/feature-drafts/linux-host-runtime.md`
+> remains the decision record; this directory holds the measurements and Linux host prototype.
 
 ## The question
 

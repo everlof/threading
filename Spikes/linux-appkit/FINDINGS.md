@@ -1854,3 +1854,23 @@ resume journey with an unrelated session made unreadable *after* the window snap
 the fixture restored that row before later journeys. The complete real-daemon Linux host suite
 also passed against the shared loader refactor. Neither suite measures authenticated Codex use or
 absolute launch latency at the stated 50,000-session stress cardinality.
+
+## 68. A master refresh changes the core copies without moving the existing UI verdicts
+
+On 2026-09-25 the branch was rebased onto the current macOS product tree. Re-vendoring changed
+four of the 45 portable core copies: `Project`, `ScheduledMessage`, `SessionCurfew` and
+`SessionLaunchFailure`. All 45 copies are byte-identical to their production sources. The real
+daemon `host-smoke.sh` and Docker/Xvfb `window-smoke.sh` suites passed after the refresh, including
+the clean-profile startup and saved-agent resume paths. This checks that the new stored fields
+have not broken the current Linux host; it does not prove a migration of arbitrary future stores.
+
+The AppKit shim still builds. A fresh per-file sweep found no changed verdict among existing
+`UI/Design` files. `SimulatorRecordingBadge.swift` is the one new file and is a `shim-gap`
+(`NSAccessibility`, `NSString.draw`, `NSString.size`). The measured totals are 125 `shim-gap`,
+27 `shim-clean` and two `clean` files, versus 124, 27 and two in the previous baseline. The
+baseline remains unchanged so later refreshes continue to report that added gap.
+
+The complete Mac test target passed 9,515 tests (83 skipped) on the refreshed stack. The complete
+mobile target passed 898 tests (one skipped) on an explicit iOS Simulator destination; the
+runner's default device name was ambiguous among three installed simulators and never reached
+test execution. Neither test target exercises an authenticated Linux Codex installation.

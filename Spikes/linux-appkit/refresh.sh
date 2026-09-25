@@ -11,10 +11,9 @@
 # product work on master moves a file out of AppKit's way, this says so, by name, that week. When
 # it moves one further in, it says that too. Neither is visible from inside the branch.
 #
-# The branch is deliberately thin. Nothing here is under `Sources/`, so it cannot conflict with
-# product work; the only thing that drifts is the vendored copies, and re-copying them is what
-# surfaces the drift. Anything this spike needs *changed* in the app belongs on master — see
-# delivery slice 3 in docs/feature-drafts/linux-host-runtime.md, the structural ratchets.
+# Keep portable production changes under Sources/ and Tests/ in sync with master. The Linux-only
+# host remains in this spike. Re-copying the shared sources after a rebase exposes drift, while
+# the build and sweep measure what the updated product tree can compile on Linux.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 repository="$(cd ../.. && pwd)"
