@@ -177,6 +177,29 @@ with log_path.open('w+') as log:
         assert terminal_text.get_character_count() == len(initial)
         assert terminal_text.get_character_at_offset(initial.index('界')) == ord('界')
         assert 0 <= terminal_text.get_caret_offset() <= len(initial)
+        def character_rect(offset, coordinates=Atspi.CoordType.WINDOW):
+            value = terminal_text.get_character_extents(offset, coordinates)
+            return value.x, value.y, value.width, value.height
+        wide = initial.index('界')
+        character_row = initial[:wide].count('\n')
+        assert character_rect(wide) == (80, character_row * 22, 20, 22)
+        assert terminal_text.get_offset_at_point(95, character_row * 22 + 11,
+                                                 Atspi.CoordType.WINDOW) == wide
+        accented = initial.index('e\u0301', wide)
+        assert character_rect(accented) == (110, character_row * 22, 10, 22)
+        assert character_rect(accented + 1) == character_rect(accented)
+        assert terminal_text.get_offset_at_point(115, character_row * 22 + 11,
+                                                 Atspi.CoordType.WINDOW) == accented
+        newline = initial.index('\n', accented)
+        assert character_rect(newline) == (120, character_row * 22, 0, 22)
+        # AT-SPI may normalize ATK's unavailable horizontal corners on the wire.
+        invalid = character_rect(len(initial))
+        assert invalid[0] < 0 and invalid[1] == -1 and invalid[3] == -1, invalid
+        assert terminal_text.get_offset_at_point(799, character_row * 22 + 11,
+                                                 Atspi.CoordType.WINDOW) == -1
+        assert character_rect(wide, Atspi.CoordType.SCREEN) == (
+            int(window_geometry['X']) + 80,
+            int(window_geometry['Y']) + character_row * 22, 20, 22)
         assert not terminal_text.set_caret_offset(0), 'read-only terminal accepted remote caret movement'
         subprocess.run(['xdotool', 'key', 'x'], check=True, timeout=5)
         updated = eventually(lambda: screen_text()
@@ -184,6 +207,9 @@ with log_path.open('w+') as log:
                              'live accessible terminal update')
         assert 'VISIBLE 界 e\u0301' not in updated, updated
         assert terminal_text.get_character_count() == len(updated)
+        assert character_rect(updated.index('UPDATED')) == (0, 0, 10, 22)
+        invalid = character_rect(len(updated))
+        assert invalid[0] < 0 and invalid[1] == -1 and invalid[3] == -1, invalid
         subprocess.run(['xdotool', 'windowsize', window_id, '960', '600'], check=True, timeout=5)
         eventually(lambda: re.search(r'TERMINAL_FRAME 960x600', log_path.read_text()),
                    'resized terminal frame')
@@ -215,10 +241,16 @@ with log_path.open('w+') as log:
                     other.kill()
                 other.wait(timeout=3)
         assert re.search(r'TERMINAL_FRAME .*A11Y TERMINAL READY', log_path.read_text())
+        subprocess.run(['xdotool', 'key', 'ctrl+shift+p'], check=True, timeout=5)
+        eventually(lambda: content(app) if content(app).get_role_name() == 'list' else None,
+                   'project list after terminal unmount')
+        assert terminal_text.get_offset_at_point(5, 5, Atspi.CoordType.WINDOW) == -1
+        invalid = character_rect(0)
+        assert invalid[0] < 0 and invalid[1] == -1 and invalid[3] == -1, invalid
         subprocess.run(['xdotool', 'windowfocus', window_id,
                         'key', 'alt+F4'], check=True, timeout=5)
         assert process.wait(timeout=5) == 0
-        print('PASS AT-SPI: bounded navigator, native geometry, focus and live terminal text',
+        print('PASS AT-SPI: bounded navigator, native geometry, focus and live terminal text geometry',
               flush=True)
     except BaseException:
         log.flush()

@@ -52,6 +52,10 @@ struct WindowHarness {
     private static let maximumPersistedRuntimeTitleScalars = 256
     private static let navigatorRowHeight: CGFloat = 22
     private static let navigatorRowStride: CGFloat = 24
+    #if os(Linux)
+    private static let terminalCellWidth = Int(TW_TERMINAL_CELL_WIDTH)
+    private static let terminalCellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
+    #endif
 
     @MainActor private static func navigatorRowRect(_ index: Int, width: Int, height: Int) -> NSRect {
         let top = Specimen.Window.titleHeight + 2 + CGFloat(index) * navigatorRowStride
@@ -357,7 +361,7 @@ struct WindowHarness {
         tw_terminal_mode(window)
         tw_project_navigation(window, allowsProjects ? 1 : 0)
         tw_accessibility_show_terminal(window, "Terminal starting")
-        tw_accessibility_terminal_text(window, nil, 0, -1)
+        tw_accessibility_terminal_text(window, nil, 0, -1, nil, 0)
         session.setPreedit(nil)
         defer { session.setPreedit(nil) }
         session.invalidateFrame()
@@ -406,14 +410,22 @@ struct WindowHarness {
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
                 frame.title.withCString { tw_accessibility_show_terminal(window, $0) }
-                frame.accessibleText.withCString {
-                    tw_accessibility_terminal_text(window, $0, Int32(frame.accessibleText.utf8.count),
-                                                   Int32(frame.accessibleCaret))
+                let accessibleRuns = frame.accessibleRuns.map {
+                    TWTextRun(offset: $0.offset, characters: $0.characters,
+                              column: $0.column, row: $0.row, cells: $0.cells)
                 }
-                let caretX = frame.cursorColumn >= 0 ? frame.cursorColumn * 10 : 8
-                let caretY = frame.cursorColumn >= 0 ? frame.cursorRow * 22 : height - 22
-                tw_text_input_rect(window, Int32(max(0, min(width - 10, caretX))),
-                                   Int32(max(0, min(height - 22, caretY))), 10, 22)
+                frame.accessibleText.withCString { text in
+                    accessibleRuns.withUnsafeBufferPointer { runs in
+                        tw_accessibility_terminal_text(window, text, Int32(frame.accessibleText.utf8.count),
+                                                       Int32(frame.accessibleCaret), runs.baseAddress,
+                                                       Int32(runs.count))
+                    }
+                }
+                let caretX = frame.cursorColumn >= 0 ? frame.cursorColumn * terminalCellWidth : 8
+                let caretY = frame.cursorColumn >= 0 ? frame.cursorRow * terminalCellHeight : height - terminalCellHeight
+                tw_text_input_rect(window, Int32(max(0, min(width - terminalCellWidth, caretX))),
+                                   Int32(max(0, min(height - terminalCellHeight, caretY))),
+                                   Int32(terminalCellWidth), Int32(terminalCellHeight))
                 tw_title(window, frame.title)
                 print("TERMINAL_FRAME \(width)x\(height) \(frame.title) drawMs=\(frame.drawMilliseconds) presentMs=\(Double(DispatchTime.now().uptimeNanoseconds - presentStarted) / 1_000_000)"); fflush(nil)
             }
@@ -470,7 +482,7 @@ struct WindowHarness {
                                               width: Int, height: Int) throws {
         let accessible = "Terminal unavailable: \(boundedAccessibilityLabel(message))"
         accessible.withCString { tw_accessibility_show_terminal(window, $0) }
-        tw_accessibility_terminal_text(window, nil, 0, -1)
+        tw_accessibility_terminal_text(window, nil, 0, -1, nil, 0)
         let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
         root.title = "Terminal unavailable"
         root.addSubview(Specimen.Message(frame: NSRect(x: 12, y: 8,

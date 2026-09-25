@@ -443,9 +443,11 @@ The frame, list, mounted rows and terminal expose ATK Component bounds in window
 parent coordinates. One row layout supplies drawing, native pointer hit testing and AT-SPI
 publication; point lookup follows those drawn bounds, and unmounted nodes report no
 geometry. The text projection is capped at 64 KiB, with an explicit overflow message. This is
-an initial accessibility path, not screen-reader parity: character-level terminal geometry,
-a complete selection interface, full focus/event coverage, and native screen-reader inspection
-remain open.
+an initial accessibility path, not screen-reader parity: visible terminal characters now report
+the rendered cell rectangle and resolve a point back to a Unicode offset. Wide cells cover two
+columns, combining scalars share their cell, and newlines have zero width. A complete selection
+interface, bounds-change notifications, full focus/event coverage, and native screen-reader
+inspection remain open.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new

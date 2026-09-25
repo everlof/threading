@@ -39,9 +39,13 @@ void tw_accessibility_end_list(TWWindow *);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
 // SDL window focus is the source of truth; the bridge focuses the mounted selected row or terminal.
 void tw_accessibility_window_focus(TWWindow *, int focused);
-// Publish only the visible terminal grid. Offsets and caret count Unicode characters, not bytes.
-// NULL clears text when a terminal starts or fails. Content is capped at 64 KiB.
-void tw_accessibility_terminal_text(TWWindow *, const char *utf8, int length, int caret);
+// The accessibility projection uses the rendered cell positions, including wide and combined
+// graphemes. Each run covers one displayed cell (or a zero-width newline) in Unicode scalars.
+typedef struct { int offset, characters, column, row, cells; } TWTextRun;
+// Publish only the visible terminal grid. NULL clears text when a terminal starts or fails.
+// Content is capped at 64 KiB and at the 128x40 visible-cell grid.
+void tw_accessibility_terminal_text(TWWindow *, const char *utf8, int length, int caret,
+                                    const TWTextRun *runs, int runCount);
 // Candidate windows follow the current terminal cursor. Coordinates are window pixels.
 void tw_text_input_rect(TWWindow *, int x, int y, int width, int height);
 int tw_next_timeout(TWWindow *, TWEvent *, int milliseconds);
@@ -51,7 +55,8 @@ int tw_clipboard_read(uint8_t *destination, int capacity);
 // Copies at most 1 MiB of UTF-8 to the native clipboard. Returns 0 on success.
 int tw_clipboard_write(const uint8_t *source, int length);
 typedef struct { int offset, length, width; uint32_t foreground, background; int bold, underline; } TWCell;
-// Worker-only Pango/Cairo renderer. Output is RGBA, in fixed 10x22 pixel terminal cells.
+enum { TW_TERMINAL_CELL_WIDTH = 10, TW_TERMINAL_CELL_HEIGHT = 22 };
+// Worker-only Pango/Cairo renderer. Output is RGBA, in fixed-size terminal cells.
 int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *, int columns, int rows,
                        const char *text, int textLength, int cursorColumn, int cursorRow,
                        const char *preedit, int preeditLength, int preeditCursor, int preeditSelectionLength);
