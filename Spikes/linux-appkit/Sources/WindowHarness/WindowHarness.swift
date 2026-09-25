@@ -69,6 +69,12 @@ struct WindowHarness {
         case terminal(String)
     }
 
+    private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
+        let title = session.title.isEmpty ? session.kind.rawValue : session.title
+        return .init(id: session.id.uuidString,
+                     title: String(title.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)))
+    }
+
     @MainActor static func main() async {
         do {
             #if os(Linux)
@@ -189,12 +195,8 @@ struct WindowHarness {
         } else {
             selectedIndex = 0
         }
-        let projects = catalog.projects.map { project in
-            let agents = project.recentSessions.map {
-                ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
-                    title: String(($0.title.isEmpty ? $0.kind.rawValue : $0.title).unicodeScalars
-                        .prefix(maximumPersistedRuntimeTitleScalars)))
-            }
+        var projects = catalog.projects.map { project in
+            let agents = project.recentSessions.map(savedAgent)
             let terminals = project.recentTerminals.map {
                 ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
                     title: String($0.displayTitle.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)))
@@ -205,14 +207,35 @@ struct WindowHarness {
         }
         // The development launcher names a project explicitly. Restore only its selected,
         // launched agent; a selection from another project must not override that request.
-        // Attach never starts a process. An older selection outside the bounded picker is left
-        // alone until the navigator can reveal sessions beyond its recent window.
+        // Attach never starts a process. An older selected agent may lie outside the recent
+        // window; fetch only that indexed row and keep the picker at its existing ceiling.
         let restoreAgentID: String?
-        if requestedPath != nil, let selectedID = catalog.selectedSessionID,
-           let selected = catalog.projects[selectedIndex].recentSessions.first(where: {
-               $0.id == selectedID && $0.hasLaunched && !$0.isArchived && $0.lastExitCode == nil
-           }) {
-            restoreAgentID = selected.id.uuidString
+        if requestedPath != nil, let selectedID = catalog.selectedSessionID {
+            let selected: AgentSession?
+            if let recent = catalog.projects[selectedIndex].recentSessions.first(where: {
+                $0.id == selectedID
+            }) {
+                selected = recent
+            } else if let record = try database.sessionRecord(id: selectedID),
+                      record.project.id == catalog.projects[selectedIndex].id {
+                selected = record.session
+            } else {
+                selected = nil
+            }
+            if let selected, selected.hasLaunched, !selected.isArchived,
+               selected.lastExitCode == nil {
+                if !projects[selectedIndex].recentAgents.contains(where: {
+                    $0.id == selectedID.uuidString
+                }) {
+                    projects[selectedIndex].recentAgents.insert(savedAgent(selected), at: 0)
+                    if projects[selectedIndex].recentAgents.count > maximumSelectableAgentsPerProject {
+                        projects[selectedIndex].recentAgents.removeLast()
+                    }
+                }
+                restoreAgentID = selected.id.uuidString
+            } else {
+                restoreAgentID = nil
+            }
         } else {
             restoreAgentID = nil
         }

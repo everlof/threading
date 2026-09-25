@@ -89,11 +89,12 @@ On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, and `flock` inst
 The development launcher builds the two host executables and `threading-ptyd`, imports the
 canonical project directory into a local store, starts or reuses one background daemon, and opens
 the native window with that project selected, even when the store contains other projects.
-If its last selected agent is a recent, launched, unarchived session without a recorded exit, the
+If its last selected agent is a launched, unarchived session without a recorded exit, the
 window attempts an attach to that identity. This never spawns a child; an unavailable child shows
-the existing failure view and Ctrl+Shift+P returns to its agent picker. Otherwise the project list
-opens without starting a child. Enter opens a shell, and the saved-agent and saved-terminal pickers
-can reattach other runtimes. It keeps data under
+the existing failure view and Ctrl+Shift+P returns to its agent picker. A selected agent older
+than the recent window is fetched by identity and shown within the 512-row picker limit.
+Otherwise the project list opens without starting a child. Enter opens a shell; the saved-agent
+and saved-terminal pickers can reattach other runtimes. It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
 `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
 private to the user. If `codex` resolves to an absolute executable, the window also offers the
@@ -419,14 +420,15 @@ rollout under the standard Codex account. It refuses a missing or known-broken r
 spawning. `env -u CODEX_HOME` prevents an inherited alternate login from silently taking over
 that standard-account record.
 The initial project-window snapshot reads indexed session counts and at most 512 recent session
-payloads per project. Selected-agent attach, rollout-ID persistence, resume, and opening an agent
+payloads per project. A selected agent outside that window adds one indexed read and replaces
+one picker entry. Selected-agent attach, rollout-ID persistence, resume, and opening an agent
 read only its indexed session and owning project. Saved-terminal identity lookup still loads the
 complete graph; each project's embedded terminal array is decoded for the startup snapshot.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new
 terminal through the production store before spawning through the production PTY client. The
-fixed initial snapshot projects at most the newest 512 agents and 512 terminals per project
+fixed initial snapshot projects at most 512 agents and 512 terminals per project
 into their pickers and constructs only viewport rows. New agents created by this window join
 its in-memory catalogue after persistence. The project-targeted launcher attempts attach-only
 restoration of its saved agent selection. Opening an agent persists that selection on a worker
