@@ -2309,3 +2309,27 @@ catalogue, and verified the hidden-list refusal after opening the Unicode-named 
 real PTY. The focused `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh` passed along with the
 architecture and theme checks. This remains a bounded diagnostic list; terminal text selection,
 native screen-reader inspection and broader focus/event coverage remain open.
+
+## 86. A Linux host can create a real Claude session without a second command policy
+
+The macOS remote host already composed two Claude terminal commands from one session: resume
+with its known UUID or fresh with a caller-minted UUID. That command assembly is now a portable
+`ClaudeLaunchCommand` value. The Mac remote path supplies its integration flags and resolved
+permission mode to the same value that the experimental Linux CLI uses. Account discovery,
+settings and hooks remain host-owned; no Linux shim imports AppKit or Mac preferences.
+
+`LinuxHost claude` creates a durable Claude session through the existing session-creation and
+exact-row persistence paths, records the minted UUID as its resumable provider ID, and spawns
+the typed agent identity through the production PTY daemon. It explicitly selects Manual and
+clears an inherited `CLAUDE_CONFIG_DIR` for the standard `HOME/.claude` account. A real-shell
+recorder run verified the permission flag, UUID, quoted leading-dash prompt and a custom `HOME`
+while an unrelated project and session retained their exact stored bytes. The headless daemon
+reattach path can use that identity. The Mac remote-host tests passed (26 cases); the complete
+Mac target passed 9,519 tests (83 skipped), and the complete iOS target passed 898 tests (one
+skipped) on an installed simulator. The ordinary `scripts/test.sh all` mobile handoff could not
+select its default iPhone 17 Pro destination on this machine, so `scripts/test-mobile.sh` was run
+separately with an explicit installed simulator ID. Architecture and theme boundary checks passed.
+
+The recorder does not prove an authenticated Claude installation or transcript generation.
+The headless command has no exited-session resume or named Claude account choice, and the native
+Linux window does not yet offer a Claude launch action. Those remain separate shipping-path work.

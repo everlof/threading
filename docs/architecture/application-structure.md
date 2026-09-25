@@ -81,14 +81,16 @@ remain with the frontend that can state what its terminal renders.
 
 `AgentLaunchPlan` and `ShellCommand` are portable values under `Core/Agent/`. The plan's
 `inLoginShell` factory takes an already-resolved shell path and composes the same quoted
-`cd && exec` invocation for every host. `AgentLauncher` retains account discovery, provider
-flags, permission/default resolution and `launchEnvironment()`; compiling a command plan must
+`cd && exec` invocation for every host. `AgentLauncher` retains account discovery, remaining
+provider flags, permission/default resolution and `launchEnvironment()`; compiling a command plan must
 not import those host services or silently replace their policy. `CodexLaunchCommand` composes
 the provider's invocation and terminal flags from resolved values; the macOS launcher still owns
 model metadata, account/hook setup, permission defaults and resume preflight.
-`ClaudeLaunchCommand` likewise composes the fresh/resume command pair from resolved session
-values and host-supplied integration flags. The macOS remote launcher uses it while account
-routing, local hooks, fork handling and transcript existence checks remain host-owned.
+`ClaudeLaunchCommand` likewise composes the portable fresh/resume command pair from resolved
+session values and host-supplied integration flags. The macOS remote host and experimental Linux
+CLI share it; the macOS local launcher still owns hooks, fork handling and transcript existence
+checks. The Linux CLI currently launches only a fresh standard-account Claude session and records
+its caller-minted UUID before spawn. It does not yet offer exited-session resume.
 
 `AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
 store and UI. macOS and the Linux host share it; host adapters retain account/model admission,
