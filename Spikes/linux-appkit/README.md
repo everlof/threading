@@ -130,6 +130,7 @@ LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach TERMINAL_UUID
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock login-run /path/to/project /bin/sh python3 --version
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock codex /path/to/project /bin/sh /absolute/path/to/codex 'Inspect this project' [codex-work]
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock claude /path/to/project /bin/sh /absolute/path/to/claude 'Inspect this project' [claude-work]
+LinuxHost /path/to/experimental-store /path/to/ptyd.sock resume-claude SESSION_UUID /bin/sh /absolute/path/to/claude
 LinuxHost /path/to/experimental-store /path/to/ptyd.sock attach-agent SESSION_UUID
 ```
 
@@ -172,8 +173,10 @@ macOS remote host. It records its UUID as the provider session ID before spawnin
 shared Manual permission flag, and clears an inherited `CLAUDE_CONFIG_DIR` so the standard
 handle means `HOME/.claude`. An optional legacy handle such as `claude-work` routes through
 `HOME/.claude-work` only when it contains `.claude.json` or `settings.json`; an unavailable
-handle refuses before writing a session. The headless command does not yet resume an exited
-conversation; `attach-agent` still reconnects a daemon-held child. Its
+handle refuses before writing a session. `resume-claude` takes a saved session UUID, reads only
+that row and its owning project, then checks the recorded account and exact transcript before
+starting `--resume` under the same session identity. It refuses an unavailable named account or
+transcript without creating another conversation. `attach-agent` reconnects a daemon-held child. Its
 recorder smoke verifies the child arguments, environment, durable selection and exact-row writes,
 not an authenticated Claude installation.
 

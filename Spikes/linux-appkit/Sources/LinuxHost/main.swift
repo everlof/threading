@@ -33,11 +33,15 @@ func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
     let addingProject = args.first == "--add-project"
     try check(addingProject ? args.count == 3 : args.count >= 3,
-        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | attach-agent SESSION_UUID")
+        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | resume-claude SESSION_UUID SHELL CLAUDE_EXECUTABLE | attach-agent SESSION_UUID")
     let importFolder = addingProject ? try projectDirectory(args[2]) : nil
     // Establish the signal mask before database decoding can create worker threads.
     let terminalControl: LocalTerminal? = addingProject || args[2] == "list" ? nil : try LocalTerminal()
     let root = URL(fileURLWithPath: args[addingProject ? 1 : 0], isDirectory: true)
+    if !addingProject && args[2] == "resume-claude" {
+        try check(FileManager.default.fileExists(atPath: root.appendingPathComponent("threading.db").path),
+                  "saved session store does not exist")
+    }
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
                                            attributes: [.posixPermissions: 0o700])
     // One CLI writer per store; never silently reconcile against a concurrent host.
@@ -47,8 +51,8 @@ func run() throws -> Int32 {
     try check(flock(lock, LOCK_EX | LOCK_NB) == 0, "store is already owned by another host")
     let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
     defer { database.close() }
-    var state = try database.load().state
     if let folder = importFolder {
+        let state = try database.load().state
         if !state.projects.contains(where: { $0.folderPath == folder.path }) {
             try database.addProject(Project(name: folder.lastPathComponent, folderURL: folder),
                                     position: state.projects.count)
@@ -57,6 +61,7 @@ func run() throws -> Int32 {
         return 0
     }
     if args[2] == "list" {
+        let state = try database.load().state
         for project in state.projects {
             print("\(project.id)\t\(project.folderPath)")
             for session in project.sessions { print("  agent \(session.id)\t\(session.kind.rawValue)\t\(session.title)") }
@@ -71,7 +76,10 @@ func run() throws -> Int32 {
                              journal: { _, _ in })
     defer { link.close() }
     try link.connect()
+    var pendingResumeRecording: (session: AgentSession, projectID: ProjectID,
+                                 position: Int, plan: AgentLaunchPlan)? = nil
     if args[2] == "codex" || args[2] == "claude" {
+        let state = try database.load().state
         let isCodex = args[2] == "codex"
         try check(args.count == 7 || args.count == 8,
                   "managed agent requires DIRECTORY SHELL EXECUTABLE PROMPT [ACCOUNT_HANDLE]")
@@ -134,14 +142,58 @@ func run() throws -> Int32 {
         try link.send(.spawn(PTYHostSpawnRequest(id: identity,
             channel: .pty(grid: localTerminal.grid ?? PTYHostGrid(cols: 80, rows: 24)),
             executable: plan.executable, arguments: plan.arguments, environment: launchEnvironment(), cwd: folder.path)))
+    } else if args[2] == "resume-claude" {
+        try check(args.count == 6, "resume-claude requires SESSION_UUID SHELL CLAUDE_EXECUTABLE")
+        guard let uuid = UUID(uuidString: args[3]) else { throw HostFailure.refused("invalid session UUID") }
+        try check(args[4].hasPrefix("/") && args[5].hasPrefix("/"),
+                  "shell and Claude executable must be absolute paths")
+        let sessionID = SessionID(uuid)
+        guard let record = try database.sessionRecord(id: sessionID),
+              record.session.kind == .claude,
+              let transcriptID = record.session.resumeState.transcriptID,
+              record.session.resumeState.isResumable else {
+            throw HostFailure.refused("saved Claude conversation is unavailable")
+        }
+        let folder = record.project.folderPath
+        _ = try projectDirectory(folder)
+        guard let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/"),
+              let account = ClaudeAccountLocations.resolve(record.session.accountHandle,
+                  home: URL(fileURLWithPath: home, isDirectory: true)) else {
+            throw HostFailure.refused("saved Claude account is unavailable")
+        }
+        guard let transcript = ClaudeTranscriptPath.storageURL(sessionID: transcriptID,
+            configPath: account.configPath, projectPath: folder) else {
+            throw HostFailure.refused("saved Claude conversation has an invalid identifier")
+        }
+        var isDirectory: ObjCBool = false
+        try check(FileManager.default.fileExists(atPath: transcript.path, isDirectory: &isDirectory)
+                  && !isDirectory.boolValue,
+                  "saved Claude conversation is missing from its account")
+        let session = record.session
+        let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: args[5],
+            permissionMode: session.permissionMode, prompt: nil)
+        var command = AgentAccountRoute.prefix(for: .claude, handle: session.accountHandle,
+                                               configPath: account.configPath)
+        command.append(contentsOf: pair.resume)
+        let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder,
+            shellPath: args[4], resumeState: .resumable(pair.transcriptID))
+        // This row already exists. Wait for daemon admission so a live-child refusal does not
+        // rewrite its activity or exit status; persist before forwarding any input.
+        pendingResumeRecording = (session, record.project.id, record.position, plan)
+        identity = .agentSession(sessionID)
+        try link.send(.spawn(PTYHostSpawnRequest(id: identity,
+            channel: .pty(grid: localTerminal.grid ?? PTYHostGrid(cols: 80, rows: 24)),
+            executable: plan.executable, arguments: plan.arguments,
+            environment: launchEnvironment(), cwd: folder)))
     } else if args[2] == "attach-agent" {
         try check(args.count == 4, "attach-agent requires a stored session UUID")
         guard let uuid = UUID(uuidString: args[3]) else { throw HostFailure.refused("invalid session UUID") }
         let sessionID = SessionID(uuid)
-        try check(state.projects.contains { $0.sessions.contains { $0.id == sessionID } }, "session is not in this store")
+        try check(try database.sessionRecord(id: sessionID) != nil, "session is not in this store")
         identity = .agentSession(sessionID)
         try link.send(.attach(PTYHostAttach(id: identity, replayBudget: 512 * 1024)))
     } else if args[2] == "attach" {
+        let state = try database.load().state
         try check(args.count == 4, "attach requires a stored terminal UUID")
         guard let uuid = UUID(uuidString: args[3]) else { throw HostFailure.refused("invalid terminal UUID") }
         let terminalID = TerminalID(uuid)
@@ -150,6 +202,7 @@ func run() throws -> Int32 {
         identity = PTYHostSessionIdentity(.projectTerminal(terminalID))
         try link.send(.attach(PTYHostAttach(id: identity, replayBudget: 512 * 1024)))
     } else {
+        var state = try database.load().state
         let login = args[2] == "login-run"
         try check((args[2] == "run" && args.count >= 5) || (login && args.count >= 6),
                   "run requires DIRECTORY EXECUTABLE; login-run requires DIRECTORY SHELL EXECUTABLE")
@@ -235,6 +288,12 @@ func run() throws -> Int32 {
                 switch control {
                 case .spawned(let value):
                     try check(value.id == identity, "spawn identity mismatch")
+                    if var pending = pendingResumeRecording {
+                        AgentLaunchRecording.apply(pending.plan, to: &pending.session, at: Date())
+                        try database.saveSession(pending.session, in: pending.projectID,
+                                                 position: pending.position)
+                        pendingResumeRecording = nil
+                    }
                     spawned = true
                 case .attached(let value):
                     try check(value.id == identity, "attach identity mismatch")

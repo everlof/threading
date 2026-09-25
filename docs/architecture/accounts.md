@@ -34,6 +34,9 @@ Linux reads neither the macOS registry nor credentials. Its diagnostic window di
 31 named legacy homes per provider on a worker at startup and presents them beside the standard
 home in a native picker.
 Choosing one changes only future launches; a stored session keeps its own handle on resume.
+The Linux headless `resume-claude` path reads one indexed saved row, resolves that stored handle
+under the current `HOME`, and requires the exact transcript in that account before reusing the
+session identity. It does not create a fresh conversation when the saved file is missing.
 
 `AgentAccountSetupCoordinator` is the only writer of those records. It derives a bounded alternate
 home from a user-facing name, starts `claude auth login` or `codex login` under the corresponding

@@ -130,6 +130,7 @@ grep -q 'not in this store' "$fixture/refusal"
 echo 'PASS host restart reattaches the same live child, replays output and preserves terminal identity'
 python3 tests/host_terminal_smoke.py "$host" "$fixture/store" "$fixture/pty.sock" "$fixture/project"
 python3 tests/incremental_launch_smoke.py "$host" "$fixture/store" "$fixture/pty.sock" "$fixture/project"
+python3 tests/claude_headless_resume_smoke.py "$host" "$daemon" "$fixture/pty.sock" "$fixture"
 # Fast exits race pipe EOF. Preserve the child's status even when the daemon refuses late input.
 for attempt in $(seq 1 8); do
   set +e

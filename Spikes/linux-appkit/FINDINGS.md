@@ -2399,3 +2399,30 @@ account picker and project action line were inspected in `out/claude-account-pic
 `out/claude-named-project.png`. Mac unit tests cover exact routing, Science exclusion, registered
 locations and ambiguous handles. This still does not prove an authenticated Claude installation,
 host hook integration, or exited-session resume from the headless CLI.
+
+## 89. Headless Claude resume uses the saved account and one indexed row
+
+`LinuxHost resume-claude` now takes a saved session UUID and uses `ProjectDatabase.sessionRecord`
+to read only that session and its owning project. It checks the existing project, resolves the
+stored account handle under the current `HOME`, and requires the exact transcript path produced
+by `ClaudeTranscriptPath`. Missing stores, unavailable named accounts and transcripts refuse
+before spawning; none fall back to a new conversation or a different account. The shared
+`ClaudeLaunchCommand` builds
+the `--resume` command with the saved provider ID, and the PTY daemon keeps the same typed session
+identity. `attach-agent` continues to reconnect an already running child.
+
+An existing row is recorded as launched only after the daemon accepts the spawn. This preserves
+its exact bytes when a duplicate resume meets a live child. The Linux host smoke runs a real
+daemon and a recorder child under a named Claude home, checks fresh launch, exited-session
+resume, absent transcript/marker and changed-`HOME` refusals, then leaves a child alive and
+checks that a second resume neither rewrites the row nor starts another child. An unrelated
+corrupt session row remains untouched and does not block the indexed resume. The full host smoke
+and shared-core harness pass in a native aarch64 Linux VM. This recorder verifies routing and
+durable identity, not authenticated Claude behavior.
+
+The complete Mac target passed 9,521 tests (83 skipped, zero failures). Architecture, theme,
+main-actor latency and vendoring checks passed. `scripts/test.sh all` could not select its default
+iPhone 17 Pro simulator because that device is not installed. A separate full mobile attempt on
+the installed Threading iPhone 17 simulator built successfully but its boot check remained in
+CoreSimulator data migration for more than seven minutes, before XCTest launched. iOS tests are
+therefore unverified for this slice.
