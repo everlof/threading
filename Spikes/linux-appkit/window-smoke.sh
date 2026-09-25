@@ -228,6 +228,51 @@ xdotool key alt+F4
 wait "$window_pid"
 window_pid=''
 echo 'PASS native mouse: tracking-off refusal, X10 press, SGR press/release and wheel'
+"$bin/WindowHarness" --terminal "$fixture/store" "$fixture/pty.sock" "$fixture/Alpha" \
+  /usr/bin/python3 "$PWD/tests/terminal_scrollback_child.py" >"$fixture/window.log" 2>&1 &
+window_pid=$!
+for attempt in $(seq 1 200); do
+  id=$(xdotool search --name '^Threading terminal - SCROLL READY$' 2>/dev/null | head -1) || true
+  [[ -n "$id" ]] && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+[[ -n "$id" ]]
+xdotool windowfocus "$id" mousemove --window "$id" 25 33
+for step in $(seq 1 4); do xdotool click 4; done
+for attempt in $(seq 1 200); do
+  xdotool getwindowname "$id" | grep -q 'SCROLL READY \[scrollback\]$' && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+xdotool getwindowname "$id" | grep 'SCROLL READY \[scrollback\]$'
+import -window "$id" out/terminal-scrollback-held.png
+xdotool type --clearmodifiers '.'
+for attempt in $(seq 1 200); do
+  xdotool getwindowname "$id" | grep -q 'SCROLL NEW \[scrollback\]$' && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+xdotool getwindowname "$id" | grep 'SCROLL NEW \[scrollback\]$'
+for step in $(seq 1 8); do xdotool click 5; done
+for attempt in $(seq 1 200); do
+  xdotool getwindowname "$id" | grep -q 'SCROLL NEW$' && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+xdotool getwindowname "$id" | grep 'SCROLL NEW$'
+import -window "$id" out/terminal-scrollback-live.png
+xdotool type --clearmodifiers q
+for attempt in $(seq 1 200); do
+  xdotool getwindowname "$id" | grep -q 'exited 0$' && break
+  kill -0 "$window_pid" || { cat "$fixture/window.log"; exit 1; }
+  sleep .05
+done
+xdotool getwindowname "$id" | grep 'exited 0$'
+xdotool key alt+F4
+wait "$window_pid"
+window_pid=''
+echo 'PASS native scrollback: wheel navigation, held output, live return and PTY input'
 python3 tests/terminal_clipboard_smoke.py "$bin/WindowHarness" "$fixture/store" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_exit_smoke.py "$bin/WindowHarness"
 python3 tests/project_terminal_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/store" "$fixture/pty.sock" "$fixture" "$PWD/tests/project_terminal_child.py"

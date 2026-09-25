@@ -483,7 +483,9 @@ final class GraphicalTerminal: @unchecked Sendable {
             case .mouseButton(let x, let y, let button, let release, let modifiers):
                 emulator?.mouseButton(x: x, y: y, button: button, release: release, modifiers: modifiers)
             case .mouseWheel(let x, let y, let steps, let modifiers):
-                emulator?.mouseWheel(x: x, y: y, steps: steps, modifiers: modifiers)
+                if emulator?.mouseWheel(x: x, y: y, steps: steps, modifiers: modifiers) == true {
+                    dirty = true
+                }
             }
         }
         lock.unlock()
@@ -537,7 +539,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                 dirty = false
                 let snapshot = emulator.snapshot()
                 let title = (exitStatus.map { "Threading terminal - exited \($0)" }
-                    ?? "Threading terminal - \(snapshot.title.isEmpty ? "running" : snapshot.title)") + replayLabel
+                    ?? "Threading terminal - \(snapshot.title.isEmpty ? "running" : snapshot.title)")
+                    + replayLabel + (snapshot.atLiveEnd ? "" : " [scrollback]")
                 drawing.async { [self] in
                     do { finish(try Self.draw(snapshot, width: width, height: height, title: title)) }
                     catch { fail(error); finish(nil) }
