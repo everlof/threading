@@ -91,11 +91,24 @@ if [[ ${THREADING_LINUX_CODEX+x} ]]; then
 else
   codex=$(command -v codex || true)
 fi
+if [[ ${THREADING_LINUX_CLAUDE+x} ]]; then
+  claude=$THREADING_LINUX_CLAUDE
+else
+  claude=$(command -v claude || true)
+fi
 if [[ -n $codex ]]; then
   if [[ $codex != /* || ! -x $codex ]]; then
     echo "run-app: Codex must be an absolute executable: $codex" >&2
     exit 1
   fi
-  exec "$window" --app-codex-project "$store" "$socket" "$shell_path" "$codex" "$project"
+fi
+if [[ -n $claude ]]; then
+  if [[ $claude != /* || ! -x $claude ]]; then
+    echo "run-app: Claude must be an absolute executable: $claude" >&2
+    exit 1
+  fi
+fi
+if [[ -n $codex || -n $claude ]]; then
+  exec "$window" --app-agents-project "$store" "$socket" "$shell_path" "${codex:--}" "${claude:--}" "$project"
 fi
 exec "$window" --app-project "$store" "$socket" "$shell_path" "$project"

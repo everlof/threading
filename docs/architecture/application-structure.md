@@ -88,14 +88,20 @@ the provider's invocation and terminal flags from resolved values; the macOS lau
 model metadata, account/hook setup, permission defaults and resume preflight.
 `ClaudeLaunchCommand` likewise composes the portable fresh/resume command pair from resolved
 session values and host-supplied integration flags. The macOS remote host and experimental Linux
-CLI share it; the macOS local launcher still owns hooks, fork handling and transcript existence
-checks. The Linux CLI currently launches only a fresh standard-account Claude session and records
-its caller-minted UUID before spawn. It does not yet offer exited-session resume.
+hosts share it; the macOS local launcher still owns hooks and fork handling. The Linux CLI starts
+a fresh standard-account Claude session and records its caller-minted UUID before spawn; the native
+Linux window can also resume an exited one after a worker checks the exact transcript path.
+`ClaudeTranscriptPath` owns that portable path and project-slug encoding for both hosts, while
+account discovery and transcript source selection remain host-owned. The headless CLI does not
+yet offer exited-session resume.
 
 `AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
 store and UI. macOS and the Linux host share it; host adapters retain account/model admission,
 project/identity checks, fallback branch lookup, persistence and notification delivery. This is
 not yet a shared session-creation transaction or runtime coordinator.
+The native Linux host prepares a new agent through a zero-recent-row navigation snapshot and one
+indexed identity check, then uses the incremental session write. It never decodes the standing
+session graph to launch a new child.
 `AgentLaunchRecording` applies a terminal plan's durable launch facts before either host hands
 it to a process owner. Both hosts mark the attempt launched, stamp activity, clear a previous
 exit code and store the plan's resume state; admission and the exact database write remain with

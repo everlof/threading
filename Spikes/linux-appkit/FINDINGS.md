@@ -2331,5 +2331,42 @@ select its default iPhone 17 Pro destination on this machine, so `scripts/test-m
 separately with an explicit installed simulator ID. Architecture and theme boundary checks passed.
 
 The recorder does not prove an authenticated Claude installation or transcript generation.
-The headless command has no exited-session resume or named Claude account choice, and the native
-Linux window does not yet offer a Claude launch action. Those remain separate shipping-path work.
+The headless command still has no exited-session resume or named Claude account choice. The
+subsequent native-window path is recorded in section 87.
+
+## 87. The native Linux window now owns a Claude create, attach and resume journey
+
+The diagnostic window's managed-agent route now chooses the provider from a saved session rather
+than assuming Codex. The project view exposes Ctrl+Shift+L for a fresh standard-account Claude
+terminal beside its existing Codex action; `run-app.sh` passes whichever absolute provider
+executables are available. Fresh creation uses the shared `ClaudeLaunchCommand`, selects Manual,
+clears an inherited `CLAUDE_CONFIG_DIR`, stores the caller-minted UUID and selected row, then
+spawns the same typed identity through the production PTY daemon. A reopened window first attaches
+to the daemon-held child. If that child has exited, it resumes only after an exact transcript
+preflight; a missing file refuses the launch without creating another conversation.
+
+The preflight does not carry a second guess at Claude's project slug. `ClaudeTranscriptPath` is a
+Foundation-only value shared with the Mac storage fallback, including its measured UTF-16 encoding
+of punctuation and non-ASCII project paths. The Linux check runs on the terminal worker and reads
+one computed file. Fresh agent creation now reads zero standing session payloads through the
+bounded navigation snapshot and checks its proposed UUID by indexed identity lookup instead of
+decoding the entire graph. On the 5,100-session/two-project Release fixture, the median creation
+read was 0.3 ms versus 38.0 ms for a full graph read; an unreadable unrelated session row no
+longer blocks an exact new-row write. The visible navigator still mounts only viewport rows from
+its bounded saved catalogue. The existing project and saved-agent navigation is host-owned: Threading
+retains account routing, session identity, persistence, PTY ownership and resume admission even
+if a future extension can customize its presentation.
+
+The real Xvfb journey used a custom `HOME`, a conflicting inherited `CLAUDE_CONFIG_DIR`, and a
+project path containing dots and an underscore. Its recorder checked the fresh and resume flags,
+the exact durable provider UUID, a second window's attachment to the same live child, and refusal
+after removing the transcript. The focused native agent suite and one-command startup suite
+passed. The project-action and saved-agent screenshots in `out/claude-project-list.png` and
+`out/claude-agent-picker.png` were inspected in the rendered window. The Mac transcript-path and
+remote-host suites passed 35 focused tests. The complete `scripts/test.sh all` gate passed 9,519
+Mac tests (82 skipped) and 898 iOS tests (one skipped) with zero failures. Architecture and theme
+boundaries stayed clean, and all 50 vendored core files verified byte-identical.
+
+This remains a source-tree diagnostic window, not a packaged Linux release. The recorder is not
+an authenticated Claude installation; named Claude accounts, host hook integration and exited
+Claude resume from the headless CLI remain open.

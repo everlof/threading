@@ -162,8 +162,12 @@ transcript discovery and native UI remain unfinished.
 The later Linux host now also creates a standard-account Claude Code session from the same
 portable fresh/resume command pair used by the macOS remote host. It stores the caller-minted
 UUID and launches through the real daemon; the recorder verifies flags, account environment and
-durable exact-row writes. The native Linux window still has no Claude creation/resume path, and
-no authenticated provider run is claimed ([FINDINGS section 86](../../Spikes/linux-appkit/FINDINGS.md#86-a-linux-host-can-create-a-real-claude-session-without-a-second-command-policy)).
+durable exact-row writes. At that point the native Linux window had no Claude creation/resume
+path, and no authenticated provider run was claimed ([FINDINGS section 86](../../Spikes/linux-appkit/FINDINGS.md#86-a-linux-host-can-create-a-real-claude-session-without-a-second-command-policy)).
+The native experiment now starts standard-account Claude sessions and resumes exited ones only
+after finding their exact transcript through the shared project-slug/path policy. This is a
+window and real PTY-daemon journey, not yet a packaged Linux app or an authenticated Claude run
+([FINDINGS section 87](../../Spikes/linux-appkit/FINDINGS.md#87-the-native-linux-window-now-owns-a-claude-create-attach-and-resume-journey)).
 
 ## The boundary to build
 

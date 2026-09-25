@@ -20,7 +20,7 @@ store = data / 'store'
 environment = dict(os.environ, THREADING_LINUX_DATA_DIR=str(data),
                    THREADING_LINUX_RUNTIME_DIR=str(runtime), THREADING_LINUX_BIN_DIR=bin_dir,
                    THREADING_LINUX_DAEMON_BIN=daemon, THREADING_LINUX_SHELL='/bin/sh',
-                   THREADING_LINUX_CODEX='')
+                   THREADING_LINUX_CODEX='', THREADING_LINUX_CLAUDE='')
 
 
 def xdo(*args):
@@ -58,10 +58,11 @@ def terminal_row():
     raise AssertionError('daemon did not retain the project terminal')
 
 
-def launch(log_name, project_argument=None, codex=None):
+def launch(log_name, project_argument=None, codex=None, claude=None):
     log = (root / log_name).open('w+')
     process = subprocess.Popen([script, project_argument or str(project)], cwd=root,
-                               env=dict(environment, THREADING_LINUX_CODEX=codex or ''),
+                               env=dict(environment, THREADING_LINUX_CODEX=codex or '',
+                                        THREADING_LINUX_CLAUDE=claude or ''),
                                stdout=log, stderr=log)
     return process, log
 
@@ -87,8 +88,9 @@ try:
     log.close()
     process = None
 
-    # A configured provider uses the other targeted entry point, even before an agent starts.
-    process, log = launch('startup-other-project.log', other_project.name, codex='/bin/true')
+    # Both configured providers use the combined targeted entry point before any agent starts.
+    process, log = launch('startup-other-project.log', other_project.name,
+                          codex='/bin/true', claude='/bin/true')
     window = title(process, 'Threading experiment - ' + str(other_project))
     assert int((runtime / 'daemon.pid').read_text()) == daemon_pid, 'relaunch replaced the live daemon'
     subprocess.run(['import', '-window', window, 'out/startup-target-project.png'], check=True, timeout=5)

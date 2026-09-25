@@ -53,9 +53,9 @@ project-graph slice and runs the on-disk contracts below:
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 46 production files are byte-identical to their sources. Fresh-session record assembly,
-terminal launch recording, launch values, account command routing and bounded Codex rollout checks
-are shared with the app.
+The 50 production files are byte-identical to their sources. Fresh-session record assembly,
+terminal launch recording, launch values, account command routing, bounded Codex rollout checks
+and Claude transcript paths are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
 agent runtime. The debug harness uses
 `@testable import CoreSlice` without widening the production APIs. Commit-refusal fixtures use
@@ -97,9 +97,10 @@ Otherwise the project list opens without starting a child. Enter opens a shell; 
 and saved-terminal pickers can reattach other runtimes. It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
 `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
-private to the user. If `codex` resolves to an absolute executable, the window also offers the
-managed Codex action. Set `THREADING_LINUX_CODEX=` to run the terminal-only mode, or set it to an
-absolute executable to choose a particular CLI. Closing the window leaves running children with
+private to the user. If `codex` or `claude` resolves to an absolute executable, the window also
+offers its managed agent action. Set `THREADING_LINUX_CODEX=` or `THREADING_LINUX_CLAUDE=` to disable
+that provider, or set either to an absolute executable to choose a particular CLI. Clear both for
+terminal-only mode. Closing the window leaves running children with
 the daemon; running the command again opens the same stored projects and can reattach them.
 In a Codex-enabled project list, Ctrl+Shift+I opens the native login chooser; Up/Down and Enter
 select the login used by the next Ctrl+Shift+A launch. It lists the standard home and up to 31
@@ -422,6 +423,8 @@ With an existing experimental store and a running daemon:
 ```bash
 WindowHarness --app /path/to/experimental-store /path/to/ptyd.sock /bin/bash -l
 WindowHarness --app-codex /path/to/experimental-store /path/to/ptyd.sock /bin/bash /absolute/path/to/codex
+WindowHarness --app-claude /path/to/experimental-store /path/to/ptyd.sock /bin/bash /absolute/path/to/claude
+WindowHarness --app-agents /path/to/experimental-store /path/to/ptyd.sock /bin/bash /absolute/path/to/codex /absolute/path/to/claude
 ```
 
 Select a project with Up/Down or a click, then press Enter to open its shell. Ctrl+Shift+P
@@ -442,6 +445,14 @@ from silently taking over a standard-account record. Ctrl+Shift+I opens the acco
 the project list; it can choose a legacy login such as `codex-work` after finding
 `HOME/.codex-work/auth.json`. `THREADING_LINUX_CODEX_ACCOUNT=codex-work` can still select the
 initial handle without opening the picker. Selection affects new sessions only.
+Ctrl+Shift+L starts a fresh standard-account Claude session when a Claude executable is configured.
+Its caller-minted UUID is stored before spawn, and `env -u CLAUDE_CONFIG_DIR` keeps an inherited
+alternate login from taking over `HOME/.claude`. The saved-agent picker first reattaches a
+daemon-held child; after exit it resumes the same UUID only when the exact transcript exists in
+the recorded project's Claude storage slot. A missing transcript refuses the resume without
+creating another chat. Named Claude accounts, hooks and authenticated-provider execution are not
+yet covered by this Linux experiment. The native action uses the same host-owned session and PTY
+paths as Codex; it adds no public extension presentation component.
 The initial project-window snapshot reads indexed session counts and at most 512 recent session
 payloads per project. A selected agent outside that window adds one indexed read and replaces
 one picker entry. Selected-agent attach, rollout-ID persistence, resume, and opening an agent
@@ -476,15 +487,17 @@ terminals and agents, and requests frames only for the visible terminal. It save
 terminal through the production store before spawning through the production PTY client. The
 fixed initial snapshot projects at most 512 agents and 512 terminals per project
 into their pickers and constructs only viewport rows. New agents created by this window join
-its in-memory catalogue after persistence. The project-targeted launcher attempts attach-only
+its in-memory catalogue after persistence; creation asks for zero standing session payloads and
+checks the new UUID by indexed lookup. The project-targeted launcher attempts attach-only
 restoration of its saved agent selection. Opening an agent persists that selection on a worker
 before entering its terminal; opening a terminal clears it when the store accepts the write, as
 on macOS. The generic `--app` mode starts at the project list, and saved terminals still require
 explicit selection. `--attach` and `--attach-agent` remain available below.
 
-Run `THREADING_LINUX_AGENT_ONLY=1 ./window-smoke.sh` for the focused native agent-selection and
-startup reattach journey. `THREADING_LINUX_NAMED_ONLY=1 ./window-smoke.sh` isolates named Codex
-creation and exact resume. The ordinary `./window-smoke.sh` runs the complete Xvfb suite.
+Run `THREADING_LINUX_AGENT_ONLY=1 ./window-smoke.sh` for focused native agent selection, Codex
+account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NAMED_ONLY=1
+./window-smoke.sh` isolates named Codex creation and exact resume. The ordinary
+`./window-smoke.sh` runs the complete Xvfb suite.
 
 The project catalogue is an initial snapshot plus this window's newly created terminal counts
 and agent sessions; external store changes are not live-synchronized. Closing the window

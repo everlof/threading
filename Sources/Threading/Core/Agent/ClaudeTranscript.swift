@@ -165,23 +165,6 @@ enum ClaudeTranscript {
     /// dashes rather than one. Measured against the CLI: a folder named `slug probe_v1.2 åäö-🎉`
     /// is filed under `slug-probe-v1-2-------`.
     static func projectSlug(forPath path: String) -> String {
-        var slug = ""
-        slug.reserveCapacity(path.utf16.count)
-
-        for unit in path.utf16 {
-            if preservedSlugCodeUnits.contains(unit), let scalar = Unicode.Scalar(unit) {
-                slug.unicodeScalars.append(scalar)
-            } else {
-                slug.append(AgentDefaults.projectSlugSeparator)
-            }
-        }
-
-        return slug
+        ClaudeTranscriptPath.projectSlug(forPath: path)
     }
-
-    /// Spelled out rather than compared against numeric bounds: the set is the rule, and an
-    /// ASCII range written as `0x61...0x7A` is a place for a mistake to hide.
-    private static let preservedSlugCodeUnits: Set<UInt16> = Set(
-        AgentDefaults.projectSlugPreservedCharacters.utf16
-    )
 }

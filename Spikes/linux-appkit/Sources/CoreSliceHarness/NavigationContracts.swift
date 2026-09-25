@@ -53,6 +53,16 @@ func runNavigationContracts() throws {
         _ = try database.load()
         throw ContractFailure.failed("authoritative load accepted unreadable session")
     } catch ProjectDatabaseLoadError.corruptRow { }
+    let appended = AgentSession(kind: .claude, title: "New launch after an unreadable old row")
+    try database.addSession(appended, to: beta.id, position: newer.count,
+                            selectNewSession: true)
+    let afterAppend = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+    try require(afterAppend.projects.map(\.sessionCount) == [4, 4],
+                "indexed launch changed unrelated session counts")
+    try require(afterAppend.selectedSessionID == appended.id,
+                "indexed launch did not select its new session")
+    try require(try database.sessionRecord(id: appended.id)?.session.id == appended.id,
+                "indexed launch could not reopen its new row")
     print("PASS bounded project navigation: indexed recent windows, counts, selection and partial-read fence")
 }
 
@@ -92,14 +102,24 @@ func runNavigationStress() throws {
         try require(snapshot.projects.map { $0.recentSessions.count } == [512, 100],
                     "stress navigator decoded outside its window")
     }
+    func creationRead() throws {
+        let snapshot = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+        try require(snapshot.projects.map(\.sessionCount) == [5_000, 100],
+                    "stress creation counts changed")
+        try require(snapshot.projects.allSatisfy { $0.recentSessions.isEmpty },
+                    "stress creation decoded standing session payloads")
+    }
 
     try fullRead()
     try navigationRead()
+    try creationRead()
     var fullSamples: [Double] = []
     var navigationSamples: [Double] = []
+    var creationSamples: [Double] = []
     for _ in 0..<5 {
         fullSamples.append(try measure(fullRead))
         navigationSamples.append(try measure(navigationRead))
+        creationSamples.append(try measure(creationRead))
     }
     func summary(_ samples: [Double]) -> String {
         let sorted = samples.sorted()
@@ -107,4 +127,5 @@ func runNavigationStress() throws {
     }
     print(String(format: "navigation stress fixture: 5,100 sessions in 2 projects, about 165-byte titles; save %.1f ms", fixtureMilliseconds))
     print("full graph read: \(summary(fullSamples)); bounded navigation: \(summary(navigationSamples))")
+    print("new-agent creation read: \(summary(creationSamples))")
 }
