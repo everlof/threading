@@ -20,6 +20,8 @@ home.mkdir()
 account = home / '.codex-work'
 account.mkdir()
 (account / 'auth.json').write_text('{}')
+for number in range(40):
+    (home / f'.codex-{number:02d}').mkdir()
 foreign = root / 'named-foreign'
 foreign.mkdir()
 child = root / 'named-codex-child'
@@ -51,7 +53,7 @@ sys.exit(0)
 ''')
 child.chmod(0o700)
 environment = dict(os.environ, HOME=str(home), CODEX_HOME=str(foreign),
-                   THREADING_LINUX_CODEX_ACCOUNT='codex-work')
+                   THREADING_LINUX_CODEX_ACCOUNT='codex-missing')
 subprocess.run([host, '--add-project', store, str(project)], check=True, capture_output=True,
                timeout=10)
 
@@ -114,6 +116,17 @@ def visit(log_name, action):
 
 
 def create(process, window, log):
+    key(window, 'ctrl+shift+i')
+    title(process, 'Threading Codex accounts - ' + str(project), log)
+    key(window, 'Down')
+    deadline = time.monotonic() + 5
+    while 'selected=codex-work total=2' not in log.read_text():
+        assert time.monotonic() < deadline, log.read_text()
+        time.sleep(.05)
+    subprocess.run(['import', '-window', window, 'out/codex-account-picker.png'],
+                   check=True, timeout=5)
+    key(window, 'Return')
+    title(process, 'Threading experiment - ' + str(project), log)
     key(window, 'ctrl+shift+a')
     title(process, 'Threading terminal - NAMED CREATED', log)
     created = json.loads((project / 'named-created.json').read_text())

@@ -88,6 +88,11 @@ struct WindowHarness {
         case terminal(String)
     }
 
+    private struct PendingAgent {
+        let projectIndex: Int
+        let accountHandle: AccountHandle
+    }
+
     private static func savedAgentTitle(_ title: String, accountHandle: AccountHandle) -> String {
         let account = accountHandle.isStandard ? "" :
             " [\(String(accountHandle.name.unicodeScalars.prefix(64)))]"
@@ -142,10 +147,12 @@ struct WindowHarness {
                     throw WindowFailure("usage: WindowHarness --app-codex EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX | --app-codex-project EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX PROJECT")
                 }
                 let requestedProject = targeted ? args[4] : nil
-                let snapshot = try await Task.detached {
-                    try loadSnapshot(args[0], selectingProjectAt: requestedProject)
+                let prepared = try await Task.detached {
+                    (try loadSnapshot(args[0], selectingProjectAt: requestedProject),
+                     discoverCodexAccounts())
                 }.value
-                try show(snapshot, launch: Array(args.prefix(3)), agentExecutable: args[3])
+                try show(prepared.0, launch: Array(args.prefix(3)), agentExecutable: args[3],
+                         codexAccounts: prepared.1)
                 return
             }
             guard CommandLine.arguments.count == 2 else { throw WindowFailure("usage: WindowHarness EXISTING_STORE") }
@@ -164,6 +171,36 @@ struct WindowHarness {
     }
 
     #if os(Linux)
+    /// Inspect the home once on a worker. The picker and input loop only touch this bounded
+    /// value, and the shared resolver still validates the selected home at launch time.
+    private static func discoverCodexAccounts() -> [AccountHandle] {
+        guard let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/") else {
+            return [.standard]
+        }
+        let homeURL = URL(fileURLWithPath: home, isDirectory: true)
+        guard let directory = Glibc.opendir(home) else { return [.standard] }
+        defer { Glibc.closedir(directory) }
+        var names: [String] = []
+        while let entry = Glibc.readdir(directory) {
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) }
+            }
+            guard name.hasPrefix(".codex-"), name.utf8.count <= 129 else { continue }
+            // Unverified directories must not consume the bound and hide a real login.
+            let handle = AccountHandle.named(String(name.dropFirst()))
+            guard CodexAccountLocations.resolve(handle, home: homeURL) != nil else { continue }
+            // Keep 31 lexical accounts plus standard without building an unbounded home listing.
+            names.append(name)
+            names.sort()
+            if names.count > 31 { names.removeLast() }
+        }
+        let candidates = names.map { homeURL.appendingPathComponent($0, isDirectory: true) }
+        let found = CodexAccountLocations.discover(home: homeURL, candidates: candidates,
+                                                   verified: [])
+        return [.standard] + found.map(\.handle).filter { !$0.isStandard }
+            .sorted { $0.name < $1.name }
+    }
+
     /// SDL owns its renderer on the thread that opened it. Do not suspend the window loop across
     /// a store write: Swift's Linux main-actor executor can resume it on another native thread.
     /// The worker publishes one result, and the native loop polls only while that write is live.
@@ -512,23 +549,22 @@ struct WindowHarness {
     @MainActor private static func reconcilePendingAgents(
         projects: inout [ProjectSnapshot],
         runtimes: inout [SavedRuntimeKey: GraphicalTerminal],
-        pending: inout [String: Int],
-        retainedProjects: inout Set<String>,
-        accountHandle: AccountHandle
+        pending: inout [String: PendingAgent],
+        retainedProjects: inout Set<String>
     ) -> Bool {
         var changed = false
-        for (id, projectIndex) in Array(pending) {
+        for (id, launch) in Array(pending) {
             let key = SavedRuntimeKey.agent(id)
             guard let runtime = runtimes[key] else { pending.removeValue(forKey: id); continue }
             if runtime.hasCreatedAgent {
-                projects[projectIndex].sessions += 1
-                projects[projectIndex].recentAgents.insert(
-                    .init(id: id, title: savedAgentTitle("codex", accountHandle: accountHandle)),
+                projects[launch.projectIndex].sessions += 1
+                projects[launch.projectIndex].recentAgents.insert(
+                    .init(id: id, title: savedAgentTitle("codex", accountHandle: launch.accountHandle)),
                     at: 0)
-                if projects[projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
-                    projects[projectIndex].recentAgents.removeLast()
+                if projects[launch.projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
+                    projects[launch.projectIndex].recentAgents.removeLast()
                 }
-                retainedProjects.insert(projects[projectIndex].id)
+                retainedProjects.insert(projects[launch.projectIndex].id)
                 pending.removeValue(forKey: id)
                 changed = true
             } else if runtime.canReplace {
@@ -542,8 +578,9 @@ struct WindowHarness {
     }
 
     @MainActor static func show(_ snapshot: WindowSnapshot, launch: [String]? = nil,
-                                agentExecutable: String? = nil) throws {
-        let codexAccount = AccountHandle(storedName:
+                                agentExecutable: String? = nil,
+                                codexAccounts: [AccountHandle] = []) throws {
+        var codexAccount = AccountHandle(storedName:
             ProcessInfo.processInfo.environment["THREADING_LINUX_CODEX_ACCOUNT"])
         var projects = snapshot.projects
         guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
@@ -552,7 +589,7 @@ struct WindowHarness {
         defer { tw_close(window) }
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
-        var pendingAgentProjects: [String: Int] = [:]
+        var pendingAgentProjects: [String: PendingAgent] = [:]
         var restoredProjectIDs: Set<String> = []
         var previousTerminalCounts: [String: Int] = [:]
         defer {
@@ -562,6 +599,8 @@ struct WindowHarness {
         var width = 800, height = 480, selected = snapshot.selectedProjectIndex, first = 0
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
+        var accountPicker = false
+        var accountSelected = 0, accountFirst = 0
         var pendingSelection: PendingSelection?
         var dirty = true
         if let id = snapshot.restoreAgentID, let launch,
@@ -580,10 +619,13 @@ struct WindowHarness {
         while true {
             if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                       pending: &pendingAgentProjects,
-                                      retainedProjects: &restoredProjectIDs,
-                                      accountHandle: codexAccount) { dirty = true }
+                                      retainedProjects: &restoredProjectIDs) { dirty = true }
             let count = max(1, (height / 2 - 32) / Int(navigatorRowStride))
-            if let savedPicker {
+            if accountPicker {
+                accountSelected = max(0, min(codexAccounts.count - 1, accountSelected))
+                if accountSelected < accountFirst { accountFirst = accountSelected }
+                if accountSelected >= accountFirst + count { accountFirst = accountSelected - count + 1 }
+            } else if let savedPicker {
                 let project = projects[savedPicker.projectIndex]
                 let savedCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
                 savedSelected = max(0, min(savedCount - 1, savedSelected))
@@ -599,7 +641,19 @@ struct WindowHarness {
                 let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
                 let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
                 let end: Int
-                if let savedPicker {
+                if accountPicker {
+                    root.title = "Codex login - Enter: choose; Esc: back"
+                    end = min(codexAccounts.count, accountFirst + count)
+                    for index in accountFirst..<end {
+                        let handle = codexAccounts[index]
+                        let name = handle.isStandard ? "Default Codex" :
+                            "Codex [\(String(handle.name.prefix(48)))]"
+                        let text = name + (handle == codexAccount ? " *" : "")
+                        root.addSubview(Specimen.Row(frame: navigatorRowRect(index - accountFirst,
+                            width: width, height: height),
+                            text: text, accent: accent, selected: index == accountSelected))
+                    }
+                } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     root.title = savedPicker.isAgent
@@ -621,20 +675,20 @@ struct WindowHarness {
                             text: text, accent: accent, selected: index == savedSelected))
                     }
                 } else {
+                    let accountName = codexAccount.isStandard ? "Codex" :
+                        "Codex \(String(codexAccount.name.prefix(16)))"
                     if launch != nil {
                         root.title = width >= 700 ? "Projects - Enter: shell; Left: agents; Right: terminals" : "Projects - Enter: shell"
                     }
                     if agentExecutable != nil {
-                        let accountName = codexAccount.isStandard ? "Codex" :
-                            "Codex \(String(codexAccount.name.prefix(16)))"
                         root.title = width >= 700
-                            ? "Enter: shell; Left/Right: saved; C-S-A: \(accountName)"
-                            : "Ctrl+Shift+A: \(accountName)"
+                            ? "Enter: shell; C-S-A: \(accountName); C-S-I: login"
+                            : "C-S-A: \(accountName); C-S-I: login"
                     }
                     if !projects.isEmpty, terminals[projects[selected].id]?.canReplace == true {
                         root.title = agentExecutable == nil
                             ? (width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Left/Right: saved" : "Ctrl+Shift+N: new")
-                            : (width >= 700 ? "Enter: view; C-S-N: shell; C-S-A: Codex" : "C-S-N: shell; C-S-A: Codex")
+                            : (width >= 700 ? "Enter: view; C-S-A: \(accountName); C-S-I: login" : "C-S-A: \(accountName); C-S-I: login")
                     }
                     end = min(projects.count, first + count)
                     for index in first..<end {
@@ -661,7 +715,24 @@ struct WindowHarness {
                     tw_present(window, $0.baseAddress, Int32(width), Int32(height))
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
-                if let savedPicker {
+                if accountPicker {
+                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    tw_accessibility_begin_list(window, "Codex accounts", Int32(accountFirst),
+                                                Int32(codexAccounts.count), 1, 0, listY,
+                                                Int32(width), Int32(height) - listY)
+                    for index in accountFirst..<end {
+                        let handle = codexAccounts[index]
+                        let name = handle.isStandard ? "Default Codex" : "Codex \(handle.name)"
+                        let label = name + (handle == codexAccount ? " active" : "")
+                        try publishAccessibleRow(window, id: handle.name, label: label,
+                                                 selected: index == accountSelected,
+                                                 visibleIndex: index - accountFirst,
+                                                 width: width, height: height)
+                    }
+                    tw_accessibility_end_list(window)
+                    tw_title(window, "Threading Codex accounts - \(projects[selected].path)")
+                    print("ACCOUNT_PICKER_FRAME \(width)x\(height) mounted=\(end - accountFirst) selected=\(codexAccounts[accountSelected].name) total=\(codexAccounts.count)")
+                } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     let total = savedPicker.isAgent ? project.sessions : project.terminalCount
@@ -750,7 +821,10 @@ struct WindowHarness {
             switch event.kind {
             case 5: return
             case 12:
-                if savedPicker != nil {
+                if accountPicker {
+                    accountPicker = false
+                    dirty = true
+                } else if savedPicker != nil {
                     savedPicker = nil
                     dirty = true
                 } else { return }
@@ -759,9 +833,11 @@ struct WindowHarness {
                 height = max(180, min(900, Int(event.height)))
                 dirty = true
             case 2:
-                let listFirst = savedPicker == nil ? first : savedFirst
+                let listFirst = accountPicker ? accountFirst : (savedPicker == nil ? first : savedFirst)
                 let listCount: Int
-                if let savedPicker {
+                if accountPicker {
+                    listCount = codexAccounts.count
+                } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     listCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
                 } else { listCount = projects.count }
@@ -772,12 +848,19 @@ struct WindowHarness {
                         && event.y >= row.y && event.y < row.y + row.height
                 }) {
                     let candidate = listFirst + mounted
-                    if savedPicker == nil { selected = candidate }
+                    if accountPicker { accountSelected = candidate }
+                    else if savedPicker == nil { selected = candidate }
                     else { savedSelected = candidate }
                     dirty = true
                 }
             case 8:
                 guard let launch, !projects.isEmpty else { break }
+                if accountPicker {
+                    codexAccount = codexAccounts[accountSelected]
+                    accountPicker = false
+                    dirty = true
+                    break
+                }
                 if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
@@ -851,7 +934,7 @@ struct WindowHarness {
                 tw_project_mode(window)
                 dirty = true
             case 9:
-                guard savedPicker == nil, let launch, !projects.isEmpty else { break }
+                guard !accountPicker, savedPicker == nil, let launch, !projects.isEmpty else { break }
                 let project = projects[selected]
                 if let existing = terminals[project.id], !existing.canReplace {
                     tw_title(window, "Threading experiment - terminal may still be running")
@@ -882,7 +965,8 @@ struct WindowHarness {
                 tw_project_mode(window)
                 dirty = true
             case 13:
-                guard savedPicker == nil, let launch, let agentExecutable, !projects.isEmpty else { break }
+                guard !accountPicker, savedPicker == nil, let launch,
+                      let agentExecutable, !projects.isEmpty else { break }
                 guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
@@ -891,7 +975,8 @@ struct WindowHarness {
                 let savedID = String(describing: id)
                 let session = GraphicalTerminal()
                 restoredRuntimes[.agent(savedID)] = session
-                pendingAgentProjects[savedID] = selected
+                pendingAgentProjects[savedID] = PendingAgent(projectIndex: selected,
+                                                             accountHandle: codexAccount)
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
                                    shell: launch[2], codex: agentExecutable,
                                    accountHandle: codexAccount, id: id,
@@ -902,7 +987,11 @@ struct WindowHarness {
                 tw_project_mode(window)
                 dirty = true
             case 3, 4:
-                if let savedPicker {
+                if accountPicker {
+                    let next = max(0, min(codexAccounts.count - 1,
+                                          accountSelected + (event.kind == 3 ? -1 : 1)))
+                    if next != accountSelected { accountSelected = next; dirty = true }
+                } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     let savedCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
                     let next = max(0, min(savedCount - 1, savedSelected + (event.kind == 3 ? -1 : 1)))
@@ -912,7 +1001,8 @@ struct WindowHarness {
                     if next != selected { selected = next; dirty = true }
                 }
             case 10:
-                guard savedPicker == nil, launch != nil, !projects.isEmpty else { break }
+                guard !accountPicker, savedPicker == nil, launch != nil,
+                      !projects.isEmpty else { break }
                 guard !projects[selected].recentTerminals.isEmpty else {
                     tw_title(window, "Threading experiment - no saved terminals")
                     break
@@ -922,16 +1012,20 @@ struct WindowHarness {
                 savedFirst = 0
                 dirty = true
             case 11:
-                if savedPicker != nil {
+                if accountPicker {
+                    accountPicker = false
+                    dirty = true
+                } else if savedPicker != nil {
                     savedPicker = nil
                     dirty = true
                 } else if launch != nil, !projects.isEmpty {
                     if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                               pending: &pendingAgentProjects,
-                                              retainedProjects: &restoredProjectIDs,
-                                              accountHandle: codexAccount) { dirty = true }
+                                              retainedProjects: &restoredProjectIDs) { dirty = true }
                     guard !projects[selected].recentAgents.isEmpty else {
-                        let pending = pendingAgentProjects.values.contains(selected)
+                        let pending = pendingAgentProjects.values.contains {
+                            $0.projectIndex == selected
+                        }
                         tw_title(window, pending ? "Threading experiment - agent starting"
                                                  : "Threading experiment - no saved agents")
                         break
@@ -941,6 +1035,13 @@ struct WindowHarness {
                     savedFirst = 0
                     dirty = true
                 }
+            case 20:
+                guard !accountPicker, savedPicker == nil, agentExecutable != nil,
+                      !projects.isEmpty, !codexAccounts.isEmpty else { break }
+                accountPicker = true
+                accountSelected = codexAccounts.firstIndex(of: codexAccount) ?? 0
+                accountFirst = 0
+                dirty = true
             default: break
             }
         }
