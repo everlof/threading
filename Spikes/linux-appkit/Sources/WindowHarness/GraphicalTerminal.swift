@@ -84,8 +84,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var replayLabel = ""
     private var attachmentViewportApplied = false
     private var codexDiscovery: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)?
-    private var codexResume: (store: String, socket: String, shell: String, executable: String, sessionID: SessionID,
-                              width: Int, height: Int)?
+    private var agentResume: (store: String, socket: String, shell: String, codex: String?,
+                              claude: String?, sessionID: SessionID, width: Int, height: Int)?
 
     func start(store: String, socket: String, directory: String, executable: String, arguments: [String]) {
         worker.async { [self] in
@@ -103,21 +103,21 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
     }
     func startAgent(store: String, socket: String, directory: String, shell: String,
-                    codex: String, accountHandle: AccountHandle, id: SessionID,
+                    kind: AgentKind, executable: String, accountHandle: AccountHandle, id: SessionID,
                     width: Int, height: Int) {
         worker.async { [self] in
             do {
                 let columns = max(2, width / Self.cellWidth), rows = max(1, height / Self.cellHeight)
                 let link = try connect(socket: socket, columns: columns, rows: rows)
-                let home = try Self.codexHome(for: accountHandle)
+                let accountPath = try Self.accountPath(for: kind, handle: accountHandle)
                 let plan = try Self.createAgent(store: store, directory: directory,
-                                                shell: shell, codex: codex,
+                                                shell: shell, kind: kind, executable: executable,
                                                 accountHandle: accountHandle,
-                                                accountPath: home.path, id: id)
+                                                accountPath: accountPath, id: id)
                 let environment = Self.launchEnvironment()
                 let identity = PTYHostSessionIdentity.agentSession(id)
                 self.identity = identity
-                codexDiscovery = (store, directory, home.path, id, Date())
+                if kind == .codex { codexDiscovery = (store, directory, accountPath, id, Date()) }
                 lastWidth = width; lastHeight = height
                 lock.lock(); createdAgent = true; spawnMayBeLive = true; lock.unlock()
                 try link.spawn(PTYHostSpawnRequest(id: identity,
@@ -134,15 +134,22 @@ final class GraphicalTerminal: @unchecked Sendable {
         environment["LANG"] = environment["LANG"] ?? "C.UTF-8"
         return environment.map { "\($0.key)=\($0.value)" }
     }
-    private static func codexHome(for handle: AccountHandle) throws -> URL {
+    private static func accountPath(for kind: AgentKind, handle: AccountHandle) throws -> String {
         guard let home = ProcessInfo.processInfo.environment["HOME"], home.hasPrefix("/") else {
-            throw WindowFailure("an absolute HOME is required for Codex account routing")
+            throw WindowFailure("an absolute HOME is required for agent account routing")
         }
+        let homeURL = URL(fileURLWithPath: home, isDirectory: true)
+        if kind == .claude {
+            guard handle.isStandard else { throw WindowFailure("named Claude accounts are not available in this window") }
+            return homeURL.appendingPathComponent(AgentAccountDefaults.claudeDefaultDirectory,
+                                                 isDirectory: true).path
+        }
+        guard kind == .codex else { throw WindowFailure("unsupported agent kind") }
         guard let location = CodexAccountLocations.resolve(
-            handle, home: URL(fileURLWithPath: home, isDirectory: true)) else {
+            handle, home: homeURL) else {
             throw WindowFailure("saved Codex account is unavailable: \(handle.name)")
         }
-        return URL(fileURLWithPath: location.configPath, isDirectory: true)
+        return location.configPath
     }
     private func connect(socket: String, columns: Int = 80, rows: Int = 24) throws -> PTYHostClient {
         connectionGeneration += 1
@@ -175,9 +182,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         attach(store: store, socket: socket, savedID: sessionID, kind: .agent)
     }
     func openAgent(store: String, socket: String, sessionID: String, shell: String,
-                   codex: String, width: Int, height: Int) {
+                   codex: String?, claude: String?, width: Int, height: Int) {
         attach(store: store, socket: socket, savedID: sessionID, kind: .agent,
-               resume: (shell, codex, width, height))
+               resume: (shell, codex, claude, width, height))
     }
     private enum SavedKind { case terminal, agent }
     /// Navigation is durable before the UI enters a runtime. Keep the exact-row membership
@@ -209,7 +216,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         try database.saveSelectedSessionID(id)
     }
     private func attach(store: String, socket: String, savedID: String, kind: SavedKind,
-                        resume: (String, String, Int, Int)? = nil) {
+                        resume: (String, String?, String?, Int, Int)? = nil) {
         worker.async { [self] in
             do {
                 attaching = true
@@ -217,7 +224,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind)
                 identity = id
                 if let resume, let uuid = UUID(uuidString: savedID) {
-                    codexResume = (store, socket, resume.0, resume.1, SessionID(uuid), resume.2, resume.3)
+                    agentResume = (store, socket, resume.0, resume.1, resume.2,
+                                   SessionID(uuid), resume.3, resume.4)
                 }
                 let link = try connect(socket: socket)
                 try link.attach(PTYHostAttach(id: id))
@@ -305,10 +313,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
     private static func createAgent(store: String, directory: String, shell: String,
-                                    codex: String, accountHandle: AccountHandle,
+                                    kind: AgentKind, executable: String, accountHandle: AccountHandle,
                                     accountPath: String, id: SessionID) throws -> AgentLaunchPlan {
-        guard shell.hasPrefix("/"), codex.hasPrefix("/") else {
-            throw WindowFailure("shell and Codex executable must be absolute paths")
+        guard shell.hasPrefix("/"), executable.hasPrefix("/") else {
+            throw WindowFailure("shell and agent executable must be absolute paths")
         }
         guard let folder = ProjectDirectory.existing(at: directory) else {
             throw WindowFailure("project directory does not exist")
@@ -322,28 +330,42 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
-        let state = try database.load().state
-        guard let projectIndex = state.projects.firstIndex(where: { $0.folderPath == folder.path }) else {
+        // The 5,100-session stress fixture for navigation establishes this bound: a fresh
+        // launch needs counts and one project identity, not every retained session payload.
+        let catalog = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+        guard let project = catalog.projects.first(where: { $0.folderPath == folder.path }) else {
             throw WindowFailure("project is not in this store")
         }
-        guard !state.projects.contains(where: { $0.sessions.contains(where: { $0.id == id }) }) else {
+        guard try database.sessionRecord(id: id) == nil else {
             throw WindowFailure("session identity already exists")
         }
-        guard var session = AgentSessionCreation.makeRecord(kind: .codex,
+        guard var session = AgentSessionCreation.makeRecord(kind: kind,
                                                             accountHandle: accountHandle,
                                                             permissionMode: .manual, id: id) else {
             throw WindowFailure("unsupported session configuration")
         }
-        let (codexCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex, model: nil,
-            permissionMode: session.permissionMode, resumeState: session.resumeState, prompt: nil)
-        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle,
+        let agentCommand: ShellCommand
+        let resumeState: ResumeState
+        switch kind {
+        case .codex:
+            (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: executable,
+                model: nil, permissionMode: session.permissionMode,
+                resumeState: session.resumeState, prompt: nil)
+        case .claude:
+            let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
+                permissionMode: session.permissionMode, prompt: nil)
+            agentCommand = pair.fresh
+            resumeState = .resumable(pair.transcriptID)
+        case .grok, .openCode, .cursor:
+            throw WindowFailure("unsupported agent kind")
+        }
+        var command = AgentAccountRoute.prefix(for: kind, handle: session.accountHandle,
                                                configPath: accountPath)
-        command.append(contentsOf: codexCommand)
+        command.append(contentsOf: agentCommand)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: folder.path,
             shellPath: shell, resumeState: resumeState)
         AgentLaunchRecording.apply(plan, to: &session, at: Date())
-        let project = state.projects[projectIndex]
-        try database.addSession(session, to: project.id, position: project.sessions.count,
+        try database.addSession(session, to: project.id, position: project.sessionCount,
                                 selectNewSession: true)
         return plan
     }
@@ -373,7 +395,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             lastHeight = max(180, value.grid.rows * Self.cellHeight)
             replayRemaining = count
             lock.lock(); initialViewport = (lastWidth, lastHeight); running = count == 0; lock.unlock()
-            codexResume = nil
+            agentResume = nil
             dirty = true
         case .spawned(let value):
             guard !attaching, value.id == identity else { fail(WindowFailure("spawn identity mismatch")); return }
@@ -403,11 +425,12 @@ final class GraphicalTerminal: @unchecked Sendable {
                 self.fail(WindowFailure("timed out waiting for child exit after input refusal"))
             }
         case .error(let value) where value.code == .unknownSession && value.detail == "attach" && attaching:
-            guard let resume = codexResume else { fail(WindowFailure("PTY: \(value)")); return }
-            codexResume = nil
+            guard let resume = agentResume else { fail(WindowFailure("PTY: \(value)")); return }
+            agentResume = nil
             do {
                 let (plan, directory) = try Self.resumeAgent(store: resume.store,
-                    sessionID: resume.sessionID, shell: resume.shell, codex: resume.executable)
+                    sessionID: resume.sessionID, shell: resume.shell,
+                    codex: resume.codex, claude: resume.claude)
                 let columns = max(2, resume.width / Self.cellWidth), rows = max(1, resume.height / Self.cellHeight)
                 connectionGeneration += 1
                 client?.close()
@@ -463,10 +486,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         return true
     }
     private static func resumeAgent(store: String, sessionID: SessionID, shell: String,
-                                    codex: String) throws -> (AgentLaunchPlan, String) {
-        guard shell.hasPrefix("/"), codex.hasPrefix("/") else {
-            throw WindowFailure("shell and Codex executable must be absolute paths")
-        }
+                                    codex: String?, claude: String?) throws -> (AgentLaunchPlan, String) {
+        guard shell.hasPrefix("/") else { throw WindowFailure("shell must be an absolute path") }
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
@@ -475,32 +496,57 @@ final class GraphicalTerminal: @unchecked Sendable {
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
         guard let record = try database.sessionRecord(id: sessionID),
-              record.session.kind == .codex,
               record.session.resumeState.isResumable else {
-            throw WindowFailure("saved agent has no resumable Codex conversation")
+            throw WindowFailure("saved agent has no resumable conversation")
         }
         let project = record.project
         var session = record.session
-        let home = try codexHome(for: session.accountHandle)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: project.folderPath, isDirectory: &isDirectory),
               isDirectory.boolValue else { throw WindowFailure("project directory does not exist") }
-        guard let id = session.resumeState.transcriptID,
-              let rollout = CodexRolloutIdentity.rolloutURL(for: id, projectPath: project.folderPath,
-                  sessionsDirectory: home.appendingPathComponent(
+        guard let id = session.resumeState.transcriptID else {
+            throw WindowFailure("saved agent has no conversation identifier")
+        }
+        let accountPath = try accountPath(for: session.kind, handle: session.accountHandle)
+        let agentCommand: ShellCommand
+        let resumeState: ResumeState
+        switch session.kind {
+        case .codex:
+            guard let codex, codex.hasPrefix("/") else {
+                throw WindowFailure("Codex executable is unavailable")
+            }
+            let home = URL(fileURLWithPath: accountPath, isDirectory: true)
+            guard let rollout = CodexRolloutIdentity.rolloutURL(for: id, projectPath: project.folderPath,
+                sessionsDirectory: home.appendingPathComponent(
                     AgentAccountDefaults.sessionsSubdirectory, isDirectory: true),
-                  launchedAt: session.createdAt) else {
-            throw WindowFailure("saved Codex conversation is missing from its account")
+                launchedAt: session.createdAt) else {
+                throw WindowFailure("saved Codex conversation is missing from its account")
+            }
+            guard !CodexRolloutNumbering.isMixed(at: rollout) else {
+                throw WindowFailure("saved Codex conversation has broken record numbering")
+            }
+            (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex,
+                model: session.model, permissionMode: session.permissionMode,
+                resumeState: session.resumeState, prompt: nil)
+        case .claude:
+            guard let claude, claude.hasPrefix("/") else {
+                throw WindowFailure("Claude executable is unavailable")
+            }
+            guard let transcript = ClaudeTranscriptPath.storageURL(sessionID: id,
+                configPath: accountPath, projectPath: project.folderPath),
+                FileManager.default.fileExists(atPath: transcript.path) else {
+                throw WindowFailure("saved Claude conversation is missing from its account")
+            }
+            let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: claude,
+                permissionMode: session.permissionMode, prompt: nil)
+            agentCommand = pair.resume
+            resumeState = .resumable(pair.transcriptID)
+        case .grok, .openCode, .cursor:
+            throw WindowFailure("saved agent kind is unavailable in this window")
         }
-        guard !CodexRolloutNumbering.isMixed(at: rollout) else {
-            throw WindowFailure("saved Codex conversation has broken record numbering")
-        }
-        let (codexCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex,
-            model: session.model, permissionMode: session.permissionMode,
-            resumeState: session.resumeState, prompt: nil)
-        var command = AgentAccountRoute.prefix(for: .codex, handle: session.accountHandle,
-                                               configPath: home.path)
-        command.append(contentsOf: codexCommand)
+        var command = AgentAccountRoute.prefix(for: session.kind, handle: session.accountHandle,
+                                               configPath: accountPath)
+        command.append(contentsOf: agentCommand)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: project.folderPath,
             shellPath: shell, resumeState: resumeState)
         AgentLaunchRecording.apply(plan, to: &session, at: Date())

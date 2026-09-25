@@ -43,6 +43,7 @@ Sources/Threading/Core/Agent/CodexAccountLocations.swift
 Sources/Threading/Core/Agent/ShellCommand.swift
 Sources/Threading/Core/Agent/CodexLaunchCommand.swift
 Sources/Threading/Core/Agent/ClaudeLaunchCommand.swift
+Sources/Threading/Core/Agent/ClaudeTranscriptPath.swift
 Sources/Threading/Core/Agent/CodexDiscoveryDefaults.swift
 Sources/Threading/Core/Agent/CodexRolloutIdentity.swift
 Sources/Threading/Core/Agent/CodexRolloutNumbering.swift

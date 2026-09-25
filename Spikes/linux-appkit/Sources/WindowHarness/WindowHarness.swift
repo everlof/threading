@@ -151,6 +151,7 @@ struct WindowHarness {
 
     private struct PendingAgent {
         let projectIndex: Int
+        let kind: AgentKind
         let accountHandle: AccountHandle
     }
 
@@ -201,19 +202,32 @@ struct WindowHarness {
                 try show(snapshot, launch: targeted ? Array(args.prefix(3)) : args)
                 return
             }
-            if mode == "--app-codex" || mode == "--app-codex-project" {
+            if mode == "--app-codex" || mode == "--app-codex-project"
+                || mode == "--app-claude" || mode == "--app-claude-project"
+                || mode == "--app-agents" || mode == "--app-agents-project" {
                 let args = Array(CommandLine.arguments.dropFirst(2))
-                let targeted = mode == "--app-codex-project"
-                guard args.count == (targeted ? 5 : 4), args[2].hasPrefix("/"), args[3].hasPrefix("/") else {
-                    throw WindowFailure("usage: WindowHarness --app-codex EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX | --app-codex-project EXISTING_STORE SOCKET ABS_SHELL ABS_CODEX PROJECT")
+                let targeted = mode!.hasSuffix("-project")
+                let combined = mode!.hasPrefix("--app-agents")
+                guard args.count == (combined ? (targeted ? 6 : 5) : (targeted ? 5 : 4)),
+                      args[2].hasPrefix("/") else {
+                    throw WindowFailure("usage: WindowHarness --app-{codex|claude} STORE SOCKET ABS_SHELL ABS_AGENT [PROJECT] | --app-agents STORE SOCKET ABS_SHELL CODEX_OR_- CLAUDE_OR_- [PROJECT]")
                 }
-                let requestedProject = targeted ? args[4] : nil
+                let codex = combined ? (args[3] == "-" ? nil : args[3])
+                    : (mode!.hasPrefix("--app-codex") ? args[3] : nil)
+                let claude = combined ? (args[4] == "-" ? nil : args[4])
+                    : (mode!.hasPrefix("--app-claude") ? args[3] : nil)
+                guard (codex != nil || claude != nil),
+                      codex.map({ $0.hasPrefix("/") }) ?? true,
+                      claude.map({ $0.hasPrefix("/") }) ?? true else {
+                    throw WindowFailure("configured agent executables must be absolute paths")
+                }
+                let requestedProject = targeted ? args.last : nil
                 let prepared = try await Task.detached {
                     (try loadSnapshot(args[0], selectingProjectAt: requestedProject),
-                     discoverCodexAccounts())
+                     codex == nil ? [.standard] : discoverCodexAccounts())
                 }.value
-                try show(prepared.0, launch: Array(args.prefix(3)), agentExecutable: args[3],
-                         codexAccounts: prepared.1)
+                try show(prepared.0, launch: Array(args.prefix(3)), agentExecutable: codex,
+                         claudeExecutable: claude, codexAccounts: prepared.1)
                 return
             }
             guard CommandLine.arguments.count == 2 else { throw WindowFailure("usage: WindowHarness EXISTING_STORE") }
@@ -620,7 +634,8 @@ struct WindowHarness {
             if runtime.hasCreatedAgent {
                 projects[launch.projectIndex].sessions += 1
                 projects[launch.projectIndex].recentAgents.insert(
-                    .init(id: id, title: savedAgentTitle("codex", accountHandle: launch.accountHandle)),
+                    .init(id: id, title: savedAgentTitle(launch.kind.rawValue,
+                                                       accountHandle: launch.accountHandle)),
                     at: 0)
                 if projects[launch.projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
                     projects[launch.projectIndex].recentAgents.removeLast()
@@ -640,6 +655,7 @@ struct WindowHarness {
 
     @MainActor static func show(_ snapshot: WindowSnapshot, launch: [String]? = nil,
                                 agentExecutable: String? = nil,
+                                claudeExecutable: String? = nil,
                                 codexAccounts: [AccountHandle] = []) throws {
         var codexAccount = AccountHandle(storedName:
             ProcessInfo.processInfo.environment["THREADING_LINUX_CODEX_ACCOUNT"])
@@ -738,18 +754,25 @@ struct WindowHarness {
                 } else {
                     let accountName = codexAccount.isStandard ? "Codex" :
                         "Codex \(String(codexAccount.name.prefix(16)))"
+                    var agentActions: [String] = []
+                    if agentExecutable != nil {
+                        agentActions.append("C-S-A: \(accountName)")
+                        agentActions.append("C-S-I: login")
+                    }
+                    if claudeExecutable != nil { agentActions.append("C-S-L: Claude") }
                     if launch != nil {
                         root.title = width >= 700 ? "Projects - Enter: shell; Left: agents; Right: terminals" : "Projects - Enter: shell"
                     }
-                    if agentExecutable != nil {
+                    if !agentActions.isEmpty {
                         root.title = width >= 700
-                            ? "Enter: shell; C-S-A: \(accountName); C-S-I: login"
-                            : "C-S-A: \(accountName); C-S-I: login"
+                            ? "Enter: shell; " + agentActions.joined(separator: "; ")
+                            : agentActions.joined(separator: "; ")
                     }
                     if !projects.isEmpty, terminals[projects[selected].id]?.canReplace == true {
-                        root.title = agentExecutable == nil
+                        root.title = agentActions.isEmpty
                             ? (width >= 700 ? "Enter: view; Ctrl+Shift+N: new; Left/Right: saved" : "Ctrl+Shift+N: new")
-                            : (width >= 700 ? "Enter: view; C-S-A: \(accountName); C-S-I: login" : "C-S-A: \(accountName); C-S-I: login")
+                            : (width >= 700 ? "Enter: view; " + agentActions.joined(separator: "; ")
+                                            : agentActions.joined(separator: "; "))
                     }
                     end = min(projects.count, first + count)
                     for index in first..<end {
@@ -938,7 +961,7 @@ struct WindowHarness {
                     let runtime = saved[savedSelected]
                     let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                     let session: GraphicalTerminal
-                    let mayResume = savedPicker.isAgent && agentExecutable != nil
+                    let mayResume = savedPicker.isAgent && (agentExecutable != nil || claudeExecutable != nil)
                     let existing = restoredRuntimes[key]
                     let reuses = existing.map { !(mayResume && $0.canReplace) } ?? false
                     guard reuses || existing != nil
@@ -958,9 +981,10 @@ struct WindowHarness {
                         restoredRuntimes[key] = session
                         restoredProjectIDs.insert(project.id)
                         if savedPicker.isAgent {
-                            if let agentExecutable {
+                            if mayResume {
                                 session.openAgent(store: launch[0], socket: launch[1], sessionID: runtime.id,
-                                    shell: launch[2], codex: agentExecutable, width: width, height: height)
+                                    shell: launch[2], codex: agentExecutable, claude: claudeExecutable,
+                                    width: width, height: height)
                             } else {
                                 session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
                             }
@@ -1034,9 +1058,11 @@ struct WindowHarness {
                 width = size.0; height = size.1
                 tw_project_mode(window)
                 dirty = true
-            case 13:
-                guard !accountPicker, savedPicker == nil, let launch,
-                      let agentExecutable, !projects.isEmpty else { break }
+            case 13, 21:
+                guard !accountPicker, savedPicker == nil, let launch, !projects.isEmpty else { break }
+                let kind: AgentKind = event.kind == 13 ? .codex : .claude
+                guard let executable = event.kind == 13 ? agentExecutable : claudeExecutable else { break }
+                let accountHandle: AccountHandle = event.kind == 13 ? codexAccount : .standard
                 guard terminals.count + restoredRuntimes.count < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
@@ -1046,10 +1072,10 @@ struct WindowHarness {
                 let session = GraphicalTerminal()
                 restoredRuntimes[.agent(savedID)] = session
                 pendingAgentProjects[savedID] = PendingAgent(projectIndex: selected,
-                                                             accountHandle: codexAccount)
+                                                             kind: kind, accountHandle: accountHandle)
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
-                                   shell: launch[2], codex: agentExecutable,
-                                   accountHandle: codexAccount, id: id,
+                                   shell: launch[2], kind: kind, executable: executable,
+                                   accountHandle: accountHandle, id: id,
                                    width: width, height: height)
                 guard let size = try runTerminal(session, window: window, width: width, height: height,
                                                  allowsProjects: true) else { return }

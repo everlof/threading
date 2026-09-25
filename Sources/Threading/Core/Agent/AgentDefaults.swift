@@ -225,7 +225,7 @@ enum AgentDefaults {
     static let transcriptExtension = "jsonl"
 
     /// Claude names a project's directory after its absolute path, keeping only the characters
-    /// below and writing this separator in place of every other one. `ClaudeTranscript` owns the
+    /// below and writing this separator in place of every other one. `ClaudeTranscriptPath` owns the
     /// encoding; these are the two values it is written from.
     static let projectSlugSeparator = "-"
     static let projectSlugPreservedCharacters =
