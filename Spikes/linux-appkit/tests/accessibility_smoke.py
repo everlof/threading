@@ -75,6 +75,46 @@ with log_path.open('w+') as log:
         assert window.returncode == 0
         window_id = window.stdout.splitlines()[0]
         subprocess.run(['xdotool', 'windowfocus', '--sync', window_id], check=True, timeout=5)
+        frame = app.get_child_at_index(0)
+        frame_component = frame.get_component_iface()
+        list_component = listed.get_component_iface()
+        first_component = first.get_component_iface()
+        assert frame_component and list_component and first_component
+        def rect(component, coordinates=Atspi.CoordType.WINDOW):
+            value = component.get_extents(coordinates)
+            return value.x, value.y, value.width, value.height
+        assert rect(frame_component) == (0, 0, 800, 480)
+        assert rect(list_component) == (0, 52, 800, 428)
+        assert rect(first_component) == (12, 56, 776, 44)
+        assert rect(first_component, Atspi.CoordType.PARENT) == (12, 4, 776, 44)
+        assert list_component.get_accessible_at_point(
+            40, 78, Atspi.CoordType.WINDOW).get_accessible_id() == first.get_accessible_id()
+        assert list_component.get_accessible_at_point(40, 101, Atspi.CoordType.WINDOW) is None
+        geometry = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', window_id],
+                                  capture_output=True, text=True, check=True, timeout=5)
+        window_geometry = dict(re.findall(r'^(X|Y|WIDTH|HEIGHT)=(-?\d+)$',
+                                          geometry.stdout, re.MULTILINE))
+        assert rect(frame_component, Atspi.CoordType.SCREEN) == (
+            int(window_geometry['X']), int(window_geometry['Y']), 800, 480)
+        assert rect(first_component, Atspi.CoordType.SCREEN) == (
+            int(window_geometry['X']) + 12, int(window_geometry['Y']) + 56, 776, 44)
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '124', 'click', '1'],
+                       check=True, timeout=5)
+        eventually(lambda: window_title().endswith('/Project02'), 'second row native click')
+        subprocess.run(['xdotool', 'mousemove', '--window', window_id, '40', '78', 'click', '1'],
+                       check=True, timeout=5)
+        eventually(lambda: window_title().endswith('/Project01'), 'first row native click')
+        subprocess.run(['import', '-window', window_id,
+                        str(Path.cwd() / 'out' / 'accessibility-list.png')], check=True, timeout=5)
+        subprocess.run(['xdotool', 'windowsize', window_id, '801', '481'], check=True, timeout=5)
+        eventually(lambda: rect(list_component) if rect(list_component) ==
+                   (0, 52, 801, 429) else None, 'odd-size navigator frame')
+        assert rect(first_component) == (12, 56, 776, 44)
+        subprocess.run(['import', '-window', window_id,
+                        str(Path.cwd() / 'out' / 'accessibility-list-odd.png')], check=True, timeout=5)
+        subprocess.run(['xdotool', 'windowsize', window_id, '800', '480'], check=True, timeout=5)
+        eventually(lambda: rect(list_component) if rect(list_component) ==
+                   (0, 52, 800, 428) else None, 'restored navigator frame')
         assert first.get_state_set().contains(Atspi.StateType.FOCUSABLE)
         eventually(lambda: first if first.get_state_set().contains(Atspi.StateType.FOCUSED)
                    else None, 'selected project keyboard focus')
@@ -115,6 +155,12 @@ with log_path.open('w+') as log:
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
         assert terminal.get_child_count() == 0
+        terminal_component = terminal.get_component_iface()
+        assert terminal_component is not None
+        assert rect(terminal_component) == (0, 0, 800, 480)
+        assert rect(list_component) == (-1, -1, -1, -1)
+        assert frame_component.get_accessible_at_point(
+            40, 78, Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
         eventually(lambda: terminal if terminal.get_state_set().contains(Atspi.StateType.FOCUSED)
                    else None, 'terminal keyboard focus after row action')
         assert terminal.get_state_set().contains(Atspi.StateType.FOCUSABLE)
@@ -138,6 +184,13 @@ with log_path.open('w+') as log:
                              'live accessible terminal update')
         assert 'VISIBLE 界 e\u0301' not in updated, updated
         assert terminal_text.get_character_count() == len(updated)
+        subprocess.run(['xdotool', 'windowsize', window_id, '960', '600'], check=True, timeout=5)
+        eventually(lambda: re.search(r'TERMINAL_FRAME 960x600', log_path.read_text()),
+                   'resized terminal frame')
+        eventually(lambda: rect(terminal_component) if rect(terminal_component) ==
+                   (0, 0, 960, 600) else None, 'resized terminal component')
+        subprocess.run(['import', '-window', window_id,
+                        str(Path.cwd() / 'out' / 'accessibility-terminal.png')], check=True, timeout=5)
         with (root / 'accessibility-other-window.log').open('w+') as other_log:
             other = subprocess.Popen([binary, store], stdout=other_log, stderr=other_log)
             try:
@@ -165,7 +218,7 @@ with log_path.open('w+') as log:
         subprocess.run(['xdotool', 'windowfocus', window_id,
                         'key', 'alt+F4'], check=True, timeout=5)
         assert process.wait(timeout=5) == 0
-        print('PASS AT-SPI: bounded navigator, SDL keyboard focus and live visible terminal text',
+        print('PASS AT-SPI: bounded navigator, native geometry, focus and live terminal text',
               flush=True)
     except BaseException:
         log.flush()

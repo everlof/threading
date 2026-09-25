@@ -2,11 +2,13 @@
 #define THREADING_LINUX_ACCESSIBILITY_INTERNAL_H
 #include <stdint.h>
 
-void tw_accessibility_open(void);
+void tw_accessibility_open(TWWindow *window);
 void tw_accessibility_close(void);
 void tw_accessibility_poll(void);
 void tw_accessibility_title(const char *title);
 uint32_t tw_accessibility_event_type(void);
 int tw_accessibility_event_is_current(uint32_t generation);
+int tw_accessibility_row_center(int row, int *x, int *y);
+void tw_window_geometry(TWWindow *window, int *x, int *y, int *width, int *height);
 
 #endif

@@ -43,9 +43,13 @@ TWWindow *tw_open(const char *title, int width, int height) {
     SDL_SetWindowMaximumSize(w->window, 1280, 900);
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
     if (!w->renderer) { tw_close(w); return NULL; }
-    tw_accessibility_open();
+    tw_accessibility_open(w);
     tw_accessibility_window_focus(w, (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     return w;
+}
+void tw_window_geometry(TWWindow *w, int *x, int *y, int *width, int *height) {
+    SDL_GetWindowPosition(w->window, x, y);
+    SDL_GetWindowSize(w->window, width, height);
 }
 int tw_present(TWWindow *w, const uint8_t *rgba, int width, int height) {
     if (width < 1 || width > 1280 || height < 1 || height > 900) return -1;
@@ -143,9 +147,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         else if (e.type == tw_accessibility_event_type()) {
             if (!tw_accessibility_event_is_current((uint32_t)(uintptr_t)e.user.data2)) continue;
             if (e.user.code == 1) {
+                if (!tw_accessibility_row_center((int)(intptr_t)e.user.data1, &out->x, &out->y)) continue;
                 out->kind = 2;
-                out->x = 20;
-                out->y = (28 + (int)(intptr_t)e.user.data1 * 24 + 10) * 2;
             } else if (e.user.code == 2) out->kind = 8;
         }
         else if (e.type == SDL_WINDOWEVENT) {

@@ -439,10 +439,13 @@ screen through the read-only ATK Text interface. Unicode character and caret off
 same bounded grid as rendering; concealed cells are blanked, hidden scrollback is omitted, and
 text-change events carry only changed spans. SDL window focus now marks the selected mounted row
 or the terminal as focusable and focused, and removes that state when the window loses focus.
-The text projection is capped at 64 KiB, with an
-explicit overflow message. This is an initial accessibility path, not screen-reader parity:
-component geometry and hit testing, a complete selection interface, full focus/event coverage,
-and native screen-reader inspection remain open.
+The frame, list, mounted rows and terminal expose ATK Component bounds in window, screen and
+parent coordinates. One row layout supplies drawing, native pointer hit testing and AT-SPI
+publication; point lookup follows those drawn bounds, and unmounted nodes report no
+geometry. The text projection is capped at 64 KiB, with an explicit overflow message. This is
+an initial accessibility path, not screen-reader parity: character-level terminal geometry,
+a complete selection interface, full focus/event coverage, and native screen-reader inspection
+remain open.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new

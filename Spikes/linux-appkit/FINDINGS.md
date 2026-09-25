@@ -2135,3 +2135,34 @@ second native window, verified the original terminal lost focus, closed that win
 focus returned. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh` passed on the final code. Focus
 state does not yet prove a complete screen-reader experience, component geometry, or selection
 semantics. This remains a host-only platform leaf.
+
+## 80. Mounted Linux accessibility nodes report native geometry
+
+The frame, project/saved-runtime list, mounted rows and terminal now implement ATK Component.
+The application root does not advertise a screen rectangle. Row extents use the diagnostic
+renderer’s actual 2× coordinates: at 800×480 the first row is `(12, 56, 776, 44)` pixels in the
+window, and each later mounted row begins 48 pixels lower. The list starts below the 52-pixel
+title strip. One Swift row-rectangle helper now supplies the rendered frame, native pointer
+hit test and AT-SPI publication; the bridge’s row action uses the published rectangle’s centre.
+The helper mirrors the root’s integer half-size bounds on odd-pixel windows. Screen coordinates
+add SDL’s current window position; parent-relative row coordinates subtract the list origin.
+Frame and terminal queries read live SDL geometry; the navigator republishes list and row bounds
+after resize. An unmounted or retired node reports unavailable extents, and a component’s point
+lookup examines only its mounted children.
+
+The Ubuntu 24.04 ARM/Xvfb AT-SPI client compared frame and row extents with `xdotool`’s native
+window geometry, checked all three coordinate forms, an odd 801×481 window and the gap between
+rows, then clicked at a reported row point and observed the same project selection. It verified
+that a held list loses its extents when the terminal mounts, and that the terminal’s bounds update
+after a native 960×600 resize. The final `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh` lane
+passed. I inspected the captured 800×480 and 801×481 lists and 960×600 terminal frame; the
+first accessible row rectangle matches the visible blue selection band.
+
+The full `./window-smoke.sh` suite passed with the shared pointer geometry, including native
+project clicks, saved-runtime pickers, terminal input, reattach and clean-profile startup without
+a session bus. The final row-bound validation change affects only the AT-SPI-enabled path.
+I inspected its 960×600 project frame after the native click selected Gamma.
+
+Terminal character extents, bounds-change notifications, richer selection and actual
+screen-reader/magnifier inspection remain open. This geometry is for the current bounded
+diagnostic window, not a portable layout contract for the future product shell.
