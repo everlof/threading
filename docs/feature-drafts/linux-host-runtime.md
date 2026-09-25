@@ -306,7 +306,8 @@ project and saved-runtime rows with Unicode names, selection state and actions t
 same navigation route as pointer input. A client can discover only the bounded viewport and open
 a real project terminal. The terminal now projects its visible grid through read-only ATK Text,
 including Unicode character and caret offsets and changed-span notifications. Concealed cells
-are masked and hidden scrollback is omitted. Geometry, focus, complete selection,
+are masked and hidden scrollback is omitted. The mounted selected row or terminal follows SDL
+window focus into AT-SPI state. Geometry, comprehensive focus behavior, complete selection,
 screen-reader inspection and other product surfaces remain unproven.
 
 ## Evidence required

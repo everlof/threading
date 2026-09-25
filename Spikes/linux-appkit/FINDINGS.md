@@ -2114,6 +2114,24 @@ The full `./window-smoke.sh` suite also passed, covering the renderer, PTY, nati
 scrollback, clipboard, saved-terminal and agent paths, reattach, and clean-profile startup with
 the text projection in every prepared frame.
 
-Component geometry and hit testing, selection, focus, IME preedit announcements, actual
+Component geometry and hit testing, selection, full focus behavior, IME preedit announcements, actual
 screen-reader inspection and non-X11 desktop evidence remain open. The published text is a
 bounded visible-screen projection, not a transcript or a full terminal accessibility model.
+
+## 79. Linux AT-SPI focus follows the real SDL window
+
+The ATK bridge now marks the selected mounted navigator row or terminal focusable, and focused
+only while SDL reports keyboard focus for its window. Moving selection transfers the focused
+state to the new mounted row; replacing a viewport row drops focus before retiring the old node.
+Opening the terminal transfers focus from the row without inventing another input path. The
+bridge holds one reference to the focused node through a transition so removal cannot leave a
+dangling pointer, and skips duplicate state-change notifications when nothing moved. The focus
+projection examines at most the 32 mounted rows when a list selection changes and one terminal
+node on a frame; it does not scan saved sessions or offscreen rows.
+
+The Ubuntu 24.04 ARM/Xvfb AT-SPI client verified focus on the selected project, transfer across
+keyboard scrolling and an AT-SPI row action, then focus on the real PTY terminal. It opened a
+second native window, verified the original terminal lost focus, closed that window, and verified
+focus returned. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh` passed on the final code. Focus
+state does not yet prove a complete screen-reader experience, component geometry, or selection
+semantics. This remains a host-only platform leaf.

@@ -37,8 +37,9 @@ G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, accessible_node_get_type(),
 static AccessibleNode *app, *frame, *list;
 static TerminalNode *terminal;
 static AccessibleNode *activeList;
+static AccessibleNode *focused;
 static uint32_t eventType = UINT32_MAX, generation = 1;
-static int bridgeReady;
+static int bridgeReady, windowFocused;
 static struct {
     char title[128];
     int first, total, count, canOpen;
@@ -78,6 +79,10 @@ static AtkStateSet *node_state(AtkObject *object) {
     }
     atk_state_set_add_state(states, ATK_STATE_ENABLED);
     atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
+    if (node == list || node == (AccessibleNode *)terminal || node->row >= 0) {
+        atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
+        if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
+    }
     if (node_mounted(object)) {
         atk_state_set_add_state(states, ATK_STATE_VISIBLE);
         atk_state_set_add_state(states, ATK_STATE_SHOWING);
@@ -138,12 +143,42 @@ static void clear_children(AccessibleNode *parent) {
         g_ptr_array_remove_index(parent->children, index);
     }
 }
+static void set_focused(AccessibleNode *next) {
+    if (focused == next) return;
+    AccessibleNode *old = focused;
+    focused = next ? g_object_ref(next) : NULL;
+    if (old) {
+        atk_object_notify_state_change(ATK_OBJECT(old), ATK_STATE_FOCUSED, FALSE);
+        g_object_unref(old);
+    }
+    if (focused) atk_object_notify_state_change(ATK_OBJECT(focused), ATK_STATE_FOCUSED, TRUE);
+}
+static void refresh_focus(void) {
+    AccessibleNode *next = NULL;
+    if (windowFocused && frame && frame->children->len == 1) {
+        AccessibleNode *content = g_ptr_array_index(frame->children, 0);
+        if (content == list) {
+            next = list;
+            for (guint i = 0; i < list->children->len; i++) {
+                AccessibleNode *row = g_ptr_array_index(list->children, i);
+                if (row->selected) { next = row; break; }
+            }
+        } else if (content == (AccessibleNode *)terminal) next = content;
+    }
+    set_focused(next);
+}
 static void show_content(AccessibleNode *content) {
-    if (!frame || (frame->children->len == 1 && g_ptr_array_index(frame->children, 0) == content)) return;
+    if (!frame) return;
+    if (frame->children->len == 1 && g_ptr_array_index(frame->children, 0) == content) {
+        refresh_focus();
+        return;
+    }
+    set_focused(NULL);
     clear_children(frame);
     add_child(frame, content);
     activeList = content == list ? list : NULL;
     generation++;
+    refresh_focus();
 }
 static AtkObject *get_root(void) { return ATK_OBJECT(app); }
 static const gchar *get_toolkit_name(void) { return "Threading Linux bridge"; }
@@ -337,8 +372,9 @@ void tw_accessibility_open(void) {
 }
 void tw_accessibility_close(void) {
     if (!app) return;
+    set_focused(NULL);
     if (bridgeReady) atk_bridge_adaptor_cleanup();
-    bridgeReady = 0; activeList = NULL; eventType = UINT32_MAX;
+    bridgeReady = 0; activeList = NULL; eventType = UINT32_MAX; windowFocused = 0;
     clear_children(list);
     clear_children(frame);
     clear_children(app);
@@ -359,6 +395,12 @@ void tw_accessibility_title(const char *title) {
 }
 uint32_t tw_accessibility_event_type(void) { return eventType; }
 int tw_accessibility_event_is_current(uint32_t value) { return bridgeReady && value == generation; }
+void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {
+    (void)window;
+    if (!bridgeReady || windowFocused == (hasFocus != 0)) return;
+    windowFocused = hasFocus != 0;
+    refresh_focus();
+}
 
 void tw_accessibility_begin_list(TWWindow *window, const char *name, int first, int total, int canOpen) {
     (void)window;
@@ -396,6 +438,7 @@ void tw_accessibility_end_list(TWWindow *window) {
         same = row->id && strcmp(row->id, pending.rows[i].id) == 0;
     }
     if (!same) {
+        set_focused(NULL);
         clear_children(list);
         for (int i = 0; i < pending.count; i++) {
             AccessibleNode *row = new_node(ATK_ROLE_LIST_ITEM, pending.rows[i].name);
@@ -420,6 +463,7 @@ void tw_accessibility_end_list(TWWindow *window) {
         }
     }
     show_content(list);
+    refresh_focus();
     set_terminal_text(NULL, 0, -1);
 }
 void tw_accessibility_show_terminal(TWWindow *window, const char *name) {
