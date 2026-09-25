@@ -145,6 +145,10 @@ whole-graph save. A first Codex session and its newly imported project commit to
 existing-project session and its selection commit together; rollout discovery writes only the
 standing session. The project terminal remains embedded in its owning project row, so that row
 still grows with the number of terminals in that project.
+Selected agent attach, rollout discovery and resume read one indexed session and its validated
+owning project instead of decoding the full archive again. The initial project-window snapshot
+still performs the complete authoritative graph load on a worker, and terminal identity lookup
+still searches the embedded terminal records.
 The visible experiment has no agent-account or model picker. It resumes a dormant Codex record
 only after finding its exact provider rollout in the standard account and checking the known
 mixed-ordinal failure; named accounts and other providers are still unsupported. A source-tree

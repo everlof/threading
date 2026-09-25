@@ -1822,3 +1822,35 @@ fixture set the X11 clipboard, sent native Ctrl+Shift+V, checked exact Unicode a
 bytes with bracketed paste on, checked plain bytes with the mode off, and proved a 64 KiB-plus-one
 selection was refused before a following small paste completed. This is clipboard/PTY evidence,
 not an IME, copy/selection, or installed-distribution check.
+
+## 67. A selected agent no longer reloads every saved conversation
+
+The native Linux window already loads the complete graph once on a worker to build its project
+snapshot. It then did that same decode again on each saved-agent attach, each Codex rollout-ID
+update, and each resume. Those operations know one session ID; they should not decode every
+archived record to find it or persist the one changed payload.
+
+`ProjectDatabase.sessionRecord(id:)` now queries the session primary key and its owning project
+primary key. It uses the same indexed-column and payload checks as a complete load, returning the
+session's stored position for an exact-row update. An unrelated unreadable row is never decoded
+by that operation. To keep this partial result from being mistaken for an authoritative graph,
+the same connection refuses `save(_:)` after a targeted read until a complete `load()` succeeds;
+exact-row writes remain available. The native agent paths use this lookup under the existing
+nonblocking store lock. The initial window snapshot, terminal identity search, and terminal
+creation still read the whole graph. The owning project's embedded terminal array is part of its
+one row, so this is bounded by that row as well as by the selected session payload.
+
+The scaling contract is one user-selected attach or resume, or one rollout-ID update per fresh
+Codex launch, against an archive expected to hold thousands of sessions and stressed at 50,000.
+The targeted path performs two primary-key seeks and decodes two payloads regardless of the number
+of other sessions; no UI-frame callback invokes it. This is structural work evidence, not a
+measured end-to-end launch-latency result.
+
+The focused macOS `ProjectDatabaseTests` suite passed 54 tests (one skipped), including target
+session/project validation, an unrelated unreadable row, exact-row update preservation and the
+partial-read reconciliation refusal. The final owner-validation test passed again after its
+assertion was strengthened. The complete Linux Docker/Xvfb suite passed the real selected-agent
+resume journey with an unrelated session made unreadable *after* the window snapshot was built;
+the fixture restored that row before later journeys. The complete real-daemon Linux host suite
+also passed against the shared loader refactor. Neither suite measures authenticated Codex use or
+absolute launch latency at the stated 50,000-session stress cardinality.

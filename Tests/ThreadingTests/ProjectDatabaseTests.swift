@@ -577,6 +577,89 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(restored.selectedSessionID, session.id)
     }
 
+    func testTargetedSessionReadSkipsUnrelatedPayloadsAndPreservesExactWrites() throws {
+        let database = try makeDatabase()
+        let target = AgentSession(kind: .codex, title: "Target")
+        let other = AgentSession(kind: .claude, title: "Other")
+        let targetProject = makeProject("target", sessions: [target])
+        let otherProject = makeProject("other", sessions: [other])
+        try database.save(ProjectsState(projects: [targetProject, otherProject]))
+
+        let inspection = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { inspection.close() }
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, "unreadable-future-payload")
+            .bind(2, other.id.uuidString)
+            .run()
+
+        let record = try XCTUnwrap(database.sessionRecord(id: target.id))
+        XCTAssertEqual(record.session.id, target.id)
+        XCTAssertEqual(record.project.id, targetProject.id)
+        XCTAssertEqual(record.project.folderPath, targetProject.folderPath)
+        XCTAssertTrue(record.project.sessions.isEmpty)
+        XCTAssertEqual(record.position, 0)
+        XCTAssertNil(try database.sessionRecord(id: SessionID()))
+
+        var renamed = record.session
+        renamed.title = "Renamed"
+        try database.saveSession(renamed, in: record.project.id, position: record.position)
+        XCTAssertEqual(try storedSession(id: target.id, from: inspection).title, "Renamed")
+        XCTAssertEqual(String(data: try storedSessionPayload(id: other.id, from: inspection),
+                              encoding: .utf8), "unreadable-future-payload")
+        XCTAssertThrowsError(try database.load())
+    }
+
+    func testTargetedSessionReadValidatesItsOwnIndexedValues() throws {
+        let database = try makeDatabase()
+        let target = AgentSession(kind: .codex, title: "Target")
+        let project = makeProject("target", sessions: [target])
+        try database.save(ProjectsState(projects: [project]))
+        let inspection = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { inspection.close() }
+        try inspection.prepare("UPDATE session SET kind = ? WHERE id = ?")
+            .bind(1, "claude")
+            .bind(2, target.id.uuidString)
+            .run()
+        XCTAssertThrowsError(try database.sessionRecord(id: target.id)) { error in
+            guard case ProjectDatabaseLoadError.corruptRow(let table, let id, _) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(table, "session")
+            XCTAssertEqual(id, target.id.uuidString)
+        }
+        try inspection.prepare("UPDATE session SET kind = ? WHERE id = ?")
+            .bind(1, "codex")
+            .bind(2, target.id.uuidString)
+            .run()
+        try inspection.prepare("UPDATE project SET name = ? WHERE id = ?")
+            .bind(1, "Wrong")
+            .bind(2, project.id.uuidString)
+            .run()
+        XCTAssertThrowsError(try database.sessionRecord(id: target.id)) { error in
+            guard case ProjectDatabaseLoadError.corruptRow(let table, let id, _) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(table, "project")
+            XCTAssertEqual(id, project.id.uuidString)
+        }
+    }
+
+    func testTargetedReadCannotAuthorizeWholeGraphReconciliation() throws {
+        let database = try makeDatabase()
+        let target = AgentSession(kind: .codex, title: "Target")
+        let project = makeProject("target", sessions: [target])
+        let state = ProjectsState(projects: [project])
+        try database.save(state)
+        XCTAssertNotNil(try database.sessionRecord(id: target.id))
+        XCTAssertThrowsError(try database.save(state)) { error in
+            guard case ProjectDatabaseWriteError.partialReadRequiresFullLoad = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+        _ = try database.load()
+        try database.save(state)
+    }
+
     func testBatchSessionWritesAreAtomicAndDoNotRewriteStandingRows() throws {
         enum Expected: Error { case commitRefused }
 

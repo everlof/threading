@@ -236,6 +236,11 @@ with (root / 'agent-resume-window.log').open('w+') as log:
                                stdout=log, stderr=log, env=environment)
     try:
         window = title(process, 'Threading experiment - ' + str(project), root / 'agent-resume-window.log')
+        # The window snapshot was valid at startup. A different record becoming unreadable
+        # afterwards must not make a selected agent's attach/resume decode the entire archive.
+        with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+            database.execute('UPDATE session SET data = ? WHERE id = ?',
+                             ('unreadable-future-payload', standing_id))
         key(window, 'Left')
         title(process, 'Threading agents - ' + str(project), root / 'agent-resume-window.log')
         key(window, 'Return')
@@ -256,6 +261,8 @@ with (root / 'agent-resume-window.log').open('w+') as log:
         print((root / 'agent-resume-window.log').read_text(), file=sys.stderr)
         raise
     finally:
+        with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+            database.execute('UPDATE session SET data = ? WHERE id = ?', (standing_data, standing_id))
         if process.poll() is None:
             process.kill()
         process.wait(timeout=3)

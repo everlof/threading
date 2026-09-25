@@ -390,6 +390,11 @@ when the daemon no longer holds one, resumes the exact stored provider ID after 
 rollout under the standard Codex account. It refuses a missing or known-broken rollout before
 spawning. `env -u CODEX_HOME` prevents an inherited alternate login from silently taking over
 that standard-account record.
+After the initial full project-window snapshot, selected-agent attach, rollout-ID persistence and
+resume read only the indexed session and its owning project row. This validates the target without
+decoding every retained conversation again. The initial snapshot and saved-terminal identity
+lookup still load the complete graph; a project's own embedded terminal array is still decoded
+when that project is the selected agent's owner.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new

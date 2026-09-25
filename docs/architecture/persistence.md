@@ -169,6 +169,15 @@ by id later, so startup records `containsUnkeyedRows` and only skipping the tabl
 it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
 of record.
 
+Selected-session runtime operations have a narrower read contract than startup. An indexed
+`sessionRecord(id:)` reads one session row and its owning project row, validates both indexed
+columns against their model payloads, and leaves unrelated rows unread. The Linux native host uses
+that path for agent attach, Codex rollout-ID persistence and resume after its initial complete
+project-window snapshot. This does not relax the all-or-nothing contract for a complete graph:
+after a targeted read, `save(_:)` refuses reconciliation on that connection until `load()` succeeds.
+Exact-row `saveSession` remains allowed, so a newer unrelated payload is not decoded or rewritten
+by a selected-session update.
+
 **The attachment document's `formatVersion` is 3.** Version 3 adds the optional exact turn id and
 the current/next/neither placement used by the collapsible attachment chronology. The version bump
 prevents an older build from silently rewriting a row while discarding that grouping metadata.
