@@ -40,6 +40,7 @@ Sources/Threading/Core/Agent/AgentLaunchRecording.swift
 Sources/Threading/Core/Agent/AgentAccountRoute.swift
 Sources/Threading/Core/Agent/AgentAccountDefaults.swift
 Sources/Threading/Core/Agent/CodexAccountLocations.swift
+Sources/Threading/Core/Agent/ClaudeAccountLocations.swift
 Sources/Threading/Core/Agent/ShellCommand.swift
 Sources/Threading/Core/Agent/CodexLaunchCommand.swift
 Sources/Threading/Core/Agent/ClaudeLaunchCommand.swift

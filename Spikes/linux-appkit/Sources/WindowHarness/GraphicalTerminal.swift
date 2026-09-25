@@ -140,9 +140,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
         let homeURL = URL(fileURLWithPath: home, isDirectory: true)
         if kind == .claude {
-            guard handle.isStandard else { throw WindowFailure("named Claude accounts are not available in this window") }
-            return homeURL.appendingPathComponent(AgentAccountDefaults.claudeDefaultDirectory,
-                                                 isDirectory: true).path
+            guard let location = ClaudeAccountLocations.resolve(handle, home: homeURL) else {
+                throw WindowFailure("saved Claude account is unavailable: \(handle.name)")
+            }
+            return location.configPath
         }
         guard kind == .codex else { throw WindowFailure("unsupported agent kind") }
         guard let location = CodexAccountLocations.resolve(

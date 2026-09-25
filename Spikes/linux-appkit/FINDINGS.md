@@ -2370,3 +2370,32 @@ boundaries stayed clean, and all 50 vendored core files verified byte-identical.
 This remains a source-tree diagnostic window, not a packaged Linux release. The recorder is not
 an authenticated Claude installation; named Claude accounts, host hook integration and exited
 Claude resume from the headless CLI remain open.
+
+## 88. Named Claude sessions use one account identity across the Mac and Linux hosts
+
+The Mac account list and Linux hosts now share `ClaudeAccountLocations`. A standard handle
+always routes to `HOME/.claude`; a legacy named handle requires its exact `HOME/.claude-*`
+directory with `.claude.json` or `settings.json`. Verified Mac registry records may admit other
+directories without a marker, but neither host accepts Claude Science data roots, and duplicate
+handles at different paths are withheld rather than selected by scan order. This is a routing
+address, not credential handling. Linux reads neither the Mac registry nor provider secrets.
+When a verified alias names a marker-backed legacy home, discovery keeps the legacy handle at
+that path, preserving the session identity the older Mac account list already exposed.
+
+The native Linux project view offers a bounded Claude picker at Ctrl+Shift+O and starts the
+selected account with Ctrl+Shift+L. It scans `HOME` once on a worker, keeps at most 31 verified
+named homes beside the standard choice, and mounts only visible picker rows. The saved session
+stores its chosen handle. After the child exits, resume resolves that stored handle and the exact
+transcript in its account directory; the current picker choice cannot move the conversation.
+The headless `LinuxHost claude` command accepts the same optional handle and refuses an unavailable
+one before writing a session. Account selection, durable identity, transcript admission, and PTY
+ownership remain host-owned even if a later extension customizes the picker presentation.
+
+The Xvfb recorder verified named creation, exact resume, refusal after removing the login marker,
+refusal under another `HOME`, and the headless CLI route. It also checked that 40 empty
+`.claude-*` directories and a Claude Science root do not consume the picker's 31-account bound.
+The standard Claude and named Codex journeys passed in the same native agent suite. The rendered
+account picker and project action line were inspected in `out/claude-account-picker.png` and
+`out/claude-named-project.png`. Mac unit tests cover exact routing, Science exclusion, registered
+locations and ambiguous handles. This still does not prove an authenticated Claude installation,
+host hook integration, or exited-session resume from the headless CLI.
