@@ -437,9 +437,11 @@ queries that tree with an AT-SPI client, scrolls a 15-project list, and opens a 
 project into a real PTY through the row action. The terminal node exposes the current visible
 screen through the read-only ATK Text interface. Unicode character and caret offsets come from the
 same bounded grid as rendering; concealed cells are blanked, hidden scrollback is omitted, and
-text-change events carry only changed spans. The text projection is capped at 64 KiB, with an
+text-change events carry only changed spans. SDL window focus now marks the selected mounted row
+or the terminal as focusable and focused, and removes that state when the window loses focus.
+The text projection is capped at 64 KiB, with an
 explicit overflow message. This is an initial accessibility path, not screen-reader parity:
-component geometry and hit testing, a complete selection interface, focus/event coverage,
+component geometry and hit testing, a complete selection interface, full focus/event coverage,
 and native screen-reader inspection remain open.
 
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored

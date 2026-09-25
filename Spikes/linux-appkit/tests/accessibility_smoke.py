@@ -75,6 +75,9 @@ with log_path.open('w+') as log:
         assert window.returncode == 0
         window_id = window.stdout.splitlines()[0]
         subprocess.run(['xdotool', 'windowfocus', '--sync', window_id], check=True, timeout=5)
+        assert first.get_state_set().contains(Atspi.StateType.FOCUSABLE)
+        eventually(lambda: first if first.get_state_set().contains(Atspi.StateType.FOCUSED)
+                   else None, 'selected project keyboard focus')
         for step in range(1, 11):
             subprocess.run(['xdotool', 'key', 'Down'], check=True, timeout=5)
             project_name = f'Project{step + 1:02d}' + ('-界' if step + 1 == 6 else '')
@@ -85,6 +88,7 @@ with log_path.open('w+') as log:
                             else None, 'scrolled accessible viewport')
         assert listed.get_child_count() == 8
         assert listed.get_child_at_index(7).get_state_set().contains(Atspi.StateType.SELECTED)
+        assert listed.get_child_at_index(7).get_state_set().contains(Atspi.StateType.FOCUSED)
         target_index = next(index for index in range(listed.get_child_count())
                             if '界' in listed.get_child_at_index(index).get_name())
         target = listed.get_child_at_index(target_index)
@@ -104,12 +108,16 @@ with log_path.open('w+') as log:
                               .contains(Atspi.StateType.SELECTED) else None,
                               'AT-SPI selection state')
         assert selected.get_name().startswith(name)
+        assert selected.get_state_set().contains(Atspi.StateType.FOCUSED)
         assert selected.get_action_iface().do_action(1), 'AT-SPI open action was refused'
         terminal = eventually(lambda: content(app) if content(app).get_role_name() == 'terminal'
                               else None, 'terminal accessible after row action')
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
         assert terminal.get_child_count() == 0
+        eventually(lambda: terminal if terminal.get_state_set().contains(Atspi.StateType.FOCUSED)
+                   else None, 'terminal keyboard focus after row action')
+        assert terminal.get_state_set().contains(Atspi.StateType.FOCUSABLE)
         assert terminal.get_description() == 'Visible terminal screen; read only.'
         terminal_text = terminal.get_text_iface()
         assert terminal_text is not None
@@ -130,11 +138,34 @@ with log_path.open('w+') as log:
                              'live accessible terminal update')
         assert 'VISIBLE 界 e\u0301' not in updated, updated
         assert terminal_text.get_character_count() == len(updated)
+        with (root / 'accessibility-other-window.log').open('w+') as other_log:
+            other = subprocess.Popen([binary, store], stdout=other_log, stderr=other_log)
+            try:
+                def other_window():
+                    found = subprocess.run(['xdotool', 'search', '--name', '^Threading experiment - '],
+                                           capture_output=True, text=True, timeout=5)
+                    return next((value for value in found.stdout.splitlines()
+                                 if value != window_id), None)
+                other_id = eventually(other_window, 'second native window')
+                subprocess.run(['xdotool', 'windowfocus', '--sync', other_id],
+                               check=True, timeout=5)
+                eventually(lambda: True if not terminal.get_state_set().contains(
+                    Atspi.StateType.FOCUSED) else None, 'terminal focus lost to second window')
+                subprocess.run(['xdotool', 'key', 'alt+F4'], check=True, timeout=5)
+                assert other.wait(timeout=5) == 0, other_log.read()
+                subprocess.run(['xdotool', 'windowfocus', '--sync', window_id],
+                               check=True, timeout=5)
+                eventually(lambda: terminal if terminal.get_state_set().contains(
+                    Atspi.StateType.FOCUSED) else None, 'terminal focus restored')
+            finally:
+                if other.poll() is None:
+                    other.kill()
+                other.wait(timeout=3)
         assert re.search(r'TERMINAL_FRAME .*A11Y TERMINAL READY', log_path.read_text())
         subprocess.run(['xdotool', 'windowfocus', window_id,
                         'key', 'alt+F4'], check=True, timeout=5)
         assert process.wait(timeout=5) == 0
-        print('PASS AT-SPI: bounded navigator and live visible terminal text, Unicode, concealment and caret',
+        print('PASS AT-SPI: bounded navigator, SDL keyboard focus and live visible terminal text',
               flush=True)
     except BaseException:
         log.flush()

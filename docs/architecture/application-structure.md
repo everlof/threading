@@ -135,7 +135,9 @@ bounded Unicode names, selected state and actions. Actions re-enter SDL's existi
 events; the bridge neither reads the store nor owns runtime decisions. The terminal currently
 exposes a read-only ATK Text projection of its visible, bounded grid, with Unicode offsets,
 concealed-cell masking and changed-span notifications. It does not traverse hidden scrollback.
-Component geometry, focus and complete selection semantics remain open accessibility work.
+SDL window focus is projected onto the mounted selected row or terminal without moving selection.
+Component geometry, comprehensive focus behavior and complete selection semantics remain open
+accessibility work.
 
 Graphical restoration across app restarts is available through explicit
 `--attach STORE SOCKET TERMINAL_UUID` and through selection

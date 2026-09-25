@@ -35,6 +35,8 @@ void tw_accessibility_begin_list(TWWindow *, const char *name, int first, int to
 int tw_accessibility_add_row(TWWindow *, const char *id, const char *name, int selected);
 void tw_accessibility_end_list(TWWindow *);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
+// SDL window focus is the source of truth; the bridge focuses the mounted selected row or terminal.
+void tw_accessibility_window_focus(TWWindow *, int focused);
 // Publish only the visible terminal grid. Offsets and caret count Unicode characters, not bytes.
 // NULL clears text when a terminal starts or fails. Content is capped at 64 KiB.
 void tw_accessibility_terminal_text(TWWindow *, const char *utf8, int length, int caret);

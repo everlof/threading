@@ -44,6 +44,7 @@ TWWindow *tw_open(const char *title, int width, int height) {
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
     if (!w->renderer) { tw_close(w); return NULL; }
     tw_accessibility_open();
+    tw_accessibility_window_focus(w, (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     return w;
 }
 int tw_present(TWWindow *w, const uint8_t *rgba, int width, int height) {
@@ -150,6 +151,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         else if (e.type == SDL_WINDOWEVENT) {
             if (e.window.event == SDL_WINDOWEVENT_CLOSE) out->kind = 5;
             else if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) out->kind = 1;
+            else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+                tw_accessibility_window_focus(w, e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
         } else if (w->terminal && (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)) {
             if (e.button.button == SDL_BUTTON_LEFT) out->key = 0;
             else if (e.button.button == SDL_BUTTON_MIDDLE) out->key = 1;
