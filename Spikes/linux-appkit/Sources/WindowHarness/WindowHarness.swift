@@ -247,6 +247,19 @@ struct WindowHarness {
         var failure: String?
         var failureNeedsDisplay = false
         while true {
+            if let copy = session.takeCopyResult() {
+                switch copy {
+                case .text(let bytes):
+                    let wrote = bytes.withUnsafeBytes {
+                        tw_clipboard_write($0.bindMemory(to: UInt8.self).baseAddress, Int32($0.count))
+                    }
+                    if wrote == 0 { print("CLIPBOARD_COPIED \(bytes.count)") }
+                    else { print("CLIPBOARD_REFUSED native write failed") }
+                case .empty: print("CLIPBOARD_REFUSED no selection")
+                case .oversized: print("CLIPBOARD_REFUSED selection exceeds 1 MiB")
+                }
+                fflush(nil)
+            }
             if let size = session.takeInitialViewport() {
                 width = size.0; height = size.1
                 guard tw_resize(window, Int32(width), Int32(height)) == 0 else {
@@ -303,6 +316,8 @@ struct WindowHarness {
                     session.mouseWheel(x: Int(event.x), y: Int(event.y), steps: Int(event.key),
                         modifiers: modifiers(event))
                 }
+                if event.kind == 17 { session.mouseMotion(x: Int(event.x), y: Int(event.y)) }
+                if event.kind == 18 { session.requestCopySelection() }
             }
         }
     }

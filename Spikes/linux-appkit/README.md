@@ -318,9 +318,9 @@ UTF-8 committed text and legacy Ctrl-letter input are wired. Functional keys (Re
 Backspace, Escape, Delete, arrows, Home/End, Page Up/Down and F1–F12) use SwiftTerm's live encoder,
 including modifiers and press/repeat/release. This honors application-cursor and negotiated kitty
 modes for those keys. Complete enhanced printable-key, keypad, Insert and IME support remains
-outstanding; this is not full keyboard-protocol parity. Pango shapes individual cell graphemes: cross-cell
-joining, full IME composition, clipboard copy/selection,
-accessibility and live profile/theme configuration remain outstanding.
+outstanding; this is not full keyboard-protocol parity. Pango shapes individual cell graphemes;
+cross-cell joining, full IME composition, accessibility and live profile/theme configuration
+remain outstanding.
 
 The native pointer sends button presses, releases and bounded wheel steps through SwiftTerm's
 live DEC mouse mode and encoding. X10 sends presses only; VT200-style modes send releases too.
@@ -329,16 +329,21 @@ instead moves through the retained 2,000-line history, holding the viewed rows a
 arrives and hiding the live cursor until the viewport returns to the end. The alternate screen
 turns wheel steps into cursor keys when its alternate-scroll mode is enabled. Shift bypasses
 mouse reporting unless the child requested shift capture; Alt requests local wheel scrolling.
-Project-list clicks and wheel navigation keep their own route. Drag/motion reports, local text
-selection/copy and a visible scroll indicator are still absent.
+Project-list clicks and wheel navigation keep their own route. A local left-button drag selects
+text through SwiftTerm's selection service; Ctrl+Shift+C copies up to 1 MiB of selected UTF-8
+to the native clipboard, including held scrollback and output from a child that has exited.
+Pointer motion is coalesced to one pending worker operation and the snapshot paints only selected
+visible cells. Mouse-tracking programs still own ordinary clicks; Shift permits local selection
+unless they request shift capture. DEC drag/motion reports, double/triple-click selection and a
+visible scroll indicator remain absent.
 
 Ctrl+Shift+V pastes UTF-8 text from the native clipboard. The host accepts at most 64 KiB per
 gesture, refuses larger or invalid text without sending a prefix, and forwards the accepted bytes
 on the ordered terminal worker. The live SwiftTerm mode decides whether to wrap them in bracketed
 paste markers; the shortcut key itself is not forwarded to the child. Clipboard retrieval is an
 SDL/X11 platform operation on explicit user input, not part of the frame loop; SDL may allocate the
-source text before the host can reject an oversized selection. This does not
-implement selection, copy, rich clipboard types, or IME composition.
+source text before the host can reject an oversized selection. Rich clipboard types and IME
+composition remain unimplemented.
 
 Customization classification: this is a host-only diagnostic embedding of the terminal surface,
 not a new public extension component. Store identities, launch admission, input authority,

@@ -28,24 +28,67 @@ final class PTYEmulator: TerminalDelegate {
             }
         }
     }
-    func mouseButton(x: Int, y: Int, button: Int, release: Bool, modifiers: Modifiers) {
+    @discardableResult
+    func mouseButton(x: Int, y: Int, button: Int, release: Bool, modifiers: Modifiers,
+                     forceLocal: Bool = false) -> Bool {
         terminal.terminalLock.withLock {
             let mode = terminal.mouseMode
-            guard mode != .off, !(modifiers.contains(.shift) && !terminal.mouseShiftCapture),
-                  !release || mode != .x10,
-                  (0...2).contains(button), let hit = mouseHit(x: x, y: y) else { return }
+            guard (0...2).contains(button) else { return false }
+            if button == 0 && selecting && release {
+                let hit = clampedMouseHit(x: x, y: y)
+                selection.dragExtend(row: hit.row, col: hit.column)
+                selecting = false
+                if !selection.hasSelectionRange { selection.selectNone() }
+                return true
+            }
+            let local = forceLocal || mode == .off
+                || (modifiers.contains(.shift) && !terminal.mouseShiftCapture)
+            if button == 0 && !release && local {
+                guard let hit = mouseHit(x: x, y: y) else { return false }
+                selection.selectNone()
+                selection.startSelection(row: hit.row, col: hit.column)
+                selecting = true
+                return true
+            }
+            guard !forceLocal, mode != .off, !local, !release || mode != .x10,
+                  let hit = mouseHit(x: x, y: y) else { return false }
             let flags = terminal.encodeButton(button: button, release: release,
                 shift: modifiers.contains(.shift), meta: modifiers.contains(.alt),
                 control: modifiers.contains(.ctrl))
             terminal.sendEvent(buttonFlags: flags, x: hit.column, y: hit.row, pixelX: x, pixelY: y)
+            return false
         }
     }
     @discardableResult
-    func mouseWheel(x: Int, y: Int, steps: Int, modifiers: Modifiers) -> Bool {
+    func mouseMotion(x: Int, y: Int) -> Bool {
+        terminal.terminalLock.withLock {
+            guard selecting else { return false }
+            let hit = clampedMouseHit(x: x, y: y)
+            selection.dragExtend(row: hit.row, col: hit.column)
+            return true
+        }
+    }
+    enum CopyResult: Sendable {
+        case text(Data)
+        case empty
+        case oversized
+    }
+    func copySelection(maximumBytes: Int) -> CopyResult {
+        terminal.terminalLock.withLock {
+            guard selection.active && selection.hasSelectionRange else { return .empty }
+            let bytes = Data(selection.getSelectedText().utf8)
+            guard !bytes.isEmpty else { return .empty }
+            guard bytes.count <= maximumBytes else { return .oversized }
+            return .text(bytes)
+        }
+    }
+    @discardableResult
+    func mouseWheel(x: Int, y: Int, steps: Int, modifiers: Modifiers,
+                    forceLocal: Bool = false) -> Bool {
         terminal.terminalLock.withLock {
             guard steps != 0, let hit = mouseHit(x: x, y: y) else { return false }
             let count = min(8, abs(steps))
-            let local = modifiers.contains(.alt)
+            let local = forceLocal || modifiers.contains(.alt)
                 || (modifiers.contains(.shift) && !terminal.mouseShiftCapture)
             if !local && terminal.mouseMode != .off {
                 let flags = terminal.encodeButton(button: steps > 0 ? 4 : 5, release: false,
@@ -72,6 +115,9 @@ final class PTYEmulator: TerminalDelegate {
         guard x >= 0, y >= 0, x < terminal.cols * 10, y < terminal.rows * 22 else { return nil }
         return (x / 10, y / 22)
     }
+    private func clampedMouseHit(x: Int, y: Int) -> (column: Int, row: Int) {
+        (max(0, min(terminal.cols - 1, x / 10)), max(0, min(terminal.rows - 1, y / 22)))
+    }
     struct Cell: Sendable {
         let text: String
         let width: Int
@@ -92,6 +138,8 @@ final class PTYEmulator: TerminalDelegate {
     private let sendBytes: (Data) -> Void
     private var title = ""
     private var terminal: Terminal!
+    private var selection: SelectionService!
+    private var selecting = false
     private var cursorVisible = true
     private var suppressReplies = false
 
@@ -99,6 +147,7 @@ final class PTYEmulator: TerminalDelegate {
         guard Self.valid(columns, rows) else { throw Failure.invalidGrid }
         sendBytes = send
         terminal = Terminal(delegate: self, options: TerminalOptions(cols: columns, rows: rows, scrollback: 2000))
+        selection = SelectionService(terminal: terminal)
         terminal.foregroundColor = Color(red: 0xd4d4, green: 0xd4d4, blue: 0xd4d4)
         terminal.backgroundColor = Color(red: 0x1717, green: 0x1919, blue: 0x1d1d)
     }
@@ -123,6 +172,8 @@ final class PTYEmulator: TerminalDelegate {
             var cells: [Cell] = []
             cells.reserveCapacity(terminal.cols * terminal.rows)
             for row in 0..<terminal.rows {
+                let selected = selection.selectedColumns(inBufferRow: terminal.buffer.yDisp + row,
+                                                         columns: terminal.cols)
                 for column in 0..<terminal.cols {
                     let value = terminal.getCharData(col: column, row: row)!
                     let character = terminal.getCharacter(for: value)
@@ -132,7 +183,9 @@ final class PTYEmulator: TerminalDelegate {
                     let bg = inverse ? foreground : background
                     let fg = value.attribute.style.contains(.invisible) ? bg : (inverse ? background : foreground)
                     cells.append(Cell(text: character == "\0" ? " " : String(character),
-                                      width: Int(value.width), attribute: value.attribute, foregroundRGB: fg, backgroundRGB: bg))
+                                      width: Int(value.width), attribute: value.attribute,
+                                      foregroundRGB: selected?.contains(column) == true ? 0xffffff : fg,
+                                      backgroundRGB: selected?.contains(column) == true ? 0x37648e : bg))
                 }
             }
             let atLiveEnd = terminal.isViewportAtLiveEnd()

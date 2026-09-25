@@ -1919,3 +1919,32 @@ row 060. Captured frames were inspected in the real SDL window. Local text
 selection/copy, a visible scroll indicator and behavior under a non-X11 compositor remain
 unverified. The complete Docker/Xvfb `window-smoke.sh` suite passed on the final code, and
 the macOS SwiftTerm `ScrollbackEndTests` suite passed all three tests.
+
+## 71. Local Linux terminal selection uses SwiftTerm's retained-buffer model
+
+The SDL window could paste but could not copy a path or a line from shell output. Local
+left-button drags now use the same `SelectionService` that owns selection behavior in SwiftTerm's
+Apple views. It anchors rows in the buffer, so a selection made while viewing history copies
+those historical cells. The Linux adapter asks the service once per visible row for its selected
+columns, then paints those cells in its existing Pango/Cairo terminal frame. It creates no
+parallel text model and never snapshots all retained history for a frame.
+
+When DEC mouse tracking is enabled, ordinary clicks still belong to the child. Shift claims a
+local selection unless the child requested shift capture; after child exit, pointer input is
+local regardless of the last mouse mode. Ctrl+Shift+C extracts selected UTF-8 on the serial
+terminal worker and sends at most 1 MiB to SDL's native clipboard on the UI thread. Empty or
+oversized selections leave the clipboard unchanged. The shortcut itself sends no byte to the
+PTY. Held-left-button motion is coalesced to one pending worker operation, rather than filling
+the bounded key/button input queue. The only retained text remains SwiftTerm's 2,000-line
+scrollback; each frame still copies at most the 128×40 visible grid. This is the existing
+host-only diagnostic terminal; Threading keeps PTY input, selection ownership and clipboard
+authority, and no extension presentation contract is added.
+
+The Linux emulator contract passed exact Unicode copy, visible-cell selection, Shift bypass and
+ordinary mouse-report authority. macOS SwiftTerm `SelectionTests` passed 30 tests. The native
+Docker/Xvfb journey copied `ROW 025` from a held historical viewport and `ROW 038` after the
+PTY child exited; the child still accepted its expected input afterward, so neither drag nor
+copy leaked a control byte to it. The captured native frames were inspected in both states:
+selected cells painted `(55,100,142)` against the adjacent terminal background `(23,25,29)`.
+The complete Docker/Xvfb `window-smoke.sh` suite passed on the final code. DEC motion/drag
+reports, word/row click gestures, IME and non-X11 clipboard behavior remain outside this slice.

@@ -1,6 +1,7 @@
 #include "LinuxWindowBridge.h"
 #ifdef __linux__
 #include <SDL2/SDL.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 struct TWWindow { SDL_Window *window; SDL_Renderer *renderer; SDL_Texture *texture; int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate; };
@@ -76,6 +77,16 @@ int tw_clipboard_read(uint8_t *destination, int capacity) {
     SDL_free(text);
     return length > (size_t)capacity ? -1 : (int)length;
 }
+int tw_clipboard_write(const uint8_t *source, int length) {
+    if (!source || length < 1 || length > 1024 * 1024 || memchr(source, 0, (size_t)length)) return -1;
+    char *text = malloc((size_t)length + 1);
+    if (!text) return -1;
+    memcpy(text, source, (size_t)length);
+    text[length] = 0;
+    int result = SDL_SetClipboardText(text);
+    free(text);
+    return result;
+}
 int tw_next(TWWindow *w, TWEvent *out) { return tw_next_timeout(w, out, -1); }
 int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
     SDL_Event e;
@@ -94,10 +105,13 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             out->kind = 15; out->x = e.button.x; out->y = e.button.y;
             out->action = e.type == SDL_MOUSEBUTTONUP ? 3 : 1;
             out->modifiers = tw_modifiers(SDL_GetModState());
+        } else if (w->terminal && e.type == SDL_MOUSEMOTION && (e.motion.state & SDL_BUTTON_LMASK)) {
+            out->kind = 17; out->x = e.motion.x; out->y = e.motion.y;
         } else if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
             out->kind = 2; out->x = e.button.x; out->y = e.button.y;
         } else if (e.type == SDL_MOUSEWHEEL && e.wheel.y != 0) {
-            int y = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
+            int y = e.wheel.y;
+            if (e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) y = y == INT_MIN ? INT_MAX : -y;
             if (w->terminal) {
                 out->kind = 16; out->key = y > 8 ? 8 : (y < -8 ? -8 : y);
                 SDL_GetMouseState(&out->x, &out->y);
@@ -106,7 +120,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->suppressActivation && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && e.key.keysym.sym == w->suppressActivation) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;
-        } else if (w->terminal && w->suppressActivation == SDLK_v && e.type == SDL_TEXTINPUT) {
+        } else if (w->terminal && (w->suppressActivation == SDLK_v || w->suppressActivation == SDLK_c)
+                   && e.type == SDL_TEXTINPUT) {
             // A shortcut must not also type its printable key into the PTY.
         } else if (w->terminal && e.type == SDL_TEXTINPUT) {
             out->kind = 6; memcpy(out->text, e.text.text, sizeof(out->text));
@@ -115,6 +130,13 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 && (e.key.keysym.mod & KMOD_SHIFT)) {
                 if (e.type == SDL_KEYDOWN && !e.key.repeat) {
                     out->kind = 14; w->suppressActivation = SDLK_v; return 1;
+                }
+                continue;
+            }
+            if (e.key.keysym.sym == SDLK_c && (e.key.keysym.mod & KMOD_CTRL)
+                && (e.key.keysym.mod & KMOD_SHIFT)) {
+                if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+                    out->kind = 18; w->suppressActivation = SDLK_c; return 1;
                 }
                 continue;
             }
