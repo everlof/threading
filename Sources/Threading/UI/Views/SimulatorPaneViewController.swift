@@ -104,6 +104,7 @@ final class SimulatorPaneViewController: NSViewController {
     private var lease: SimulatorDeviceLease?
     private var preparationTask: Task<Void, Never>?
     private var preparationGeneration = 0
+    private var preparationFailureDetail: String?
     private var preparationCompletions: [
         @MainActor @Sendable (SimulatorPaneAgentResult<SimulatorDeviceLease>) -> Void
     ] = []
@@ -1005,6 +1006,7 @@ final class SimulatorPaneViewController: NSViewController {
         preparationTask?.cancel()
         stopTransport()
         presentationState = .discovering
+        preparationFailureDetail = nil
         let leaseManager = leaseManager
         let currentLease = (releasingCurrentLease || refreshingCurrentLease) ? lease : nil
         if currentLease != nil { lease = nil }
@@ -1031,6 +1033,9 @@ final class SimulatorPaneViewController: NSViewController {
                     ?? devices.first?.id
                 guard let targetID else {
                     throw SimulatorControlError.noAvailableIOSDevices
+                }
+                guard devices.contains(where: { $0.id == targetID }) else {
+                    throw SimulatorControlError.deviceNotFound(targetID)
                 }
                 self?.preferredDeviceID = targetID
                 self?.presentationState = .preparing(targetID)
@@ -1062,6 +1067,8 @@ final class SimulatorPaneViewController: NSViewController {
                     self.lease = currentLease
                     self.requiresLeaseRefresh = true
                 }
+                self.preparationFailureDetail = (error as? SimulatorControlError)?
+                    .diagnosticDetail
                 self.presentationState = .failed(error.localizedDescription)
                 self.finishPreparation(.failure(error.localizedDescription))
             }
@@ -2915,6 +2922,9 @@ final class SimulatorPaneViewController: NSViewController {
            lastStreamFailure != statusLabel.stringValue {
             tooltipLines.append(lastStreamFailure)
         }
+        if case .failed = presentationState, let preparationFailureDetail {
+            tooltipLines.append(String(preparationFailureDetail.prefix(1_000)))
+        }
         statusLabel.toolTip = tooltipLines.joined(separator: "\n")
     }
 
@@ -2955,6 +2965,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
     var screenViewForTesting: SimulatorScreenView { screenView }
     var statusForTesting: String { statusLabel.stringValue }
+    var statusTooltipForTesting: String { statusLabel.toolTip ?? "" }
     var controlButtonForTesting: ThemedIconButton { controlButton }
     var recordButtonForTesting: ThemedIconButton { recordButton }
     var recordingBadgeForTesting: SimulatorRecordingBadge { recordingBadge }

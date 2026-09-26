@@ -56,6 +56,7 @@ struct SimulatorLaunchReceipt: Equatable, Sendable {
 enum SimulatorControlError: LocalizedError, Equatable, Sendable {
     case launchFailed(String)
     case commandFailed(operation: String, detail: String)
+    case bootFailed(deviceName: String, detail: String)
     case timedOut(operation: String)
     case cancelled
     case outputTooLarge(operation: String)
@@ -73,6 +74,11 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
         switch self {
         case .launchFailed(let detail): return detail
         case .commandFailed(_, let detail): return detail
+        case .bootFailed(let deviceName, _):
+            return L10n.format(
+                "Couldn’t start %@. Try Refresh or choose another Simulator.",
+                deviceName
+            )
         case .timedOut(let operation): return "Simulator \(operation) took too long."
         case .cancelled: return "The Simulator operation was cancelled."
         case .outputTooLarge(let operation):
@@ -82,8 +88,10 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
             return "More than \(maximum) iOS Simulator devices are installed."
         case .noAvailableIOSDevices:
             return "No available iOS Simulator device is installed in Xcode."
-        case .deviceNotFound(let id):
-            return "The iOS Simulator device \(id.rawValue) is no longer available."
+        case .deviceNotFound:
+            return L10n.string(
+                "The selected Simulator is no longer available. Choose another device."
+            )
         case .invalidApplication(let detail): return detail
         case .invalidBundleIdentifier: return "The application bundle identifier is invalid."
         case .tooManyLaunchArguments(let maximum):
@@ -93,6 +101,11 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
         case .invalidScreenshot:
             return "CoreSimulator did not return a valid PNG screenshot."
         }
+    }
+
+    var diagnosticDetail: String? {
+        if case .bootFailed(_, let detail) = self { return detail }
+        return nil
     }
 }
 
@@ -147,15 +160,25 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                 return SimulatorDeviceLease(device: device, bootOwnership: .user)
             }
 
-            _ = try Self.run(
-                ["bootstatus", device.id.rawValue, "-b"],
-                operation: "boot",
-                timeout: SimulatorControlDefaults.bootTimeout,
-                maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
-                capture: .combined,
-                using: runner,
-                cancellation: cancellation
-            )
+            do {
+                _ = try Self.run(
+                    ["bootstatus", device.id.rawValue, "-b"],
+                    operation: "boot",
+                    timeout: SimulatorControlDefaults.bootTimeout,
+                    maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
+                    capture: .combined,
+                    using: runner,
+                    cancellation: cancellation
+                )
+            } catch let error as SimulatorControlError {
+                if case .commandFailed(_, let detail) = error {
+                    throw SimulatorControlError.bootFailed(
+                        deviceName: device.name,
+                        detail: detail
+                    )
+                }
+                throw error
+            }
             return SimulatorDeviceLease(
                 device: device.withState(.booted),
                 bootOwnership: .threading

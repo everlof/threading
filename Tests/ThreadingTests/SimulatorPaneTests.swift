@@ -152,6 +152,56 @@ final class SimulatorPaneTests: HostedStoreTestCase {
         XCTAssertTrue(controller.isPresentedForTesting)
     }
 
+    func testBootFailureShowsActionAndKeepsTechnicalDetailInTooltip() async throws {
+        let detail = "Device boot failed: NSPOSIXErrorDomain Code=22 Invalid argument"
+        let control = SimulatorPaneControlFake(
+            preparationFailure: .bootFailed(deviceName: simulatorPaneTestDevice.name, detail: detail)
+        )
+        let controller = SimulatorPaneViewController(control: control)
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually {
+            if case .failed = controller.presentationState { return true }
+            return false
+        }
+
+        XCTAssertEqual(
+            controller.statusForTesting,
+            L10n.format(
+                "Couldn’t start %@. Try Refresh or choose another Simulator.",
+                simulatorPaneTestDevice.name
+            )
+        )
+        XCTAssertTrue(controller.statusTooltipForTesting.contains(detail))
+        XCTAssertFalse(controller.statusForTesting.contains("NSPOSIXErrorDomain"))
+    }
+
+    func testMissingPreferredDeviceAsksForAnotherWithoutAttemptingBoot() async throws {
+        let missingID = SimulatorDeviceID("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+        let control = SimulatorPaneControlFake()
+        let controller = SimulatorPaneViewController(
+            preferredDeviceID: missingID,
+            control: control
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually {
+            if case .failed = controller.presentationState { return true }
+            return false
+        }
+
+        XCTAssertEqual(
+            controller.statusForTesting,
+            L10n.string("The selected Simulator is no longer available. Choose another device.")
+        )
+        let counts = await control.counts()
+        XCTAssertEqual(counts.prepares, 0)
+    }
+
     func testDisplayPaneKeepsOnePersistedSimulatorTabAndRestoresItLazily() async throws {
         let control = SimulatorPaneControlFake()
         let sessionID = SessionID()
@@ -407,10 +457,15 @@ private actor SimulatorPaneControlFake: SimulatorControlling {
     }
 
     private let failure: SimulatorControlError?
+    private let preparationFailure: SimulatorControlError?
     private var callCounts = Counts()
 
-    init(failure: SimulatorControlError? = nil) {
+    init(
+        failure: SimulatorControlError? = nil,
+        preparationFailure: SimulatorControlError? = nil
+    ) {
         self.failure = failure
+        self.preparationFailure = preparationFailure
     }
 
     func counts() -> Counts { callCounts }
@@ -424,6 +479,7 @@ private actor SimulatorPaneControlFake: SimulatorControlling {
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
         callCounts.prepares += 1
         if let failure { throw failure }
+        if let preparationFailure { throw preparationFailure }
         return SimulatorDeviceLease(
             device: simulatorPaneTestDevice,
             bootOwnership: .user

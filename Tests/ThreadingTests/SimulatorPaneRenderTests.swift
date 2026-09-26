@@ -182,6 +182,50 @@ final class SimulatorPaneRenderTests: XCTestCase {
         print("Rendered the adopted Simulator pane to \(Render.directory.path)")
     }
 
+    func testRendersBootFailureInTheRightPanel() throws {
+        try FileManager.default.createDirectory(
+            at: Render.directory,
+            withIntermediateDirectories: true
+        )
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(.system)
+        let deviceFrame = try makeDeviceFramePNG()
+
+        for appearance in Render.appearances {
+            let fixture = try makeFixture(
+                appearance: appearance.value,
+                deviceFrame: deviceFrame,
+                bootFailure: "Device boot failed: NSPOSIXErrorDomain Code=22 Invalid argument"
+            )
+            defer { fixture.tearDown() }
+            eventually {
+                if case .failed = fixture.simulator.presentationState { return true }
+                return false
+            }
+            settle(fixture.window)
+
+            let content = try XCTUnwrap(fixture.window.contentView)
+            XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2)
+            XCTAssertEqual(
+                fixture.simulator.statusForTesting,
+                L10n.format(
+                    "Couldn’t start %@. Try Refresh or choose another Simulator.",
+                    "iPhone 17 Pro"
+                )
+            )
+            let representation = try XCTUnwrap(
+                content.bitmapImageRepForCachingDisplay(in: content.bounds)
+            )
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-boot-failure-system-\(appearance.name).png"
+                )
+            )
+        }
+    }
+
     /// The presenter window's content — the device alone, with touches — at the size it opens
     /// at. Built and drawn offscreen: the window itself is never ordered on screen here.
     func testRendersPresenterWindowContent() throws {
@@ -358,7 +402,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
 
     private func makeFixture(
         appearance appearanceName: NSAppearance.Name,
-        deviceFrame: Data
+        deviceFrame: Data,
+        bootFailure: String? = nil
     ) throws -> SimulatorPaneRenderFixture {
         let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
         let device = SimulatorDevice(
@@ -375,7 +420,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
         )
         let control = SimulatorPaneRenderControl(
             device: device,
-            frame: deviceFrame
+            frame: deviceFrame,
+            bootFailure: bootFailure
         )
         let image = try XCTUnwrap(NSImage(data: deviceFrame))
         var imageRect = NSRect(origin: .zero, size: image.size)
@@ -657,16 +703,24 @@ private struct SimulatorPaneRenderFixture {
 private actor SimulatorPaneRenderControl: SimulatorControlling {
     private let device: SimulatorDevice
     private let frame: Data
+    private let bootFailure: String?
 
-    init(device: SimulatorDevice, frame: Data) {
+    init(device: SimulatorDevice, frame: Data, bootFailure: String? = nil) {
         self.device = device
         self.frame = frame
+        self.bootFailure = bootFailure
     }
 
     func availableDevices() async throws -> [SimulatorDevice] { [device] }
 
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
-        SimulatorDeviceLease(device: device, bootOwnership: .user)
+        if let bootFailure {
+            throw SimulatorControlError.bootFailed(
+                deviceName: device.name,
+                detail: bootFailure
+            )
+        }
+        return SimulatorDeviceLease(device: device, bootOwnership: .user)
     }
 
     func installAndLaunch(

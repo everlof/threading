@@ -62,6 +62,30 @@ final class SimulatorControlTests: XCTestCase {
         ])
     }
 
+    func testBootFailureNamesTheDeviceAndKeepsSimctlDetailForDiagnosis() async throws {
+        let detail = "Device boot failed: NSPOSIXErrorDomain Code=22 Invalid argument"
+        let runner = RecordingSimulatorCommandRunner(
+            outputs: [Data(Self.deviceFixture.utf8), Data(detail.utf8)],
+            exitStatuses: [0, 1]
+        )
+        let control = SimctlSimulatorControl(runner: runner)
+
+        do {
+            _ = try await control.prepare(deviceID: Self.recentPhoneID)
+            XCTFail("A failed device boot should not produce a lease.")
+        } catch let error as SimulatorControlError {
+            XCTAssertEqual(error, .bootFailed(deviceName: "Recent Phone", detail: detail))
+            XCTAssertEqual(
+                error.localizedDescription,
+                L10n.format(
+                    "Couldn’t start %@. Try Refresh or choose another Simulator.",
+                    "Recent Phone"
+                )
+            )
+            XCTAssertEqual(error.diagnosticDetail, detail)
+        }
+    }
+
     func testInstallAndLaunchUsesTheSelectedUDIDAndReturnsThePID() async throws {
         let runner = RecordingSimulatorCommandRunner(outputs: [
             Data(),

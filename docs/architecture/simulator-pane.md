@@ -260,6 +260,11 @@ failed control request. The transport (H.264, JPEG, shared memory) is a diagnost
 the tooltip. A green "Live" label was removed: it made the default state the loudest thing in the
 pane, and it is what kept a frozen stream looking healthy.
 
+A failed `simctl bootstatus` is reported as a device-specific start failure with Refresh and the
+device chooser as recovery paths; its bounded stderr stays in the status tooltip. A previously
+selected UDID missing from current discovery is called unavailable before the lease manager can
+reuse a cached lease. Neither path guesses that a boot error means the device was deleted.
+
 **Annotations have an explicit mode and a one-note gesture.** Option-click (or the screen menu's
 **Add Note Here**) pins a note through exactly the same bounded editor without enabling the
 persistent annotation mode or emitting device HID. The persistent mode selects its toolbar button

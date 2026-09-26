@@ -15780,6 +15780,17 @@
         }
       }
     },
+    "Couldn’t start %@. Try Refresh or choose another Simulator." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att starta %@. Prova Uppdatera eller välj en annan simulator."
+          }
+        }
+      }
+    },
     "Couldn’t start agent updates" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49570,6 +49581,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Scrollfabriken sammansätter alla tre gränserna."
+          }
+        }
+      }
+    },
+    "The selected Simulator is no longer available. Choose another device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda simulatorn är inte längre tillgänglig. Välj en annan enhet."
           }
         }
       }

@@ -3538,6 +3538,9 @@ treated the same way: a visible tab that goes a few seconds without a new pictur
 to the screenshot preview and offers retry, rather than keeping a stale frame under a live label.
 The public screenshot fallback is view-only, so actual device input waits until the direct
 connection has recovered.
+If a device cannot start, the tab names it and offers Refresh or the device chip to choose another;
+hover the error for CoreSimulator's detail. If a saved device is gone, choose one that is still
+listed in the chip.
 
 **More tabs than fit scroll rather than shrink**, and the strip only answers what is meant for
 it. Swipe sideways over the tabs to move along them; a mouse wheel does the same, since sideways
