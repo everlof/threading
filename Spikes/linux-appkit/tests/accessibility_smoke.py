@@ -252,7 +252,8 @@ with log_path.open('w+') as log:
                                check=True, timeout=5)
                 eventually(lambda: True if not terminal.get_state_set().contains(
                     Atspi.StateType.FOCUSED) else None, 'terminal focus lost to second window')
-                subprocess.run(['xdotool', 'key', 'alt+F4'], check=True, timeout=5)
+                subprocess.run(['xdotool', 'windowfocus', '--sync', other_id,
+                                'key', 'alt+F4'], check=True, timeout=5)
                 assert other.wait(timeout=5) == 0, other_log.read()
                 subprocess.run(['xdotool', 'windowfocus', '--sync', window_id],
                                check=True, timeout=5)

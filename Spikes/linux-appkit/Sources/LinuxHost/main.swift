@@ -33,13 +33,14 @@ func projectDirectory(_ path: String) throws -> URL {
 func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
     let addingProject = args.first == "--add-project"
-    try check(addingProject ? args.count == 3 : args.count >= 3,
-        "usage: LinuxHost --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | resume-claude SESSION_UUID SHELL CLAUDE_EXECUTABLE | attach-agent SESSION_UUID")
+    let initializingStore = args.first == "--init-store"
+    try check(initializingStore ? args.count == 2 : (addingProject ? args.count == 3 : args.count >= 3),
+        "usage: LinuxHost --init-store STORE | --add-project STORE DIRECTORY | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | resume-claude SESSION_UUID SHELL CLAUDE_EXECUTABLE | attach-agent SESSION_UUID")
     let importFolder = addingProject ? try projectDirectory(args[2]) : nil
     // Establish the signal mask before database decoding can create worker threads.
-    let terminalControl: LocalTerminal? = addingProject || args[2] == "list" ? nil : try LocalTerminal()
-    let root = URL(fileURLWithPath: args[addingProject ? 1 : 0], isDirectory: true)
-    if !addingProject && args[2] == "resume-claude" {
+    let terminalControl: LocalTerminal? = initializingStore || addingProject || args[2] == "list" ? nil : try LocalTerminal()
+    let root = URL(fileURLWithPath: args[initializingStore || addingProject ? 1 : 0], isDirectory: true)
+    if !initializingStore && !addingProject && args[2] == "resume-claude" {
         try check(FileManager.default.fileExists(atPath: root.appendingPathComponent("threading.db").path),
                   "saved session store does not exist")
     }
@@ -52,11 +53,13 @@ func run() throws -> Int32 {
     try check(flock(lock, LOCK_EX | LOCK_NB) == 0, "store is already owned by another host")
     let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
     defer { database.close() }
+    if initializingStore { return 0 }
     if let folder = importFolder {
-        let state = try database.load().state
-        if !state.projects.contains(where: { $0.folderPath == folder.path }) {
+        let projects = try database.navigationSnapshot(recentSessionLimit: 0,
+                                                       recentTerminalLimit: 0).projects
+        if !projects.contains(where: { $0.folderPath == folder.path }) {
             try database.addProject(Project(name: folder.lastPathComponent, folderURL: folder),
-                                    position: state.projects.count)
+                                    position: projects.count)
         }
         print(folder.path)
         return 0

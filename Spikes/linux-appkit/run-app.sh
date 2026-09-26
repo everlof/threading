@@ -28,16 +28,16 @@ for directory in "$data_dir" "$runtime_dir"; do
   fi
 done
 store=$data_dir/store
-if [[ -z $project && ! -f $store/threading.db ]]; then
-  echo 'run-app: first launch needs an existing project directory' >&2
-  exit 1
-fi
 for directory in "$data_dir" "$runtime_dir"; do
   mkdir -p -m 700 -- "$directory"
   chmod 700 -- "$directory"
 done
 if [[ $shell_path != /* || ! -x $shell_path ]]; then
   echo "run-app: shell must be an absolute executable: $shell_path" >&2
+  exit 1
+fi
+if [[ ! -x /usr/bin/zenity ]]; then
+  echo 'run-app: /usr/bin/zenity is required for the native project folder picker' >&2
   exit 1
 fi
 
@@ -75,6 +75,8 @@ exec 9>"$runtime_dir/start.lock"
 flock -x 9
 if [[ -n $project ]]; then
   "$host" --add-project "$store" "$project" >/dev/null
+else
+  "$host" --init-store "$store" >/dev/null
 fi
 if ! "$daemon" sessions --json --socket "$socket" >/dev/null 2>&1; then
   nohup "$daemon" --socket "$socket" --state "$state" >"$data_dir/daemon.log" 2>&1 </dev/null 9>&- &

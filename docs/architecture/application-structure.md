@@ -217,8 +217,14 @@ the window can change it without changing saved sessions. The stored handle send
 back to that exact `HOME/.codex-work` after login-marker, rollout-ID and mixed-ordinal checks.
 Without the variable, new sessions use `HOME/.codex`.
 Registered keyring locations and other providers are still unsupported on Linux. A source-tree
-Linux launcher can import an existing project into the same durable store without a daemon,
-then start or reuse the daemon before opening this window with the requested project selected.
+Linux launcher can initialize an empty durable store or import an existing project without a
+daemon, then start or reuse the daemon before opening this window. The native project list also
+opens a system GTK folder dialog through Zenity on a worker. The selected directory enters the
+same `LinuxHost --add-project` command, which reads project rows without decoding every session.
+The host owns canonical identity, duplicate handling and the store lock; a successful import
+refreshes the bounded navigator snapshot without spawning a child. The empty list exposes an
+accessible Add project row with the same Enter, click and AT-SPI open route. Its AT-SPI select
+action only selects the row, so the following open action cannot launch a second dialog.
 The import and worker-built startup snapshot use the same canonical project-directory identity
 as macOS, so a symlink spelling does not create or select a second project. Selecting a project
 alone does not start another child.

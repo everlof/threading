@@ -149,6 +149,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (e.user.code == 1) {
                 if (!tw_accessibility_row_center((int)(intptr_t)e.user.data1, &out->x, &out->y)) continue;
                 out->kind = 2;
+                out->action = 1; // Accessibility selection precedes a separate open action.
             } else if (e.user.code == 2) out->kind = 8;
         }
         else if (e.type == SDL_WINDOWEVENT) {
@@ -301,6 +302,10 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             else if (e.key.keysym.sym == SDLK_o && (e.key.keysym.mod & KMOD_CTRL)
                 && (e.key.keysym.mod & KMOD_SHIFT) && !e.key.repeat) {
                 out->kind = 22; w->suppressActivation = SDLK_o;
+            }
+            else if (e.key.keysym.sym == SDLK_p && (e.key.keysym.mod & KMOD_CTRL)
+                && (e.key.keysym.mod & KMOD_SHIFT) && !e.key.repeat) {
+                out->kind = 23; w->suppressActivation = SDLK_p;
             }
             else if (e.key.keysym.sym == SDLK_UP) out->kind = 3;
             else if (e.key.keysym.sym == SDLK_DOWN) out->kind = 4;

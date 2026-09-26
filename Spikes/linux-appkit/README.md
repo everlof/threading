@@ -81,7 +81,8 @@ model encoding, or the complete application's recovery path.
 
 ### Start the native window from a clean Linux profile
 
-On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, ATK/AT-SPI, and `flock` installed:
+On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, ATK/AT-SPI, Zenity,
+and `flock` installed:
 
 ```bash
 ./run-app.sh /absolute/path/to/an/existing/project
@@ -89,9 +90,12 @@ On a Linux machine with Swift 6.3.2, SQLite, SDL2, Pango/Cairo, ATK/AT-SPI, and 
 ```
 
 The first command imports the canonical project directory into a local store and opens that
-project even when the store contains others. After one import, the no-argument command reopens
-the saved project list without importing a project or starting a child. With no existing store it
-refuses before creating state or starting a daemon. Both commands build the two host executables
+project even when the store contains others. The no-argument command opens the saved project
+list, including from a clean profile. In an empty list, activate **Add project folder** with
+Enter or a click; Ctrl+Shift+P opens the same native folder dialog from any project list.
+Choosing an existing directory imports and selects it without starting a child. Cancellation
+leaves the list unchanged; choosing an already imported directory selects its existing row.
+Both commands build the two host executables
 and `threading-ptyd` when needed, and start or reuse one background daemon.
 If its last selected agent is a launched, unarchived session without a recorded exit, the
 window checks the daemon after releasing the store lock. It attaches only when that exact child
@@ -115,9 +119,10 @@ marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window
 the chooser can replace it. The selection lasts for this window only. Saved sessions retain their
 own account handle, so opening one never follows a later chooser change.
 
-This is a source-tree development entry point, not a packaged Linux release. The startup command,
-project import, store lock, daemon rendezvous and process ownership are host-owned; it publishes
-no new extension presentation surface. The native UI and provider limitations below still apply.
+This is a source-tree development entry point, not a packaged Linux release. The project list's
+import action is deliberately host-only: Threading owns directory identity, duplicate detection,
+store locking and import; Zenity owns the platform folder dialog. It publishes no new extension
+presentation surface. The native UI and provider limitations below still apply.
 
 `./host-smoke.sh` builds `LinuxHost` and the production `threading-ptyd` in an arm64 Linux
 container, then exercises a real shell through a PTY with an isolated store and daemon. Full
@@ -439,7 +444,8 @@ WindowHarness --app-agents /path/to/experimental-store /path/to/ptyd.sock /bin/b
 ```
 
 Select a project with Up/Down or a click, then press Enter to open its shell. Ctrl+Shift+P
-returns to projects; Enter revisits that project's existing terminal, including its child and
+opens the folder dialog from projects and returns to projects from a terminal. Enter revisits
+that project's existing terminal, including its child and
 emulator state. Right opens the selected project's saved terminals, newest first. Up/Down or a
 click selects one and Enter attaches it; Left or Escape returns to projects. A star marks a
 runtime retained by this window. Left from projects opens saved agent sessions, also newest
@@ -478,7 +484,8 @@ the currently mounted project/saved-runtime rows. Rows carry their durable IDs a
 names in both native drawing and accessibility; selection state and `select`/`open` actions use the same native
 navigation route as pointer and keyboard input. The list describes its visible range and never
 materializes offscreen accessibility rows. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh`
-queries that tree with an AT-SPI client, scrolls a 15-project list, and opens a Unicode-named
+checks the empty list's Add project action and dialog cancellation, then queries a populated
+tree with an AT-SPI client, scrolls a 15-project list, and opens a Unicode-named
 project into a real PTY through the row action. The terminal node exposes the current visible
 screen through the read-only ATK Text interface. Unicode character and caret offsets come from the
 same bounded grid as rendering; concealed cells are blanked, hidden scrollback is omitted, and
