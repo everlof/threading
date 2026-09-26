@@ -2493,3 +2493,35 @@ boundaries passed. The required `scripts/test.sh all` iOS leg built for the inst
 Threading iPhone 17 simulator, but XCTest never launched: CoreSimulator did not report boot
 readiness after eight minutes, so the attempt was stopped. iOS tests remain unverified for
 this slice; no iOS source changed.
+
+## 93. The Linux window can import its first project
+
+The source-tree launcher now initializes an empty private store and starts or reuses its daemon
+when invoked with no directory. The navigator mounts one **Add project folder** row in that
+state. Enter, a click, its AT-SPI open action, or Ctrl+Shift+P in the project list opens Zenity's
+native GTK folder dialog. The dialog and `LinuxHost --add-project` run on a worker; SDL keeps its
+owning thread while the picker is open. A selected existing directory is canonicalized, imported
+once under the store lock, and selected in a refreshed bounded navigator snapshot. The import
+command now reads project rows without decoding the entire stored session graph. Cancellation
+leaves the catalogue unchanged; startup and import never spawn a child.
+
+This is a deliberately host-only project import surface. Threading owns path identity, duplicate
+admission, store writes and process startup; the Linux platform leaf owns the folder dialog. It
+does not add an extension component or imply a packaged desktop release.
+
+The focused real Xvfb startup fixture passed from a clean profile: it captured and inspected the
+empty and populated windows, clicked the Add project row, imported through the GTK dialog,
+repeated the same import through Ctrl+Shift+P without a second row, cancelled a third dialog,
+and then opened and reattached the same daemon-held shell. An initial full-suite run exposed
+Zenity inheriting the smoke runner's script-bearing stdin. Both helper processes now receive a
+closed stdin; the complete native-window suite passed through its final startup case afterward.
+The AT-SPI lane also passed: the empty Add project row's accessible open action launched and
+cancelled the GTK dialog, and the existing bounded-list, focus and terminal-text checks passed.
+The older focus fixture now targets its second window when sending Alt+F4, avoiding an
+intermittent close of the wrong X window after an accessibility focus query.
+The accessibility bridge marks a select event separately from pointer clicks: selecting the
+empty action row does not start a dialog, while its subsequent open event does.
+The complete Mac target passed 9,521 tests (83 skipped, zero failures) after this Linux-only
+change. The complete iOS Simulator target passed 898 tests (one skipped, zero failures), so
+`scripts/test.sh all` finished successfully. Architecture, theme and main-actor-latency checks
+passed as well.

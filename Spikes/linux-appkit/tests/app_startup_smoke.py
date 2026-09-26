@@ -42,6 +42,25 @@ def key(window, value):
     assert xdo('windowfocus', '--sync', window, 'key', '--delay', '50', value).returncode == 0
 
 
+def choose_folder(path):
+    dialog = title(process, 'Add project folder')
+    key(dialog, 'ctrl+l')
+    assert xdo('type', '--clearmodifiers', '--delay', '1', str(path)).returncode == 0
+    assert xdo('key', 'Return').returncode == 0
+    return dialog
+
+
+def wait_event(marker, count=1):
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        contents = Path(log.name).read_text()
+        if contents.count(marker) >= count:
+            return
+        assert process.poll() is None, f'app exited before {marker}: {contents}'
+        time.sleep(.05)
+    raise AssertionError(f'missing {marker} ({count}): {Path(log.name).read_text()}')
+
+
 def held():
     result = subprocess.run([daemon, 'sessions', '--json', '--socket', str(socket)],
                             capture_output=True, text=True, check=True, timeout=5)
@@ -74,16 +93,34 @@ daemon_pid = None
 process = None
 log = None
 try:
-    first_run = subprocess.run([script], cwd=root, env=environment,
-                               capture_output=True, text=True, timeout=5)
-    assert first_run.returncode == 1 and 'first launch needs an existing project directory' in first_run.stderr, first_run
-    assert not data.exists() and not runtime.exists(), 'no-argument first run created state'
-
-    process, log = launch('startup-first.log')
-    window = title(process, 'Threading experiment - ' + str(project))
+    process, log = launch('startup-first.log', project_argument=None)
+    window = title(process, 'Threading experiment - empty store')
     daemon_pid = int((runtime / 'daemon.pid').read_text())
     assert os.stat(data).st_mode & 0o777 == 0o700
     assert os.stat(runtime).st_mode & 0o777 == 0o700
+    assert (store / 'threading.db').is_file()
+    assert held() == [], 'opening an empty project list spawned a child'
+    subprocess.run(['import', '-window', window, 'out/startup-empty-projects.png'], check=True, timeout=5)
+    assert xdo('mousemove', '--window', window, '100', '78', 'click', '1').returncode == 0
+    choose_folder(project)
+    wait_event('PROJECT_IMPORTED ', 1)
+    window = title(process, 'Threading experiment - ' + str(project))
+    assert held() == [], 'importing a folder spawned a child'
+    listing = subprocess.check_output([host, str(store), str(socket), 'list'], text=True, timeout=5)
+    assert listing.count(str(project)) == 1, listing
+    subprocess.run(['import', '-window', window, 'out/startup-imported-project.png'], check=True, timeout=5)
+    key(window, 'ctrl+shift+p')
+    choose_folder(project)
+    wait_event('PROJECT_IMPORTED ', 2)
+    title(process, 'Threading experiment - ' + str(project))
+    listing = subprocess.check_output([host, str(store), str(socket), 'list'], text=True, timeout=5)
+    assert listing.count(str(project)) == 1, 'duplicate folder import made a second project'
+    key(window, 'ctrl+shift+p')
+    dialog = title(process, 'Add project folder')
+    key(dialog, 'Escape')
+    wait_event('PROJECT_IMPORT_CANCELLED')
+    title(process, 'Threading experiment - ' + str(project))
+    assert held() == [], 'cancelling the picker spawned a child'
     key(window, 'Return')
     first = terminal_row()
     listing = subprocess.check_output([host, str(store), str(socket), 'list'], text=True, timeout=5)
@@ -170,7 +207,7 @@ try:
     assert len(held()) == 1 and held()[0]['pid'] == first['pid'], held()
     key(window, 'Escape')
     assert process.wait(timeout=5) == 0
-    print('PASS clean-profile import, no-argument reopen, daemon reuse and same-child native reattach', flush=True)
+    print('PASS clean-profile native folder import, cancel, duplicate, no-argument reopen, daemon reuse and same-child native reattach', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.kill()

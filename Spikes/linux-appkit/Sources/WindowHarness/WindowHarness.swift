@@ -306,6 +306,103 @@ struct WindowHarness {
         }
     }
 
+    /// The GTK dialog and store import run away from SDL's owning thread. Only one bounded
+    /// snapshot crosses back to the navigator; closing the window closes a pending dialog.
+    private final class FolderImportGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var chooser: Process?
+        private var cancelled = false
+        private var result: Result<WindowSnapshot?, Error>?
+
+        func opened(_ process: Process) {
+            lock.lock()
+            chooser = process
+            let shouldCancel = cancelled
+            lock.unlock()
+            if shouldCancel && process.isRunning { process.terminate() }
+        }
+        func closed() {
+            lock.lock(); chooser = nil; lock.unlock()
+        }
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let process = chooser
+            lock.unlock()
+            if let process, process.isRunning { process.terminate() }
+        }
+        func isCancelled() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled
+        }
+        func finish(_ value: Result<WindowSnapshot?, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<WindowSnapshot?, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private static func beginFolderImport(store: String, socket: String) -> FolderImportGate {
+        let gate = FolderImportGate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            gate.finish(Result { try importFolder(store: store, socket: socket, gate: gate) })
+        }
+        return gate
+    }
+
+    private static func importFolder(store: String, socket: String,
+                                     gate: FolderImportGate) throws -> WindowSnapshot? {
+        let chooser = Process()
+        chooser.executableURL = URL(fileURLWithPath: "/usr/bin/zenity")
+        chooser.arguments = ["--file-selection", "--directory", "--title=Add project folder"]
+        let output = Pipe()
+        // A launcher may be reading commands from stdin (including bash -s smoke runs).
+        // Neither child may consume those commands while the window remains open.
+        chooser.standardInput = FileHandle.nullDevice
+        chooser.standardOutput = output
+        chooser.standardError = FileHandle.nullDevice
+        try chooser.run()
+        gate.opened(chooser)
+        var bytes = Data()
+        var tooLong = false
+        while true {
+            let chunk = output.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            if bytes.count + chunk.count > 4096 { tooLong = true }
+            else if !tooLong { bytes.append(chunk) }
+        }
+        chooser.waitUntilExit()
+        gate.closed()
+        if gate.isCancelled() || chooser.terminationStatus == 1 { return nil }
+        guard chooser.terminationStatus == 0 else { throw WindowFailure("folder picker failed") }
+        guard !tooLong, bytes.last == 10 else { throw WindowFailure("folder picker returned an invalid path") }
+        bytes.removeLast()
+        guard let path = String(data: bytes, encoding: .utf8),
+              let folder = ProjectDirectory.existing(at: path) else {
+            throw WindowFailure("selected project directory does not exist")
+        }
+        guard !gate.isCancelled() else { return nil }
+        guard let executable = Bundle.main.executableURL?.deletingLastPathComponent()
+            .appendingPathComponent("LinuxHost"),
+            FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw WindowFailure("LinuxHost executable is unavailable")
+        }
+        let host = Process()
+        host.executableURL = executable
+        host.arguments = ["--add-project", store, folder.path]
+        host.standardInput = FileHandle.nullDevice
+        host.standardOutput = FileHandle.nullDevice
+        host.standardError = FileHandle.nullDevice
+        try host.run()
+        host.waitUntilExit()
+        guard host.terminationStatus == 0 else { throw WindowFailure("could not import project directory") }
+        return try loadSnapshot(store, selectingProjectAt: folder.path, socket: socket)
+    }
+
     private struct PendingSelection {
         let event: TWEvent
         let continuesOnRefusal: Bool
@@ -730,6 +827,8 @@ struct WindowHarness {
         var accountPicker: AgentKind?
         var accountSelected = 0, accountFirst = 0
         var pendingSelection: PendingSelection?
+        var pendingFolderImport: FolderImportGate?
+        defer { pendingFolderImport?.cancel() }
         var dirty = true
         if let id = snapshot.restoreAgentID, let launch,
            let row = projects[selected].recentAgents.firstIndex(where: { $0.id == id }) {
@@ -745,6 +844,22 @@ struct WindowHarness {
             tw_project_mode(window)
         }
         while true {
+            if let gate = pendingFolderImport, let result = gate.take() {
+                pendingFolderImport = nil
+                switch result {
+                case .success(let imported?):
+                    projects = imported.projects
+                    selected = imported.selectedProjectIndex
+                    first = 0
+                    dirty = true
+                    print("PROJECT_IMPORTED \(projects[selected].path)"); fflush(nil)
+                case .success(nil):
+                    print("PROJECT_IMPORT_CANCELLED"); fflush(nil)
+                case .failure(let error):
+                    print("PROJECT_IMPORT_REFUSED \(error)"); fflush(nil)
+                    tw_title(window, "Threading experiment - project import failed")
+                }
+            }
             let pickerAccounts = accountPicker == .claude ? claudeAccounts : codexAccounts
             if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                       pending: &pendingAgentProjects,
@@ -831,19 +946,27 @@ struct WindowHarness {
                             : (width >= 700 ? "Enter: view; " + agentActions.joined(separator: "; ")
                                             : agentActions.joined(separator: "; "))
                     }
-                    end = min(projects.count, first + count)
-                    for index in first..<end {
-                        let project = projects[index]
-                        let display = String(project.name.unicodeScalars.prefix(80))
-                        let opened = terminals[project.id]
-                        let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
-                            + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
-                        let retained = opened != nil || restoredProjectIDs.contains(project.id)
-                        let text = "\(display) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " *" : "")"
-                        addNavigatorRow(text, index: index - first, width: width,
-                                        height: height, accent: accent,
-                                        selected: index == selected,
+                    if projects.isEmpty, launch != nil {
+                        root.title = "Projects - Ctrl+Shift+P: add folder"
+                        end = 1
+                        addNavigatorRow("Add project folder…", index: 0, width: width,
+                                        height: height, accent: accent, selected: true,
                                         root: root, textRows: &textRows)
+                    } else {
+                        end = min(projects.count, first + count)
+                        for index in first..<end {
+                            let project = projects[index]
+                            let display = String(project.name.unicodeScalars.prefix(80))
+                            let opened = terminals[project.id]
+                            let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
+                                + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
+                            let retained = opened != nil || restoredProjectIDs.contains(project.id)
+                            let text = "\(display) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " *" : "")"
+                            addNavigatorRow(text, index: index - first, width: width,
+                                            height: height, accent: accent,
+                                            selected: index == selected,
+                                            root: root, textRows: &textRows)
+                        }
                     }
                 }
                 let title = root.title
@@ -911,19 +1034,27 @@ struct WindowHarness {
                     print("\(label) \(width)x\(height) mounted=\(end - savedFirst) selected=\(selectedID) total=\(total) capped=\(capped)")
                 } else {
                     let listY = Int32(Specimen.Window.titleHeight * 2)
-                    tw_accessibility_begin_list(window, "Projects", Int32(first), Int32(projects.count),
+                    let hasAddRow = projects.isEmpty && launch != nil
+                    tw_accessibility_begin_list(window, "Projects", Int32(first),
+                                                Int32(hasAddRow ? 1 : projects.count),
                                                 launch == nil ? 0 : 1, 0, listY,
                                                 Int32(width), Int32(height) - listY)
-                    for index in first..<end {
-                        let project = projects[index]
-                        let opened = terminals[project.id]
-                        let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
-                            + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
-                        let retained = opened != nil || restoredProjectIDs.contains(project.id)
-                        let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " retained" : "")"
-                        try publishAccessibleRow(window, id: project.id, label: label,
-                                                 selected: index == selected,
-                                                 visibleIndex: index - first, width: width, height: height)
+                    if hasAddRow {
+                        try publishAccessibleRow(window, id: "add-project", label: "Add project folder",
+                                                 selected: true, visibleIndex: 0,
+                                                 width: width, height: height)
+                    } else {
+                        for index in first..<end {
+                            let project = projects[index]
+                            let opened = terminals[project.id]
+                            let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
+                                + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
+                            let retained = opened != nil || restoredProjectIDs.contains(project.id)
+                            let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " retained" : "")"
+                            try publishAccessibleRow(window, id: project.id, label: label,
+                                                     selected: index == selected,
+                                                     visibleIndex: index - first, width: width, height: height)
+                        }
                     }
                     tw_accessibility_end_list(window)
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
@@ -965,6 +1096,16 @@ struct WindowHarness {
                     }
                     continue
                 }
+            } else if pendingFolderImport != nil {
+                if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 { return }
+                    if event.kind == 1 {
+                        width = max(320, min(1280, Int(event.width)))
+                        height = max(180, min(900, Int(event.height)))
+                        dirty = true
+                    }
+                }
+                continue
             } else {
                 guard tw_next(window, &event) == 1 else {
                     throw WindowFailure(String(cString: tw_error()))
@@ -992,13 +1133,19 @@ struct WindowHarness {
                 } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
                     listCount = savedPicker.isAgent ? project.recentAgents.count : project.recentTerminals.count
-                } else { listCount = projects.count }
+                } else { listCount = projects.isEmpty && launch != nil ? 1 : projects.count }
                 let visibleCount = max(0, min(listCount - listFirst, count))
                 if let mounted = (0..<visibleCount).first(where: { index in
                     let row = navigatorRowPixels(index, width: width, height: height)
                     return event.x >= row.x && event.x < row.x + row.width
                         && event.y >= row.y && event.y < row.y + row.height
                 }) {
+                    if projects.isEmpty, let launch, accountPicker == nil, savedPicker == nil {
+                        if event.action != 1 {
+                            pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                        }
+                        break
+                    }
                     let candidate = listFirst + mounted
                     if accountPicker != nil { accountSelected = candidate }
                     else if savedPicker == nil { selected = candidate }
@@ -1006,7 +1153,11 @@ struct WindowHarness {
                     dirty = true
                 }
             case 8:
-                guard let launch, !projects.isEmpty else { break }
+                guard let launch else { break }
+                if projects.isEmpty {
+                    pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                    break
+                }
                 if let pickerKind = accountPicker {
                     if pickerKind == .claude {
                         claudeAccount = pickerAccounts[accountSelected]
@@ -1121,6 +1272,9 @@ struct WindowHarness {
                 width = size.0; height = size.1
                 tw_project_mode(window)
                 dirty = true
+            case 23:
+                guard accountPicker == nil, savedPicker == nil, let launch else { break }
+                pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
             case 13, 21:
                 guard accountPicker == nil, savedPicker == nil, let launch, !projects.isEmpty else { break }
                 let kind: AgentKind = event.kind == 13 ? .codex : .claude

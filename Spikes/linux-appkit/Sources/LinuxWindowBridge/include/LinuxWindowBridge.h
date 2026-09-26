@@ -1,7 +1,8 @@
 #pragma once
 #include <stdint.h>
 typedef struct TWWindow TWWindow;
-// 1 repaint/resize, 2 project click, 3/4 project navigation, 5 window quit.
+// 1 repaint/resize, 2 project click (action=1 for AT-SPI select),
+// 3/4 project navigation, 5 window quit.
 // Terminal kinds 15/16/17 carry button (key 0/1/2, action 1 press/3 release), wheel (signed
 // key, one notch per unit), and held-left-button motion. Coordinates are window pixels;
 // the host maps them to grid cells. Kind 18 requests copying the current local selection.
@@ -25,7 +26,8 @@ void tw_close(TWWindow *);
 void tw_terminal_mode(TWWindow *);
 // Optional host navigation: kind 8 activates/returns, 9 requests a fresh terminal,
 // 10/11 drill in/back, 12 is keyboard cancel, 13 requests fresh Codex,
-// 20 chooses a Codex account, 21 requests fresh Claude, 22 chooses a Claude account.
+// 20 chooses a Codex account, 21 requests fresh Claude, 22 chooses a Claude account,
+// 23 opens the native project folder picker from the project list.
 // In terminal mode, kind 14 requests a clipboard paste. The caller reads a bounded UTF-8
 // payload only after this event; the bridge never puts unbounded clipboard text in TWEvent.
 void tw_project_navigation(TWWindow *, int enabled);

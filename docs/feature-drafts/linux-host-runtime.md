@@ -335,6 +335,12 @@ single-child selection through the native navigation route. Bounds-change notifi
 comprehensive focus behavior, terminal text selection, screen-reader inspection and other product
 surfaces remain unproven.
 
+The source-tree Linux launcher can now open a clean profile into an empty native project list.
+Its Add project row and Ctrl+Shift+P command open a system GTK folder dialog through Zenity;
+the selected directory is imported by the host's canonical, locked store operation on a worker.
+The dialog is a Linux platform leaf for a deliberately host-only import action. This proves a
+first-launch path in the Xvfb shell, not packaging or broader Linux desktop compatibility.
+
 ## Evidence required
 
 - The standard macOS build, architecture/theme/localization checks, and focused behavior tests stay
