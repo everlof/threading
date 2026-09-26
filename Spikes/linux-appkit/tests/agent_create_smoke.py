@@ -119,7 +119,8 @@ foreign_home = root / 'foreign-home'
 foreign_home.mkdir()
 environment = dict(os.environ, HOME=str(auth_home), CODEX_HOME=str(foreign_home / '.codex'))
 with log_path.open('w+') as log:
-    process = subprocess.Popen([binary, '--app-codex', store, endpoint, '/bin/sh', str(child)],
+    process = subprocess.Popen([binary, '--app-codex-project', store, endpoint, '/bin/sh',
+                                str(child), str(project)],
                                stdout=log, stderr=log, env=environment)
     try:
         window = title(process, 'Threading experiment - ' + str(project), log_path)
