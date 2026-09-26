@@ -38,7 +38,7 @@ def title(process, expected):
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
         assert process.poll() is None, f'app exited before {expected}'
-        result = xdo('search', '--name', '^' + expected + '$')
+        result = xdo('search', '--onlyvisible', '--name', '^' + expected + '$')
         if result.returncode == 0:
             return result.stdout.splitlines()[0]
         time.sleep(.05)
@@ -46,7 +46,8 @@ def title(process, expected):
 
 
 def key(window, value):
-    assert xdo('windowfocus', '--sync', window, 'key', '--delay', '50', value).returncode == 0
+    result = xdo('windowfocus', '--sync', window, 'key', '--delay', '50', value)
+    assert result.returncode == 0, (window, value, result.stdout, result.stderr)
 
 
 def choose_folder(path):

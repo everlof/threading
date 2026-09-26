@@ -180,11 +180,14 @@ The observed and offline exit cases are recorded in
 The source-tree launcher can also reopen the saved project navigator without a directory after
 the first import; the explicit-directory route still targets that project. A static-Swift preview
 tarball runs this lifecycle on Ubuntu 24.04 arm64 without the Swift toolchain or source checkout.
-It is not a packaged desktop entry point or a compatibility claim for other Linux distributions.
+The same preview now has an installable `.deb` with a desktop entry. Neither artifact makes a
+compatibility claim for other Linux distributions or a release-grade provider-integration claim.
 The clean-profile and saved-project reopen checks are recorded in
 [FINDINGS section 91](../../Spikes/linux-appkit/FINDINGS.md#91-the-linux-development-app-reopens-from-its-saved-project-list).
 The archive-only runtime check is recorded in
 [FINDINGS section 95](../../Spikes/linux-appkit/FINDINGS.md#95-the-linux-window-runs-from-an-ubuntu-arm64-preview-tarball).
+The package installation, non-root desktop launch and reinstall check are recorded in
+[FINDINGS section 96](../../Spikes/linux-appkit/FINDINGS.md#96-the-ubuntu-preview-has-an-installable-desktop-package).
 
 ## The boundary to build
 
@@ -345,8 +348,8 @@ The Linux launcher can now open a clean profile into an empty native project lis
 Its Add project row and Ctrl+Shift+P command open a system GTK folder dialog through Zenity;
 the selected directory is imported by the host's canonical, locked store operation on a worker.
 The dialog is a Linux platform leaf for a deliberately host-only import action. This proves a
-first-launch path in the Xvfb shell. The preview tarball tests that path without a source checkout;
-broader Linux desktop compatibility remains unproven.
+first-launch path in the Xvfb shell. The preview archive and installed `.deb` test that path
+without a source checkout; broader Linux desktop compatibility remains unproven.
 
 ## Evidence required
 
