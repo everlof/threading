@@ -459,6 +459,21 @@ struct WindowHarness {
             recentSessionLimit: maximumSelectableAgentsPerProject,
             recentTerminalLimit: maximumSelectableTerminalsPerProject
         )
+        // A normal relaunch follows the saved agent to its owning project. Reuse a session in
+        // the bounded navigator snapshot; one indexed read covers a selection older than that
+        // window. An explicit project argument remains authoritative.
+        var selectedAgent: (projectID: ProjectID, session: AgentSession)?
+        if let selectedID = catalog.selectedSessionID {
+            for project in catalog.projects {
+                if let session = project.recentSessions.first(where: { $0.id == selectedID }) {
+                    selectedAgent = (project.id, session)
+                    break
+                }
+            }
+            if selectedAgent == nil, let record = try database.sessionRecord(id: selectedID) {
+                selectedAgent = (record.project.id, record.session)
+            }
+        }
         let selectedIndex: Int
         if let requestedPath {
             guard let folder = ProjectDirectory.existing(at: requestedPath),
@@ -467,7 +482,9 @@ struct WindowHarness {
             }
             selectedIndex = index
         } else {
-            selectedIndex = 0
+            selectedIndex = selectedAgent.flatMap { agent in
+                catalog.projects.firstIndex(where: { $0.id == agent.projectID })
+            } ?? 0
         }
         var projects = catalog.projects.map { project in
             let agents = project.recentSessions.map(savedAgent)
@@ -479,29 +496,19 @@ struct WindowHarness {
                 path: project.folderPath, sessions: project.sessionCount,
                 terminalCount: project.terminalCount, recentAgents: agents, recentTerminals: terminals)
         }
-        // The development launcher names a project explicitly. Restore only its selected,
-        // launched agent; a selection from another project must not override that request.
-        // Attach never starts a process. An older selected agent may lie outside the recent
-        // window; fetch only that indexed row and keep the picker at its existing ceiling.
+        // Restore only a selected, launched agent in the chosen project. Attach never starts a
+        // process. An older selected agent joins the picker without increasing its row ceiling.
         let restoreAgentID: String?
         let restoreAgentActivity: Date?
         let restoreAgentProjectID: ProjectID?
-        if requestedPath != nil, let selectedID = catalog.selectedSessionID {
-            let selected: AgentSession?
-            if let recent = catalog.projects[selectedIndex].recentSessions.first(where: {
-                $0.id == selectedID
-            }) {
-                selected = recent
-            } else if let record = try database.sessionRecord(id: selectedID),
-                      record.project.id == catalog.projects[selectedIndex].id {
-                selected = record.session
-            } else {
-                selected = nil
-            }
-            if let selected, selected.hasLaunched, !selected.isArchived,
+        if let selectedAgent,
+           catalog.projects.indices.contains(selectedIndex),
+           selectedAgent.projectID == catalog.projects[selectedIndex].id {
+            let selected = selectedAgent.session
+            if selected.hasLaunched, !selected.isArchived,
                selected.lastExitCode == nil {
                 if !projects[selectedIndex].recentAgents.contains(where: {
-                    $0.id == selectedID.uuidString
+                    $0.id == selected.id.uuidString
                 }) {
                     projects[selectedIndex].recentAgents.insert(savedAgent(selected), at: 0)
                     if projects[selectedIndex].recentAgents.count > maximumSelectableAgentsPerProject {

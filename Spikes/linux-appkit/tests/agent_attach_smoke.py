@@ -16,6 +16,10 @@ root = Path(folder)
 store = str(root / 'agent-window-store')
 project = root / 'AgentProject'
 project.mkdir()
+other_project = root / 'OtherAgentProject'
+other_project.mkdir()
+subprocess.run([host, '--add-project', store, str(other_project)], check=True,
+               capture_output=True, timeout=8)
 child = root / 'agent-window-child'
 child.write_text('''#!/usr/bin/python3
 import json, os, signal, sys, termios, tty
@@ -144,10 +148,15 @@ with log_path.open('w+') as log:
         os.kill(original['pid'], 0)
         app_log_path = root / 'agent-app.log'
         with app_log_path.open('w+') as app_log:
-            process = subprocess.Popen([binary, '--app', store, endpoint, '/bin/sh'],
+            process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh',
+                                        str(other_project)],
                                        stdout=app_log, stderr=app_log)
             try:
-                window = await_title(process, 'Threading experiment - ' + str(project), app_log_path)
+                window = await_title(process, 'Threading experiment - ' + str(other_project),
+                                     app_log_path)
+                assert selected_session() == agents[-1], 'project targeting changed agent selection'
+                assert xdo('windowfocus', window, 'key', 'Down').returncode == 0
+                await_title(process, 'Threading experiment - ' + str(project), app_log_path)
                 assert xdo('windowfocus', window, 'key', 'Left').returncode == 0
                 await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 deadline = time.monotonic() + 5
@@ -197,8 +206,8 @@ with log_path.open('w+') as log:
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=3)
-        # Put the selected live agent beyond the 512-row recent window. The targeted launcher
-        # must find this one identity without decoding or mounting the rest of the archive.
+        # Put the selected live agent beyond the 512-row recent window. A normal launch must
+        # find its owning project and this identity without mounting the rest of the archive.
         with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
             project_id, kind, active_at, payload = database.execute(
                 'SELECT project_id, kind, last_active_at, data FROM session WHERE id = ?',
@@ -222,7 +231,7 @@ with log_path.open('w+') as log:
         filled_listing = listing()
         # Restoration is attach-only, even when the selected agent is outside the recent page.
         with (root / 'agent-reopened.log').open('w+') as reopened_log:
-            process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh', str(project)],
+            process = subprocess.Popen([binary, '--app', store, endpoint, '/bin/sh'],
                                        stdout=reopened_log, stderr=reopened_log)
             try:
                 window = await_title(process, 'Threading terminal - AGENT LIVE [history cut]',
@@ -254,10 +263,22 @@ with log_path.open('w+') as log:
                     process.kill()
                 process.wait(timeout=3)
         assert listing() == filled_listing, 'graphical attach changed the saved agent records'
-        other_project = root / 'OtherAgentProject'
-        other_project.mkdir()
-        subprocess.run([host, '--add-project', store, str(other_project)], check=True,
-                       capture_output=True, timeout=8)
+        # Once the child has exited, a normal relaunch still opens the selected agent's
+        # project, but leaves the exited session in its picker for explicit resume.
+        with (root / 'agent-exited-reopen.log').open('w+') as exited_log:
+            process = subprocess.Popen([binary, '--app', store, endpoint, '/bin/sh'],
+                                       stdout=exited_log, stderr=exited_log)
+            try:
+                window = await_title(process, 'Threading experiment - ' + str(project),
+                                     root / 'agent-exited-reopen.log')
+                assert selected_session() == agents[-1]
+                assert json.loads(marker.read_text()) == original
+                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert process.wait(timeout=5) == 0
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
         with (root / 'agent-other-project.log').open('w+') as other_log:
             process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh',
                                         str(other_project)], stdout=other_log, stderr=other_log)
@@ -309,7 +330,7 @@ with log_path.open('w+') as log:
         missing = subprocess.run([binary, '--attach-agent', store, endpoint, str(uuid.uuid4())],
                                  capture_output=True, timeout=8)
         assert missing.returncode != 0 and b'session is not in this store' in missing.stderr, missing
-        print('PASS graphical agent picker: durable selection, attach-only startup, shell clearing, same child and exit 9', flush=True)
+        print('PASS graphical agent picker: cross-project relaunch, bounded attach-only restore, shell clearing, same child and exit 9', flush=True)
     except BaseException:
         log.flush()
         print(log_path.read_text(), file=sys.stderr)

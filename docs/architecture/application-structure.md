@@ -165,9 +165,10 @@ Graphical restoration across app restarts is available through explicit
 `--attach STORE SOCKET TERMINAL_UUID` and through selection
 in the project browser. A saved agent session has the same terminal renderer through explicit
 `--attach-agent STORE SOCKET SESSION_UUID` or the project's saved-agent picker; the host validates
-the agent record and keeps its typed daemon identity. The project-targeted launcher considers
-attach-only restoration of the saved selected agent when it belongs to that project, has launched,
-is unarchived and has no recorded exit. After releasing the store lock, it surveys the daemon
+the agent record and keeps its typed daemon identity. A normal launch chooses the saved selected
+agent's project; an explicit project target takes precedence. Both routes consider attach-only
+restoration when the selected agent belongs to the chosen project, has launched, is unarchived and
+has no recorded exit. After releasing the store lock, the host surveys the daemon
 once: a running child is attached, a held exit updates only that saved row, and an absent child
 opens the project list without inventing an exit status. A failed survey preserves the attach-only
 failure route. An observed in-window exit also updates the exact saved row, while an exited

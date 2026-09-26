@@ -2525,3 +2525,24 @@ The complete Mac target passed 9,521 tests (83 skipped, zero failures) after thi
 change. The complete iOS Simulator target passed 898 tests (one skipped, zero failures), so
 `scripts/test.sh all` finished successfully. Architecture, theme and main-actor-latency checks
 passed as well.
+
+## 94. Normal Linux relaunch follows the saved agent
+
+The native window previously considered a selected agent only when the launcher named a project.
+No-argument relaunch always started at the first project, even when a live daemon-held agent was
+selected in another project. The normal route now chooses that agent's owning project and uses the
+same attach-only daemon survey as the explicit route. A named project still takes precedence. A
+held exit or absent child leaves the chosen project list open; neither case starts a replacement.
+
+The initial navigator remains bounded to 512 recent agents per project. A selected agent already
+in that snapshot is reused; one outside it costs one indexed session read and takes one picker
+slot. The real Xvfb fixture imports a different project first, selects a live agent in the second
+project, pushes it beyond the recent page with 513 dormant rows, and reopens without a directory.
+The window attaches to the original PID, then records exit 9. A later no-argument launch opens the
+selected project's list instead of respawning the child. The fixture also verifies that an
+explicit first-project choice overrides the live selection and that opening a shell clears it.
+The complete native-window smoke suite passed on the final code.
+
+The repository's `scripts/test.sh all` gate passed: 9,522 Mac tests (83 skipped) and 898 iOS
+Simulator tests (one skipped), with zero failures. Architecture, theme and main-actor-latency
+boundary checks passed.

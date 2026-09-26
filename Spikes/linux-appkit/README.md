@@ -91,18 +91,19 @@ and `flock` installed:
 ```
 
 The first command imports the canonical project directory into a local store and opens that
-project even when the store contains others. The no-argument command opens the saved project
-list, including from a clean profile. In an empty list, activate **Add project folder** with
+project even when the store contains others. The no-argument command follows a saved selected
+agent to its project; with no selected agent, it opens the saved project list, including from a
+clean profile. In an empty list, activate **Add project folder** with
 Enter or a click; Ctrl+Shift+P opens the same native folder dialog from any project list.
 Choosing an existing directory imports and selects it without starting a child. Cancellation
 leaves the list unchanged; choosing an already imported directory selects its existing row.
 Both commands build the two host executables
 and `threading-ptyd` when needed, and start or reuse one background daemon.
-If its last selected agent is a launched, unarchived session without a recorded exit, the
-window checks the daemon after releasing the store lock. It attaches only when that exact child
-is still running. A held exit is saved to the selected row; an absent child opens the project
-list without inventing an exit code. A failed daemon query still attempts attach and surfaces
-its failure. Startup never spawns a child. A selected agent older
+If the saved selected agent belongs to the chosen project, is launched, is unarchived and has no
+recorded exit, the window checks the daemon after releasing the store lock. It attaches only
+when that exact child is still running. A held exit is saved to the selected row; an absent
+child opens the project list without inventing an exit code. A failed daemon query still attempts
+attach and surfaces its failure. Startup never spawns a child. A selected agent older
 than the recent window is fetched by identity and shown within the 512-row picker limit.
 Otherwise the project list opens without starting a child. Enter opens a shell; the saved-agent
 and saved-terminal pickers can reattach other runtimes. It keeps data under
@@ -477,8 +478,9 @@ paths as Codex; it adds no public extension presentation component.
 The initial project-window snapshot reads indexed session counts and at most 512 recent session
 payloads per project. A selected agent outside that window adds one indexed read and replaces
 one picker entry. Selected-agent attach, rollout-ID persistence, resume, and opening an agent
-read only its indexed session and owning project. Saved-terminal identity lookup still loads the
-complete graph; each project's embedded terminal array is decoded for the startup snapshot.
+read only its indexed session and owning project. Saved-terminal identity lookup reads project
+rows without decoding unrelated sessions; each project's embedded terminal array is decoded for
+the startup snapshot.
 
 With a session accessibility bus, the native window publishes an AT-SPI application, frame and
 the currently mounted project/saved-runtime rows. Rows carry their durable IDs and retain Unicode
@@ -510,11 +512,12 @@ terminal through the production store before spawning through the production PTY
 fixed initial snapshot projects at most 512 agents and 512 terminals per project
 into their pickers and constructs only viewport rows. New agents created by this window join
 its in-memory catalogue after persistence; creation asks for zero standing session payloads and
-checks the new UUID by indexed lookup. The project-targeted launcher attempts attach-only
-restoration of its saved agent selection. Opening an agent persists that selection on a worker
-before entering its terminal; opening a terminal clears it when the store accepts the write, as
-on macOS. The generic `--app` mode starts at the project list, and saved terminals still require
-explicit selection. `--attach` and `--attach-agent` remain available below.
+checks the new UUID by indexed lookup. Both normal and project-targeted launches attempt
+attach-only restoration of the saved agent selection in the chosen project. Opening an agent
+persists that selection on a worker before entering its terminal; opening a terminal clears it
+when the store accepts the write, as on macOS. The generic `--app` mode chooses the saved agent's
+project when one is selected; saved terminals still require explicit selection. `--attach` and
+`--attach-agent` remain available below.
 
 Run `THREADING_LINUX_AGENT_ONLY=1 ./window-smoke.sh` for focused native agent selection, Codex
 account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NAMED_ONLY=1
