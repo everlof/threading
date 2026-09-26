@@ -121,12 +121,13 @@ marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window
 the chooser can replace it. The selection lasts for this window only. Saved sessions retain their
 own account handle, so opening one never follows a later chooser change.
 
-`./package-app.sh` builds a bundle with a static Swift runtime for Ubuntu 24.04 arm64;
-`./bundle-smoke.sh` builds it in the pinned Swift container and opens the extracted tarball in a
-fresh Ubuntu runtime container with no Swift toolchain or source checkout. The output is
-`out/threading-linux-preview-ubuntu24.04-arm64.tar.gz`; its runtime requirements and usage are in
-`BUNDLE_README.md`. The bundle has no desktop integration, updater or distro-wide compatibility
-claim. Its host binaries currently require Swift's `-enable-testing` build flag because the
+`./package-app.sh` builds a static-Swift archive and installable `.deb` for Ubuntu 24.04 arm64;
+`./bundle-smoke.sh` builds both in the pinned Swift container, then exercises the extracted
+archive and installed package in a fresh Ubuntu runtime container with no Swift toolchain or
+source checkout. The outputs are `out/threading-linux-preview-ubuntu24.04-arm64.tar.gz` and
+`out/threading-linux-preview-ubuntu24.04-arm64.deb`; usage is in `BUNDLE_README.md`. The package
+adds a desktop entry and icon, but has no updater or distro-wide compatibility claim. Its host
+binaries currently require Swift's `-enable-testing` build flag because the
 experimental host imports the core slice with `@testable`; product modularization remains open.
 
 The project list's

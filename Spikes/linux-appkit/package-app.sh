@@ -52,5 +52,41 @@ output=$PWD/out/$name
 rm -rf -- "$output"
 mv -- "$bundle" "$output"
 tar -C out -czf "out/$name.tar.gz" "$name"
+
+# Keep the launcher beside its binaries: run-app.sh resolves them from BASH_SOURCE.
+package=threading-linux-preview
+version=0.0.1+git${revision:0:12}
+package_root=$staging/package-root
+installed_bundle=$package_root/opt/$package
+mkdir -p "$installed_bundle" "$package_root/DEBIAN" \
+  "$package_root/usr/share/applications" "$package_root/usr/share/icons/hicolor/1024x1024/apps"
+cp -a "$output/." "$installed_bundle/"
+install -m 0644 ../../Brand/ThreadingMark-1024.png \
+  "$package_root/usr/share/icons/hicolor/1024x1024/apps/$package.png"
+cat > "$package_root/usr/share/applications/$package.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Threading Linux Preview
+Comment=Local project and terminal workspace
+Exec=/opt/$package/run-app.sh
+Icon=$package
+Terminal=false
+Categories=Development;
+EOF
+cat > "$package_root/DEBIAN/control" <<EOF
+Package: $package
+Version: $version
+Section: devel
+Priority: optional
+Architecture: arm64
+Depends: libsqlite3-0, libsdl2-2.0-0, libpangocairo-1.0-0, libatk-bridge2.0-0t64, zenity, fonts-dejavu-core, util-linux
+Maintainer: David Everlöf <support@mjukis.dev>
+Description: Experimental native Linux host for Threading
+ Local projects, terminals and coding-agent sessions in a desktop window.
+ This preview currently targets Ubuntu 24.04 arm64.
+EOF
+deb=$PWD/out/$package-ubuntu24.04-arm64.deb
+dpkg-deb --root-owner-group --build "$package_root" "$deb"
 echo "package-app: $output"
 echo "package-app: $PWD/out/$name.tar.gz"
+echo "package-app: $deb"

@@ -2583,3 +2583,33 @@ rendered empty-project window from the extracted bundle was inspected. All 10 sp
 contracts, architecture/theme/main-actor-latency checks and `scripts/test.sh all` passed. The
 complete Mac target ran 9,522 tests (83 skipped), and the iOS Simulator target ran 898 tests
 (one skipped), with zero failures.
+
+## 96. The Ubuntu preview has an installable desktop package
+
+The archive required manual dependency installation and a shell launch. `package-app.sh` now
+also builds an Ubuntu 24.04 arm64 `.deb` from the same three binaries and launcher. Its control
+file declares the Linux runtime packages; it installs under `/opt/threading-linux-preview` with
+the launcher beside its binaries, plus a desktop entry and the existing Threading mark. A
+symlinked command in `/usr/bin` would break the launcher's sibling-binary lookup, so the desktop
+entry points to the installed script directly. The package has no maintainer scripts and leaves
+the user's XDG store and daemon state outside package-owned paths.
+
+The source-free Ubuntu runtime smoke installs the `.deb` before installing any GUI test tools,
+validates its desktop entry, then runs both the archive and installed launcher through the
+clean-profile folder-import, saved-project, daemon-reuse and same-child reattachment journey.
+The installed path runs as an ordinary user. Reinstalling the package leaves the saved SQLite
+store byte-identical and readable. `gtk-launch` opens the packaged desktop entry under Xvfb as
+that user with default XDG paths; its real first-run window and the imported-project window were
+captured and inspected. The smoke fixture now searches only visible X windows, because an old
+unmapped Zenity dialog can briefly retain the same title and reject focus with X11 `BadMatch`.
+
+This desktop integration is deliberately host-only: Threading still owns launch, project
+identity, store, daemon and process authority, while the operating system owns menu placement.
+The artifact remains a preview: the experimental host still builds with `-enable-testing`, and
+Wayland, other distributions, authenticated providers and a production upgrade channel remain
+unverified. A graphical session may omit shell-installed CLIs from `PATH`; the bundle README
+documents explicit executable paths for terminal and desktop-entry launches.
+
+The archive/package runtime smoke, 10 spike runner tests, architecture/theme/main-actor-latency
+checks and `scripts/test.sh all` passed. The complete Mac target ran 9,522 tests (83 skipped),
+and the iOS Simulator target ran 898 tests (one skipped), with zero failures.

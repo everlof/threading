@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the preview, then exercise only its tarball in a Swift-free Ubuntu image.
+# Build both preview artifacts, then exercise them in a Swift-free Ubuntu image.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
@@ -34,6 +34,8 @@ grep -Fxq "source_dirty=$source_dirty" out/threading-linux-preview-ubuntu24.04-a
 
 docker run --rm -i --platform linux/arm64 \
   -v "$PWD/out/threading-linux-preview-ubuntu24.04-arm64.tar.gz:/archive.tar.gz:ro" \
+  -v "$PWD/out/threading-linux-preview-ubuntu24.04-arm64.deb:/preview.deb:ro" \
   -v "$PWD/tests/app_startup_smoke.py:/test.py:ro" \
   -v "$PWD/tests/bundle_runtime_smoke.sh:/runner.sh:ro" \
+  -v "$PWD/tests/desktop_entry_smoke.sh:/desktop-test.sh:ro" \
   -v "$PWD/out/bundle-smoke:/evidence" ubuntu:24.04 bash /runner.sh
