@@ -7,7 +7,9 @@ import subprocess
 import sys
 import time
 
-script, host, daemon, bin_dir, fixture = sys.argv[1:]
+script, host, daemon, bin_dir, fixture = sys.argv[1:6]
+assert sys.argv[6:] in ([], ['--bundled']), 'usage: app_startup_smoke.py SCRIPT HOST DAEMON BIN_DIR FIXTURE [--bundled]'
+bundled = sys.argv[6:] == ['--bundled']
 root = Path(fixture)
 project = root / 'StartupProject'
 project.mkdir()
@@ -18,9 +20,14 @@ runtime = root / 'startup-runtime'
 socket = runtime / 'pty.sock'
 store = data / 'store'
 environment = dict(os.environ, THREADING_LINUX_DATA_DIR=str(data),
-                   THREADING_LINUX_RUNTIME_DIR=str(runtime), THREADING_LINUX_BIN_DIR=bin_dir,
-                   THREADING_LINUX_DAEMON_BIN=daemon, THREADING_LINUX_SHELL='/bin/sh',
+                   THREADING_LINUX_RUNTIME_DIR=str(runtime), THREADING_LINUX_SHELL='/bin/sh',
                    THREADING_LINUX_CODEX='', THREADING_LINUX_CLAUDE='')
+if bundled:
+    environment.pop('THREADING_LINUX_BIN_DIR', None)
+    environment.pop('THREADING_LINUX_DAEMON_BIN', None)
+else:
+    environment['THREADING_LINUX_BIN_DIR'] = bin_dir
+    environment['THREADING_LINUX_DAEMON_BIN'] = daemon
 
 
 def xdo(*args):
@@ -44,8 +51,18 @@ def key(window, value):
 
 def choose_folder(path):
     dialog = title(process, 'Add project folder')
+    subprocess.run(['xclip', '-selection', 'clipboard'], input=str(path),
+                   text=True, check=True, timeout=5)
     key(dialog, 'ctrl+l')
-    assert xdo('type', '--clearmodifiers', '--delay', '1', str(path)).returncode == 0
+    time.sleep(.2)  # GTK creates the location entry after handling the shortcut.
+    assert xdo('key', 'ctrl+a', 'BackSpace').returncode == 0
+    assert xdo('key', 'ctrl+v').returncode == 0
+    time.sleep(.2)
+    assert xdo('key', 'ctrl+a', 'ctrl+c').returncode == 0
+    selected = subprocess.check_output(['xclip', '-o', '-selection', 'clipboard'],
+                                       text=True, timeout=5)
+    assert Path(selected).is_dir() and Path(selected).resolve() == path.resolve(), \
+        f'GTK selected {selected!r}, expected {str(path)!r}'
     assert xdo('key', 'Return').returncode == 0
     return dialog
 

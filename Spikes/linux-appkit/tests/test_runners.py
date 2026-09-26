@@ -74,7 +74,8 @@ echo "no such module CryptoKit" >&2
 exit 23''')
         result = self.run_script("coreslice.sh")
         self.assertEqual(result.returncode, 23, result.stderr)
-        self.assertEqual((self.spike / "swift-calls").read_text(), "build --product CoreSliceHarness\n")
+        self.assertEqual((self.spike / "swift-calls").read_text(),
+                         "build -c debug --product CoreSliceHarness\n")
         self.assertIn("no such module CryptoKit", (self.spike / "out/coreslice-build.log").read_text())
         self.assertFalse((self.spike / "out/coreslice-run.log").exists())
 
@@ -84,7 +85,8 @@ exit 23''')
         result = self.run_script("coreslice.sh")
         self.assertEqual(result.returncode, 17, result.stderr)
         self.assertEqual((self.spike / "swift-calls").read_text().splitlines(),
-                         ["build --product CoreSliceHarness", "run --skip-build CoreSliceHarness"])
+                         ["build -c debug --product CoreSliceHarness",
+                          "run --skip-build -c debug CoreSliceHarness"])
 
     def test_core_refuses_drift_before_starting_docker(self):
         self.write(self.spike / "vendor-core.sh", "exit 9")
@@ -127,7 +129,8 @@ exit 23''')
         result = self.run_script("coreslice.sh", "--sqlite")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.spike / "swift-calls").read_text().splitlines(),
-                         ["build --product SQLiteHarness", "run --skip-build SQLiteHarness"])
+                         ["build -c debug --product SQLiteHarness",
+                          "run --skip-build -c debug SQLiteHarness"])
         self.assertTrue((self.spike / "out/sqlite-run.log").exists())
         self.assertFalse((self.spike / "out/coreslice-run.log").exists())
         self.assertIn("--platform\nlinux/arm64\n", (self.spike / "docker-args").read_text())

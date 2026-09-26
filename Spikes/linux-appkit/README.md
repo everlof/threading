@@ -1,6 +1,6 @@
 # Spike: an `AppKit` module of our own, on Linux
 
-> **An experimental Linux host, not a packaged app.** No Xcode target references this directory,
+> **An experimental Linux host and preview bundle, not a release app.** No Xcode target references this directory,
 > and no standard Mac build gate runs it. Shared portable changes live in the product's `Sources/`
 > and `Tests/`, or in local packages; the core slice copies its selected app sources byte-for-byte.
 > `docs/feature-drafts/linux-host-runtime.md`
@@ -121,7 +121,15 @@ marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window
 the chooser can replace it. The selection lasts for this window only. Saved sessions retain their
 own account handle, so opening one never follows a later chooser change.
 
-This is a source-tree development entry point, not a packaged Linux release. The project list's
+`./package-app.sh` builds a bundle with a static Swift runtime for Ubuntu 24.04 arm64;
+`./bundle-smoke.sh` builds it in the pinned Swift container and opens the extracted tarball in a
+fresh Ubuntu runtime container with no Swift toolchain or source checkout. The output is
+`out/threading-linux-preview-ubuntu24.04-arm64.tar.gz`; its runtime requirements and usage are in
+`BUNDLE_README.md`. The bundle has no desktop integration, updater or distro-wide compatibility
+claim. Its host binaries currently require Swift's `-enable-testing` build flag because the
+experimental host imports the core slice with `@testable`; product modularization remains open.
+
+The project list's
 import action is deliberately host-only: Threading owns directory identity, duplicate detection,
 store locking and import; Zenity owns the platform folder dialog. It publishes no new extension
 presentation surface. The native UI and provider limitations below still apply.
