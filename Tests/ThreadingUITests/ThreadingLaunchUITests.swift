@@ -78,5 +78,24 @@ final class ThreadingLaunchUITests: XCTestCase {
             in: sandbox,
             of: window
         )
+
+        let hud = visibleApp.buttons["debug.main-thread-hud"]
+        let resting = hud.frame
+        let windowFrame = window.frame
+        window.coordinate(withNormalizedOffset: CGVector(
+            dx: (resting.maxX + 8 - windowFrame.minX) / windowFrame.width,
+            dy: (resting.midY - windowFrame.minY) / windowFrame.height
+        )).hover()
+        try recordScenarioScreenshot(
+            checkpoint: "main-thread-stall-readout-moved",
+            order: 2,
+            title: "Main-thread stall readout moved aside",
+            description: "The diagnostic readout clears the pointer and remains available in another corner.",
+            journey: "Main-thread stall diagnostics",
+            in: sandbox,
+            of: window
+        )
+        XCTAssertLessThan(hud.frame.midX, resting.midX - 20,
+                          "the readout should leave the corner when the pointer approaches")
     }
 }

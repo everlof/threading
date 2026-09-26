@@ -132,6 +132,53 @@ final class MainThreadStallHUDTests: XCTestCase {
         XCTAssertEqual(hud.intrinsicContentSize.height, collapsed, accuracy: 0.5)
     }
 
+    func testApproachingTheReadoutMovesItAsideAndLeavesItsNewPositionClickable() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false
+        )
+        let content = try XCTUnwrap(window.contentView)
+        let presenter = MainThreadStallHUDPresenter(content: content)
+        content.layoutSubtreeIfNeeded()
+        let resting = presenter.hud.frame
+        let pointer = NSPoint(x: resting.midX, y: resting.midY)
+
+        presenter.pointerMoved(to: pointer)
+        content.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(presenter.placement, .bottomLeading)
+        XCTAssertLessThan(presenter.hud.frame.maxX, pointer.x)
+        XCTAssertGreaterThanOrEqual(
+            presenter.hud.frame.minY,
+            Design.Size.footerHeight + MainThreadStallHUDDefaults.margin - 0.5,
+            "the moved readout must clear the sidebar footer"
+        )
+        let moved = presenter.hud.frame
+        presenter.pointerMoved(to: NSPoint(x: moved.midX, y: moved.midY))
+        XCTAssertEqual(presenter.hud.frame, moved, "the readout must stay put so it can be clicked")
+        XCTAssertTrue(presenter.hud.performPrimaryAction())
+
+        presenter.reset()
+        content.layoutSubtreeIfNeeded()
+        XCTAssertEqual(presenter.hud.frame.maxX, resting.maxX, accuracy: 0.5)
+    }
+
+    func testExpandedReadoutUsesAHighCornerWhenACompactWindowHasNoClearBottomCorner() {
+        let placement = MainThreadStallHUDPlacement.dodge(
+            pointer: NSPoint(x: 250, y: 50),
+            bounds: NSRect(x: 0, y: 0, width: 400, height: 300),
+            safeTop: 260,
+            size: NSSize(width: 300, height: 120)
+        )
+        XCTAssertEqual(placement, .topTrailing)
+        XCTAssertNil(MainThreadStallHUDPlacement.dodge(
+            pointer: NSPoint(x: 100, y: 250),
+            bounds: NSRect(x: 0, y: 0, width: 400, height: 300),
+            safeTop: 260,
+            size: NSSize(width: 300, height: 120)
+        ))
+    }
+
     // MARK: - Accessibility
 
     func testItExposesItsRoleAndPrimaryAction() {

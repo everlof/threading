@@ -228,6 +228,11 @@ see it in an installed Release app. `defaults delete codes.threading showsMainTh
 restores the build's default on the next launch. This uses the app's preferences domain rather
 than editing the signed bundle's `Info.plist`. The HUD stays host-owned because it reports the
 host's own watchdog and semantic spans; extensions receive no authority over this diagnostic.
+Its presenter tracks pointer movement only in the main window. A pointer entering the pill's
+32-point clearance zone moves it to a clear corner, preferring the lower left above the sidebar
+footer. It stays there for that pointer visit so its history button remains clickable, then
+returns when the pointer leaves or the window loses focus. The movement path checks four fixed
+rectangles and changes constraints once; it never reads the session list or starts a polling timer.
 
 ### Two neighbours found by the same trace
 

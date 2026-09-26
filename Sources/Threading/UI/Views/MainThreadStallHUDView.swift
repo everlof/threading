@@ -23,6 +23,7 @@ enum MainThreadStallHUDDefaults {
     /// grab a window by, and a diagnostic readout that ate the resize grip would be a worse bug
     /// than the ones it reports.
     static let margin = Design.Spacing.large
+    static let pointerClearance = Design.Spacing.pane
 }
 
 /// An opt-in diagnostic pill that says whether the main thread is currently keeping up.
@@ -38,8 +39,10 @@ enum MainThreadStallHUDDefaults {
 /// semantic spans were open while it was. An empty span list is the informative case and says so
 /// out loud, because that is what points at work no span covers.
 ///
-/// It costs nothing while nothing is wrong: it observes an event that is only posted after a
-/// stall, and the only repeating timer it runs is the one that settles it back afterwards.
+/// Its diagnostic reading costs nothing while nothing is wrong: it observes an event that is
+/// only posted after a stall, and the only repeating timer it runs settles it back afterwards.
+/// Its presenter does one constant-time pointer check per movement while this opt-in view is
+/// visible, and changes constraints only when the pointer first approaches it.
 /// Debug builds show it by default; Release builds require a local developer preference. Its
 /// technical words name spans and durations for whoever is debugging, so they are not localized.
 /// A `ThemedControl` rather than a bare view because it answers a click: the boundary lint's
@@ -316,4 +319,144 @@ final class MainThreadStallHUDView: ThemedControl {
     /// It reads as text and answers a press, so it names the hand rather than taking the base
     /// class's arrow.
     override var restingPointer: NSCursor? { .pointingHand }
+}
+
+/// One move per pointer visit keeps the readout out of the way without making its history
+/// button impossible to approach. It returns home when the pointer leaves or the window loses
+/// focus. Prefer the other bottom corner; use a top corner when a narrow window leaves no clear
+/// space beside an expanded readout.
+enum MainThreadStallHUDPlacement: Hashable {
+    case bottomTrailing, bottomLeading, topTrailing, topLeading
+
+    static func dodge(
+        pointer: NSPoint,
+        bounds: NSRect,
+        safeTop: CGFloat,
+        size: NSSize
+    ) -> Self? {
+        let margin = MainThreadStallHUDDefaults.margin
+        let leading = bounds.minX + margin
+        let trailing = max(leading, bounds.maxX - margin - size.width)
+        let bottom = bounds.minY + margin
+        let top = max(bottom, min(bounds.maxY, safeTop) - margin - size.height)
+        let leadingBottom = bottom + Design.Size.footerHeight
+        let frames: [Self: NSRect] = [
+            .bottomTrailing: NSRect(x: trailing, y: bottom, width: size.width, height: size.height),
+            .bottomLeading: NSRect(x: leading, y: leadingBottom, width: size.width, height: size.height),
+            .topTrailing: NSRect(x: trailing, y: top, width: size.width, height: size.height),
+            .topLeading: NSRect(x: leading, y: top, width: size.width, height: size.height)
+        ]
+        let clearance = MainThreadStallHUDDefaults.pointerClearance
+        guard let resting = frames[.bottomTrailing],
+              resting.insetBy(dx: -clearance, dy: -clearance).contains(pointer) else { return nil }
+
+        let alternatives: [Self] = [.bottomLeading, .topTrailing, .topLeading]
+        if let clear = alternatives.first(where: {
+            guard let frame = frames[$0] else { return false }
+            return !frame.insetBy(dx: -clearance, dy: -clearance).contains(pointer)
+        }) {
+            return clear
+        }
+        return alternatives.max { left, right in
+            distanceSquared(from: pointer, to: frames[left]!)
+                < distanceSquared(from: pointer, to: frames[right]!)
+        }
+    }
+
+    private static func distanceSquared(from point: NSPoint, to rect: NSRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return dx * dx + dy * dy
+    }
+}
+
+@MainActor
+final class MainThreadStallHUDPresenter {
+    let hud = MainThreadStallHUDView()
+    private weak var content: NSView?
+    private let pointerEvents = LocalEventMonitor()
+    private let windowEvents = AppEventObservations()
+    private var constraints: [MainThreadStallHUDPlacement: [NSLayoutConstraint]] = [:]
+    private(set) var placement: MainThreadStallHUDPlacement = .bottomTrailing
+
+    init(content: NSView) {
+        self.content = content
+
+        content.addSubview(hud, positioned: .above, relativeTo: nil)
+        let margin = MainThreadStallHUDDefaults.margin
+        constraints = [
+            .bottomTrailing: [
+                hud.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+                hud.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -margin)
+            ],
+            .bottomLeading: [
+                hud.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
+                hud.bottomAnchor.constraint(
+                    equalTo: content.bottomAnchor,
+                    constant: -(margin + Design.Size.footerHeight)
+                )
+            ],
+            .topTrailing: [
+                hud.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+                hud.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor, constant: margin)
+            ],
+            .topLeading: [
+                hud.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
+                hud.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor, constant: margin)
+            ]
+        ]
+        NSLayoutConstraint.activate(constraints[.bottomTrailing] ?? [])
+
+        pointerEvents.install(matching: [.mouseMoved, .mouseEntered, .mouseExited]) {
+            [weak self] event in
+            self?.handlePointerEvent(event)
+            return event
+        }
+        if let window = content.window {
+            windowEvents.observe(NSWindow.didResignKeyNotification, object: window) { [weak self] in
+                self?.reset()
+            }
+            windowEvents.observe(NSWindow.willCloseNotification, object: window) { [weak self] in
+                self?.stop()
+            }
+        }
+    }
+
+    private func handlePointerEvent(_ event: NSEvent) {
+        guard let content else { return }
+        guard event.window === content.window else {
+            if event.type == .mouseMoved { reset() }
+            return
+        }
+        let pointer = content.convert(event.locationInWindow, from: nil)
+        guard content.bounds.contains(pointer) else { reset(); return }
+        if event.type != .mouseExited { pointerMoved(to: pointer) }
+    }
+
+    /// Also used by the window fixture; local pointer events drive the real path.
+    func pointerMoved(to pointer: NSPoint) {
+        guard placement == .bottomTrailing, let content,
+              content.bounds.contains(pointer) else { return }
+        let target = MainThreadStallHUDPlacement.dodge(
+            pointer: pointer,
+            bounds: content.bounds,
+            safeTop: content.safeAreaRect.maxY,
+            size: hud.intrinsicContentSize
+        )
+        if let target { setPlacement(target) }
+    }
+
+    func reset() { setPlacement(.bottomTrailing) }
+
+    private func setPlacement(_ next: MainThreadStallHUDPlacement) {
+        guard next != placement else { return }
+        NSLayoutConstraint.deactivate(constraints[placement] ?? [])
+        NSLayoutConstraint.activate(constraints[next] ?? [])
+        placement = next
+    }
+
+    private func stop() {
+        pointerEvents.remove()
+        windowEvents.removeAll()
+    }
 }

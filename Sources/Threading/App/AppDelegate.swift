@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// recovery launch open the store under the normal-launch default.
     private lazy var environment: AppEnvironment = .live
     private var runsStartupProfile = false
+    private var mainThreadStallHUDPresenter: MainThreadStallHUDPresenter?
 
     override init() {
         processMainEntryNanoseconds = DispatchTime.now().uptimeNanoseconds
@@ -4019,7 +4020,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.smallerText)
     }
 
-    /// Puts the main-thread readout in the window's bottom-trailing corner.
+    /// Puts the main-thread readout in the window's bottom-trailing corner and lets its
+    /// pointer-aware presenter move it aside for the rest of a pointer visit.
     ///
     /// Installed from here rather than from inside the window's own view tree, for two reasons:
     /// no shipping controller then carries a diagnostic child it has to know about, and the
@@ -4029,18 +4031,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func installMainThreadStallHUD(on controller: MainWindowController) {
         guard let content = controller.window?.contentView else { return }
 
-        let hud = MainThreadStallHUDView()
-        content.addSubview(hud, positioned: .above, relativeTo: nil)
-        NSLayoutConstraint.activate([
-            hud.trailingAnchor.constraint(
-                equalTo: content.trailingAnchor,
-                constant: -MainThreadStallHUDDefaults.margin
-            ),
-            hud.bottomAnchor.constraint(
-                equalTo: content.bottomAnchor,
-                constant: -MainThreadStallHUDDefaults.margin
-            )
-        ])
+        mainThreadStallHUDPresenter = MainThreadStallHUDPresenter(content: content)
     }
 }
 
