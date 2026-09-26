@@ -133,6 +133,12 @@ final class ProjectDatabase {
         let position: Int
     }
 
+    /// Ordered project rows, with session payloads left unread for exact-row operations.
+    struct ProjectRecord {
+        let project: Project
+        let position: Int
+    }
+
     /// One existing project row whose payload changed without changing graph membership/order.
     struct ProjectWrite {
         let project: Project
@@ -368,6 +374,21 @@ final class ProjectDatabase {
         }
         return ProjectNavigationSnapshot(projects: projects,
                                          selectedSessionID: try selectedSessionID())
+    }
+
+    /// Reads project payloads in stored order without decoding any session row. Terminals are
+    /// embedded in projects, so shell creation and attach need these rows, but not the archive of
+    /// conversations beneath them. Like other partial views, this cannot authorize `save(_:)`.
+    func projectRecords() throws -> [ProjectRecord] {
+        partialGraphRead = true
+        let rows = try database.prepare(ProjectDatabaseSchema.selectProjects)
+        defer { rows.finalize() }
+        var records: [ProjectRecord] = []
+        while try rows.step() {
+            records.append(ProjectRecord(project: try decodedProject(from: rows),
+                                         position: records.count))
+        }
+        return records
     }
 
     /// Reads one session by its primary key and decodes only it and its owning project. Selected

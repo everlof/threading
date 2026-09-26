@@ -5559,3 +5559,18 @@ each read on the same store. Full-graph read: **45.3 ms median, 50.7 ms max**. B
 save took 252.5 ms separately. This isolates the storage phase and does not claim a whole-window
 launch result. Project terminal arrays still live inside project payloads, and a large number of
 projects still multiplies the 512-session window; those are the remaining scaling boundaries.
+
+## Linux terminal project read, measured 2026-09-26
+
+Creating or reattaching a shell in either Linux host previously used `ProjectDatabase.load()` and
+decoded every saved agent session. The new `projectRecords()` reads ordered project payloads only;
+the terminal stays embedded in its owning project row, and an exact-row write appends it. The
+expected cost follows project and terminal counts, not archived session count. An unrelated
+unreadable session no longer prevents shell creation or attach; a corrupt project row still does.
+
+The same opt-in 5,100-session Release fixture, with two projects and no saved terminals, took five
+warmed samples on arm64 Linux. Full-graph read was **43.3 ms median, 44.2 ms max**; terminal project
+read rounded to **0.0 ms median, 0.1 ms max** at one decimal place. Fixture save took 238.3 ms
+separately. This isolates the storage read, not daemon admission or the window. It proves session
+archive size no longer drives that read; a store with many projects or many terminals inside one
+project still requires a separate stress measurement before claiming that dimension is bounded.

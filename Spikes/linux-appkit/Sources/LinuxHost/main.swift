@@ -55,9 +55,8 @@ func run() throws -> Int32 {
     defer { database.close() }
     if initializingStore { return 0 }
     if let folder = importFolder {
-        let projects = try database.navigationSnapshot(recentSessionLimit: 0,
-                                                       recentTerminalLimit: 0).projects
-        if !projects.contains(where: { $0.folderPath == folder.path }) {
+        let projects = try database.projectRecords()
+        if !projects.contains(where: { $0.project.folderPath == folder.path }) {
             try database.addProject(Project(name: folder.lastPathComponent, folderURL: folder),
                                     position: projects.count)
         }
@@ -197,16 +196,15 @@ func run() throws -> Int32 {
         identity = .agentSession(sessionID)
         try link.send(.attach(PTYHostAttach(id: identity, replayBudget: 512 * 1024)))
     } else if args[2] == "attach" {
-        let state = try database.load().state
         try check(args.count == 4, "attach requires a stored terminal UUID")
         guard let uuid = UUID(uuidString: args[3]) else { throw HostFailure.refused("invalid terminal UUID") }
         let terminalID = TerminalID(uuid)
-        try check(state.projects.contains { $0.terminals.contains { $0.id == terminalID } },
+        let records = try database.projectRecords()
+        try check(records.contains { $0.project.terminals.contains { $0.id == terminalID } },
                   "terminal is not in this store")
         identity = PTYHostSessionIdentity(.projectTerminal(terminalID))
         try link.send(.attach(PTYHostAttach(id: identity, replayBudget: 512 * 1024)))
     } else {
-        var state = try database.load().state
         let login = args[2] == "login-run"
         try check((args[2] == "run" && args.count >= 5) || (login && args.count >= 6),
                   "run requires DIRECTORY EXECUTABLE; login-run requires DIRECTORY SHELL EXECUTABLE")
@@ -222,24 +220,18 @@ func run() throws -> Int32 {
         } else {
             plan = AgentLaunchPlan(executable: args[4], arguments: Array(args.dropFirst(5)), resumeState: .unavailable)
         }
-        let index: Int
-        let addedProject: Bool
-        if let existing = state.projects.firstIndex(where: { $0.folderPath == folder.path }) {
-            index = existing
-            addedProject = false
-        } else {
-            state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder))
-            index = state.projects.count - 1
-            addedProject = true
-        }
+        let records = try database.projectRecords()
+        let existing = records.first { $0.project.folderPath == folder.path }
+        var project = existing?.project ?? Project(name: folder.lastPathComponent, folderURL: folder)
+        let position = existing?.position ?? records.count
         let terminal = ProjectTerminal(id: TerminalID(), title: URL(fileURLWithPath: args[executableIndex]).lastPathComponent,
             customTitle: nil, currentDirectory: folder.path, branch: nil, themeID: nil,
             soundOverrides: nil, createdAt: Date())
-        state.projects[index].terminals.append(terminal)
-        if addedProject {
-            try database.addProject(state.projects[index], position: index)
+        project.terminals.append(terminal)
+        if existing == nil {
+            try database.addProject(project, position: position)
         } else {
-            try database.saveProject(state.projects[index], position: index)
+            try database.saveProject(project, position: position)
         }
         identity = PTYHostSessionIdentity(.projectTerminal(terminal.id))
         try link.send(.spawn(PTYHostSpawnRequest(id: identity, channel: .pty(grid: localTerminal.grid ?? PTYHostGrid(cols: 80, rows: 24)),
