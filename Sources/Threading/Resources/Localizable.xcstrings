@@ -7474,6 +7474,17 @@
         }
       }
     },
+    "App Diagnostics" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appdiagnostik"
+          }
+        }
+      }
+    },
     "App font" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40776,6 +40787,17 @@
         }
       }
     },
+    "Sends crashes, system-attributed hangs, and sampled traces and profiles to Sentry. Prompts, terminal output, paths, screenshots, network URLs and identifiers are excluded. Off until you choose otherwise." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skickar krascher, systemtillskrivna hängningar samt samplade spårningar och profiler till Sentry. Prompter, terminalutdata, sökvägar, skärmbilder, nätverks-URL:er och identifierare utesluts. Av tills du väljer något annat."
+          }
+        }
+      }
+    },
     "Sends while Threading is running." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41603,6 +41625,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dela en gratisvecka med Claude Code till vänner"
+          }
+        }
+      }
+    },
+    "Share crash & performance reports" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela krasch- och prestandarapporter"
           }
         }
       }

@@ -59,6 +59,7 @@ readonly BUILD_DIR="$ROOT/build/release"
 readonly ARCHIVE="$BUILD_DIR/$SCHEME.xcarchive"
 readonly EXPORT_DIR="$BUILD_DIR/export"
 readonly APP="$EXPORT_DIR/$SCHEME.app"
+readonly SENTRY_RELEASE_FILE="$BUILD_DIR/sentry-release.txt"
 
 derived_data_args=()
 if [[ -n "${THREADING_DERIVED_DATA:-}" ]]; then
@@ -414,6 +415,17 @@ fi
 # failed to take — visible only after someone installs it.
 if [[ "$channel" != "$CHANNEL" ]]; then
     fail "asked for a $CHANNEL build but the bundle carries '$channel'"
+fi
+
+# The release object and debug files must describe the archive that actually ships. A local dry
+# run creates no remote Sentry state; every notarized build is fail-closed on the CI/local secret,
+# dSYM processing, commit association and release finalization.
+if [[ $NOTARIZE -eq 1 ]]; then
+    say "Uploading Sentry release metadata and dSYMs"
+    "$ROOT/scripts/sentry-release.sh" prepare \
+        --app "$APP" \
+        --debug-files "$ARCHIVE/dSYMs" \
+        --output "$SENTRY_RELEASE_FILE"
 fi
 
 zip="$BUILD_DIR/$SCHEME-$version.zip"

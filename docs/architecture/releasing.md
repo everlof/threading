@@ -27,6 +27,18 @@ exact commit check; direct `release.sh` and `publish_release.sh` runs remain fai
 already exists under account `mjukis-threading`; [Keys](#keys--threadings-own-one-manual-step-from-real)
 records its custody requirements.
 
+The same shipping lane owns Sentry's release half. Every notarized archive requires an
+organization-scoped `SENTRY_AUTH_TOKEN`: `scripts/sentry-release.sh` derives Cocoa's exact
+`codes.threading@<version>+<build>` identity from the exported app, creates the release, uploads
+the dSYMs from that archive with source context, associates commits from the full checkout, and
+finalizes it. Publication records the deploy only after the GitHub release and feed exist.
+Stable, beta and nightly events use `production`, `beta` and `nightly` environments respectively.
+Dry-run, non-notarized archives create no remote Sentry state. GitHub Actions stores the token as
+`SENTRY_AUTH_TOKEN`; local release machines provide it in the environment or their secret store,
+never a tracked `.sentryclirc`, `sentry.properties` or env file. The iOS companion has no shipping
+archive lane here, so its App Store pipeline must perform the same upload from the archive Apple
+receives rather than reusing the Mac dSYMs.
+
 ## Distribution signing is not a build setting
 
 The obvious move is to pin `CODE_SIGN_IDENTITY[sdk=macosx*] = "Developer ID Application"` in the

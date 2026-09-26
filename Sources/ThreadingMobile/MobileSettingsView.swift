@@ -8,6 +8,7 @@ struct MobileSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(MobileSessionAccountBadgePreference.key)
     private var showsAccountBadge = MobileSessionAccountBadgePreference.defaultValue
+    @ObservedObject private var sentryDiagnostics = MobileSentryDiagnosticsStatus.shared
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -119,6 +120,15 @@ struct MobileSettingsView: View {
                             detail: model.activeHost.map { LocalizedStringKey($0.name) }
                         ) {
                             RemoteDiagnosticsView()
+                        }
+
+                        ThemedRowDivider()
+                        SettingsNavigationRow(
+                            symbol: "waveform.path.ecg",
+                            title: "App diagnostics",
+                            detail: sentryDiagnostics.isEnabled ? "On" : "Off"
+                        ) {
+                            SentryDiagnosticsSettingsView()
                         }
                     }
 

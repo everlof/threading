@@ -53,6 +53,8 @@
 	     presents a certificate. -->
 	<key>ThreadingReportIntakeURL</key>
 	<string>$(THREADING_REPORT_INTAKE_URL)</string>
+	<key>ThreadingSentryDSN</key>
+	<string>https://f1b176cf933e42e30fd125ed837301fd@o4512146237161472.ingest.de.sentry.io/4512147496501329</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMainNibFile</key>

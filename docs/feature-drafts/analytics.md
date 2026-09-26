@@ -1,7 +1,12 @@
 # Analytics and crash reporting: what leaves the machine, and only by consent
 
-**Status: draft.** Researched 2026-08-22. Nothing is committed. The local counter store (steps
-1–2) is implementable now and needs no consent surface, because nothing leaves the machine. The
+**Status: draft for product analytics.** Researched 2026-08-22; revised 2026-09-25. The counter
+store and analytics upload described here are not implemented. A separate, explicit opt-in
+Sentry channel for native crash, hang and sampled performance diagnostics is now implemented
+under the stricter boundary in
+[`sentry-diagnostics.md`](../architecture/sentry-diagnostics.md). It is not product analytics and
+does not weaken the rules below. The local counter store (steps 1–2) is implementable now and
+needs no consent surface, because nothing leaves the machine. The
 upload path shares the hosted remote service's deployed control plane and its deployment gate
 ([hosted-remote-service.md](hosted-remote-service.md) §Release sequence step 3). The single
 decision that gates the whole feature is a brand decision, not a technical one: Threading's
@@ -117,10 +122,11 @@ from one of them.
    are kept locally with receipts (the `MacIssueReportOutbox` record/package pattern —
    [github.md](../architecture/github.md)); live counters are visible in the same surface. A user
    can always answer "what exactly has this app sent?" from the app itself.
-7. **First-party endpoint; crash reports are a separate consent.** Ingest rides our existing
-   Cloudflare control plane, not a vendor SDK. Crash/hang reporting is a different channel with
-   richer payloads and therefore its own moment of consent — ask-at-the-moment with the payload
-   shown, per the Sparkle/Apple pattern — and is never bundled into the analytics yes.
+7. **First-party endpoint; app diagnostics are a separate consent.** Analytics ingest rides our
+   existing Cloudflare control plane, not a vendor SDK. Crash, hang and performance diagnostics
+   are a different, independently revocable Sentry channel with an explicit default-off Settings
+   control and the allowlist in `sentry-diagnostics.md`; they are never bundled into an analytics
+   yes.
 
 Rejected alternatives, recorded per this directory's rules:
 
@@ -130,7 +136,7 @@ Rejected alternatives, recorded per this directory's rules:
 | Firebase / Crashlytics | Google endpoint; ads-adjacent SDK with documented App Review friction; category poison. |
 | TelemetryDeck | The respectable Apple-indie vendor, but its model is a *stable* double-hashed device ID (that is what powers its retention metrics) plus a vendor endpoint — both conflict with rules 3 and 7. |
 | Aptabase (self-hosted) | Closest in spirit (daily-rotating salt, no stored client ID), but event-stream shaped, needs an operated Postgres/ClickHouse deployment, and still doesn't match report-shaped weekly uploads. Running it is more ops than the Worker route below. |
-| Sentry for crashes | Third-party endpoint and an in-process crash handler SDK; MetricKit already produces the payloads without installing signal handlers in a PTY-juggling process. |
+| Default-on or helper-process Sentry | A third-party endpoint without explicit consent is unacceptable, and installing separate crash handlers in PTY/helper processes fragments ownership and releases. The adopted exception is default-off and top-level-app-only. |
 
 ## The counter store (client)
 

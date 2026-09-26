@@ -53,6 +53,16 @@ final class MobileAppStoreSubmissionTests: XCTestCase {
         )
 
         XCTAssertEqual(manifest["NSPrivacyTracking"] as? Bool, false)
+        let collected = try XCTUnwrap(
+            manifest["NSPrivacyCollectedDataTypes"] as? [[String: Any]]
+        )
+        let crashData = try XCTUnwrap(collected.first {
+            $0["NSPrivacyCollectedDataType"] as? String
+                == "NSPrivacyCollectedDataTypeCrashData"
+        })
+        XCTAssertEqual(crashData["NSPrivacyCollectedDataTypeLinked"] as? Bool, false)
+        XCTAssertEqual(crashData["NSPrivacyCollectedDataTypeTracking"] as? Bool, false)
+
         let accessed = try XCTUnwrap(manifest["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
         XCTAssertEqual(
             Set(accessed.compactMap { $0["NSPrivacyAccessedAPIType"] as? String }),

@@ -24,6 +24,8 @@
 	-->
 	<key>ThreadingReportIntakeURL</key>
 	<string>$(THREADING_REPORT_INTAKE_URL)</string>
+	<key>ThreadingSentryDSN</key>
+	<string>https://f64d45d52c161bde5ec5960adba17bb9@o4512146237161472.ingest.de.sentry.io/4512148079378512</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_threading._tcp</string>

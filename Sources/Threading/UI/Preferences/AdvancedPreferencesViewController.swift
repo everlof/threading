@@ -102,6 +102,10 @@ final class AdvancedPreferencesViewController: NSViewController {
         var sections: [NSView] = [
             SettingsUI.note(AdvancedStrings.explanation),
             SettingsUI.section(
+                AdvancedStrings.sentryDiagnosticsSection,
+                SettingsCard(rows: sentryDiagnosticsRows())
+            ),
+            SettingsUI.section(
                 AdvancedStrings.localDiagnosticsSection,
                 SettingsCard(rows: localDiagnosticsRows())
             ),
@@ -203,6 +207,22 @@ final class AdvancedPreferencesViewController: NSViewController {
                 detail: AdvancedStrings.localDiagnosticsCacheDetail(count: count),
                 button: clearButton
             ),
+        ]
+    }
+
+    private func sentryDiagnosticsRows() -> [NSView] {
+        let toggle = SettingsUI.toggle(
+            isOn: AppSettings.shared.sentryDiagnosticsEnabled,
+            target: self,
+            action: #selector(sentryDiagnosticsChanged(_:))
+        )
+        toggle.setAccessibilityLabel(AdvancedStrings.sentryDiagnosticsTitle)
+        return [
+            SettingsUI.row(
+                title: AdvancedStrings.sentryDiagnosticsTitle,
+                subtitle: AdvancedStrings.sentryDiagnosticsDetail,
+                control: toggle
+            )
         ]
     }
 
@@ -511,6 +531,12 @@ final class AdvancedPreferencesViewController: NSViewController {
         AppSettings.shared.localDiagnosticsEnabled = sender.state == .on
     }
 
+    @objc private func sentryDiagnosticsChanged(_ sender: ThemedToggle) {
+        let isEnabled = sender.state == .on
+        AppSettings.shared.sentryDiagnosticsEnabled = isEnabled
+        SentryDiagnostics.preferenceDidChange(isEnabled: isEnabled)
+    }
+
     @objc private func clearLocalDiagnostics() {
         MobileDiagnosticsCaptureStore.shared.clearCaptures()
         rebuild()
@@ -705,6 +731,18 @@ enum AdvancedStrings {
     static var title: String { L10n.string("Advanced") }
     static var explanation: String {
         L10n.string("Where Threading keeps your settings and your work, and how to start over.")
+    }
+
+    static var sentryDiagnosticsSection: String { L10n.string("App Diagnostics") }
+    static var sentryDiagnosticsTitle: String {
+        L10n.string("Share crash & performance reports")
+    }
+    static var sentryDiagnosticsDetail: String {
+        L10n.string(
+            "Sends crashes, system-attributed hangs, and sampled traces and profiles to Sentry. "
+                + "Prompts, terminal output, paths, screenshots, network URLs and identifiers "
+                + "are excluded. Off until you choose otherwise."
+        )
     }
 
     static var localDiagnosticsSection: String { L10n.string("Local Diagnostics") }

@@ -104,6 +104,18 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(AppSettingDefinitions.localDiagnosticsEnabled.read(from: defaults), true)
     }
 
+    func testSentryDiagnosticsIsAbsentAndOffUntilThePersonOptsIn() throws {
+        let suiteName = "AppSettingDefinitionTests.sentryDiagnostics.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(defaults.object(forKey: "sentryDiagnosticsEnabled"))
+        XCTAssertEqual(AppSettingDefinitions.sentryDiagnosticsEnabled.read(from: defaults), false)
+
+        XCTAssertTrue(AppSettingDefinitions.sentryDiagnosticsEnabled.write(true, to: defaults))
+        XCTAssertEqual(AppSettingDefinitions.sentryDiagnosticsEnabled.read(from: defaults), true)
+    }
+
     @MainActor
     func testMainThreadStallHUDUsesTheLocalPreferenceInBothBuilds() throws {
         let suiteName = "AppSettingDefinitionTests.stallHUD.\(UUID().uuidString)"
@@ -290,6 +302,10 @@ final class AppSettingDefinitionTests: XCTestCase {
             .defaultPermissionMode: .init(key: "defaultPermissionMode", valueType: .string),
             .localDiagnosticsEnabled: .init(
                 key: "localDiagnosticsEnabled",
+                valueType: .boolean
+            ),
+            .sentryDiagnosticsEnabled: .init(
+                key: "sentryDiagnosticsEnabled",
                 valueType: .boolean
             ),
             .remoteAccessEnabled: .init(key: "remoteAccessEnabled", valueType: .boolean),
@@ -486,6 +502,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         // Opt-in false is an absence semantic, not a seeded key: the person's first write is
         // distinguishable from a registered default.
         XCTAssertNil(defaults["localDiagnosticsEnabled"])
+        XCTAssertNil(defaults["sentryDiagnosticsEnabled"])
         // The LAN door is the shipped exposure now that the listener presents a pinned
         // identity, and the seed is what makes an existing install pick it up.
         XCTAssertEqual(
@@ -509,9 +526,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 91)
+        XCTAssertEqual(authoredRows.count, 92)
 #else
-        XCTAssertEqual(authoredRows.count, 90)
+        XCTAssertEqual(authoredRows.count, 91)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -612,7 +629,8 @@ final class AppSettingDefinitionTests: XCTestCase {
         // reaching the daemon from a terminal is the last thing in that sentence. Internal builds
         // then append the deliberately secluded developer-only service identity.
         var expectedAdvanced = [
-            "Allow paired-iPhone checkups", "Settings", "Projects, sessions and caches",
+            "Allow paired-iPhone checkups", "Share crash & performance reports", "Settings",
+            "Projects, sessions and caches",
             "First-launch walkthrough", "Run at next launch", "Reset settings",
             "Reset everything", "Background host", "Turn off the background host",
             "Command line tool", "Tools in Threading's terminals"

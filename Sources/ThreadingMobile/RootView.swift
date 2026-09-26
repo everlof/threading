@@ -40,6 +40,7 @@ enum MobileDemoScene: Equatable {
     case collaborationSettings
     case advancedConnectionSettings
     case localDiagnosticsSettings
+    case appDiagnosticsSettings(isEnabled: Bool)
     case notificationSettings
     case terminalKeySettings
     case terminalKeyEditor
@@ -136,6 +137,8 @@ extension MobileDemoScene {
         case "collaboration-settings": return .collaborationSettings
         case "advanced-connection-settings": return .advancedConnectionSettings
         case "local-diagnostics-settings": return .localDiagnosticsSettings
+        case "app-diagnostics-settings": return .appDiagnosticsSettings(isEnabled: false)
+        case "app-diagnostics-settings-on": return .appDiagnosticsSettings(isEnabled: true)
         case "notification-settings": return .notificationSettings
         case "terminal-key-settings": return .terminalKeySettings
         case "terminal-key-editor": return .terminalKeyEditor
@@ -246,6 +249,8 @@ enum MobileDemoFixture: String, CaseIterable {
     case collaborationSettings = "collaboration-settings"
     case advancedConnectionSettings = "advanced-connection-settings"
     case localDiagnosticsSettings = "local-diagnostics-settings"
+    case appDiagnosticsSettings = "app-diagnostics-settings"
+    case appDiagnosticsSettingsOn = "app-diagnostics-settings-on"
     case notificationSettings = "notification-settings"
     case macAppearanceSettings = "mac-appearance-settings"
     case connectionProgressLab = "connection-progress-lab"
@@ -532,6 +537,11 @@ struct RootView: View {
         case .localDiagnosticsSettings:
             NavigationStack {
                 MobileDiagnosticsView()
+            }
+        case let .appDiagnosticsSettings(isEnabled):
+            let status = MobileSentryDiagnosticsStatus.evidenceFixture(isEnabled: isEnabled)
+            NavigationStack {
+                SentryDiagnosticsSettingsView(status: status)
             }
         case .notificationSettings:
             NavigationStack {

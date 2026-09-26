@@ -12,6 +12,10 @@
 		F10B00010000000000000001 /* RemoteWireEncodingLaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10B00010000000000000002 /* RemoteWireEncodingLaneTests.swift */; };
 		09EEC39439CEDA7EAFBC697C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
 		5AAA00010000000000000011 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5AAA00010000000000000001 /* Sparkle */; };
+		E50000010000000000000011 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000010000000000000001 /* Sentry */; };
+		E50000010000000000000012 /* Sentry-Dynamic in Frameworks */ = {isa = PBXBuildFile; productRef = E50000010000000000000002 /* Sentry-Dynamic */; };
+		E50000010000000000000013 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000010000000000000001 /* Sentry */; };
+		E50000010000000000000014 /* Sentry-Dynamic in Frameworks */ = {isa = PBXBuildFile; productRef = E50000010000000000000002 /* Sentry-Dynamic */; };
 		5CC000010000000000000001 /* scc in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 5CC000010000000000000002 /* scc */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		6746DE83B248339F7A44A795 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
 		7A0000010000000000000001 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000011 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift */; };
@@ -559,6 +563,7 @@
 				ThreadingMobile/SessionWorkspaceDrawer.swift,
 				ThreadingMobile/SessionWorkspaceView.swift,
 				ThreadingMobile/ShareChatSheet.swift,
+				ThreadingMobile/SentryDiagnostics.swift,
 				ThreadingMobile/TerminalFixtures/marketing-claude-tui.json,
 				ThreadingMobile/TerminalFixtures/marketing-claude-tui-light.json,
 				ThreadingMobile/TerminalFixtures/marketing-codex-tui.json,
@@ -610,6 +615,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E50000010000000000000013 /* Sentry in Frameworks */,
 				7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */,
 				B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */,
 				F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */,
@@ -644,6 +650,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E50000010000000000000012 /* Sentry-Dynamic in Frameworks */,
 				A20000010000000000000012 /* SwiftTerm in Frameworks */,
 				A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */,
 				61A0CE010000000000000001 /* ThreadingGlanceKit in Frameworks */,
@@ -661,6 +668,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E50000010000000000000014 /* Sentry-Dynamic in Frameworks */,
 				B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */,
 				B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */,
 			);
@@ -685,6 +693,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E50000010000000000000011 /* Sentry in Frameworks */,
 				F1000001000000000000036 /* SwiftTerm in Frameworks */,
 				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
 				F1000001000000000000038 /* LabelMorph in Frameworks */,
@@ -1044,6 +1053,7 @@
 			);
 			name = ThreadingTests;
 			packageProductDependencies = (
+				E50000010000000000000001 /* Sentry */,
 				7C000007000000000000C0F1 /* ThreadingPluginKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 			);
@@ -1158,6 +1168,7 @@
 			);
 			name = ThreadingMobile;
 			packageProductDependencies = (
+				E50000010000000000000002 /* Sentry-Dynamic */,
 				61A0CE010000000000000002 /* ThreadingGlanceKit */,
 				A20000010000000000000010 /* SwiftTerm */,
 				A20000010000000000000011 /* ThreadingRemoteKit */,
@@ -1188,6 +1199,7 @@
 			);
 			name = ThreadingMobileTests;
 			packageProductDependencies = (
+				E50000010000000000000002 /* Sentry-Dynamic */,
 				A20000010000000000000011 /* ThreadingRemoteKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 			);
@@ -1287,6 +1299,7 @@
 			);
 			name = Threading;
 			packageProductDependencies = (
+				E50000010000000000000001 /* Sentry */,
 				F4000001000000000000001 /* SwiftTerm */,
 				F4000001000000000000003 /* ThinkingOrbs */,
 				F4000001000000000000005 /* LabelMorph */,
@@ -1364,6 +1377,7 @@
 			);
 			mainGroup = F5000001000000000000001;
 			packageReferences = (
+				E50000010000000000000020 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				61A0CE010000000000000011 /* ThreadingGlanceKit */,
 				F4000001000000000000002 /* XCLocalSwiftPackageReference "Packages/Vendor/SwiftTerm" */,
 				F4000001000000000000004 /* XCLocalSwiftPackageReference "Packages/Vendor/ThinkingOrbs" */,
@@ -3035,6 +3049,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		E50000010000000000000020 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 9.29.0;
+			};
+		};
 		5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -3054,6 +3076,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		E50000010000000000000001 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E50000010000000000000020 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+		E50000010000000000000002 /* Sentry-Dynamic */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E50000010000000000000020 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = "Sentry-Dynamic";
+		};
 		5AAA00010000000000000001 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */;

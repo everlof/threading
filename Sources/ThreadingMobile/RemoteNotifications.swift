@@ -268,6 +268,7 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
     private let notifications: RemoteNotificationManager
 
     override init() {
+        SentryDiagnostics.startIfEnabled()
         let continuity: MobileSessionContinuityStore
 #if DEBUG
         if MobileTerminalWireFixtureConfiguration.current != nil,

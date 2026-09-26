@@ -16,6 +16,28 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.5.0]
+
+### Added
+
+- **Optional diagnostics for the Mac and iPhone apps.** Turn on Sentry diagnostics in Advanced
+  Settings on Mac or Settings on iPhone to share crash, hang and sampled performance evidence.
+  It starts off, can be turned off at any time, and excludes terminal content, commands, prompts,
+  paths, account details, screenshots and raw logs. Helper processes and Linux builds do not send
+  their own events.
+- An optional main-thread stall indicator is available in release builds to help investigate a
+  slow or frozen Mac interface.
+
+### Changed
+
+- Agents can discover the available browser controls more reliably. Startup reconciliation does
+  less work at once when there are many saved checkpoints.
+
+### Fixed
+
+- Attachment previews retry after the connection route recovers, and images in the browser offer
+  their content menu on right-click.
+
 ## [0.4.0]
 
 ### Added

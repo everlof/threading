@@ -1151,6 +1151,27 @@
       }
     },
     {
+      "id": "advanced-sentry-diagnostics",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Advanced app diagnostics consent",
+      "description": "The real Advanced Settings page with content-free Sentry crash and performance reporting visibly off and on, including the privacy boundary copy.",
+      "states": ["Opted out", "Opted in"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Shared settings width × 900 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AdvancedSettingsRenderTests.swift",
+        "test": "ThreadingTests/AdvancedSettingsRenderTests/testRendersSentryDiagnosticsOptInStates"
+      },
+      "capture": {
+        "glob": "advanced-sentry-diagnostics-*.png"
+      }
+    },
+    {
       "id": "advanced-developer-settings",
       "kind": "surface",
       "status": "implemented",

@@ -68,6 +68,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case codexStartupSpeed
     case defaultPermissionMode
     case localDiagnosticsEnabled
+    case sentryDiagnosticsEnabled
     case remoteAccessEnabled
     case remoteNotificationMacActivityWindow
     case remoteHostedServiceEnvironment
@@ -1064,7 +1065,7 @@ enum AppSettingDefinitions {
         persistenceKey: "ptyHostEnabled",
         absence: .falseValue,
         presentations: [row(
-            "advanced", 7, "Background Sessions", "Background host",
+            "advanced", 8, "Background Sessions", "Background host",
             ["PTY", "daemon", "background", "durable", "keep running", "threading-ptyd"]
         )]
     )
@@ -1095,7 +1096,7 @@ enum AppSettingDefinitions {
         persistenceKey: "prependsCommandLineToolsToPATH",
         absence: .falseValue,
         presentations: [row(
-            "advanced", 10, "Background Sessions", "Tools in Threading's terminals",
+            "advanced", 11, "Background Sessions", "Tools in Threading's terminals",
             ["PATH", "command line", "CLI", "terminal", "threading-ptyd", "shell"]
         )]
     )
@@ -1204,6 +1205,16 @@ enum AppSettingDefinitions {
         )]
     )
 
+    static let sentryDiagnosticsEnabled = AppSettingDescriptor<Bool>(
+        identity: .sentryDiagnosticsEnabled,
+        persistenceKey: "sentryDiagnosticsEnabled",
+        absence: .falseValue,
+        presentations: [row(
+            "advanced", 1, "App Diagnostics", "Share crash & performance reports",
+            ["Sentry", "crash", "hang", "performance", "profiling", "MetricKit"]
+        )]
+    )
+
     static let remoteAccessEnabled = AppSettingDescriptor<Bool>(
         identity: .remoteAccessEnabled,
         persistenceKey: "remoteAccessEnabled",
@@ -1238,7 +1249,7 @@ enum AppSettingDefinitions {
     /// value, and has no presentation to disclose a control it does not contain.
 #if DEBUG || THREADING_INTERNAL
     private static let remoteHostedServiceEnvironmentPresentations = [row(
-        "advanced", 11, "Developer Settings", "Hosted service",
+        "advanced", 12, "Developer Settings", "Hosted service",
         ["development", "production", "push", "control plane", "Hosted Direct"]
     )]
 #else
@@ -1511,6 +1522,7 @@ enum AppSettingDefinitions {
         .init(claudeRemoteControl), .init(claudeTerminalRenderer),
         .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
+        .init(sentryDiagnosticsEnabled),
         .init(remoteAccessEnabled),
         .init(remoteAccessKeepAwake),
         .init(remoteHostedServiceEnvironment),
@@ -1591,27 +1603,27 @@ enum AppSettingDefinitions {
         surfaced("privacy.screenRecording", pageID: "privacy", order: 3,
                   section: "System Permissions", title: "Screen Recording",
                   "permissions", "TCC", "grant"),
-        surfaced("advanced.settingsLocation", pageID: "advanced", order: 1,
+        surfaced("advanced.settingsLocation", pageID: "advanced", order: 2,
                   section: "Locations", title: "Settings",
                   "preferences file", "where", "location", "reveal"),
-        surfaced("advanced.applicationSupportLocation", pageID: "advanced", order: 2,
+        surfaced("advanced.applicationSupportLocation", pageID: "advanced", order: 3,
                   section: "Locations", title: "Projects, sessions and caches",
                   "application support", "location", "reveal"),
-        surfaced("advanced.welcomeTour", pageID: "advanced", order: 3,
+        surfaced("advanced.welcomeTour", pageID: "advanced", order: 4,
                   section: "Welcome Tour", title: "First-launch walkthrough",
                   "onboarding", "welcome tour"),
-        surfaced("advanced.runWelcomeTour", pageID: "advanced", order: 4,
+        surfaced("advanced.runWelcomeTour", pageID: "advanced", order: 5,
                   section: "Welcome Tour", title: "Run at next launch", "onboarding", "flag"),
-        surfaced("advanced.resetSettings", pageID: "advanced", order: 5,
+        surfaced("advanced.resetSettings", pageID: "advanced", order: 6,
                   section: "Start Over", title: "Reset settings",
                   "reset", "start over", "fresh"),
-        surfaced("advanced.resetEverything", pageID: "advanced", order: 6,
+        surfaced("advanced.resetEverything", pageID: "advanced", order: 7,
                   section: "Start Over", title: "Reset everything",
                   "erase", "corrupt", "start over"),
-        surfaced("advanced.turnOffBackgroundHost", pageID: "advanced", order: 8,
+        surfaced("advanced.turnOffBackgroundHost", pageID: "advanced", order: 9,
                   section: "Background Sessions", title: "Turn off the background host",
                   "login items", "launch agent", "daemon", "threading-ptyd"),
-        surfaced("advanced.commandLineTool", pageID: "advanced", order: 9,
+        surfaced("advanced.commandLineTool", pageID: "advanced", order: 10,
                   section: "Background Sessions", title: "Command line tool",
                   "install", "symlink", "PATH", "terminal", "threading-ptyd", ".local/bin")
     ]

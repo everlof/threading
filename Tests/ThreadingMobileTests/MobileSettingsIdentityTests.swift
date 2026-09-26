@@ -1,4 +1,5 @@
 import Foundation
+import Sentry
 import ThreadingRemoteKit
 import XCTest
 @testable import ThreadingMobile
@@ -136,5 +137,62 @@ final class MobileSettingsIdentityTests: XCTestCase {
             connectionPolicy: .privateOnly,
             pinnedFingerprint: pinned?.hex
         )
+    }
+}
+
+final class MobileSentryDiagnosticsTests: XCTestCase {
+    @MainActor
+    func testConsentIsAbsentAndOffUntilThePersonOptsIn() throws {
+        let suiteName = "MobileSentryDiagnosticsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var changes: [Bool] = []
+
+        let status = MobileSentryDiagnosticsStatus(defaults: defaults) { enabled in
+            changes.append(enabled)
+        }
+
+        XCTAssertNil(defaults.object(forKey: MobileSentryDiagnosticsConsent.enabledKey))
+        XCTAssertFalse(status.isEnabled)
+
+        status.isEnabled = true
+
+        XCTAssertTrue(defaults.bool(forKey: MobileSentryDiagnosticsConsent.enabledKey))
+        XCTAssertEqual(changes, [true])
+    }
+
+    func testSanitizerRemovesMobileContentAndIdentifiers() throws {
+        let event = Event(level: .error)
+        event.user = User(userId: "private-account")
+        let request = SentryRequest()
+        request.url = "https://private.example/session/secret"
+        event.request = request
+        event.extra = ["terminal": "private output"]
+        event.context = [
+            "app": ["app_identifier": "codes.threading.mobile"],
+            "device": ["name": "David's iPhone"],
+        ]
+        event.tags = ["component": "ios", "session": "secret-session"]
+        event.message = SentryMessage(formatted: "a private prompt")
+        event.transaction = "session/private-repository"
+        event.type = "transaction"
+
+        let debugImage = DebugMeta()
+        debugImage.codeFile = "/private/var/containers/ThreadingMobile.debug.dylib"
+        event.debugMeta = [debugImage]
+
+        let sanitized = try XCTUnwrap(
+            SentryDiagnostics.sanitize(event, consentIsEnabled: true)
+        )
+
+        XCTAssertNil(sanitized.user)
+        XCTAssertNil(sanitized.request)
+        XCTAssertNil(sanitized.extra)
+        XCTAssertNil(sanitized.message)
+        XCTAssertNil(sanitized.context?["device"])
+        XCTAssertNotNil(sanitized.context?["app"])
+        XCTAssertEqual(sanitized.tags, ["component": "ios"])
+        XCTAssertEqual(sanitized.transaction, "threading.ios.activity")
+        XCTAssertEqual(debugImage.codeFile, "ThreadingMobile.debug.dylib")
     }
 }

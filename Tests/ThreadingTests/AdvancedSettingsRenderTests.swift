@@ -82,6 +82,67 @@ final class AdvancedSettingsRenderTests: XCTestCase {
         XCTAssertEqual(written, 4)
     }
 
+    @MainActor
+    func testRendersSentryDiagnosticsOptInStates() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previous = AppSettings.shared.sentryDiagnosticsEnabled
+        defer { AppSettings.shared.sentryDiagnosticsEnabled = previous }
+        let previousTheme = AppThemeLibrary.current
+        AppThemeLibrary.apply(.system)
+        defer { AppThemeLibrary.apply(previousTheme) }
+
+        var written = 0
+        for enabled in [false, true] {
+            AppSettings.shared.sentryDiagnosticsEnabled = enabled
+            for (appearanceName, appearance) in [
+                ("light", NSAppearance.Name.aqua),
+                ("dark", NSAppearance.Name.darkAqua),
+            ] {
+                let resolvedAppearance = try XCTUnwrap(NSAppearance(named: appearance))
+                var rendered: Data?
+                var renderedToggleState: NSControl.StateValue?
+                var hasThemeBoundaryViolations = false
+                resolvedAppearance.performAsCurrentDrawingAppearance {
+                    let controller = AdvancedPreferencesViewController()
+                    let host = self.laidOut(
+                        controller.view,
+                        width: Render.width,
+                        height: Render.height
+                    )
+                    host.appearance = resolvedAppearance
+                    controller.view.appearance = resolvedAppearance
+                    AppThemeRefresh.repaint(host)
+                    host.layoutSubtreeIfNeeded()
+                    renderedToggleState = self.descendants(of: controller.view)
+                        .compactMap { $0 as? ThemedToggle }
+                        .first {
+                            $0.accessibilityLabel()
+                                == L10n.string("Share crash & performance reports")
+                        }?.state
+                    hasThemeBoundaryViolations = !ThemeBoundaryAudit.violations(
+                        in: controller.view
+                    ).isEmpty
+                    rendered = self.png(of: host)
+                }
+
+                XCTAssertEqual(renderedToggleState, enabled ? .on : .off)
+                XCTAssertFalse(hasThemeBoundaryViolations)
+
+                let stateName = enabled ? "on" : "off"
+                let url = directory.appendingPathComponent(
+                    "advanced-sentry-diagnostics-\(stateName)-\(appearanceName).png"
+                )
+                try XCTUnwrap(rendered).write(to: url)
+                written += 1
+            }
+        }
+
+        print("Rendered \(written) Advanced Sentry-diagnostics pages to \(directory.path)")
+        XCTAssertEqual(written, 4)
+    }
+
 #if DEBUG || THREADING_INTERNAL
     /// The internal Release is the app a developer actually leaves in `/Applications`, so the
     /// service selector must be visible there without returning a production build to Debug.

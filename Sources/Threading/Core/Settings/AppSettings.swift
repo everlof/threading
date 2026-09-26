@@ -1274,6 +1274,15 @@ final class AppSettings {
         }
     }
 
+    /// Whether Threading may send content-free crashes, hangs and sampled performance data to
+    /// Sentry. Independent of paired-device diagnostics and absent until the person opts in.
+    var sentryDiagnosticsEnabled: Bool {
+        get { AppSettingDefinitions.sentryDiagnosticsEnabled.read(from: defaults) ?? false }
+        set {
+            AppSettingDefinitions.sentryDiagnosticsEnabled.write(newValue, to: defaults)
+        }
+    }
+
     // MARK: - Remote Access
 
     /// Whether the remote-access server runs (and, once implemented, its tunnel). Off by

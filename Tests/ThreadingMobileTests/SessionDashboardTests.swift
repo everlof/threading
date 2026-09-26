@@ -1300,6 +1300,10 @@ final class MobileDemoSceneTests: XCTestCase {
                 expected = ("advanced-connection-settings", .advancedConnectionSettings)
             case .localDiagnosticsSettings:
                 expected = ("local-diagnostics-settings", .localDiagnosticsSettings)
+            case .appDiagnosticsSettings:
+                expected = ("app-diagnostics-settings", .appDiagnosticsSettings(isEnabled: false))
+            case .appDiagnosticsSettingsOn:
+                expected = ("app-diagnostics-settings-on", .appDiagnosticsSettings(isEnabled: true))
             case .notificationSettings: expected = ("notification-settings", .notificationSettings)
             case .macAppearanceSettings:
                 expected = ("mac-appearance-settings", .macAppearanceSettings)

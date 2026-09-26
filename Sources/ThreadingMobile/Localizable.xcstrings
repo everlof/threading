@@ -1686,6 +1686,17 @@
         }
       }
     },
+    "App diagnostics" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appdiagnostik"
+          }
+        }
+      }
+    },
     "App icon" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7663,6 +7674,17 @@
         }
       }
     },
+    "Privacy boundary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integritetsgräns"
+          }
+        }
+      }
+    },
     "Private Browser" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9316,6 +9338,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dela chatt"
+          }
+        }
+      }
+    },
+    "Share crash & performance reports" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela krasch- och prestandarapporter"
           }
         }
       }
@@ -12294,6 +12327,17 @@
         }
       }
     },
+    "Turning the switch off stops new reports immediately." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När du stänger av reglaget stoppas nya rapporter omedelbart."
+          }
+        }
+      }
+    },
     "Types “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12930,6 +12974,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När funktionen är aktiverad på denna iPhone och dess parkopplade Mac kan Threading skicka begränsat anslutningsunderlag via det lokala nätverket. Om du stänger av den stoppas nya förfrågningar omedelbart."
+          }
+        }
+      }
+    },
+    "When enabled, Threading sends crashes, system-attributed hangs, and sampled traces and profiles to Sentry. Prompts, terminal output, paths, screenshots, view hierarchy, network URLs and identifiers are excluded." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När detta är aktiverat skickar Threading krascher, systemtillskrivna hängningar samt samplade spårningar och profiler till Sentry. Prompter, terminalutdata, sökvägar, skärmbilder, vyhierarki, nätverks-URL:er och identifierare utesluts."
           }
         }
       }

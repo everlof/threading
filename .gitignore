@@ -66,6 +66,9 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
+.sentryclirc
+sentry.properties
+.env.sentry-build-plugin
 
 ## Playgrounds
 timeline.xctimeline

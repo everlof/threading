@@ -76,10 +76,12 @@ jobs:
           command -v swiftlint >/dev/null || brew install swiftlint
           command -v rg >/dev/null || brew install ripgrep
           command -v gitleaks >/dev/null || brew install gitleaks
+          command -v sentry-cli >/dev/null || brew install getsentry/tools/sentry-cli
           python3 -m pip install --disable-pip-version-check \
             -r scripts/requirements-schema.txt
           swiftlint version
           gitleaks version
+          sentry-cli --version
 
       - name: Import the Developer ID certificate
         if: steps.moved.outputs.changed == 'true'
@@ -133,6 +135,9 @@ jobs:
         if: steps.moved.outputs.changed == 'true'
         env:
           NOTARY_PROFILE: threading-ci
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: threading
+          SENTRY_PROJECT: threading-macos
         run: |
           # The date as dotted digits, zero-padding stripped — 2026.8.6, the shape
           # releasing.md's channel table records, satisfying both the release script's
@@ -166,6 +171,9 @@ jobs:
         if: steps.moved.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: threading
+          SENTRY_PROJECT: threading-macos
         run: |
           # Gapless roll: the previous nightly's feed stays live until the replacement is in
           # place. Assets go up first — the appcast last, so it never names a zip that is not
@@ -197,6 +205,10 @@ jobs:
               --title "Nightly $THREADING_VERSION" \
               --notes-file "$RUNNER_TEMP/nightly-notes.md"
           fi
+          scripts/sentry-release.sh deploy \
+            --release-file build/release/sentry-release.txt \
+            --environment nightly \
+            --url "https://github.com/${{ github.repository }}/releases/tag/nightly"
 
       - name: Remove the Sparkle private key
         if: always()

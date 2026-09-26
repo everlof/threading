@@ -30,6 +30,7 @@ enum MacRemoteDiagnostics {
         fields: [RemoteDiagnosticField: String] = [:]
     ) {
         journal.record(event, level: level, fields: fields)
+        SentryDiagnostics.capture(event, level: level, fields: fields)
     }
 
     /// Interaction probes must not put the journal's synchronous file append onto the WebSocket
@@ -42,6 +43,7 @@ enum MacRemoteDiagnostics {
     ) {
         interactionRecordingQueue.async {
             journal.record(event, level: level, fields: fields)
+            SentryDiagnostics.capture(event, level: level, fields: fields)
         }
     }
 

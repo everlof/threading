@@ -29,6 +29,8 @@
 #                               base64 EdDSA seed. Threading's own key, deliberately not
 #                               claudex's, so this secret can never sign a claudex update;
 #                               see releasing.md.
+#   SENTRY_AUTH_TOKEN           organization token scoped to Threading, used only to create the
+#                               matching release, upload this archive's dSYMs, and record deploys
 
 name: Release
 
@@ -78,10 +80,12 @@ jobs:
           command -v swiftlint >/dev/null || brew install swiftlint
           command -v rg >/dev/null || brew install ripgrep
           command -v gitleaks >/dev/null || brew install gitleaks
+          command -v sentry-cli >/dev/null || brew install getsentry/tools/sentry-cli
           python3 -m pip install --disable-pip-version-check \
             -r scripts/requirements-schema.txt
           swiftlint version
           gitleaks version
+          sentry-cli --version
 
       - name: Import the Developer ID certificate
         env:
@@ -140,6 +144,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NOTARY_PROFILE: threading-ci
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: threading
+          SENTRY_PROJECT: threading-macos
         run: scripts/publish_release.sh
 
       - name: Remove temporary release credentials

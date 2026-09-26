@@ -1,0 +1,14 @@
+# This repository has its own Sentry organization. Keep global connections for
+# other companies out of the tool catalogue here so an agent cannot select the
+# wrong organization by accident.
+[mcp_servers.sentry]
+url = "https://mcp.sentry.dev/mcp"
+enabled = false
+
+[mcp_servers.sentry_ordus]
+url = "https://mcp.sentry.dev/mcp/ordus"
+enabled = false
+
+[mcp_servers.sentry_threading]
+url = "https://mcp.sentry.dev/mcp/threading"
+default_tools_approval_mode = "writes"

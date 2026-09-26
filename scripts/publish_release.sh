@@ -207,6 +207,17 @@ fi
 gh release upload "$FEED_TAG" "$APPCAST" --repo "$REPO" --clobber
 echo "  appcast.xml on $FEED_TAG"
 
+if [[ "$CHANNEL" == "release" ]]; then
+    sentry_environment="production"
+else
+    sentry_environment="$CHANNEL"
+fi
+say "Recording the Sentry deploy"
+"$ROOT/scripts/sentry-release.sh" deploy \
+    --release-file "$BUILD_DIR/sentry-release.txt" \
+    --environment "$sentry_environment" \
+    --url "https://github.com/$REPO/releases/tag/$TAG"
+
 say "Published"
 echo "  release:  https://github.com/$REPO/releases/tag/$TAG"
 echo "  download: https://github.com/$REPO/releases/download/$TAG/Threading-$VERSION.zip"

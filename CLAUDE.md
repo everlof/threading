@@ -182,6 +182,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | The toolbar, the pane header strips, the sidebar's silhouette, split-item behaviour, anything pinning to `topAnchor` | [`window-chrome.md`](docs/architecture/window-chrome.md) |
 | The MCP server, tool routing by session token, launch flags, the display panel and its web view | [`mcp-and-display.md`](docs/architecture/mcp-and-display.md) |
 | The opt-in paired-iPhone evidence path, automatic error screenshots, bounded Mac cache and iOS checkup tools | [`ios-local-diagnostics.md`](docs/architecture/ios-local-diagnostics.md) |
+| The opt-in Sentry crash, hang and performance channel, its process boundary, sanitizer, consent and symbolication gate | [`sentry-diagnostics.md`](docs/architecture/sentry-diagnostics.md) |
 | iOS usage widgets, the bounded capacity feed, App Group publication, freshness and usage deep links | [`ios-glanceable-surfaces.md`](docs/architecture/ios-glanceable-surfaces.md) |
 | The session-owned in-panel iOS Simulator, CoreSimulator lifecycle, direct framebuffer/input helper, leases and agent route | [`simulator-pane.md`](docs/architecture/simulator-pane.md) |
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |

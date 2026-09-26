@@ -51,6 +51,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Mobile connection details panel | — | host-only | active-route and address truth, endpoint ordering, certificate verdict, bounded network inspection, refresh authority and device-local clipboard policy | Host-only |
 | iOS saved-pairing recovery | — | host-only | protected-data availability, credential validation and custody, retry, write authority, selected Mac and deferred notification/widget navigation | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
+| Sentry app diagnostics settings | — | host-only | exact device-local consent, SDK lifecycle, payload sanitizer, sampling and immediate revocation | Host-only |
 | Main-thread stall readout | — | host-only | main-queue watchdog truth, bounded incident and trace recording, local opt-in and disclosure of active semantic spans | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
@@ -262,6 +263,13 @@ with owner authorization, the selected LAN route, single-use request ids, the fi
 allowlist, screenshot provenance and bounded custody. An extension may not replace or relabel
 these settings and claim evidence or an error screenshot is disabled when the host would still
 accept or collect it.
+
+Sentry app diagnostics settings are host-only because their switches are the visible consent
+boundary for a third-party diagnostic channel. Threading must keep the displayed state identical
+to the SDK lifecycle, enforce the payload sanitizer and sampling policy, and stop new reports as
+soon as consent is revoked. An extension may not replace or relabel the surface and claim
+reporting is off while the host SDK remains active, or offer data classes the host refuses to
+send.
 
 Mobile notification settings and their automatic turn-completion trigger are host-only because
 the switches are the visible consent boundary for APNs delivery and the trigger states a runtime

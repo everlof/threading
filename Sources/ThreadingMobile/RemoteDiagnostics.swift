@@ -77,6 +77,7 @@ enum MobileDiagnostics {
         fields: [RemoteDiagnosticField: String] = [:]
     ) {
         let record = journal.record(event, level: level, fields: fields)
+        SentryDiagnostics.capture(event, level: level, fields: fields)
         Task { @MainActor in
             sharing.enqueue(record)
             if level == .error {
