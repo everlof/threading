@@ -2546,3 +2546,40 @@ The complete native-window smoke suite passed on the final code.
 The repository's `scripts/test.sh all` gate passed: 9,522 Mac tests (83 skipped) and 898 iOS
 Simulator tests (one skipped), with zero failures. Architecture, theme and main-actor-latency
 boundary checks passed.
+
+## 95. The Linux window runs from an Ubuntu arm64 preview tarball
+
+The source-tree launcher previously always verified vendored files and invoked SwiftPM. It now
+uses sibling `bin/WindowHarness`, `bin/LinuxHost` and `bin/threading-ptyd` when its bundle marker is
+present. The existing source-tree path still builds its products. `package-app.sh` builds the
+three release executables with a static Swift runtime on Ubuntu 24.04 arm64, stages the launcher,
+runtime README and source stamp, and writes a tarball. The host products currently need Swift's
+`-enable-testing` flag for their `@testable` imports of the experimental core slice. This is a
+preview artifact, not a release-grade app or a replacement for the macOS distribution pipeline.
+The bundle runner passes the source revision and dirty state into its builder: a linked worktree's
+`.git` pointer names a path outside the Docker mount, so Git inside that container cannot read
+the checkout. The VM invocation supplies those values from the host worktree; a complete checkout
+can compute them locally. Packaging refuses missing or malformed provenance rather than stamping
+an unknown revision with a false clean state.
+
+`bundle-smoke.sh` builds the tarball in the pinned Swift container, then extracts it in a fresh
+Ubuntu 24.04 container with no Swift toolchain or source checkout. The runtime receives only the
+archive and test fixtures. It checks dynamic-library resolution and runs the existing real-Xvfb
+clean-profile startup journey without binary-path overrides: native folder import, duplicate and
+cancel behavior, saved-project reopen, daemon reuse and reattachment to the same terminal child.
+The folder fixture pastes the directory path and reads it back before submission; synthetic
+character-by-character typing intermittently let GTK autocomplete leave a stale suffix, making a
+valid test directory look absent to the application.
+The bundle needs Ubuntu's SDL2, Pango/Cairo, AT-SPI, SQLite, Zenity and font packages; those are
+listed in its README. This proves the Ubuntu 24.04 arm64 Xvfb path, not other distributions,
+Wayland, desktop installation or authenticated provider runs.
+
+The bundle's project-import presentation is deliberately host-only. Threading retains canonical
+path, store, daemon and process authority; Zenity supplies the platform folder dialog. Packaging
+adds no extension component or alternate presentation contract.
+
+The focused source-tree native-window smoke and the archive-only bundle smoke passed. The
+rendered empty-project window from the extracted bundle was inspected. All 10 spike runner
+contracts, architecture/theme/main-actor-latency checks and `scripts/test.sh all` passed. The
+complete Mac target ran 9,522 tests (83 skipped), and the iOS Simulator target ran 898 tests
+(one skipped), with zero failures.

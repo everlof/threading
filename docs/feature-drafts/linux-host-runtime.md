@@ -174,14 +174,17 @@ an explicit project target takes precedence
 ([FINDINGS section 94](../../Spikes/linux-appkit/FINDINGS.md#94-normal-linux-relaunch-follows-the-saved-agent)).
 A child that exited while the window was closed no longer opens as a false live attachment;
 explicit picker selection resumes it after transcript preflight. This still does not provide a
-packaged release or authenticated-provider evidence.
+release-grade Linux package or authenticated-provider evidence.
 The observed and offline exit cases are recorded in
 [FINDINGS section 90](../../Spikes/linux-appkit/FINDINGS.md#90-native-linux-agent-exits-survive-window-restarts).
 The source-tree launcher can also reopen the saved project navigator without a directory after
-the first import; the explicit-directory route still targets that project. This is a usable
-development lifecycle, not a packaged desktop entry point.
+the first import; the explicit-directory route still targets that project. A static-Swift preview
+tarball runs this lifecycle on Ubuntu 24.04 arm64 without the Swift toolchain or source checkout.
+It is not a packaged desktop entry point or a compatibility claim for other Linux distributions.
 The clean-profile and saved-project reopen checks are recorded in
 [FINDINGS section 91](../../Spikes/linux-appkit/FINDINGS.md#91-the-linux-development-app-reopens-from-its-saved-project-list).
+The archive-only runtime check is recorded in
+[FINDINGS section 95](../../Spikes/linux-appkit/FINDINGS.md#95-the-linux-window-runs-from-an-ubuntu-arm64-preview-tarball).
 
 ## The boundary to build
 
@@ -338,11 +341,12 @@ single-child selection through the native navigation route. Bounds-change notifi
 comprehensive focus behavior, terminal text selection, screen-reader inspection and other product
 surfaces remain unproven.
 
-The source-tree Linux launcher can now open a clean profile into an empty native project list.
+The Linux launcher can now open a clean profile into an empty native project list.
 Its Add project row and Ctrl+Shift+P command open a system GTK folder dialog through Zenity;
 the selected directory is imported by the host's canonical, locked store operation on a worker.
 The dialog is a Linux platform leaf for a deliberately host-only import action. This proves a
-first-launch path in the Xvfb shell, not packaging or broader Linux desktop compatibility.
+first-launch path in the Xvfb shell. The preview tarball tests that path without a source checkout;
+broader Linux desktop compatibility remains unproven.
 
 ## Evidence required
 

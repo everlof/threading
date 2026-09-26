@@ -9,7 +9,12 @@ project=''
 if [[ $# == 1 ]]; then
   project=$(realpath -e -- "$1")
 fi
-cd "$(dirname "${BASH_SOURCE[0]}")"
+app_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+cd "$app_dir"
+bundle_bin=''
+if [[ -f "$app_dir/BUNDLE-MANIFEST" ]]; then
+  bundle_bin=$app_dir/bin
+fi
 if [[ -n $project && ! -d $project ]]; then
   echo "run-app: project is not a directory: $project" >&2
   exit 1
@@ -42,18 +47,26 @@ if [[ ! -x /usr/bin/zenity ]]; then
 fi
 
 if [[ -z ${THREADING_LINUX_BIN_DIR:-} ]]; then
-  ./vendor-core.sh --verify
-  swift build --product WindowHarness
-  swift build --product LinuxHost
-  bin_dir=$(swift build --show-bin-path)
+  if [[ -n $bundle_bin ]]; then
+    bin_dir=$bundle_bin
+  else
+    ./vendor-core.sh --verify
+    swift build --product WindowHarness
+    swift build --product LinuxHost
+    bin_dir=$(swift build --show-bin-path)
+  fi
 else
   bin_dir=$THREADING_LINUX_BIN_DIR
 fi
 host=$bin_dir/LinuxHost
 window=$bin_dir/WindowHarness
 if [[ -z ${THREADING_LINUX_DAEMON_BIN:-} ]]; then
-  swift build --package-path ../../Targets/PTYHost --product threading-ptyd
-  daemon=$(swift build --package-path ../../Targets/PTYHost --show-bin-path)/threading-ptyd
+  if [[ -n $bundle_bin ]]; then
+    daemon=$bundle_bin/threading-ptyd
+  else
+    swift build --package-path ../../Targets/PTYHost --product threading-ptyd
+    daemon=$(swift build --package-path ../../Targets/PTYHost --show-bin-path)/threading-ptyd
+  fi
 else
   daemon=$THREADING_LINUX_DAEMON_BIN
 fi
