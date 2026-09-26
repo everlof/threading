@@ -319,9 +319,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         defer { database.close() }
         switch kind {
         case .terminal:
-            let projects = try database.load().state.projects
             let id = TerminalID(uuid)
-            guard projects.contains(where: { $0.terminals.contains(where: { $0.id == id }) }) else {
+            let records = try database.projectRecords()
+            guard records.contains(where: { $0.project.terminals.contains(where: { $0.id == id }) }) else {
                 throw WindowFailure("terminal is not in this store")
             }
             return PTYHostSessionIdentity(.projectTerminal(id))
@@ -358,25 +358,18 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
-        var state = try database.load().state
-        let index: Int
-        let addedProject: Bool
-        if let found = state.projects.firstIndex(where: { $0.folderPath == folder.path }) {
-            index = found
-            addedProject = false
-        } else {
-            state.projects.append(Project(name: folder.lastPathComponent, folderURL: folder))
-            index = state.projects.count - 1
-            addedProject = true
-        }
+        let records = try database.projectRecords()
+        let existing = records.first { $0.project.folderPath == folder.path }
+        var project = existing?.project ?? Project(name: folder.lastPathComponent, folderURL: folder)
+        let position = existing?.position ?? records.count
         let terminal = ProjectTerminal(id: TerminalID(), title: URL(fileURLWithPath: executable).lastPathComponent,
             customTitle: nil, currentDirectory: folder.path, branch: nil, themeID: nil,
             soundOverrides: nil, createdAt: Date())
-        state.projects[index].terminals.append(terminal)
-        if addedProject {
-            try database.addProject(state.projects[index], position: index)
+        project.terminals.append(terminal)
+        if existing == nil {
+            try database.addProject(project, position: position)
         } else {
-            try database.saveProject(state.projects[index], position: index)
+            try database.saveProject(project, position: position)
         }
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }

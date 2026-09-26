@@ -177,8 +177,16 @@ snapshot. The Linux project navigator uses a partial `navigationSnapshot` read: 
 sessions and decodes only its requested recent window per project, while retaining the saved
 selected-session identity. Project terminals still require decoding each owning project payload
 because they are embedded there. This does not relax the all-or-nothing contract for a complete
-graph: after either partial read, `save(_:)` refuses reconciliation on that connection until
+graph: after any partial read, `save(_:)` refuses reconciliation on that connection until
 `load()` succeeds.
+
+Linux shell creation and saved-terminal attach use `projectRecords()`, another partial read. It
+decodes ordered project payloads to find their embedded terminals and project positions, but reads
+no session payloads. The caller can append a terminal with the exact-row `saveProject` or
+`addProject` path even if an unrelated archived session is unreadable; it cannot reconcile the
+whole graph from those project rows. The project-array decode remains the scale boundary until
+terminals have independent rows.
+
 The Linux project window persists an opened saved agent as the selected session through an exact
 targeted validation and scalar write on a worker. Opening a shell or saved terminal clears that
 selection when the store accepts the write. A project-targeted relaunch can attempt attach-only

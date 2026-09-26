@@ -49,6 +49,21 @@ func runNavigationContracts() throws {
     let partial = try database.navigationSnapshot(recentSessionLimit: 2, recentTerminalLimit: 1)
     try require(partial.projects[0].recentSessions.map(\.id) == [older[3].id, older[2].id],
                 "unreadable dormant row is not decoded for navigation")
+    let projectRecords = try database.projectRecords()
+    try require(projectRecords.map(\.project.id) == [alpha.id, beta.id],
+                "terminal records retain project order without decoding sessions")
+    try require(projectRecords.allSatisfy { $0.project.sessions.isEmpty },
+                "terminal records loaded session payloads")
+    try require(projectRecords[0].project.terminals.map(\.id) == alpha.terminals.map(\.id),
+                "terminal attach cannot find saved terminals")
+    var editedProject = projectRecords[1].project
+    let shell = ProjectTerminal(id: TerminalID(), title: "New shell", customTitle: nil,
+                                currentDirectory: editedProject.folderPath, branch: nil,
+                                themeID: nil, soundOverrides: nil, createdAt: Date())
+    editedProject.terminals.append(shell)
+    try database.saveProject(editedProject, position: projectRecords[1].position)
+    try require(try database.projectRecords()[1].project.terminals.last?.id == shell.id,
+                "terminal creation did not persist after an unreadable unrelated session")
     do {
         _ = try database.load()
         throw ContractFailure.failed("authoritative load accepted unreadable session")
@@ -109,17 +124,27 @@ func runNavigationStress() throws {
         try require(snapshot.projects.allSatisfy { $0.recentSessions.isEmpty },
                     "stress creation decoded standing session payloads")
     }
+    func terminalRead() throws {
+        let records = try database.projectRecords()
+        try require(records.map(\.project.id) == [large.id, small.id],
+                    "stress terminal read changed project order")
+        try require(records.allSatisfy { $0.project.sessions.isEmpty },
+                    "stress terminal read decoded saved sessions")
+    }
 
     try fullRead()
     try navigationRead()
     try creationRead()
+    try terminalRead()
     var fullSamples: [Double] = []
     var navigationSamples: [Double] = []
     var creationSamples: [Double] = []
+    var terminalSamples: [Double] = []
     for _ in 0..<5 {
         fullSamples.append(try measure(fullRead))
         navigationSamples.append(try measure(navigationRead))
         creationSamples.append(try measure(creationRead))
+        terminalSamples.append(try measure(terminalRead))
     }
     func summary(_ samples: [Double]) -> String {
         let sorted = samples.sorted()
@@ -128,4 +153,5 @@ func runNavigationStress() throws {
     print(String(format: "navigation stress fixture: 5,100 sessions in 2 projects, about 165-byte titles; save %.1f ms", fixtureMilliseconds))
     print("full graph read: \(summary(fullSamples)); bounded navigation: \(summary(navigationSamples))")
     print("new-agent creation read: \(summary(creationSamples))")
+    print("terminal project read: \(summary(terminalSamples))")
 }

@@ -64,9 +64,10 @@ the existing preflight injection seam; no test fills the host disk. StateManager
 recovery policy remain outside this executable.
 
 `./coreslice.sh --navigation-stress` makes a disposable 5,100-session store and compares the
-old complete startup read with the bounded project navigator on that same store in a Release
-build. Fixture creation is reported separately. This is an opt-in scaling check, not a launch
-time measurement of the native window or a replacement for the behavioral contracts.
+complete graph read with bounded navigation, new-agent creation and terminal project reads on
+that same store in a Release build. Fixture creation is reported separately. This is an opt-in
+scaling check, not a launch-time measurement of the native window or a replacement for the
+behavioral contracts.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound

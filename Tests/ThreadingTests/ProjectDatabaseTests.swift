@@ -1132,6 +1132,43 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertThrowsError(try database.load())
     }
 
+    func testProjectRecordsLeaveUnrelatedSessionsUnreadForTerminalWrites() throws {
+        let database = try makeDatabase()
+        let archived = AgentSession(kind: .codex, title: "Archived")
+        let other = makeProject("other", sessions: [archived])
+        var target = makeProject("target")
+        let terminal = ProjectTerminal(id: TerminalID(), title: "Shell", customTitle: nil,
+                                       currentDirectory: target.folderPath, branch: nil,
+                                       themeID: nil, soundOverrides: nil, createdAt: Date())
+        target.terminals = [terminal]
+        try database.save(ProjectsState(projects: [other, target]))
+
+        let inspection = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { inspection.close() }
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, "{ unreadable archived session")
+            .bind(2, archived.id.uuidString)
+            .run()
+
+        let records = try database.projectRecords()
+        XCTAssertEqual(records.map(\.project.id), [other.id, target.id])
+        XCTAssertEqual(records.map(\.position), [0, 1])
+        XCTAssertTrue(records.allSatisfy { $0.project.sessions.isEmpty })
+        XCTAssertEqual(records[1].project.terminals.map(\.id), [terminal.id])
+        XCTAssertThrowsError(try database.save(ProjectsState(projects: []))) { error in
+            guard case ProjectDatabaseWriteError.partialReadRequiresFullLoad = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        var edited = records[1].project
+        edited.terminals[0].title = "Renamed shell"
+        try database.saveProject(edited, position: records[1].position)
+        XCTAssertEqual(try database.projectRecords()[1].project.terminals[0].title,
+                       "Renamed shell")
+        XCTAssertThrowsError(try database.load())
+    }
+
     func testOneSessionCanBeRemovedWithoutRewritingTheGraph() throws {
         let database = try makeDatabase()
         let first = AgentSession(kind: .claude, title: "First")
