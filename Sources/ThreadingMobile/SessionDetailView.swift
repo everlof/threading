@@ -866,7 +866,10 @@ struct SessionDetailView: View {
     /// host, and the disc then shows the mark alone.
     private var sessionAccount: RemoteAccountChoiceDTO? {
         let agent = model.me?.newSessionCatalog?.agents.first { $0.id == currentSession.agentKind }
-        return MobileSessionSettingsPresentation.account(for: currentSession, in: agent)
+        guard let account = MobileSessionSettingsPresentation.account(
+            for: currentSession, in: agent
+        ) else { return nil }
+        return model.accountWithCurrentUsage(account, runtimeID: currentSession.agentKind)
     }
 
     private var canOpenWorkspace: Bool {

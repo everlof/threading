@@ -153,6 +153,109 @@ final class MobileAccountUsageReadingTests: XCTestCase {
         )
     }
 
+    func testCapacityUpdateReplacesTheStaleWeeklyValueInTheSessionMenu() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = account(
+            windows: [.init(id: "7d", name: "7d", fraction: 0.90,
+                            resetsAt: now.addingTimeInterval(3_600).timeIntervalSince1970,
+                            windowDuration: weekSeconds)],
+            fraction: 0.90,
+            summary: "7d 90%",
+            defaultModelID: "gpt-6-sol"
+        )
+        let fresh = RemoteUsageCapacityAccountDTO(
+            runtimeID: "codex", runtimeName: "Codex", accountID: "default",
+            accountName: "David", observedAt: now.timeIntervalSince1970,
+            state: .current,
+            windows: [.init(id: "7d", name: "7d", fraction: 0.95,
+                            resetsAt: now.addingTimeInterval(3_600).timeIntervalSince1970,
+                            windowDuration: weekSeconds)]
+        )
+
+        let updated = MobileAccountUsageOverlay.apply(fresh, to: old, now: now)
+
+        XCTAssertEqual(updated.usageSummary, "7d 95%")
+        XCTAssertEqual(updated.usageFraction, 0.95)
+        XCTAssertEqual(
+            MobileAccountUsageReading.resolve(account: updated, model: "gpt-6-sol", now: now)?.summary,
+            "7d 95%"
+        )
+    }
+
+    func testCapacityUpdateKeepsCataloguesModelScopeAndClearsUnavailableValues() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = account(windows: [weekly, fable], defaultModelID: "claude-fable-5")
+        let fresh = RemoteUsageCapacityAccountDTO(
+            runtimeID: "claude", runtimeName: "Claude Code", accountID: "default",
+            accountName: "David", observedAt: now.timeIntervalSince1970,
+            state: .current,
+            windows: [
+                .init(id: "7d", name: "7d", fraction: 0.75, windowDuration: weekSeconds),
+                .init(id: "Fable", name: "7d Fable", fraction: 0.95,
+                      windowDuration: weekSeconds),
+            ]
+        )
+        let updated = MobileAccountUsageOverlay.apply(fresh, to: old, now: now)
+        XCTAssertEqual(updated.usageWindows?.last?.metersModelIDs,
+                       ["claude-fable-5", "claude-fable-5[1m]"])
+        XCTAssertEqual(MobileAccountUsageReading.resolve(
+            account: updated, model: "claude-fable-5", now: now
+        )?.summary, "7d 75% · 7d Fable 95%")
+        XCTAssertEqual(MobileAccountUsageReading.resolve(
+            account: updated, model: "claude-opus-5", now: now
+        )?.summary, "7d 75%")
+
+        let unavailable = RemoteUsageCapacityAccountDTO(
+            runtimeID: "claude", runtimeName: "Claude Code", accountID: "default",
+            accountName: "David", observedAt: nil, state: .unavailable, windows: []
+        )
+        let cleared = MobileAccountUsageOverlay.apply(unavailable, to: old, now: now)
+        XCTAssertNil(cleared.usageSummary)
+        XCTAssertNil(cleared.usageFraction)
+        XCTAssertNotNil(cleared.usageError)
+    }
+
+    func testCapacityUpdateWithholdsAnUnknownWindowWhoseNameEqualsItsID() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = account(windows: [weekly], defaultModelID: "claude-opus-5")
+        let fresh = RemoteUsageCapacityAccountDTO(
+            runtimeID: "claude", runtimeName: "Claude Code", accountID: "default",
+            accountName: "David", observedAt: now.timeIntervalSince1970,
+            state: .current,
+            windows: [
+                .init(id: "7d", name: "7d", fraction: 0.75, windowDuration: weekSeconds),
+                // A scoped window with an unknown duration also has name == id.
+                .init(id: "Fable", name: "Fable", fraction: 0.95),
+            ]
+        )
+
+        let updated = MobileAccountUsageOverlay.apply(fresh, to: old, now: now)
+
+        XCTAssertEqual(updated.usageWindows?.map(\.id), ["7d"])
+        XCTAssertEqual(MobileAccountUsageReading.resolve(
+            account: updated, model: "claude-opus-5", now: now
+        )?.summary, "7d 75%")
+    }
+
+    func testCapacityTruncationDoesNotRetainAnOldNumericLimit() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = account(windows: [fiveHour, weekly], defaultModelID: "gpt-6-sol")
+        let fresh = RemoteUsageCapacityAccountDTO(
+            runtimeID: "codex", runtimeName: "Codex", accountID: "default",
+            accountName: "David", observedAt: now.timeIntervalSince1970,
+            state: .current,
+            windows: [.init(id: "5h", name: "5h", fraction: 0.55,
+                            windowDuration: fiveHourSeconds)]
+        )
+
+        let updated = MobileAccountUsageOverlay.apply(
+            fresh, to: old, mayOmitWindows: true, now: now
+        )
+
+        XCTAssertEqual(updated.usageSummary, "5h 55% · 7d —")
+        XCTAssertNil(updated.usageWindows?.last?.fraction)
+    }
+
     /// The Mac lists windows short to long, as its text reads them; the disc rings them long to
     /// short, the week outside the five hours, so the outer ring is the one slowest to come back.
     func testTheAccountsWindowsRingLongestOutsideAndShortestInnermost() {

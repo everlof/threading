@@ -10,6 +10,17 @@ import XCTest
 /// two callers that produced most of them — a dashboard coming on screen and the scene
 /// activating — to the answers that stop that, and everything that must still be paid in full.
 final class MobileRefreshPolicyTests: XCTestCase {
+    func testNumericUsageRevisionIsDecodedBeforeTheCatalogueEnvelope() throws {
+        let change = RemoteUsageCapacityChangedDTO(
+            epoch: "B2BEA9D9-94C2-4A10-92D2-AD7A820D408C", revision: 12
+        )
+        XCTAssertEqual(try MobileUsageCapacityEvent.decodeIfPresent(JSONEncoder().encode(change)),
+                       change)
+        XCTAssertNil(try MobileUsageCapacityEvent.decodeIfPresent(
+            Data(#"{"type":"catalogueHello","revision":{"epoch":"B2BEA9D9-94C2-4A10-92D2-AD7A820D408C","revision":12}}"#.utf8)
+        ))
+    }
+
     /// Which path changes are worth asking the sockets about: a network coming or going, or the
     /// kinds of interface carrying it changing. The first observation describes the network the
     /// sockets were built on and is not a change; the path becoming expensive or constrained

@@ -325,6 +325,24 @@ struct MobileCatalogueStreamFence: Equatable {
     }
 }
 
+/// Capacity events have a numeric revision, while catalogue events have an epoch/revision
+/// object. Route the former before decoding the strict catalogue envelope; trying to decode
+/// both through one `revision` field disconnects the event socket on every usage update.
+enum MobileUsageCapacityEvent {
+    private struct Kind: Decodable { let type: String }
+
+    static func decodeIfPresent(_ data: Data) throws -> RemoteUsageCapacityChangedDTO? {
+        let decoder = JSONDecoder()
+        guard try decoder.decode(Kind.self, from: data).type == "usageCapacityChanged" else {
+            return nil
+        }
+        let change = try decoder.decode(RemoteUsageCapacityChangedDTO.self, from: data)
+        guard change.type == "usageCapacityChanged", UUID(uuidString: change.epoch) != nil,
+              change.revision > 0 else { throw RemoteClientError.invalidResponse }
+        return change
+    }
+}
+
 @MainActor
 final class RemoteAppModel: ObservableObject {
     enum Phase: Equatable {
@@ -394,6 +412,16 @@ final class RemoteAppModel: ObservableObject {
             rememberCurrentDashboard()
         }
     }
+
+    /// Bounded account readings from the capacity feed, independent of `/api/me`'s session
+    /// catalogue revision. A provider update must not rebuild a potentially large session list.
+    @Published private(set) var accountUsageByID: [String: RemoteUsageCapacityAccountDTO] = [:]
+    private var accountUsageMayOmitWindows = false
+    private var accountUsageHostID: String?
+    private var accountUsageVersion: (epoch: String, revision: UInt64)?
+    private var accountUsageRefreshTask: Task<Void, Never>?
+    private var accountUsageRefreshPending = false
+    private var accountUsageRefreshGeneration: UInt64 = 0
 
     /// Every transition is recorded, not only the current one. A support report that says only
     /// "offline" cannot tell a phone that never reached this Mac from one that reached it and
@@ -1049,6 +1077,83 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         usageGlance?.refresh(pairingID: host.id, hostName: host.name, client: client)
+    }
+
+    /// The session menu and identity picker consume the same current account reading as the
+    /// widget feed. Lookup is O(1) per visible account; a usage event never copies `me.sessions`.
+    func accountWithCurrentUsage(
+        _ account: RemoteAccountChoiceDTO,
+        runtimeID: String
+    ) -> RemoteAccountChoiceDTO {
+        guard accountUsageHostID == activeHostID else { return account }
+        let key = "\(runtimeID.utf8.count):\(runtimeID)\(account.id)"
+        guard let fresh = accountUsageByID[key] else { return account }
+        return MobileAccountUsageOverlay.apply(
+            fresh, to: account, mayOmitWindows: accountUsageMayOmitWindows
+        )
+    }
+
+    func agentWithCurrentUsage(_ agent: RemoteAgentChoiceDTO) -> RemoteAgentChoiceDTO {
+        guard let accounts = agent.accounts else { return agent }
+        return RemoteAgentChoiceDTO(
+            id: agent.id,
+            name: agent.name,
+            accounts: accounts.map { accountWithCurrentUsage($0, runtimeID: agent.id) },
+            models: agent.models,
+            defaultModelID: agent.defaultModelID,
+            supportsConversation: agent.supportsConversation,
+            permissionModes: agent.permissionModes
+        )
+    }
+
+    /// Provider updates can be frequent when several chats work at once. One capacity fetch
+    /// runs at a time, coalesces a burst for 500 ms, and retains only one pending invalidation.
+    /// A host switch fences both in-flight responses and the previous host's visible values.
+    private func refreshAccountUsageCapacity(after change: RemoteUsageCapacityChangedDTO? = nil) {
+        guard !isDemo, !isEphemeralTerminalWireFixture,
+              me?.features?.contains(RemoteRESTFeature.usageCapacity.rawValue) == true,
+              let hostID = activeHostID, let client else { return }
+        if accountUsageHostID != hostID {
+            accountUsageRefreshGeneration &+= 1
+            accountUsageRefreshTask?.cancel()
+            accountUsageRefreshTask = nil
+            accountUsageRefreshPending = false
+            accountUsageHostID = hostID
+            accountUsageVersion = nil
+            accountUsageByID = [:]
+            accountUsageMayOmitWindows = false
+        }
+        if let change, let version = accountUsageVersion,
+           version.epoch == change.epoch, version.revision >= change.revision { return }
+        accountUsageRefreshPending = true
+        guard accountUsageRefreshTask == nil else { return }
+        let generation = accountUsageRefreshGeneration
+        accountUsageRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if accountUsageRefreshGeneration == generation {
+                    accountUsageRefreshTask = nil
+                }
+            }
+            while accountUsageRefreshPending, !Task.isCancelled,
+                  accountUsageRefreshGeneration == generation, activeHostID == hostID {
+                accountUsageRefreshPending = false
+                do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                do {
+                    let snapshot = try await client.fetchUsageCapacity()
+                    guard !Task.isCancelled, accountUsageRefreshGeneration == generation,
+                          activeHostID == hostID else { return }
+                    if let version = accountUsageVersion, version.epoch == snapshot.epoch,
+                       version.revision >= snapshot.revision { continue }
+                    accountUsageVersion = (snapshot.epoch, snapshot.revision)
+                    accountUsageMayOmitWindows = snapshot.omittedWindowCount > 0
+                    accountUsageByID = Dictionary(
+                        uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) }
+                    )
+                } catch is CancellationError { return }
+                catch { /* Keep the last dated reading; the next event or reconnect retries. */ }
+            }
+        }
     }
 
     /// Whether the Mac answers the continuation route at all. An older one does not, and the
@@ -1870,6 +1975,7 @@ final class RemoteAppModel: ObservableObject {
             RemoteHostTrust.register([updated])
             ensureThemeEvents(for: updated)
             refreshUsageGlance(features: response.features)
+            refreshAccountUsageCapacity()
         }
         if !isEphemeralTerminalWireFixture {
             await reconcileHostedCredential(
@@ -4035,6 +4141,14 @@ final class RemoteAppModel: ObservableObject {
                 guard activeHostID == hostID else { return }
                 guard case let .string(text) = message else { continue }
                 let data = Data(text.utf8)
+                if let change = try MobileUsageCapacityEvent.decodeIfPresent(data) {
+                    guard themeEventsDidReceiveHello else {
+                        throw RemoteClientError.invalidResponse
+                    }
+                    refreshUsageGlance(features: me?.features)
+                    refreshAccountUsageCapacity(after: change)
+                    continue
+                }
                 struct Envelope: Decodable {
                     let type: String
                     let streamID: String?
@@ -4077,6 +4191,7 @@ final class RemoteAppModel: ObservableObject {
                 switch envelope.type {
                 case "catalogueHello":
                     refreshUsageGlance(features: me?.features)
+                    refreshAccountUsageCapacity()
                     guard let streamID = envelope.streamID, !streamID.isEmpty,
                           let revision = envelope.revision else {
                         throw RemoteClientError.invalidResponse
@@ -4097,8 +4212,6 @@ final class RemoteAppModel: ObservableObject {
                     ) {
                         me = me?.replacing(theme: update.theme)
                     }
-                case "usageCapacityChanged":
-                    refreshUsageGlance(features: me?.features)
                 case "sessionsChanged":
                     let update = RemoteSessionsChangedDTO(
                         session: envelope.session,

@@ -2194,6 +2194,9 @@ spent is comfortable an hour before a reset and alarming four hours before one.
 Values are the last ones fetched: the composer shows what is known and asks for a fresh
 reading, so a login never read before fills in shortly after. Accounts with no usage source
 show nothing at all, exactly as they show no pill.
+On a paired iPhone, the session menu, new-chat account picker and Chat Settings follow new
+account readings from the Mac while the connection is live. The phone keeps each model's
+separate limit attached to that model.
 
 Where the numbers come from, per agent:
 

@@ -345,6 +345,83 @@ struct MobileAccountUsageReading: Equatable {
     }
 }
 
+/// The bounded capacity feed is fresher than the session catalogue's account readings. Keep
+/// model membership from that catalogue: the capacity feed intentionally carries no model list,
+/// and guessing an unknown window's scope on the phone could display it on the wrong chat.
+enum MobileAccountUsageOverlay {
+    static func apply(
+        _ fresh: RemoteUsageCapacityAccountDTO,
+        to account: RemoteAccountChoiceDTO,
+        mayOmitWindows: Bool = false,
+        now: Date = Date()
+    ) -> RemoteAccountChoiceDTO {
+        let previous = Dictionary(
+            (account.usageWindows ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        var windows = fresh.windows.compactMap { window -> RemoteAccountUsageWindowDTO? in
+            // Even name == id does not prove a window is account-wide: a scoped limit with an
+            // unknown duration uses its model name for both. Wait for the Mac's model mapping.
+            guard let known = previous[window.id] else { return nil }
+            return RemoteAccountUsageWindowDTO(
+                id: window.id,
+                name: window.name,
+                fraction: window.fraction,
+                resetsAt: window.resetsAt,
+                windowDuration: window.windowDuration,
+                metersModelIDs: known.metersModelIDs
+            )
+        }
+        if mayOmitWindows, fresh.state != .unavailable {
+            let included = Set(fresh.windows.map(\.id))
+            windows += (account.usageWindows ?? []).filter { !included.contains($0.id) }.map {
+                RemoteAccountUsageWindowDTO(
+                    id: $0.id, name: $0.name, fraction: nil, resetsAt: $0.resetsAt,
+                    windowDuration: $0.windowDuration, metersModelIDs: $0.metersModelIDs
+                )
+            }
+        }
+        let metered = windows.filter { window in
+            guard let models = window.metersModelIDs else { return true }
+            guard let model = account.defaultModelID else { return false }
+            return models.contains(model)
+        }
+        let summary = metered.map { window in
+            let value: String
+            if let fraction = window.fraction,
+               window.resetsAt.map({ $0 > now.timeIntervalSince1970 }) ?? true {
+                value = "\(Int((fraction * 100).rounded()))%"
+            } else {
+                value = MobileUsageDefaults.unknownValue
+            }
+            return "\(window.name) \(value)"
+        }.joined(separator: MobileUsageDefaults.segmentSeparator)
+        let peak = metered.compactMap { window -> Double? in
+            guard window.resetsAt.map({ $0 > now.timeIntervalSince1970 }) ?? true else {
+                return nil
+            }
+            return window.fraction
+        }.max()
+        return RemoteAccountChoiceDTO(
+            id: account.id,
+            name: account.name,
+            email: account.email,
+            emoji: account.emoji,
+            presentation: account.presentation,
+            imagePNG: account.imagePNG,
+            appearances: account.appearances,
+            images: account.images,
+            usageSummary: summary.isEmpty ? nil : summary,
+            usageFraction: peak,
+            // The identity picker uses this only to distinguish unavailable from loading.
+            usageError: fresh.state == .unavailable ? "unavailable" : nil,
+            usageWindows: windows,
+            models: account.models,
+            defaultModelID: account.defaultModelID
+        )
+    }
+}
+
 /// The disc's vocabulary, matching the Mac's `UsageDefaults` so a reading is one text on both.
 enum MobileUsageDefaults {
     /// How many rings fit around the mark at the disc's stroke and gap; a fourth would touch it.

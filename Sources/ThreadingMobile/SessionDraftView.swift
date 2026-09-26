@@ -388,7 +388,9 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private var accounts: [RemoteAccountChoiceDTO] {
-        selectedAgent?.accounts ?? []
+        (selectedAgent?.accounts ?? []).map {
+            appModel.accountWithCurrentUsage($0, runtimeID: agentID)
+        }
     }
 
     private var selectedAccount: RemoteAccountChoiceDTO? {

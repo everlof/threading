@@ -514,6 +514,15 @@ reset from that same resolved window set. The reading owns the reset timestamp r
 the menu rescan the account's complete wire list: a Codex Spark reset therefore appears only for a
 chat that actually runs Spark, never because it happens earlier than the selected model's limits.
 
+The phone refreshes these account readings through the bounded owner-only capacity feed when its
+event socket joins and when `usageCapacityChanged` advances. It overlays the current account
+values onto the catalogue by provider and account handle, without rebuilding the session list or
+advancing its unrelated catalogue revision. The catalogue remains the owner of model membership:
+capacity windows update matching ids, while an unknown window is withheld until the Mac supplies
+its scope in a later catalogue. If the global capacity bound omits a known window, the phone
+retains its name and scope but clears its old percentage. A numeric capacity revision is decoded
+before the event socket's strict catalogue envelope, whose revision is an epoch/revision object.
+
 ### One name per window
 
 A window is named by its **length**, and a scoped one adds the **model** it meters: compact

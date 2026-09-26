@@ -20,6 +20,14 @@ invalidate discovery; a later capacity request also refreshes a discovery older 
 Provider refreshes retain the existing four-request concurrency and pacing. Changed readings
 compare only the bounded projection, not an arbitrarily large provider window list.
 
+The phone's live session menu, composer and account settings also use this feed. One coalesced,
+single-flight capacity request follows socket join or a changed capacity revision; its bounded
+account map overlays the older account values in `/api/me` without republishing the session
+catalogue. The catalogue supplies model-to-window membership, which this widget-oriented feed
+deliberately omits. Capacity's numeric revision is routed before decoding the catalogue event
+envelope, whose revision is a different type; decoding it through that envelope disconnected the
+socket precisely when a usage update arrived.
+
 On the phone, **Settings → Widgets → Use this Mac for widgets** pins one pairing identity.
 The publisher belongs to the application delegate, rather than the Usage screen or unit-test
 model initializer. It uses the authenticated active route only when that route belongs to the

@@ -178,7 +178,10 @@ struct MobileSessionSettingsView: View {
 
     private var agent: RemoteAgentChoiceDTO? {
         guard let session else { return nil }
-        return model.me?.newSessionCatalog?.agents.first { $0.id == session.agentKind }
+        guard let accountAgent = model.me?.newSessionCatalog?.agents.first(where: {
+            $0.id == session.agentKind
+        }) else { return nil }
+        return model.agentWithCurrentUsage(accountAgent)
     }
 
     private var currentAccount: RemoteAccountChoiceDTO? {
@@ -354,7 +357,7 @@ struct MobileSessionSettingsView: View {
     private func continuationRow() -> some View {
         let accounts = MobileSessionSettingsPresentation.continuationAccounts(
             for: continuationDestinations,
-            in: model.me?.newSessionCatalog?.agents ?? []
+            in: (model.me?.newSessionCatalog?.agents ?? []).map(model.agentWithCurrentUsage)
         )
         return Menu {
             ForEach(continuationDestinations) { destination in
