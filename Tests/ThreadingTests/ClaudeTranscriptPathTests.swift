@@ -137,10 +137,180 @@ final class ClaudeTranscriptPathTests: XCTestCase {
         )
     }
 
+    // MARK: - A folder reached through a symlink
+
+    /// The trap the obvious call walks into. Foundation hands `/private/tmp` back as `/tmp`,
+    /// the one spelling Claude never files under, so a project normalised that way was looked
+    /// for in `-tmp-…` while its conversation sat in `-private-tmp-…`.
+    func testThePhysicalPathKeepsPrivateWhereFoundationStripsIt() {
+        XCTAssertEqual(URL(fileURLWithPath: "/private/tmp").resolvingSymlinksInPath().path, "/tmp")
+
+        XCTAssertEqual(ClaudeTranscript.physicalPath(of: "/tmp"), "/private/tmp")
+        XCTAssertEqual(ClaudeTranscript.projectSlugs(forPath: "/tmp"), ["-private-tmp", "-tmp"])
+    }
+
+    func testAFolderWithNoLinkOnItsPathHasOneSpelling() throws {
+        let physical = try Self.workingDirectory(of: temporaryDirectory())
+
+        XCTAssertEqual(
+            ClaudeTranscript.projectSlugs(forPath: physical),
+            [ClaudeTranscript.projectSlug(forPath: physical)]
+        )
+    }
+
+    /// The case that stopped a conversation resuming, reduced: its folder was stored as
+    /// `/tmp/takto-pr60`, Claude filed it under `-private-tmp-takto-pr60`, the lookup missed,
+    /// and the launch fell through to `--session-id`, which Claude refused with exit 1.
+    ///
+    /// The physical path is asked of the kernel the way Claude asks it (`pwd -P`, i.e.
+    /// `getcwd`), rather than computed by the code under test.
+    @MainActor
+    func testAConversationFiledUnderThePhysicalPathIsFoundThroughALink() throws {
+        let folder = try linkedFolder()
+        let configPath = try temporaryDirectory()
+        let transcriptID = TranscriptID("f4f885ad-69c4-4848-9d9b-8166328a59ac")
+        let planted = try plantTranscript(
+            transcriptID: transcriptID,
+            configPath: configPath,
+            slug: ClaudeTranscript.projectSlug(forPath: folder.physical)
+        )
+
+        let located = try locate(transcriptID, configPath: configPath, folder: folder.link)
+
+        XCTAssertEqual(located.path, planted.path)
+        XCTAssertEqual(
+            ClaudeTranscript.storageURL(
+                sessionID: transcriptID,
+                account: Self.account(configPath: configPath),
+                in: Self.project(at: folder.link)
+            )?.path,
+            planted.path
+        )
+    }
+
+    /// A copy Threading filed under the stated spelling before this was known is the file Claude
+    /// goes on writing, because its `--resume` opens a copy wherever it is. It is still found,
+    /// while a copy made now goes where Claude files a conversation it starts.
+    @MainActor
+    func testACopyFiledUnderTheStatedSpellingIsStillFound() throws {
+        let folder = try linkedFolder()
+        let configPath = try temporaryDirectory()
+        let transcriptID = TranscriptID("3c44806a-5f53-45fd-9060-839db64a9cf5")
+        let legacy = try plantTranscript(
+            transcriptID: transcriptID,
+            configPath: configPath,
+            slug: ClaudeTranscript.projectSlug(forPath: folder.link)
+        )
+
+        let located = try locate(transcriptID, configPath: configPath, folder: folder.link)
+        let destination = try XCTUnwrap(
+            ClaudeTranscript.storageURL(
+                sessionID: transcriptID,
+                account: Self.account(configPath: configPath),
+                in: Self.project(at: folder.link)
+            )
+        )
+
+        XCTAssertEqual(located.path, legacy.path)
+        XCTAssertEqual(
+            destination.deletingLastPathComponent().lastPathComponent,
+            ClaudeTranscript.projectSlug(forPath: folder.physical)
+        )
+    }
+
+    /// Both present means a stale copy beside a live one; Claude resumes the physical one.
+    @MainActor
+    func testThePhysicalCopyWinsWhenBothSpellingsHoldOne() throws {
+        let folder = try linkedFolder()
+        let configPath = try temporaryDirectory()
+        let transcriptID = TranscriptID("8cae8876-fd26-47a7-b71a-2246316c6d20")
+        _ = try plantTranscript(
+            transcriptID: transcriptID,
+            configPath: configPath,
+            slug: ClaudeTranscript.projectSlug(forPath: folder.link)
+        )
+        let physical = try plantTranscript(
+            transcriptID: transcriptID,
+            configPath: configPath,
+            slug: ClaudeTranscript.projectSlug(forPath: folder.physical)
+        )
+
+        XCTAssertEqual(
+            try locate(transcriptID, configPath: configPath, folder: folder.link).path,
+            physical.path
+        )
+    }
+
+    /// A catalogue projection asks `.known` once per session on the main actor, so it must not
+    /// resolve a link or probe for a file: a folder nothing has resolved keeps its stated
+    /// spelling, and one that has been resolved answers the physical one from memory.
+    func testTheKnownEffortAnswersFromMemoryAlone() throws {
+        let folder = try linkedFolder()
+        let stated = ClaudeTranscript.projectSlug(forPath: folder.link)
+        let physical = ClaudeTranscript.projectSlug(forPath: folder.physical)
+
+        XCTAssertEqual(ClaudeTranscript.projectSlugs(forPath: folder.link, effort: .known), [stated])
+        XCTAssertEqual(ClaudeTranscript.projectSlugs(forPath: folder.link), [physical, stated])
+        XCTAssertEqual(
+            ClaudeTranscript.projectSlugs(forPath: folder.link, effort: .known),
+            [physical, stated]
+        )
+    }
+
     // MARK: - Fixtures
 
     private static func account(configPath: String) -> AgentAccount {
         AgentAccount(provider: .claude, handle: .standard, configPath: configPath)
+    }
+
+    private static func project(at folder: String) -> Project {
+        var project = Project(name: "linked", folderURL: URL(fileURLWithPath: folder))
+        project.folderPath = folder
+        return project
+    }
+
+    /// The file the reader, and so the launcher's resume check, settles on.
+    @MainActor
+    private func locate(_ transcriptID: TranscriptID, configPath: String, folder: String) throws -> URL {
+        var session = AgentSession(kind: .claude, title: "linked")
+        session.resumeState = .resumable(transcriptID)
+        let request = try XCTUnwrap(
+            SessionTranscript.readRequest(
+                sessionID: transcriptID,
+                for: session,
+                in: Self.project(at: folder),
+                account: Self.account(configPath: configPath)
+            )
+        )
+        return try XCTUnwrap(request.resolve())
+    }
+
+    /// A real folder and a link to it, with the physical path as the kernel reports it. Under
+    /// the temporary directory, which is itself under `/var` — a link into `/private` — so the
+    /// fixture has both kinds of link on its path.
+    private func linkedFolder() throws -> (link: String, physical: String) {
+        let root = try temporaryDirectory()
+        let real = (root as NSString).appendingPathComponent("real")
+        let link = (root as NSString).appendingPathComponent("link")
+        try FileManager.default.createDirectory(atPath: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
+        let physical = try Self.workingDirectory(of: link)
+        XCTAssertNotEqual(physical, link)
+        return (link, physical)
+    }
+
+    private static func workingDirectory(of path: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/pwd")
+        process.arguments = ["-P"]
+        process.currentDirectoryURL = URL(fileURLWithPath: path)
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        return String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func temporaryDirectory() throws -> String {

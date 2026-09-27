@@ -988,11 +988,13 @@ enum AgentLauncher {
         // Resume button doing nothing looks like from outside, and the wrong-slug bug that
         // caused it was invisible for exactly as long as this path stayed silent.
         if session.hasLaunched, let existingID = session.resumeState.transcriptID {
+            let searched = ClaudeTranscript.projectSlugs(forPath: project.folderPath)
+                .joined(separator: " or ")
             ThreadingLogger.agent.warning(
                 """
                 Session \(session.id.uuidString, privacy: .public) has run before but no \
                 transcript for \(existingID.rawValue, privacy: .public) was found under \
-                \(ClaudeTranscript.projectSlug(for: project), privacy: .public); \
+                \(searched, privacy: .public); \
                 launching fresh
                 """
             )

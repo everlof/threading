@@ -2,11 +2,12 @@ import Foundation
 
 /// How far a transcript lookup may go to answer.
 ///
-/// A Claude transcript uses its reported live path or a computed fallback, so the effort makes
-/// no difference to it. A Codex rollout is *found*: its name carries a timestamp
-/// nobody recorded, so placing one means reading the account's whole sessions tree, and that
-/// is the work a caller with a catalogue of conversations must not do once per conversation
-/// on the main actor.
+/// A Claude transcript uses its reported live path or a computed fallback, and the effort only
+/// decides whether that fallback may resolve the folder's symlinks and ask which of its two
+/// spellings holds the file (`ClaudeTranscript.StorageSlot`). A Codex rollout is *found*: its
+/// name carries a timestamp nobody recorded, so placing one means reading the account's whole
+/// sessions tree, and that is the work a caller with a catalogue of conversations must not do
+/// once per conversation on the main actor.
 enum TranscriptLookupEffort: Sendable {
     /// Read the filesystem when nothing is known yet. The answer for one conversation.
     case discovering
@@ -26,12 +27,15 @@ enum SessionTranscript {
     /// location must be captured before leaving the actor; Codex's directory walk stays deferred.
     enum ReadRequest: Sendable {
         case file(URL)
+        case claudeStorage(ClaudeTranscript.StorageSlot)
         case codexRollout(TranscriptID, AgentAccount)
 
         func resolve(effort: TranscriptLookupEffort = .discovering) -> URL? {
             switch self {
             case .file(let url):
                 return url
+            case .claudeStorage(let slot):
+                return slot.resolve(effort: effort)
             case .codexRollout(let id, let account):
                 switch effort {
                 case .discovering: return CodexTranscript.url(sessionID: id, account: account)
@@ -68,12 +72,13 @@ enum SessionTranscript {
             ) {
                 return .file(mirror)
             }
-            let observed = sessionID == session.resumeState.transcriptID
-                ? locations.url(for: session, account: account) : nil
-            guard let url = observed ?? ClaudeTranscript.storageURL(
+            if sessionID == session.resumeState.transcriptID,
+               let observed = locations.url(for: session, account: account) {
+                return .file(observed)
+            }
+            return ClaudeTranscript.storageSlot(
                 sessionID: sessionID, account: account, in: project
-            ) else { return nil }
-            return .file(url)
+            ).map(ReadRequest.claudeStorage)
         case .codex:
             return .codexRollout(sessionID, account)
         case .grok, .openCode, .cursor:

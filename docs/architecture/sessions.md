@@ -1081,6 +1081,28 @@ the same encoding a second time and so found nothing to import from those folder
 encoding now lives in `ClaudeTranscript` alone and `ClaudeTranscriptPathTests` holds the measured
 cases.
 
+**The path it encodes is the physical one.** Claude names the directory after `getcwd`, which
+resolves every symlink on the way, and `/tmp` and `/var` are both links into `/private`. Threading
+normalises folders with `URL.resolvingSymlinksInPath()`, which does the opposite for exactly that
+prefix: it strips `/private` whenever the remainder exists, so `/private/tmp/x` is stored as
+`/tmp/x`. On 2026-09-27 a conversation at `/tmp/takto-pr60` stopped resuming. Its 15.7 MB
+transcript was in `-private-tmp-takto-pr60`, the lookup asked `-tmp-takto-pr60`, and every
+Resume became `--session-id`, which Claude refuses with
+`Error: Session ID … is already in use.` and exit 1. The journal's hook reports agreed: every
+fresh Threading launch in a `/tmp` folder reported its transcript under `-private-tmp-…`. So
+`ClaudeTranscript.physicalPath` uses `realpath(3)` and `projectSlugs` lists the physical spelling
+first.
+
+The stated spelling stays second, because Threading's own copies went there. An account
+migration had copied one conversation into `-tmp-sonda-503-poc`, and Claude's `--resume` opened
+that copy and went on writing it, so for such a conversation the stated directory holds the live
+file. A reader resolves through `ClaudeTranscript.StorageSlot`: the first spelling that exists,
+else the physical one. A copy destination (`storageURL`) is always the physical one, which is the
+copy Claude's resume finds first. The physical path is remembered per folder, so the `.known`
+lookup that a catalogue projection makes once per session on the main actor resolves nothing.
+It answers from memory and falls back to the stated spelling. `SessionImporter` scans both
+directories and deduplicates.
+
 The *directory* was never the bug: `AgentLauncher.plan` and `ProjectStore.executionProject` both
 hand the transcript seam a `Project` copy whose `folderPath` is `session.workingDirectory(in:)`,
 so a managed workspace is already addressed by the worktree it ran in rather than by the

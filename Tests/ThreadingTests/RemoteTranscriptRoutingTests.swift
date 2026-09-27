@@ -39,9 +39,10 @@ final class RemoteTranscriptRoutingTests: HostedStoreTestCase {
         XCTAssertEqual(remoteURL, RemoteTranscriptMirror.shared.localURL(destination: host.sshDestination, transcriptID: id))
         XCTAssertFalse(remoteURL.path.contains("/.claude"), "a mirror inside a Claude directory is counted as a conversation")
 
-        guard case .file(let localURL)? = SessionTranscript.readRequest(
+        let localRequest = try XCTUnwrap(SessionTranscript.readRequest(
             sessionID: id, for: local, in: localProject, account: account
-        ) else { return XCTFail("no request for the local session") }
+        ), "no request for the local session")
+        let localURL = try XCTUnwrap(localRequest.resolve())
         XCTAssertFalse(RemoteTranscriptMirror.shared.contains(localURL))
         XCTAssertTrue(localURL.path.hasPrefix(account.configPath), localURL.path)
     }

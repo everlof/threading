@@ -151,57 +151,61 @@ enum SessionImporter {
     /// The encoding comes from `ClaudeTranscript` rather than being spelled again here. This
     /// site had its own copy, and the copy was the incomplete one: a project folder with a dot
     /// or a space in its name scanned a directory that does not exist and reported no
-    /// conversations to import, which is indistinguishable from having none.
+    /// conversations to import, which is indistinguishable from having none. Both spellings of
+    /// a symlinked folder are scanned for the same reason (`ClaudeTranscript.projectSlugs`); a
+    /// conversation found under both is one row after `deduplicated`.
     private static func claudeSessions(
         inFolder folder: String,
         worktree: String?,
         accounts: [AgentAccount]
     ) -> ScanBatch {
-        let slug = ClaudeTranscript.projectSlug(forPath: folder)
+        let slugs = ClaudeTranscript.projectSlugs(forPath: folder)
 
         let fileManager = FileManager.default
         var found: [ImportableSession] = []
         var failures = 0
         for account in accounts {
-            let directory = URL(fileURLWithPath: account.configPath)
-                .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
-                .appendingPathComponent(slug)
+            for slug in slugs {
+                let directory = URL(fileURLWithPath: account.configPath)
+                    .appendingPathComponent(AgentDefaults.claudeProjectsSubdirectory)
+                    .appendingPathComponent(slug)
 
-            let files: [URL]
-            do {
-                files = try fileManager.contentsOfDirectory(
-                    at: directory,
-                    includingPropertiesForKeys: [.contentModificationDateKey]
-                )
-            } catch {
-                let cocoa = error as NSError
-                if cocoa.domain != NSCocoaErrorDomain
-                    || cocoa.code != CocoaError.fileReadNoSuchFile.rawValue {
-                    failures += 1
+                let files: [URL]
+                do {
+                    files = try fileManager.contentsOfDirectory(
+                        at: directory,
+                        includingPropertiesForKeys: [.contentModificationDateKey]
+                    )
+                } catch {
+                    let cocoa = error as NSError
+                    if cocoa.domain != NSCocoaErrorDomain
+                        || cocoa.code != CocoaError.fileReadNoSuchFile.rawValue {
+                        failures += 1
+                    }
+                    continue
                 }
-                continue
+
+                found.append(contentsOf: files.compactMap { url -> ImportableSession? in
+                    guard url.pathExtension == AgentDefaults.transcriptExtension else { return nil }
+
+                    let info = claudeInfo(at: url)
+                    guard let title = info.title else { return nil }
+
+                    // A recorded cwd is authoritative; its absence leaves the slug directory —
+                    // which is derived from this very folder — to vouch for membership.
+                    if let cwd = info.cwd, !belongs(cwd: cwd, folder: folder, worktree: worktree) {
+                        return nil
+                    }
+
+                    return ImportableSession(
+                        agentSessionID: TranscriptID(url.deletingPathExtension().lastPathComponent),
+                        kind: .claude,
+                        accountHandle: account.handle,
+                        title: title,
+                        lastActiveAt: lastActivity(at: url)
+                    )
+                })
             }
-
-            found.append(contentsOf: files.compactMap { url -> ImportableSession? in
-                guard url.pathExtension == AgentDefaults.transcriptExtension else { return nil }
-
-                let info = claudeInfo(at: url)
-                guard let title = info.title else { return nil }
-
-                // A recorded cwd is authoritative; its absence leaves the slug directory —
-                // which is derived from this very folder — to vouch for membership.
-                if let cwd = info.cwd, !belongs(cwd: cwd, folder: folder, worktree: worktree) {
-                    return nil
-                }
-
-                return ImportableSession(
-                    agentSessionID: TranscriptID(url.deletingPathExtension().lastPathComponent),
-                    kind: .claude,
-                    accountHandle: account.handle,
-                    title: title,
-                    lastActiveAt: lastActivity(at: url)
-                )
-            })
         }
         return ScanBatch(sessions: found, failures: failures)
     }
