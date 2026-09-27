@@ -8,6 +8,7 @@
     "Sources/ThreadingMobile/MobileSessionSettingsView.swift": 1,
     "Sources/ThreadingMobile/MobileSettingsView.swift": 2,
     "Sources/ThreadingMobile/MobileSecretApprovalLab.swift": 1,
+    "Sources/ThreadingMobile/MobileSecretApprovals.swift": 1,
     "Sources/ThreadingMobile/MobileUniversalSearchView.swift": 2,
     "Sources/ThreadingMobile/PairingView.swift": 1,
     "Sources/ThreadingMobile/RemoteAttachmentGallery.swift": 1,

@@ -408,6 +408,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// questions, a readiness card duplicating one of them, and the pairing code below all of it.
     /// The thing the page exists for was the last thing on it, and everything above it was prose.
     private func buildPage() {
+        let approvals = SecretApprovalSettingsViewController()
+        addChild(approvals)
         var labSections: [NSView] = []
 #if DEBUG
         let lab = SecretApprovalLabSettingsViewController()
@@ -423,6 +425,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 SettingsUI.section("Ways In", waysInSection()),
                 SettingsUI.section("Notification Delivery", notificationDeliveryCard()),
                 SettingsUI.section("Sharing & Security", securityCard()),
+                SettingsUI.section("Face ID Approvals", approvals.view),
                 SettingsUI.note(
                     "Remote Access publishes only Threading’s authenticated remote surface. "
                         + "MCP, extension services and other local ports stay on this Mac."

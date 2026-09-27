@@ -543,6 +543,69 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     // MARK: - Tests
 
+    func testSecretApprovalNeedsABoundOwnerAndNeverReplaysAnApproval() async throws {
+        final class Store: SecretApprovalEnrollmentStoring, @unchecked Sendable {
+            private let lock = NSLock()
+            private var stored: SecretApprovalEnrollment?
+            var isShellReachable: Bool { false }
+            func load() throws -> SecretApprovalEnrollment? { lock.withLock { stored } }
+            func save(_ enrollment: SecretApprovalEnrollment) throws { lock.withLock { stored = enrollment } }
+            func remove() throws { lock.withLock { stored = nil } }
+        }
+        final class Switch: @unchecked Sendable { var on = true }
+        let enabled = Switch()
+        let broker = SecretApprovalBroker(store: Store(), isEnabled: { enabled.on })
+        server.secretApprovals = broker
+        let path = RemoteSecretApproval.path
+        let signing = P256.Signing.PrivateKey()
+        let agreement = P256.KeyAgreement.PrivateKey()
+        let code = try await broker.beginEnrollment()
+        let enrollment = try JSONEncoder().encode(RemoteSecretApproval.Request(
+            action: .enroll, enrollmentCode: code, signingKey: signing.publicKey.x963Representation,
+            agreementKey: agreement.publicKey.x963Representation))
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "badtoken", body: enrollment)).status, 401)
+        // An owner bearer bound to no device, and a guest, see nothing at all.
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: enrollment)).status, 404)
+        authority.set(RemoteAuthorization(shareID: "approval-owner", capability: .interact,
+                                         scope: .allSessions, boundDeviceID: "test-device"), forToken: "approvaltoken")
+        authority.set(RemoteAuthorization(shareID: "approval-guest", capability: .interact,
+                                         scope: .session(SessionID()), principal: .guest,
+                                         boundDeviceID: "test-device"), forToken: "guestapprovaltoken")
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "guestapprovaltoken", body: enrollment)).status, 404)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "approvaltoken", body: enrollment)).status, 200)
+
+        let secret = Data("test secret, opened only by the enrolled phone".utf8)
+        let envelope = try await broker.wrap(secret)
+        let waiting = Task {
+            try await broker.unwrap(client: "keyvault", title: "Approve kv-1a2b3c4d", lines: ["item: beta"],
+                                    requester: "nc<keyvault<zsh", envelope: envelope)
+        }
+        let pendingBody = try JSONEncoder().encode(RemoteSecretApproval.Request(action: .pending))
+        var pending: RemoteSecretApproval.Pending?
+        for _ in 0..<200 where pending == nil {
+            let answer = try XCTUnwrap(post(path, bearer: "approvaltoken", body: pendingBody))
+            pending = try JSONDecoder().decode(RemoteSecretApproval.Response.self, from: answer.body).pending
+            if pending == nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        }
+        let shown = try XCTUnwrap(pending)
+        let opened = try RemoteSecretEnvelope.open(shown.envelope, as: agreement.publicKey) {
+            try agreement.sharedSecretFromKeyAgreement(with: $0)
+        }
+        let approval = try JSONEncoder().encode(RemoteSecretApproval.Request(
+            action: .approve, requestID: shown.id,
+            signature: try signing.signature(for: shown.signingData()).derRepresentation, secret: opened))
+        let headers = [RemoteRouter.requestIDHeader: UUID().uuidString]
+        let accepted = try XCTUnwrap(post(path, bearer: "approvaltoken", body: approval, headers: headers))
+        XCTAssertEqual(accepted.status, 200)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteSecretApproval.Response.self, from: accepted.body).receipt, shown.id)
+        let delivered = try await waiting.value
+        XCTAssertEqual(delivered, secret)
+        // The general replay cache never answers for an approval, even with the same request ID.
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "approvaltoken", body: approval, headers: headers)).status, 403)
+        enabled.on = false
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "approvaltoken", body: pendingBody)).status, 404)
+    }
+
 #if DEBUG
     func testSecretApprovalLabChecksOwnerBindingAndRejectsReplayedApproval() async throws {
         let lab = SecretApprovalLab(createCredential: {}, useCredential: { _ in }, removeCredential: {},

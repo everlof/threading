@@ -1,5 +1,10 @@
 # Face ID secret approval proof of concept
 
+> The keyvault slice of this now ships behind an off-by-default setting: see
+> [Face ID approvals](../REMOTE_ACCESS.md#face-id-approvals). Its persistent enrollment, sealed
+> envelopes and local client socket replace this lab's fixed operations for real use; the lab
+> below remains Debug-only.
+
 Implemented on `poc/faceid-secret-approval`, Debug builds only. The first experiment uses a random
 disposable credential. The second permits one authenticated GitHub profile request per approval,
 using a dedicated token entered locally on the Mac. Neither mode unlocks arbitrary Keychain items.

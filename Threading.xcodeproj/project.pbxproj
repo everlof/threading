@@ -102,6 +102,7 @@
 		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
 		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
 		FACADE010000000000000001 /* MobileSecretApprovalLabTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FACADE010000000000000002 /* MobileSecretApprovalLabTests.swift */; };
+		FACADE010000000000000003 /* MobileSecretApprovalsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FACADE010000000000000004 /* MobileSecretApprovalsTests.swift */; };
 		A63300010000000000000003 /* MobileAppStoreSubmissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000004 /* MobileAppStoreSubmissionTests.swift */; };
 		A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */; };
 		A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63500010000000000000002 /* MobileSettingsIdentityTests.swift */; };
@@ -411,6 +412,7 @@
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
 		FACADE010000000000000002 /* MobileSecretApprovalLabTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSecretApprovalLabTests.swift; sourceTree = "<group>"; };
+		FACADE010000000000000004 /* MobileSecretApprovalsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSecretApprovalsTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000004 /* MobileAppStoreSubmissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAppStoreSubmissionTests.swift; sourceTree = "<group>"; };
 		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
 		A63500010000000000000002 /* MobileSettingsIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSettingsIdentityTests.swift; sourceTree = "<group>"; };
@@ -518,6 +520,7 @@
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileSettingsView.swift,
 				ThreadingMobile/MobileSecretApprovalLab.swift,
+				ThreadingMobile/MobileSecretApprovals.swift,
 				ThreadingMobile/MobileSocketRecoveryBackoff.swift,
 				ThreadingMobile/MobileSystemShareSheet.swift,
 				ThreadingMobile/MobileTerminalFontSize.swift,
@@ -829,6 +832,7 @@
 				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
 				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
 				FACADE010000000000000002 /* MobileSecretApprovalLabTests.swift */,
+				FACADE010000000000000004 /* MobileSecretApprovalsTests.swift */,
 				A63300010000000000000004 /* MobileAppStoreSubmissionTests.swift */,
 				A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */,
 				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
@@ -1715,6 +1719,7 @@
 				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
 				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
 				FACADE010000000000000001 /* MobileSecretApprovalLabTests.swift in Sources */,
+				FACADE010000000000000003 /* MobileSecretApprovalsTests.swift in Sources */,
 				A63300010000000000000003 /* MobileAppStoreSubmissionTests.swift in Sources */,
 				A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,

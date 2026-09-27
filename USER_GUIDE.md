@@ -5953,6 +5953,17 @@ restore a hidden project when you type in one of its chats (off by default).
 The sidebar footer keeps **Settings** on the left and the icon-only **Triggers**, mute and
 hidden-project controls on the right.
 
+### Face ID approvals (keyvault)
+
+**Settings → Remote Access → Face ID Approvals** lets keyvault ask your paired iPhone to approve
+with Face ID instead of this Mac's Touch ID. It is off until you turn it on. Choose **Enroll
+iPhone**, then on the iPhone open **Settings → Face ID Approvals** and enter the eight-digit code
+(it works for five minutes). Compare the key the phone shows with the one on the Mac. When
+keyvault asks, open **Face ID Approvals** on the iPhone: it shows what is asked and which process
+on the Mac asked; **Approve with Face ID** or **Deny**. Requests expire after two minutes.
+**Forget iPhone** on the Mac, or **Forget on this iPhone**, ends it. See
+[Remote access](docs/REMOTE_ACCESS.md#face-id-approvals).
+
 ### Debug: Face ID secret approval experiment
 
 Debug builds include **Settings → Remote Access → Developer → Start experiment** on the Mac

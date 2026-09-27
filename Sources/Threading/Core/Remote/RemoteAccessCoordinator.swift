@@ -135,6 +135,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private let server: RemoteAccessServer
+    private let secretApprovalLocalServer = SecretApprovalLocalServer()
     private let identityStore: RemoteAccessIdentityStore
     private let mirrors: RemoteSessionMirrorRegistry
     private let notifications: RemoteNotificationService
@@ -212,6 +213,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             choice: { appSettings.remoteAccessKeepAwake }
         )
         server.authorizer = authority
+        server.secretApprovals = SecretApprovalBroker.shared
 #if DEBUG
         server.secretApprovalLab = SecretApprovalLab.shared
 #endif
@@ -1898,6 +1900,33 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         start()
     }
 
+    // MARK: - Face ID approvals
+
+    /// keyvault's local socket exists only while Remote Access is on and the Mac's own setting
+    /// allows approvals; the phone cannot approve without the one, and nothing may ask without
+    /// the other. Turning either off refuses whatever is waiting.
+    func refreshSecretApprovals() {
+        if appSettings.remoteAccessEnabled && appSettings.secretApprovalsEnabled {
+            do {
+                try secretApprovalLocalServer.start()
+            } catch {
+                ThreadingLogger.remote.error(
+                    "Face ID approvals could not open their local socket: \(error.localizedDescription, privacy: .private(mask: .hash))")
+            }
+        } else {
+            secretApprovalLocalServer.stop()
+            Task { await SecretApprovalBroker.shared.disabled() }
+        }
+    }
+
+    func setSecretApprovalsEnabled(_ enabled: Bool) {
+        guard appSettings.secretApprovalsEnabled != enabled else { return }
+        appSettings.secretApprovalsEnabled = enabled
+        refreshSecretApprovals()
+    }
+
+    var isSecretApprovalSocketOpen: Bool { secretApprovalLocalServer.isRunning }
+
     func setEnabled(_ enabled: Bool) {
         appSettings.remoteAccessEnabled = enabled
         if appSettings.remoteAccessEnabled { start() } else { stop() }
@@ -1998,6 +2027,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         lifecycleGeneration += 1
         stopTransports()
         server.stop()
+        refreshSecretApprovals()
         listenerStatus = .idle
         mirrors.remoteAccessStopped()
         notifications.reset()
@@ -2038,6 +2068,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         // public build clears a switch it inherited from a development build once, at launch
         // (`AppSettings`), so it never starts a listener somebody enabled in a different build.
         guard appSettings.remoteAccessEnabled else { return }
+        refreshSecretApprovals()
         switch status {
         case .disabled:
             break

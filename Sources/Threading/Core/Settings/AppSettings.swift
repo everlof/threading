@@ -1297,6 +1297,19 @@ final class AppSettings {
         set { AppSettingDefinitions.remoteHostedEnrollmentEnabled.write(newValue, to: defaults) }
     }
 
+    /// Whether keyvault may ask the paired iPhone for a Face ID approval. Off by default; see
+    /// `SecretApprovalBroker`. Local only: no remote route can change it.
+    var secretApprovalsEnabled: Bool {
+        get { AppSettingDefinitions.secretApprovalsEnabled.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.secretApprovalsEnabled.write(newValue, to: defaults) }
+    }
+
+    /// Read by `SecretApprovalBroker`, an actor, for every request; not a main-actor property.
+    nonisolated static var secretApprovalsEnabledFromAnyContext: Bool {
+        _ = registerStandardDefaults
+        return AppSettingDefinitions.secretApprovalsEnabled.read(from: .standard) ?? false
+    }
+
     /// The first-party hosted service selected by this build.
     ///
     /// A public release installed over an internal build shares its defaults domain, so the

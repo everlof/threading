@@ -356,6 +356,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteAccessDiscoveryEnabled",
                 valueType: .boolean
             ),
+            .secretApprovalsEnabled: .init(
+                key: "secretApprovalsEnabled",
+                valueType: .boolean
+            ),
             .remoteInputControlDefault: .init(
                 key: "remoteInputControlDefault",
                 valueType: .string
@@ -529,9 +533,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 92)
+        XCTAssertEqual(authoredRows.count, 93)
 #else
-        XCTAssertEqual(authoredRows.count, 91)
+        XCTAssertEqual(authoredRows.count, 92)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -602,7 +606,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(actual["remote-access"], [
             "Remote Access", "Keep this Mac awake", "This network", "Tailscale",
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
-            "Reports from your phone", "Hosted Direct"
+            "Reports from your phone", "Approve with Face ID on iPhone", "Hosted Direct"
         ])
         // Public builds offer Hosted Direct without account sign-in, so their catalogue includes
         // the same row as development builds.
@@ -614,7 +618,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(publicRemoteAccess, [
             "Remote Access", "Keep this Mac awake", "This network", "Tailscale",
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
-            "Reports from your phone", "Hosted Direct"
+            "Reports from your phone", "Approve with Face ID on iPhone", "Hosted Direct"
         ])
         XCTAssertEqual(
             AppSettingDefinitions.definitions(on: .dev),

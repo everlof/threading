@@ -5,9 +5,7 @@ import Security
 import SwiftUI
 import ThreadingRemoteKit
 
-enum MobileSecretApprovalFailure: Error, Equatable {
-    case pairFirst, preview, directConnectionRequired, pinnedConnectionRequired, invalidCode
-
+extension MobileSecretApprovalFailure {
     var message: String {
         switch self {
         case .pairFirst:

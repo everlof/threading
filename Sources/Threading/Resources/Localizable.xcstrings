@@ -7772,6 +7772,23 @@
         }
       }
     },
+    "Approve with Face ID on iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve with Face ID on iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn med Face ID på iPhone"
+          }
+        }
+      }
+    },
     "Architecture" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18930,6 +18947,40 @@
         }
       }
     },
+    "Enroll iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enroll iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrera iPhone"
+          }
+        }
+      }
+    },
+    "Enrolled iPhone key %@. Check that the phone shows the same key." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enrolled iPhone key %@. Check that the phone shows the same key."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrerad iPhone-nyckel %@. Kontrollera att telefonen visar samma nyckel."
+          }
+        }
+      }
+    },
     "Enter %@ in iPhone Settings → Developer → Face ID approval. Expires in five minutes; five attempts maximum." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20302,6 +20353,23 @@
         }
       }
     },
+    "Face ID Approvals" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID Approvals"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID-godkännanden"
+          }
+        }
+      }
+    },
     "Face ID approval lab" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21422,6 +21490,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förgrundsfärg"
+          }
+        }
+      }
+    },
+    "Forget iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm iPhone"
           }
         }
       }
@@ -25847,6 +25932,23 @@
         }
       }
     },
+    "Lets keyvault ask your paired iPhone instead of this Mac’s Touch ID. The phone shows what is asked and who asks; nothing it approves is stored on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lets keyvault ask your paired iPhone instead of this Mac’s Touch ID. The phone shows what is asked and who asks; nothing it approves is stored on this Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låter keyvault fråga din parkopplade iPhone i stället för Macens Touch ID. Telefonen visar vad som efterfrågas och vem som frågar; inget den godkänner sparas på den här Macen."
+          }
+        }
+      }
+    },
     "Lifecycle" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29418,6 +29520,23 @@
         }
       }
     },
+    "No iPhone enrolled yet. Remote Access must be on and the phone paired." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No iPhone enrolled yet. Remote Access must be on and the phone paired."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen iPhone är registrerad än. Fjärråtkomst måste vara på och telefonen parkopplad."
+          }
+        }
+      }
+    },
     "No icon was found for this project." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30942,6 +31061,23 @@
         }
       }
     },
+    "Off. keyvault uses this Mac’s Touch ID and passphrase only." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off. keyvault uses this Mac’s Touch ID and passphrase only."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Av. keyvault använder bara den här Macens Touch ID och lösenfras."
+          }
+        }
+      }
+    },
     "Offer this account for new sessions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31015,6 +31151,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "På batteri drar det laddning medan datorn står oanvänd. Att stänga locket försätter den ändå i viloläge, om inte en extern skärm är ansluten."
+          }
+        }
+      }
+    },
+    "On iPhone, open Settings → Face ID Approvals and enter %@. The code works for five minutes and five attempts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On iPhone, open Settings → Face ID Approvals and enter %@. The code works for five minutes and five attempts."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Inställningar → Face ID-godkännanden på iPhone och ange %@. Koden gäller i fem minuter och fem försök."
           }
         }
       }
@@ -31296,6 +31449,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En person · Bara den här chatten · Acceptera inom 24 timmar\nÅtkomsten gäller tills du väljer Sluta dela chatt."
+          }
+        }
+      }
+    },
+    "One phone approves. Enroll it with a code shown here; forgetting it refuses anything waiting." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One phone approves. Enroll it with a code shown here; forgetting it refuses anything waiting."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En telefon godkänner. Registrera den med en kod som visas här; om du glömmer den nekas allt som väntar."
           }
         }
       }
@@ -46523,6 +46693,23 @@
         }
       }
     },
+    "That did not work. Unlock this Mac and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That did not work. Unlock this Mac and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte. Lås upp den här Macen och försök igen."
+          }
+        }
+      }
+    },
     "That is the most marks one report carries (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56985,6 +57172,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på att agenten skriver ut sin länk…"
+          }
+        }
+      }
+    },
+    "Waiting for the iPhone to approve: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for the iPhone to approve: %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på att iPhone ska godkänna: %@"
           }
         }
       }

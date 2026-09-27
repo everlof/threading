@@ -113,6 +113,16 @@ struct MobileSettingsView: View {
                             || (model.widgetHostID != model.activeHostID && !model.canReadUsage))
                     }
 
+                    settingsSection("Security") {
+                        SettingsNavigationRow(
+                            symbol: "faceid",
+                            title: "Face ID Approvals",
+                            detail: "keyvault on your Mac"
+                        ) {
+                            MobileSecretApprovals()
+                        }
+                    }
+
                     settingsSection("Support") {
                         SettingsNavigationRow(
                             symbol: "stethoscope",

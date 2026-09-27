@@ -1023,7 +1023,8 @@ struct RemoteClient {
         return .catalogue(try decodeMe(data: data, response: response))
     }
 
-#if DEBUG
+    /// Face ID approvals travel only over a direct, pinned route: never Hosted Direct, never a
+    /// connection whose certificate this phone did not pin.
     func validateSecretApprovalTransport() throws {
         guard link.baseURL.scheme == "https",
               RemoteHostEndpointKind.privateNetwork.contains(endpointKind) else {
@@ -1038,6 +1039,28 @@ struct RemoteClient {
         }
     }
 
+    func secretApproval(_ body: RemoteSecretApproval.Request) async throws -> RemoteSecretApproval.Response {
+        try validateSecretApprovalTransport()
+        var request = request(url: link.baseURL.appendingPathComponent(RemoteSecretApproval.path))
+        request.httpMethod = "POST"
+        request.httpBody = try Self.encodeMutationBody(body)
+        request.timeoutInterval = RemoteSecretApproval.requestTimeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // No automatic retry: an approval whose answer was lost must not be sent twice.
+        let (stream, response) = try await Self.session.bytes(for: request)
+        var data = Data()
+        for try await byte in stream {
+            guard data.count < RemoteSecretApproval.maximumResponseBytes else {
+                stream.task.cancel()
+                throw RemoteClientError.invalidResponse
+            }
+            data.append(byte)
+        }
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
+        return try JSONDecoder().decode(RemoteSecretApproval.Response.self, from: data)
+    }
+
+#if DEBUG
     func secretApprovalLab(_ body: RemoteSecretApprovalLab.Request) async throws -> RemoteSecretApprovalLab.Response {
         // This experiment requires the direct, pinned TLS path. Never silently downgrade.
         try validateSecretApprovalTransport()

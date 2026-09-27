@@ -591,6 +591,15 @@ of consent, persistence, revocation, package validation, and disabled-first inst
 cannot supply or replace the approval actions or grant themselves trust. Existing themed alert and
 virtual settings table components present these values; no new public component contract is added.
 
+## Face ID approvals
+
+Settings → Remote Access → Face ID Approvals on the Mac and Settings → Face ID Approvals on
+iPhone are deliberately host-only security surfaces, like the lab below. The host owns the local
+switch, enrollment, the local client socket, the request's meaning and bounds, the requester
+chain the kernel reports, signature verification, one-use consumption, expiry and revocation.
+Extensions cannot replace the approval controls, add requests, or name a requester; themes style
+the native settings components only. Apple owns the Face ID prompt.
+
 ## Debug secret approval lab
 
 The Mac Remote Access lab controls and iPhone Face ID approval screen are deliberately host-only

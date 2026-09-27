@@ -71,6 +71,11 @@ private struct RemoteAppSettingMutationRequest: Decodable {
 /// coordinator configure them while the server reads them from its network queue.
 private final class RemoteAccessServerDependencies: @unchecked Sendable {
     private let lock = NSLock()
+    private var secretApprovalsStorage: SecretApprovalBroker?
+    var secretApprovals: SecretApprovalBroker? {
+        get { lock.withLock { secretApprovalsStorage } }
+        set { lock.withLock { secretApprovalsStorage = newValue } }
+    }
 #if DEBUG
     private var secretApprovalLabStorage: SecretApprovalLab?
     var secretApprovalLab: SecretApprovalLab? {
@@ -164,6 +169,12 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
 /// server's identity into Network.framework callbacks is safe.
 final class RemoteAccessServer: @unchecked Sendable {
     // MARK: - Properties
+    /// Face ID approvals for local clients such as keyvault. The broker answers `disabled` until
+    /// the Mac's own setting is on; nothing remote can change that setting.
+    var secretApprovals: SecretApprovalBroker? {
+        get { dependencies.secretApprovals }
+        set { dependencies.secretApprovals = newValue }
+    }
 #if DEBUG
     var secretApprovalLab: SecretApprovalLab? {
         get { dependencies.secretApprovalLab }
@@ -404,9 +415,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         from connection: RemoteConnection,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
+        // Approvals never go through the general mutation replay cache: revocation and one-use
+        // consumption are rechecked on every request, and a lost answer is not replayed.
+        if RemoteRouter.normalizedPath(request.path) == RemoteSecretApproval.path {
+            handleSecretApproval(request, respond: respond)
+            return
+        }
 #if DEBUG
-        // Approval challenges must never be served from the general mutation replay cache:
-        // revocation and one-use consumption are rechecked on every request.
         if RemoteRouter.normalizedPath(request.path) == RemoteSecretApprovalLab.path {
             handleSecretApprovalLab(request, respond: respond)
             return
@@ -846,6 +861,39 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         respond(.respond(RemoteRouter.error(404, "Not Found")))
+    }
+
+    private func handleSecretApproval(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        // Only an interactive all-sessions owner bound to a device; everyone else sees nothing.
+        guard request.method == "POST", authorization.canManageHost,
+              let device = authorization.boundDeviceID,
+              let broker = secretApprovals else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        guard request.body.count <= RemoteSecretApproval.maximumRequestBytes,
+              let payload = try? JSONDecoder().decode(RemoteSecretApproval.Request.self, from: request.body)
+        else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        Task {
+            do {
+                let result = try await broker.handle(payload, device: device, share: authorization.shareID) {
+                    self.authorizer?.isCurrent(authorization) == true
+                }
+                respond(.respond(RemoteRouter.json(result)))
+            } catch SecretApprovalBroker.Failure.disabled {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            } catch {
+                // Never echo keys, signatures or secrets; the phone gets a refusal and no detail.
+                respond(.respond(RemoteRouter.error(403, "Secret approval refused")))
+            }
+        }
     }
 
 #if DEBUG

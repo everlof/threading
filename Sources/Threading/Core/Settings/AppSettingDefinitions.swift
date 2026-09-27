@@ -82,6 +82,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessDoors
     case remoteAccessAdvertisedHostname
     case remoteAccessDiscoveryEnabled
+    case secretApprovalsEnabled
     case remoteInputControlDefault
     case remoteAccessKeepAwake
     case phoneReportWorkspace
@@ -1363,6 +1364,18 @@ enum AppSettingDefinitions {
     /// *browser* on the tailnet opens Threading without a full-page certificate warning. What it
     /// costs is a public certificate-transparency entry naming this Mac and the tailnet, which is
     /// why it is a switch a person makes rather than something the tailnet door turns on.
+    /// Whether a local client (keyvault) may ask the paired iPhone to approve one use of a secret
+    /// with Face ID. Off by default, and never remotely mutable: the phone that approves must not
+    /// be able to switch its own approval on.
+    static let secretApprovalsEnabled = AppSettingDescriptor<Bool>(
+        identity: .secretApprovalsEnabled,
+        persistenceKey: "secretApprovalsEnabled",
+        absence: .registered(false),
+        presentations: [row("remote-access", 8, "Face ID Approvals", "Approve with Face ID on iPhone",
+                            ["keyvault", "Face ID", "approval", "secret", "Touch ID", "iPhone"])],
+        remotePolicy: .catalogueOnly
+    )
+
     static let remoteAccessTailscaleServeEnabled = AppSettingDescriptor<Bool>(
         identity: .remoteAccessTailscaleServeEnabled,
         persistenceKey: "remoteAccessTailscaleServeEnabled",
@@ -1549,6 +1562,7 @@ enum AppSettingDefinitions {
         .init(remoteAccessDiscoveryEnabled),
         .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
+        .init(secretApprovalsEnabled),
         .init(updateChannelSubscription),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle),
@@ -1591,7 +1605,7 @@ enum AppSettingDefinitions {
         // to borrow the connection mode's second presentation, and that descriptor is now a
         // migration record with no row of its own. Only a channel that offers Hosted Direct
         // lists it; see `definitions(on:)`.
-        surfaced(hostedDirectIdentity, pageID: "remote-access", order: 8,
+        surfaced(hostedDirectIdentity, pageID: "remote-access", order: 9,
                   section: "Connection", title: "Hosted Direct",
                   "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,

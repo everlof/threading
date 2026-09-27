@@ -2875,6 +2875,39 @@ with no AppKit window graph or ambient project/runtime lookup.
 - `docs/NOTIFICATION_E2E.md`: opt-in real APNs and Claude → MCP → APNs verification.
 - `docs/REMOTE_DIAGNOSTICS.md`: privacy boundary, cross-device tracing and support workflow.
 
+## Face ID approvals
+
+Off by default, in every build. A local client on the Mac, keyvault first, can ask the paired
+iPhone to approve one use of a secret with Face ID instead of the Mac's Touch ID. The Mac never
+holds the secret: it seals it to the phone and hands back what the phone opened.
+
+- **Two switches, both local.** Settings → Remote Access → Face ID Approvals turns it on
+  (`secretApprovalsEnabled`, catalogue-only, never remotely mutable) and shows an eight-digit,
+  five-minute, five-attempt code; the phone enrolls with it. The local socket exists only while
+  Remote Access and that switch are both on.
+- **One phone, two Secure Enclave keys.** Enrollment sends a P-256 signing key and a P-256
+  key-agreement key, both `biometryCurrentSet` and `WhenUnlockedThisDeviceOnly` on the phone.
+  The Mac keeps their public halves in the protected Keychain when this build can use it, bound
+  to the owner grant and device that enrolled; an agent's shell cannot swap in its own.
+- **Sealing.** `wrap` (local) seals a secret to the phone's agreement key: ECIES over P-256,
+  HKDF-SHA256, AES-GCM (`RemoteSecretEnvelope`). The Mac cannot open the result.
+- **Asking.** A local client connects to `~/Library/Application Support/Threading/approvals/
+  approvals.sock` (`0700` directory) and sends `unwrap` with the envelope, a title and at most
+  twelve short lines. The broker adds `requester`, the connecting process chain as the kernel
+  reports it (`LOCAL_PEERPID`), so the phone shows who asks rather than who claims to. One request
+  at a time; it expires after 120 seconds.
+- **Approving.** `/api/secret-approval` takes the same owner, device and pinned-route rules as the
+  lab, and bypasses the REST replay cache. The phone fetches the pending request, shows it, and
+  after one Face ID opens the envelope and signs the request's canonical bytes (domain
+  `Threading.SecretApproval.v1`). The Mac verifies the signature against the enrolled key,
+  consumes the request, and returns the opened secret to the waiting client only. The client
+  checks it again itself: keyvault refuses anything but its own biometric key.
+- **Denying, forgetting, switching off** each refuse what is waiting. Forgetting the phone makes
+  every envelope sealed to it useless.
+
+Like Touch ID, this is a person's decision per use, not a sandbox: any process running as the
+user may connect and ask, and the phone shows who did.
+
 ## Debug Face ID approval experiment
 
 Debug builds expose a host-owned disposable-credential experiment through local Remote Access
