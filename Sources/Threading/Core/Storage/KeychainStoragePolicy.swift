@@ -8,6 +8,24 @@ import Security
 /// write into `errSecMissingEntitlement`. Probe once and make every credential store report the
 /// same answer instead.
 enum KeychainStoragePolicy {
+    /// Alternate Debug app identities must not overwrite the regular app's remote grants.
+    /// A separate Foundation home isolates files and defaults, but not the login Keychain.
+    static func remoteService(
+        _ service: String,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        variantNamespace: String? = Bundle.main.object(forInfoDictionaryKey: "ThreadingRemoteServiceNamespace") as? String
+    ) -> String {
+        #if DEBUG
+        // A provisioned local trial may share the registered app ID while keeping its own
+        // Foundation home and credential namespace. This is build metadata, not remote input.
+        if let variantNamespace, !variantNamespace.isEmpty { return "\(variantNamespace).\(service)" }
+        if let bundleIdentifier, bundleIdentifier != "codes.threading" {
+            return "\(bundleIdentifier).\(service)"
+        }
+        #endif
+        return service
+    }
+
     private static let probeService = "codes.threading.keychain.data-protection.probe"
     private static let probeAccount = "data-protection-v1"
 
@@ -113,7 +131,7 @@ final class MigratingKeychainBlobStore {
         dataProtection: Bool? = nil,
         keychain: any KeychainItemAccessing = SystemKeychainItemAccess()
     ) {
-        self.service = service
+        self.service = KeychainStoragePolicy.remoteService(service)
         self.account = account
         self.accessible = accessible
         usesDataProtectionKeychain = dataProtection

@@ -1126,10 +1126,31 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
                 let page = self.page(
                     state: .lanBound,
+                    height: Render.height * 2,
                     appearance: appearance,
                     credentialStorageIsShellReachable: isShellReachable
                 )
-                png = self.pngData(of: page.trimmedToContent().host)
+#if DEBUG
+                let lab = page.controller.children.compactMap {
+                    $0 as? SecretApprovalLabSettingsViewController
+                }.first
+                lab?.apply(.init(enrollmentCode: nil, enabled: false, protectedStorageAvailable: !isShellReachable))
+                XCTAssertNotNil(lab)
+#endif
+                let complete = page.trimmedToContent()
+                if let start = self.button(in: complete.view, id: "settings.secret-approval.start") {
+                    let frame = start.convert(start.bounds, to: complete.host)
+                    XCTAssertTrue(complete.host.bounds.contains(frame), "The experiment must be inside the rendered shell")
+                }
+                if let token = self.descendants(in: complete.view).first(where: {
+                    $0.accessibilityIdentifier() == "settings.secret-approval.github-token"
+                }) as? ThemedSecureField {
+                    XCTAssertGreaterThanOrEqual(token.bounds.width, SettingsUIDefaults.controlWidth,
+                                                "The token editor must remain usable beside wrapped instructions in every theme")
+                } else {
+                    XCTFail("The GitHub trial needs a secure token editor")
+                }
+                png = self.pngData(of: complete.host)
             }
             let data = try XCTUnwrap(png, "\(name) rendered nothing")
             XCTAssertGreaterThan(data.count, 20_000, "\(name) rendered empty")

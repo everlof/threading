@@ -893,6 +893,23 @@
         }
       }
     },
+    "1. Enroll this iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. Enroll this iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. Registrera denna iPhone"
+          }
+        }
+      }
+    },
     "1.5× speed, increased usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -933,6 +950,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "2 minuter eller mer"
+          }
+        }
+      }
+    },
+    "2. Approve one use" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2. Approve one use"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2. Godkänn en användning"
           }
         }
       }
@@ -1587,6 +1621,23 @@
         }
       }
     },
+    "Allow GitHub to return your username?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow GitHub to return your username?"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt GitHub att returnera ditt användarnamn?"
+          }
+        }
+      }
+    },
     "Allow Local Network access" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1616,6 +1667,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillåt i iOS-inställningar"
+          }
+        }
+      }
+    },
+    "Allow one use of the disposable test credential?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow one use of the disposable test credential?"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt en användning av den tillfälliga testuppgiften?"
+          }
+        }
+      }
+    },
+    "Allow your Mac to send its trial token to GitHub once to read your username." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow your Mac to send its trial token to GitHub once to read your username."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt Macen att skicka sin testtoken till GitHub en gång för att läsa ditt användarnamn."
           }
         }
       }
@@ -1715,6 +1800,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utseende"
+          }
+        }
+      }
+    },
+    "Approval did not complete. Check Face ID, the connection, and the Mac experiment. An expired or used request cannot be retried; request a new operation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approval did not complete. Check Face ID, the connection, and the Mac experiment. An expired or used request cannot be retried; request a new operation."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkännandet slutfördes inte. Kontrollera Face ID, anslutningen och experimentet på Macen. En utgången eller använd begäran kan inte återanvändas. Begär en ny åtgärd."
+          }
+        }
+      }
+    },
+    "Approval expires after 60 seconds. Face ID is required every time." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approval expires after 60 seconds. Face ID is required every time."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkännandet löper ut efter 60 sekunder. Face ID krävs varje gång."
+          }
+        }
+      }
+    },
+    "Approve one operation on your Mac. Its credential is never sent to this iPhone or a chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve one operation on your Mac. Its credential is never sent to this iPhone or a chat."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn en åtgärd på din Mac. Inloggningsuppgiften skickas aldrig till denna iPhone eller en chatt."
+          }
+        }
+      }
+    },
+    "Approve one use of the disposable test credential on your Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve one use of the disposable test credential on your Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn en användning av den tillfälliga testuppgiften på din Mac."
+          }
+        }
+      }
+    },
+    "Approve with Face ID" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve with Face ID"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn med Face ID"
+          }
+        }
+      }
+    },
+    "Approved once. The Mac used its test credential; no secret left the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approved once. The Mac used its test credential; no secret left the Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänt en gång. Macen använde sin testuppgift. Ingen hemlighet lämnade Macen."
           }
         }
       }
@@ -3465,6 +3652,23 @@
         }
       }
     },
+    "Could not reach the Mac. Check its Remote Access connection, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not reach the Mac. Check its Remote Access connection, then try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte nå Macen. Kontrollera dess fjärranslutning och försök igen."
+          }
+        }
+      }
+    },
     "Couldn’t capture this turn’s starting state." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3839,6 +4043,23 @@
         }
       }
     },
+    "Debug proof of concept. A physical Face ID iPhone and a pinned HTTPS connection are required. Closing this screen forgets the phone’s approval key; stop and restart the Mac experiment to enroll again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug proof of concept. A physical Face ID iPhone and a pinned HTTPS connection are required. Closing this screen forgets the phone’s approval key; stop and restart the Mac experiment to enroll again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug-prototyp. Kräver en fysisk iPhone med Face ID och en HTTPS-anslutning vars certifikat är låst till din Mac. När vyn stängs glöms telefonens godkännandenyckel. Stoppa och starta Mac-experimentet för att registrera igen."
+          }
+        }
+      }
+    },
     "Decrease terminal font size" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4092,6 +4313,23 @@
         }
       }
     },
+    "Disposable credential experiment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disposable credential experiment"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experiment med tillfällig testuppgift"
+          }
+        }
+      }
+    },
     "Done" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4220,6 +4458,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avsluta demo"
+          }
+        }
+      }
+    },
+    "Enroll with Face ID protection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enroll with Face ID protection"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrera med Face ID-skydd"
+          }
+        }
+      }
+    },
+    "Enrollment code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enrollment code"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registreringskod"
+          }
+        }
+      }
+    },
+    "Enter all eight digits from the Mac’s current experiment code." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter all eight digits from the Mac’s current experiment code."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange alla åtta siffrorna i Macens aktuella experimentkod."
           }
         }
       }
@@ -4402,6 +4691,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tilläggspanelen är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Face ID approval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID approval"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID-godkännande"
+          }
+        }
+      }
+    },
+    "Face ID did not authorize this operation. Check Face ID in iPhone Settings, then try a new request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID did not authorize this operation. Check Face ID in iPhone Settings, then try a new request."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID godkände inte åtgärden. Kontrollera Face ID i iPhones inställningar och försök sedan med en ny begäran."
+          }
+        }
+      }
+    },
+    "Face ID is unavailable. Enable Face ID for this app in iPhone Settings and unlock the phone before trying again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID is unavailable. Enable Face ID for this app in iPhone Settings and unlock the phone before trying again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID är inte tillgängligt. Aktivera Face ID för appen i iPhones inställningar och lås upp telefonen innan du försöker igen."
           }
         }
       }
@@ -4615,6 +4955,23 @@
         }
       }
     },
+    "For the GitHub trial, the Mac sends its token only to GitHub. Only your username and a receipt come back." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For the GitHub trial, the Mac sends its token only to GitHub. Only your username and a receipt come back."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I GitHub-testet skickar Macen sin token endast till GitHub. Bara ditt användarnamn och ett kvitto kommer tillbaka."
+          }
+        }
+      }
+    },
     "For your own Mac, open Threading → Settings → Remote Access and scan the pairing code. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4721,6 +5078,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Git-granskning"
+          }
+        }
+      }
+    },
+    "GitHub verified: %@. Approved once; your token stayed between this Mac and GitHub." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub verified: %@. Approved once; your token stayed between this Mac and GitHub."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub verifierat: %@. Godkänt en gång; din token stannade mellan denna Mac och GitHub."
           }
         }
       }
@@ -6260,6 +6634,23 @@
         }
       }
     },
+    "No Mac connected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Mac connected"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen Mac ansluten"
+          }
+        }
+      }
+    },
     "No Mac nearby? Try the demo." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7147,6 +7538,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Parkoppla den här Mac-datorn igen"
+          }
+        }
+      }
+    },
+    "Pair this iPhone with Threading FaceID first. Use Pair a Mac and scan the QR code in Mac Settings → Remote Access." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair this iPhone with Threading FaceID first. Use Pair a Mac and scan the QR code in Mac Settings → Remote Access."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parkoppla först denna iPhone med Threading FaceID. Välj Parkoppla en Mac och skanna QR-koden i Macens Inställningar → Fjärråtkomst."
+          }
+        }
+      }
+    },
+    "Pair with this Mac again. Its owner connection is no longer authorized." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair with this Mac again. Its owner connection is no longer authorized."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parkoppla med denna Mac igen. Ägaranslutningen är inte längre behörig."
+          }
+        }
+      }
+    },
+    "Pair with this Mac using its Remote Access QR code first. Then start the experiment under Developer and enter its eight-digit code here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair with this Mac using its Remote Access QR code first. Then start the experiment under Developer and enter its eight-digit code here."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parkoppla först med Macen via QR-koden för fjärråtkomst. Starta sedan experimentet under Utvecklare och ange dess åttasiffriga kod här."
           }
         }
       }
@@ -8181,6 +8623,23 @@
         }
       }
     },
+    "Registering this iPhone…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registering this iPhone…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrerar denna iPhone…"
+          }
+        }
+      }
+    },
     "Relay" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8412,6 +8871,23 @@
         }
       }
     },
+    "Request cancelled." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request cancelled."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Begäran avbruten."
+          }
+        }
+      }
+    },
     "Request control" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8419,6 +8895,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Be om kontroll"
+          }
+        }
+      }
+    },
+    "Request operation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request operation"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Begär åtgärd"
+          }
+        }
+      }
+    },
+    "Request test operation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Request test operation"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Begär teståtgärd"
           }
         }
       }
@@ -9916,6 +10426,23 @@
         }
       }
     },
+    "Start the experiment in Mac Settings → Remote Access → Developer, then enter its eight-digit code here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start the experiment in Mac Settings → Remote Access → Developer, then enter its eight-digit code here."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta experimentet i Mac-inställningar → Fjärråtkomst → Utvecklare och ange den åttasiffriga koden här."
+          }
+        }
+      }
+    },
     "Starting diagnostics sharing…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10609,6 +11136,40 @@
         }
       }
     },
+    "The GitHub request failed. Check the trial token on your Mac and its internet connection, then request a new approval." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The GitHub request failed. Check the trial token on your Mac and its internet connection, then request a new approval."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub-begäran misslyckades. Kontrollera testtokenen på Macen och dess internetanslutning och begär sedan ett nytt godkännande."
+          }
+        }
+      }
+    },
+    "The Mac authenticates a fixed test message with its disposable Keychain credential. Only a receipt comes back." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Mac authenticates a fixed test message with its disposable Keychain credential. Only a receipt comes back."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macen autentiserar ett fast testmeddelande med sin tillfälliga nyckelringsuppgift. Bara ett kvitto skickas tillbaka."
+          }
+        }
+      }
+    },
     "The Mac can’t find the account that owns this session." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10880,6 +11441,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macen fick för många förfrågningar. Vänta en stund och försök igen."
+          }
+        }
+      }
+    },
+    "The Mac refused registration. Stop and start the experiment on the Mac, then enter its new code within five minutes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Mac refused registration. Stop and start the experiment on the Mac, then enter its new code within five minutes."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macen nekade registreringen. Stoppa och starta experimentet på Macen och ange den nya koden inom fem minuter."
           }
         }
       }
@@ -11540,6 +12118,23 @@
         }
       }
     },
+    "This Mac does not offer the experiment. Pair with Threading FaceID, then start the experiment in its Remote Access settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Mac does not offer the experiment. Pair with Threading FaceID, then start the experiment in its Remote Access settings."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experimentet finns inte på denna Mac. Parkoppla med Threading FaceID och starta experimentet i dess inställningar för fjärråtkomst."
+          }
+        }
+      }
+    },
     "This Mac needs a newer version of Threading. Update Threading on the Mac and try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11716,6 +12311,23 @@
         }
       }
     },
+    "This connection has no saved Mac certificate. Pair again using the QR code for the Mac’s LAN or Tailscale connection." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This connection has no saved Mac certificate. Pair again using the QR code for the Mac’s LAN or Tailscale connection."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här anslutningen saknar ett sparat certifikat för Macen. Parkoppla igen med QR-koden för Macens LAN- eller Tailscale-anslutning."
+          }
+        }
+      }
+    },
     "This controls how this chat responds when an account limit is reached." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11782,6 +12394,40 @@
         }
       }
     },
+    "This iPhone is enrolled for this experiment." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This iPhone is enrolled for this experiment."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Denna iPhone är registrerad för experimentet."
+          }
+        }
+      }
+    },
+    "This iPhone is registered. Request a test operation below; Face ID appears when you approve it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This iPhone is registered. Request a test operation below; Face ID appears when you approve it."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Denna iPhone är registrerad. Begär en teståtgärd nedan. Face ID visas när du godkänner den."
+          }
+        }
+      }
+    },
     "This iPhone will trust only this Mac’s identity." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11822,6 +12468,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detta är en notis endast till en person. Inget här skickas till Claude, Codex eller terminalen."
+          }
+        }
+      }
+    },
+    "This is a preview. Pair with your Mac to register this iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is a preview. Pair with your Mac to register this iPhone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här är en förhandsvisning. Parkoppla med din Mac för att registrera denna iPhone."
           }
         }
       }
@@ -12762,6 +13425,23 @@
         }
       }
     },
+    "Use a test credential on your Mac without sending it to this iPhone or a chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use a test credential on your Mac without sending it to this iPhone or a chat."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd en testuppgift på din Mac utan att skicka den till denna iPhone eller en chatt."
+          }
+        }
+      }
+    },
     "Use direct terminal input" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12812,6 +13492,23 @@
         }
       }
     },
+    "Use this Mac’s LAN or Tailscale connection. The experiment cannot use Hosted Direct." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use this Mac’s LAN or Tailscale connection. The experiment cannot use Hosted Direct."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd Macens LAN- eller Tailscale-anslutning. Experimentet kan inte använda Hosted Direct."
+          }
+        }
+      }
+    },
     "Used" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12819,6 +13516,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använt"
+          }
+        }
+      }
+    },
+    "Uses the GitHub trial token entered on your Mac. No repository access or changes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uses the GitHub trial token entered on your Mac. No repository access or changes."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder GitHub-testtokenen som angavs på Macen. Inga arkiv öppnas eller ändras."
           }
         }
       }

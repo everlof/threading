@@ -16044,6 +16044,23 @@
         }
       }
     },
+    "Create a separate fine-grained token with a short expiry, public repositories only and no additional permissions. Enter it here, never in a chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create a separate fine-grained token with a short expiry, public repositories only and no additional permissions. Enter it here, never in a chat."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa en separat finfördelad token med kort giltighetstid, endast offentliga arkiv och inga extra behörigheter. Ange den här, aldrig i en chatt."
+          }
+        }
+      }
+    },
     "Create a separate project with the app-shipped SDK and starter panel." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16897,6 +16914,23 @@
         }
       }
     },
+    "Debug experiment using only a disposable Keychain credential. Requires a paired iPhone on a pinned HTTPS connection." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug experiment using only a disposable Keychain credential. Requires a paired iPhone on a pinned HTTPS connection."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug-experiment som bara använder en tillfällig uppgift i Nyckelring. Kräver en parkopplad iPhone med en HTTPS-anslutning vars certifikat är låst till din Mac."
+          }
+        }
+      }
+    },
     "Decides for itself when to ask." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17069,6 +17103,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Radera “%@”?"
+          }
+        }
+      }
+    },
+    "Deletes the locally stored trial token and test credential, and forgets the phone and pending approval. Revoke the token on GitHub when finished." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deletes the locally stored trial token and test credential, and forgets the phone and pending approval. Revoke the token on GitHub when finished."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Raderar den lokalt sparade testtokenen och testuppgiften samt glömmer telefonen och väntande godkännande. Återkalla tokenen på GitHub när du är klar."
+          }
+        }
+      }
+    },
+    "Deletes the test credential and forgets the enrolled phone and pending approval." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deletes the test credential and forgets the enrolled phone and pending approval."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tar bort testuppgiften, den registrerade telefonen och väntande godkännande."
           }
         }
       }
@@ -17366,6 +17434,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Identifiering av filer som nämns i %@:s utdata är avstängd i Inställningar › Allmänt. Bilder du bifogar, och de som agenten visar i panelen, visas fortfarande här."
+          }
+        }
+      }
+    },
+    "Developer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utvecklare"
           }
         }
       }
@@ -18845,6 +18930,23 @@
         }
       }
     },
+    "Enter %@ in iPhone Settings → Developer → Face ID approval. Expires in five minutes; five attempts maximum." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter %@ in iPhone Settings → Developer → Face ID approval. Expires in five minutes; five attempts maximum."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange %@ i iPhone-inställningar → Utvecklare → Face ID-godkännande. Giltig i fem minuter, högst fem försök."
+          }
+        }
+      }
+    },
     "Enter Full Screen" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18852,6 +18954,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helskärmsläge"
+          }
+        }
+      }
+    },
+    "Enter a fine-grained GitHub token beginning with github_pat_. It is saved only when the trial starts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a fine-grained GitHub token beginning with github_pat_. It is saved only when the trial starts."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange en finfördelad GitHub-token som börjar med github_pat_. Den sparas först när testet startar."
           }
         }
       }
@@ -19544,6 +19663,40 @@
         }
       }
     },
+    "Experiment enabled. Stop and start again to enroll a different phone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experiment enabled. Stop and start again to enroll a different phone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experimentet är aktiverat. Stoppa och starta igen för att registrera en annan telefon."
+          }
+        }
+      }
+    },
+    "Experiment off. Existing credentials are never accessed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experiment off. Existing credentials are never accessed."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experimentet är avstängt. Befintliga inloggningsuppgifter används aldrig."
+          }
+        }
+      }
+    },
     "Expert fallback for inspecting a selector already known." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20145,6 +20298,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Extra stor"
+          }
+        }
+      }
+    },
+    "Face ID approval lab" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID approval lab"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test av Face ID-godkännande"
           }
         }
       }
@@ -20767,6 +20937,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hitta…"
+          }
+        }
+      }
+    },
+    "Fine-grained GitHub token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fine-grained GitHub token"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finfördelad GitHub-token"
           }
         }
       }
@@ -21725,6 +21912,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "GitHub returnerade ett svar som Threading inte kunde läsa."
+          }
+        }
+      }
+    },
+    "GitHub tokens use this build’s protected, device-local Keychain. This experiment does not protect against a compromised Mac or modified app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub tokens use this build’s protected, device-local Keychain. This experiment does not protect against a compromised Mac or modified app."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub-token sparas i den här versionens skyddade, enhetslokala nyckelring. Experimentet skyddar inte mot en komprometterad Mac eller modifierad app."
+          }
+        }
+      }
+    },
+    "GitHub trial token" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub trial token"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub-token för testet"
+          }
+        }
+      }
+    },
+    "GitHub trial unavailable: this build needs protected Keychain access and hardened signing without debugger access or foreign libraries. The disposable experiment remains available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub trial unavailable: this build needs protected Keychain access and hardened signing without debugger access or foreign libraries. The disposable experiment remains available."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub-testet är inte tillgängligt: versionen behöver skyddad nyckelringsåtkomst och förstärkt signering utan felsökaråtkomst eller främmande bibliotek. Det tillfälliga experimentet är fortfarande tillgängligt."
           }
         }
       }
@@ -30869,6 +31107,23 @@
         }
       }
     },
+    "One Face ID approval permits one GET to https://api.github.com/user. Only your username returns to the phone. Redirects and automatic retries are refused." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One Face ID approval permits one GET to https://api.github.com/user. Only your username returns to the phone. Redirects and automatic retries are refused."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett Face ID-godkännande tillåter en GET till https://api.github.com/user. Endast ditt användarnamn skickas tillbaka till telefonen. Omdirigeringar och automatiska återförsök tillåts inte."
+          }
+        }
+      }
+    },
     "One agent working" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35419,6 +35674,23 @@
         }
       }
     },
+    "Read my GitHub username" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read my GitHub username"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs mitt GitHub-användarnamn"
+          }
+        }
+      }
+    },
     "Read network activity" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38630,6 +38902,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återkalla alla managerroller?"
+          }
+        }
+      }
+    },
+    "Revoke experiment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Revoke experiment"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återkalla experimentet"
           }
         }
       }
@@ -44279,6 +44568,23 @@
         }
       }
     },
+    "Start GitHub trial" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start GitHub trial"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta GitHub-test"
+          }
+        }
+      }
+    },
     "Start New Project…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44352,6 +44658,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Starta en sidokonversation i en tillfällig förgrening"
+          }
+        }
+      }
+    },
+    "Start experiment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start experiment"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta experiment"
           }
         }
       }
@@ -44897,6 +45220,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stoppa alla bakgrundsterminaler"
+          }
+        }
+      }
+    },
+    "Stop experiment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop experiment"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa experiment"
           }
         }
       }
@@ -47922,6 +48262,23 @@
         }
       }
     },
+    "The experiment could not access its disposable Keychain item. Unlock the Mac’s login Keychain and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The experiment could not access its disposable Keychain item. Unlock the Mac’s login Keychain and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Experimentet kunde inte komma åt sin tillfälliga nyckelringspost. Lås upp Macens inloggningsnyckelring och försök igen."
+          }
+        }
+      }
+    },
     "The extension custom surface could not be created." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50355,6 +50712,23 @@
         }
       }
     },
+    "The trial could not start or stop. Finish any request in progress, unlock the Mac, and check protected Keychain availability." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The trial could not start or stop. Finish any request in progress, unlock the Mac, and check protected Keychain availability."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testet kunde inte startas eller stoppas. Slutför en eventuell pågående begäran, lås upp Macen och kontrollera att den skyddade nyckelringen är tillgänglig."
+          }
+        }
+      }
+    },
     "The trigger run needs review." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52024,6 +52398,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det här är ett engångstestkonto"
+          }
+        }
+      }
+    },
+    "This lab follows this build’s Keychain storage policy. In ad-hoc Debug builds the disposable item uses the login Keychain and is not protected from local processes. Never put a real credential in this experiment." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This lab follows this build’s Keychain storage policy. In ad-hoc Debug builds the disposable item uses the login Keychain and is not protected from local processes. Never put a real credential in this experiment."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testet följer den här versionens lagringspolicy för Nyckelring. I ad hoc-signerade Debug-versioner används inloggningsnyckelringen, som inte skyddar testposten från lokala processer. Använd aldrig riktiga inloggningsuppgifter i experimentet."
           }
         }
       }
@@ -54219,6 +54610,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Prova ett bredare arbetsytefilter."
+          }
+        }
+      }
+    },
+    "Try the disposable credential first, or start a GitHub profile trial below. Requires a paired Face ID iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try the disposable credential first, or start a GitHub profile trial below. Requires a paired Face ID iPhone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prova den tillfälliga testuppgiften först, eller starta ett GitHub-profiltest nedan. Kräver en parkopplad iPhone med Face ID."
           }
         }
       }

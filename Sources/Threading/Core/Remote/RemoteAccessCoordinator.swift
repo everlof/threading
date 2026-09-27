@@ -212,6 +212,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             choice: { appSettings.remoteAccessKeepAwake }
         )
         server.authorizer = authority
+#if DEBUG
+        server.secretApprovalLab = SecretApprovalLab.shared
+#endif
         server.invitationRedeemer = self
         server.hostCommands = self
         // Doors come and go with the interfaces under them, so the status the settings page
@@ -1999,6 +2002,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         mirrors.remoteAccessStopped()
         notifications.reset()
         authority.removeAll()
+#if DEBUG
+        if let lab = server.secretApprovalLab {
+            Task {
+                do { try await lab.disable() }
+                catch {
+                    ThreadingLogger.remote.error("Secret approval lab cleanup failed; authority was cleared")
+                }
+            }
+        }
+#endif
         pairingBootstrapToken = nil
         pairingRedemptions.removeAll()
         status = .disabled

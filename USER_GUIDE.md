@@ -5952,3 +5952,17 @@ restore a hidden project when you type in one of its chats (off by default).
 
 The sidebar footer keeps **Settings** on the left and the icon-only **Triggers**, mute and
 hidden-project controls on the right.
+
+### Debug: Face ID secret approval experiment
+
+Debug builds include **Settings → Remote Access → Developer → Start experiment** on the Mac
+and **Settings → Developer → Face ID approval** on iPhone. Enroll with the temporary code shown
+on the Mac, request the fixed test operation, and approve with Face ID. This uses only a random
+disposable Keychain credential; existing passwords and tokens are never read. A physical Face ID
+iPhone and the paired Mac's pinned HTTPS route are required. **Stop experiment** on the Mac
+revokes enrollment and deletes the test item. A provisioned, hardened trial build also offers
+**Start GitHub trial**: enter a separate short-lived fine-grained token locally on the Mac, then
+approve one read of your GitHub username on iPhone. That mode requires protected Keychain storage
+and sends the token only to GitHub; existing saved account credentials are not discovered or reused.
+See the [PoC trial guide](docs/feature-drafts/faceid-secret-approval-poc.md)
+for setup, storage limitations and verification scope.

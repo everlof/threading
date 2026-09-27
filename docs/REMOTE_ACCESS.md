@@ -2424,6 +2424,10 @@ feature lock.
   protected-when-available storage and validation-first migration rules, but contains no bearer.
   Startup joins each record to a current device-bound capability before making it active, so a
   corrupt notification item cannot disable pairing and an orphan cannot restore revoked access.
+- Alternate Debug bundle identifiers namespace remote Keychain services by their bundle ID,
+  including owner/guest records, notification subscriptions and hosted credentials. A separate
+  `CFFIXED_USER_HOME` alone does not isolate the login Keychain. The regular `codes.threading`
+  identity and Release builds retain their existing service names.
 - The pairing code carries the fingerprint. `SHA-256` over the leaf certificate's DER, truncated
   to 128 bits and written base32 upper case, is 26 characters entirely inside QR's alphanumeric
   mode, and it rides as a second fragment component: `HTTPS://192.168.1.42:8760#<token>.<code>`.
@@ -2870,3 +2874,16 @@ with no AppKit window graph or ambient project/runtime lookup.
   terminal surface.
 - `docs/NOTIFICATION_E2E.md`: opt-in real APNs and Claude → MCP → APNs verification.
 - `docs/REMOTE_DIAGNOSTICS.md`: privacy boundary, cross-device tracing and support workflow.
+
+## Debug Face ID approval experiment
+
+Debug builds expose a host-owned disposable-credential experiment through local Remote Access
+settings and the iPhone Developer settings. Its separate, locally enabled authority requires a
+current device-bound interactive owner. The fixed `/api/labs/secret-approval` route deliberately
+bypasses REST mutation replay caching; a signed approval is consumed once before credential use.
+Release builds contain no route or lab UI. See the [PoC contract and trial guide](feature-drafts/faceid-secret-approval-poc.md).
+
+The GitHub mode is selected only through local token entry in a provisioned hardened Mac build.
+It signs the exact GET method and `https://api.github.com/user` destination, consumes approval
+before reading the dedicated protected Keychain item, refuses redirects and retries, and returns
+only a bounded username and receipt. It has no generic fetch, credential lookup or shell operation.

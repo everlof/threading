@@ -543,6 +543,48 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     // MARK: - Tests
 
+#if DEBUG
+    func testSecretApprovalLabChecksOwnerBindingAndRejectsReplayedApproval() async throws {
+        let lab = SecretApprovalLab(createCredential: {}, useCredential: { _ in }, removeCredential: {},
+                                    saveGitHubToken: { _ in }, fetchGitHubProfile: { "octocat" },
+                                    removeGitHubToken: {}, protectedStorageAvailable: { true })
+        server.secretApprovalLab = lab
+        let key = P256.Signing.PrivateKey()
+        let state = try await lab.enableGitHub(token: "github_pat_testValue")
+        let path = RemoteSecretApprovalLab.path
+        let enrollment = try JSONEncoder().encode(RemoteSecretApprovalLab.Request(
+            action: .enroll, enrollmentCode: state.enrollmentCode, publicKey: key.publicKey.x963Representation
+        ))
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "badtoken", body: enrollment)).status, 401)
+        // Even an old unbound owner bearer cannot enroll.
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "goodtoken", body: enrollment)).status, 404)
+        authority.set(RemoteAuthorization(shareID: "lab-owner", capability: .interact,
+                                         scope: .allSessions, boundDeviceID: "test-device"), forToken: "labtoken")
+        authority.set(RemoteAuthorization(shareID: "lab-guest", capability: .interact,
+                                         scope: .session(SessionID()), principal: .guest,
+                                         boundDeviceID: "test-device"), forToken: "guestlabtoken")
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "guestlabtoken", body: enrollment)).status, 404)
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "labtoken", body: enrollment)).status, 200)
+        let requested = try XCTUnwrap(post(path, bearer: "labtoken", body:
+            JSONEncoder().encode(RemoteSecretApprovalLab.Request(action: .challenge))))
+        let offered = try XCTUnwrap(JSONDecoder().decode(RemoteSecretApprovalLab.Response.self, from: requested.body).challenge)
+        XCTAssertTrue(offered.isGitHubProfile)
+        let approval = try JSONEncoder().encode(RemoteSecretApprovalLab.Request(
+            action: .approve, challengeID: offered.id,
+            signature: key.signature(for: offered.signingData()).derRepresentation
+        ))
+        let headers = [RemoteRouter.requestIDHeader: UUID().uuidString]
+        let accepted = try XCTUnwrap(post(path, bearer: "labtoken", body: approval, headers: headers))
+        XCTAssertEqual(accepted.status, 200)
+        let receipt = try JSONDecoder().decode(RemoteSecretApprovalLab.Response.self, from: accepted.body)
+        XCTAssertEqual(receipt.githubLogin, "octocat")
+        XCTAssertEqual(receipt.receipt, offered.id)
+        // Explicitly bypasses the general replay cache, even with the same request ID.
+        XCTAssertEqual(try XCTUnwrap(post(path, bearer: "labtoken", body: approval, headers: headers)).status, 403)
+        try await lab.disable()
+    }
+#endif
+
     func testServesTheClientPageWithHardeningHeaders() throws {
         let probe = try XCTUnwrap(get("/"))
         XCTAssertEqual(probe.status, 200)

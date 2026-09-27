@@ -408,6 +408,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// questions, a readiness card duplicating one of them, and the pairing code below all of it.
     /// The thing the page exists for was the last thing on it, and everything above it was prose.
     private func buildPage() {
+        var labSections: [NSView] = []
+#if DEBUG
+        let lab = SecretApprovalLabSettingsViewController()
+        addChild(lab)
+        labSections.append(SettingsUI.section("Developer", lab.view))
+#endif
         let page = SettingsUI.page(
             title: "Remote Access",
             summary: "Continue chats from Threading on iPhone or a private browser.",
@@ -421,7 +427,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                     "Remote Access publishes only Threading’s authenticated remote surface. "
                         + "MCP, extension services and other local ports stay on this Mac."
                 )
-            ]
+            ] + labSections
         )
         page.setAccessibilityIdentifier("settings.remote-access.page")
         page.translatesAutoresizingMaskIntoConstraints = false

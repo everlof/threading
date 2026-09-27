@@ -4,6 +4,22 @@ import ThreadingRemoteKit
 @testable import Threading
 
 final class RemoteCredentialKeychainStoreTests: XCTestCase {
+    func testAlternateDebugBundleDoesNotAddressRegularRemoteKeychainServices() {
+        let service = "codes.threading.remote.owner-devices"
+        XCTAssertEqual(KeychainStoragePolicy.remoteService(service, bundleIdentifier: "codes.threading"), service)
+        XCTAssertEqual(KeychainStoragePolicy.remoteService(service, bundleIdentifier: nil), service)
+        #if DEBUG
+        XCTAssertEqual(
+            KeychainStoragePolicy.remoteService(service, bundleIdentifier: "codes.threading", variantNamespace: "codes.threading.faceid"),
+            "codes.threading.faceid.\(service)"
+        )
+        XCTAssertEqual(
+            KeychainStoragePolicy.remoteService(service, bundleIdentifier: "codes.threading.faceid"),
+            "codes.threading.faceid.\(service)"
+        )
+        #endif
+    }
+
     private enum Item {
         static let ownerService = "codes.threading.remote.owner-devices"
         static let ownerAccount = "owner-devices-v1"

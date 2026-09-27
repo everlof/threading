@@ -150,7 +150,7 @@ private final class RemoteHostedServiceKeychainStore: RemoteHostedServicePersist
     private var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: RemoteHostedServiceDefaults.keychainService,
+            kSecAttrService as String: KeychainStoragePolicy.remoteService(RemoteHostedServiceDefaults.keychainService),
             kSecAttrAccount as String: account,
         ]
     }

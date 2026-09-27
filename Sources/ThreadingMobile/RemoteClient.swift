@@ -1023,6 +1023,44 @@ struct RemoteClient {
         return .catalogue(try decodeMe(data: data, response: response))
     }
 
+#if DEBUG
+    func validateSecretApprovalTransport() throws {
+        guard link.baseURL.scheme == "https",
+              RemoteHostEndpointKind.privateNetwork.contains(endpointKind) else {
+            throw MobileSecretApprovalFailure.directConnectionRequired
+        }
+        // Pairing/refresh replaces the QR link with the route that answered. Its certificate
+        // pin lives in RemoteHostTrust's registry after that, not in the link's QR fragment.
+        // Consult the very delegate that will enforce TLS for this request.
+        guard let host = link.baseURL.host,
+              Self.pinningDelegate.pins(forHost: host) != nil else {
+            throw MobileSecretApprovalFailure.pinnedConnectionRequired
+        }
+    }
+
+    func secretApprovalLab(_ body: RemoteSecretApprovalLab.Request) async throws -> RemoteSecretApprovalLab.Response {
+        // This experiment requires the direct, pinned TLS path. Never silently downgrade.
+        try validateSecretApprovalTransport()
+        var request = request(url: link.baseURL.appendingPathComponent(RemoteSecretApprovalLab.path))
+        request.httpMethod = "POST"
+        request.httpBody = try Self.encodeMutationBody(body)
+        request.timeoutInterval = RemoteSecretApprovalLab.requestTimeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // No automatic retry: an uncertain approval result must not execute twice.
+        let (stream, response) = try await Self.session.bytes(for: request)
+        var data = Data()
+        for try await byte in stream {
+            guard data.count < RemoteSecretApprovalLab.maximumResponseBytes else {
+                stream.task.cancel()
+                throw RemoteClientError.invalidResponse
+            }
+            data.append(byte)
+        }
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
+        return try JSONDecoder().decode(RemoteSecretApprovalLab.Response.self, from: data)
+    }
+#endif
+
     func fetchUsageCapacity() async throws -> RemoteUsageCapacityDTO {
         var request = request(url: link.usageCapacityURL)
         request.timeoutInterval = 10

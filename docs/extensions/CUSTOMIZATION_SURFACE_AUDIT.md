@@ -590,3 +590,20 @@ host-only security surfaces. Threading owns authenticated chat attribution, the 
 of consent, persistence, revocation, package validation, and disabled-first installation. Extensions
 cannot supply or replace the approval actions or grant themselves trust. Existing themed alert and
 virtual settings table components present these values; no new public component contract is added.
+
+## Debug secret approval lab
+
+The Mac Remote Access lab controls and iPhone Face ID approval screen are deliberately host-only
+security/diagnostic surfaces. The host owns local enablement, device/key enrollment, request
+meaning, cryptographic verification, single-use consumption, credential use and revocation.
+Extensions cannot replace approval controls, request arbitrary credentials, or grant authority.
+The native themed settings components remain the sole presentation; Apple owns the biometric
+prompt. No public extension component is introduced by this disposable-credential PoC.
+
+The GitHub profile trial extends the same host-only surface with a secure local token field,
+protected-storage availability, a fixed GET destination and a bounded username result. The host
+keeps token custody, the signed method/destination, the exact outbound request, redirect refusal,
+one-use consumption and revocation. Themes cannot replace those controls or expand authority.
+The fixed form retains constant-size state; the network worker caps responses at 32 KiB and
+returns only a validated username of at most 39 ASCII bytes. Native settings-shell renders and
+iPhone request/success fixtures cover the extension of the existing surface.

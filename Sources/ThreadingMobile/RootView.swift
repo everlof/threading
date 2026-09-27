@@ -35,6 +35,7 @@ enum MobileDemoScene: Equatable {
     case pairingStorageRecovery
     case settings
     case connectionProgressLab
+    case secretApprovalLab
     case connectionStatus
     case appIconSettings
     case collaborationSettings
@@ -131,6 +132,7 @@ extension MobileDemoScene {
         case "pairing", "pairing-cellular": return .pairing
         case let id where id.hasPrefix("welcome"): return .welcome
         case "settings", "marketing-settings": return .settings
+        case "secret-approval-lab", "secret-approval-pending", "secret-approval-github-success": return .secretApprovalLab
         case "connection-progress-lab": return .connectionProgressLab
         case "connection-status": return .connectionStatus
         case "app-icon-settings": return .appIconSettings
@@ -254,6 +256,9 @@ enum MobileDemoFixture: String, CaseIterable {
     case appDiagnosticsSettingsOn = "app-diagnostics-settings-on"
     case notificationSettings = "notification-settings"
     case macAppearanceSettings = "mac-appearance-settings"
+    case secretApprovalPending = "secret-approval-pending"
+    case secretApprovalGitHubSuccess = "secret-approval-github-success"
+    case secretApprovalLab = "secret-approval-lab"
     case connectionProgressLab = "connection-progress-lab"
     case connectionStatus = "connection-status"
     case diagnostics = "diagnostics"
@@ -500,6 +505,17 @@ struct RootView: View {
             }
         case .settings:
             MobileSettingsView()
+        case .secretApprovalLab:
+            NavigationStack {
+                MobileSecretApprovalLab(previewChallenge:
+                    ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "secret-approval-pending"
+                        ? RemoteSecretApprovalLab.Challenge(
+                            experimentID: UUID(), id: UUID(), deviceID: "preview-only", expiresAt: 0, githubProfile: true
+                        ) : nil,
+                    previewGitHubLogin: ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "secret-approval-github-success"
+                        ? "octocat" : nil
+                )
+            }
         case .connectionProgressLab:
             NavigationStack {
                 MobileConnectionProgressLab()
