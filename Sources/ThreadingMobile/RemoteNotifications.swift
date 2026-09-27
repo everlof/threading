@@ -816,9 +816,7 @@ private enum MobileUIEvidenceCapture {
                     "\(request.identifier).interaction-prepared"
                 )
                 try Data().write(to: readyURL, options: .atomic)
-                guard await waitUntil({
-                    FileManager.default.fileExists(atPath: preparedURL.path)
-                }, attempts: 400) else {
+                guard await waitForMarker(preparedURL, attempts: 400) else {
                     throw EvidenceError.hostInteractionTimedOut
                 }
                 evidenceChecks["hostInteractionPrepared"] = true
@@ -1128,6 +1126,16 @@ private enum MobileUIEvidenceCapture {
         }
         visit(root)
         return matches.prefix(30).joined(separator: " | ")
+    }
+
+    private nonisolated static func waitForMarker(_ url: URL, attempts: Int) async -> Bool {
+        await Task.detached(priority: .utility) {
+            for _ in 0..<attempts {
+                if FileManager.default.fileExists(atPath: url.path) { return true }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return FileManager.default.fileExists(atPath: url.path)
+        }.value
     }
 
     private static func waitUntil(

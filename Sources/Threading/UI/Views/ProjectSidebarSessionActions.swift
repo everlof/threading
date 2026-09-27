@@ -973,8 +973,9 @@ extension ProjectSidebarViewController {
     /// canonical path and lets `SessionCheckoutCoordinator` revalidate its worktree identity.
     private func checkoutMoveEntry(for session: AgentSession) -> ThemedMenuEntry? {
         guard session.managedWorkspace == nil,
-              let source = projectStore.project(forSessionID: session.id),
-              GitInfo.worktreeLocation(for: source.folderPath) != nil else { return nil }
+              let source = projectStore.project(forSessionID: session.id) else { return nil }
+        let sourceIsCheckout = GitInfo.worktreeLocation(for: source.folderPath) != nil
+        guard sourceIsCheckout || session.pendingCheckoutMove != nil else { return nil }
 
         var submenu: [ThemedMenuEntry] = []
         if let pending = session.pendingCheckoutMove {
@@ -1006,24 +1007,26 @@ extension ProjectSidebarViewController {
                     self.presentProjectNotice(L10n.string("The checkout move could not be cancelled."))
                 }
             })
-            submenu.append(.separator)
+            if sourceIsCheckout { submenu.append(.separator) }
         }
 
-        let siblings = projectStore.siblingCheckouts(of: source.id).compactMap { sibling in
-            projectStore.project(withID: sibling.projectID).map { ($0, sibling.branch) }
-        }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
-        for (project, branch) in siblings {
-            submenu.append(action(branch, symbol: "arrow.right.folder") { [weak self] in
-                self?.requestCheckoutMove(for: session.id, to: project.folderPath)
+        if sourceIsCheckout {
+            let siblings = projectStore.siblingCheckouts(of: source.id).compactMap { sibling in
+                projectStore.project(withID: sibling.projectID).map { ($0, sibling.branch) }
+            }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
+            for (project, branch) in siblings {
+                submenu.append(action(branch, symbol: "arrow.right.folder") { [weak self] in
+                    self?.requestCheckoutMove(for: session.id, to: project.folderPath)
+                })
+            }
+            if !siblings.isEmpty { submenu.append(.separator) }
+            submenu.append(action(
+                L10n.string("Choose Existing Checkout…"),
+                symbol: "folder.badge.plus"
+            ) { [weak self] in
+                self?.chooseCheckoutForMove(sessionID: session.id)
             })
         }
-        if !siblings.isEmpty { submenu.append(.separator) }
-        submenu.append(action(
-            L10n.string("Choose Existing Checkout…"),
-            symbol: "folder.badge.plus"
-        ) { [weak self] in
-            self?.chooseCheckoutForMove(sessionID: session.id)
-        })
 
         return .item(ThemedMenuItem(
             title: L10n.string("Move to Checkout"),

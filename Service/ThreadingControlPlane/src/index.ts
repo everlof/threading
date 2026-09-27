@@ -1,4 +1,5 @@
 import { recordServiceFailure, flushServiceFailureAlerts } from "./service-failure-alerts";
+import { signInAnonymousHost } from "./anonymous-auth";
 import { publicInvitationResponse } from "./invitation-worker";
 import type { Env, RendezvousPrincipal } from "./environment";
 import { HttpError } from "./environment";
@@ -68,6 +69,10 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/local-development") {
         return await handleLocalDevelopmentSignIn(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/auth/anonymous-host"
+        && !isOperatedDevelopment(env)) {
+        return await signInAnonymousHost(request, env);
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/development/start") {
         return await startDevelopmentSignIn(request, env);
@@ -321,6 +326,7 @@ async function probeStorage(env: Env, includeIssueReports = true): Promise<void>
     env.DB.prepare("SELECT accepted_count FROM issue_report_daily_quota LIMIT 1"),
     env.DB.prepare("SELECT consumed_at FROM development_auth_transactions LIMIT 1"),
     env.DB.prepare("SELECT revoked_at FROM push_registrations LIMIT 1"),
+    env.DB.prepare("SELECT secret_digest FROM anonymous_host_identities LIMIT 1"),
   ]);
   if (includeIssueReports) {
     await env.ISSUE_REPORTS.head("health/readiness-probe");

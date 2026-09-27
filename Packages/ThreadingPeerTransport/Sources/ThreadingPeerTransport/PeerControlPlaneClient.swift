@@ -254,6 +254,24 @@ public struct PeerControlPlaneClient: Sendable {
         return try response.validated()
     }
 
+    /// Restores the Mac's accountless service session using the installation secret saved before
+    /// first enrollment. The service binds that secret to exactly one host identifier.
+    public func signInAnonymousHost(
+        hostID: String,
+        installationSecret: PeerControlPlaneBearer
+    ) async throws -> PeerControlPlaneSession {
+        try validateIdentifier(hostID)
+        let response: SessionResponse = try await request(
+            method: "POST",
+            url: endpoint.route("v1", "auth", "anonymous-host"),
+            body: AnonymousHostSignInRequest(
+                hostID: hostID,
+                installationSecret: installationSecret.rawValue
+            )
+        )
+        return try response.validated()
+    }
+
     /// Authenticates against the explicit loopback-only development route. The production
     /// service does not expose this route and a non-loopback endpoint is rejected client-side.
     public func signInForLocalDevelopment() async throws -> PeerControlPlaneSession {
@@ -608,6 +626,11 @@ private struct AppleSignInRequest: Encodable {
     let identityToken: String
     let authorizationCode: String
     let nonce: String
+}
+
+private struct AnonymousHostSignInRequest: Encodable {
+    let hostID: String
+    let installationSecret: String
 }
 
 private struct DevelopmentSignInStartRequest: Encodable {

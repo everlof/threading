@@ -128,7 +128,7 @@ extension MobileDemoScene {
         case "attention-request": return .attentionRequest
         case let id where id.hasPrefix("conversation"): return .conversation
         case "pairing-storage-recovery": return .pairingStorageRecovery
-        case "pairing": return .pairing
+        case "pairing", "pairing-cellular": return .pairing
         case let id where id.hasPrefix("welcome"): return .welcome
         case "settings", "marketing-settings": return .settings
         case "connection-progress-lab": return .connectionProgressLab
@@ -236,6 +236,7 @@ enum MobileDemoFixture: String, CaseIterable {
 
     case attentionRequest = "attention-request"
     case pairing = "pairing"
+    case pairingCellular = "pairing-cellular"
 
     /// The welcome screen; the suffix focuses one feature card.
     case pairingStorageRecovery = "pairing-storage-recovery"

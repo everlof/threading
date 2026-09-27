@@ -10,7 +10,7 @@ nightly workflows under `.github/workflows/`. The trusted-Mac route is
 `scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete Mac test
 level inside the Mac release-quality gate before either public ref exists, then proves the clean tested
 commit is still checked out. The downloadable artifact is the Mac app, release builds offer
-Remote Access's local ways in but not Hosted Direct, and the iPhone companion is not published with it; the release lane therefore
+Remote Access's local and accountless Hosted Direct ways in, and the iPhone companion is not published with it; the release lane therefore
 does not make an unshipped mobile test a prerequisite. Ordinary CI remains the superset and still
 builds and tests ThreadingMobile. Because the tests are long enough for Keychain state to change,
 it rechecks
@@ -115,16 +115,14 @@ refuses at runtime. That ships a sign-in button that still does not work, and ta
 Sparkle's nested bundles inside-out, which the export otherwise does for free.
 
 Nothing working was lost by removing it: the entitlement had never been in a distributed build,
-because it never could be. The supported path for direct distribution is the web flow — a Services
-ID with `ASWebAuthenticationSession` — and that is what hosted sign-in needs before the button
-means anything outside a development build.
+because it never could be. Optional Apple sign-in would need a web flow with a Services ID. The
+public Hosted Direct path instead enrolls with a locally stored installation secret.
 
-**What public builds ship.** Decided 2026-09-13: release, beta and nightly builds offer Remote
-Access's local ways in, which need no restricted entitlement, and do not offer Hosted Direct.
-`BuildChannel.offersHostedDirect` is true only for `dev`. A public build holds an inert hosted
-controller (no endpoint, in-memory store), omits the Hosted Direct row and the Threading Direct way
-in, and delivers iPhone notifications Live only. No entitlement was added for it; the web flow above
-is what would let Hosted Direct ship.
+**What public builds offer.** Release, beta and nightly builds offer Remote Access's local ways
+in and Hosted Direct. `BuildChannel.offersHostedDirect` is true on every channel. A public build
+uses the production service with an accountless installation secret and never constructs Apple's
+native sign-in control. The service must deploy the matching anonymous-host route before these
+builds are distributed. No Sign in with Apple entitlement is needed.
 
 **What this bought.** It was the only `com.apple.developer.*` key in the entitlements file, so
 there are now none, and a Developer ID export needs no profile whatsoever: no profile secret in
@@ -362,13 +360,10 @@ Four, of which the release pipeline can stamp three:
 | `nightly` | `scripts/release.sh --channel nightly` with `THREADING_VERSION` | the date as dotted digits, e.g. `2026.8.2` | NIGHTLY |
 | `dev` | every build made any other way | `0.0.0` | DEV |
 
-Remote Access ships on every channel; Hosted Direct is offered only by `dev`
-(`BuildChannel.offersHostedDirect`). The three distributed channels show the Remote Access page with
-its local ways in — This network, Through a VPN, Tailscale and Tailscale Serve — and omit the Hosted
-Direct row, because [Sign in with Apple cannot be shipped by Developer
-ID](#sign-in-with-apple-cannot-be-shipped-by-developer-id). They hold an inert hosted controller
-with no endpoint and an in-memory store, so they never read a development build's hosted Keychain
-record or contact the hosted service. The master switch stays off by default. A distributed build
+Remote Access and Hosted Direct are offered on every channel. The three distributed channels show
+the Remote Access page with This network, Through a VPN, Tailscale, Tailscale Serve and Hosted
+Direct. Public builds enroll without the native Sign in with Apple entitlement. The master switch
+stays off by default. A distributed build
 installed over a dev build clears an inherited opt-in once, behind the
 `didClearRemoteAccessForPublicChannel` marker, so it never starts a listener enabled in a different
 build while its own later opt-ins persist. `release.sh` reads the channel back from the exported
@@ -1214,9 +1209,9 @@ captures. The app is iPhone-only, so the document needs no iPad slides.
 
 **Public Mac builds can pair with the iPhone app.** Release, beta and nightly Mac builds offer
 Remote Access's local ways in — This network, Through a VPN, Tailscale and Tailscale Serve — so a
-customer's notarized Threading pairs once they turn Remote Access on. Threading Direct, which
-needs Sign in with Apple, stays development-only (`BuildChannel.offersHostedDirect`), so a public
-Mac cannot push to a suspended iPhone: its notifications are Live only. A Mac release carrying
+customer's notarized Threading pairs once they turn Remote Access on. Threading Direct uses
+accountless installation enrollment in public builds and can send hosted push after the matching
+service route is deployed. A Mac release carrying
 this has to ship before the iPhone app is submitted, and the first notarized nightly still has to
 be checked for the Local Network and firewall prompts and the protected Keychain (see
 `REMOTE_ACCESS.md`, Distributed-build gate).
@@ -1225,8 +1220,8 @@ Decided 2026-09-13: the app is **Threading Remote**, subtitle "Approve & review 
 iPhone only, free, in every territory except France, with David Everlöf at support@mjukis.dev as
 the App Review contact. Local use over Wi-Fi, a VPN or Tailscale stays free, as
 [`REMOTE_ACCESS.md`](../REMOTE_ACCESS.md) already records: payment is for operated infrastructure,
-so a subscription arrives with hosted Threading Direct and push once they ship in public builds,
-not as a lock on local pairing. The pricing research and StoreKit design for that subscription are
+so a subscription may later fund hosted Threading Direct and push without locking local pairing.
+The pricing research and StoreKit design for that subscription are
 in [`ios-hosted-subscription.md`](../feature-drafts/ios-hosted-subscription.md). The name, subtitle
 and keywords carry no provider trademarks, which Anthropic's and OpenAI's brand rules forbid in app
 names; the description names the providers only as compatibility facts. `fastlane/metadata` points

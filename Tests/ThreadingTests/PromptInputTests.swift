@@ -825,6 +825,36 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(observedDrafts.last, "draft", "Redo has to persist the restored draft too")
     }
 
+    func testReplacingPromptTextDiscardsUndoRangesFromPreviousDraft() throws {
+        let prompt = PromptView()
+        let window = makeWindow(hosting: prompt)
+        let textView = try promptTextView(in: prompt)
+
+        XCTAssertTrue(window.makeFirstResponder(textView))
+        type("long draft", in: window)
+        let undoManager = try XCTUnwrap(textView.undoManager)
+        XCTAssertTrue(undoManager.canUndo)
+        XCTAssertFalse(undoManager === window.undoManager)
+
+        prompt.stringValue = "long draft"
+        XCTAssertTrue(undoManager.canUndo, "An unchanged draft keeps its valid typing history")
+
+        prompt.stringValue = "new"
+        XCTAssertFalse(undoManager.canUndo)
+        XCTAssertFalse(undoManager.canRedo)
+
+        type("!", in: window)
+        XCTAssertEqual(prompt.stringValue, "!new")
+        undoManager.undo()
+        XCTAssertEqual(prompt.stringValue, "new")
+        undoManager.redo()
+        XCTAssertEqual(prompt.stringValue, "!new")
+
+        prompt.clear()
+        XCTAssertFalse(undoManager.canUndo)
+        XCTAssertFalse(undoManager.canRedo)
+    }
+
     /// The undo manager is not the shipping entry point: AppKit first has to resolve the main-menu
     /// key equivalent and send the window responder's `undo:` action. The earlier regression test
     /// called the manager directly, so it passed while the menu used `UndoManager.undo` — a

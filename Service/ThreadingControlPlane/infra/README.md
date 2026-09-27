@@ -18,8 +18,8 @@ Managed here:
 `.terraform.lock.hcl` was produced by `tofu init`, so OpenTofu is what this module has been
 exercised with. `scripts/infra.mjs` and `scripts/deploy-production.mjs` both default their CLI to
 `terraform`; export `THREADING_INFRA_CLI=tofu` unless Terraform itself is installed. The deploy
-wrapper reads `d1_database_id` through that same CLI, so getting it wrong fails the deploy rather
-than silently using the checked-in placeholder.
+wrapper reads `d1_database_id` through that same CLI and pins Wrangler to the account in
+`terraform.tfvars`, so a login for another account cannot silently target the wrong service.
 
 Two files here are deliberately untracked and must exist before any command works:
 
@@ -29,6 +29,25 @@ Two files here are deliberately untracked and must exist before any command work
   on purpose so no account-specific value is committed. Credentials come from
   `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in the environment, which for R2 means an S3
   access key created under R2 → Manage API Tokens, *not* the Cloudflare API token.
+
+## Unattended production deploys
+
+Use an **account-owned** Cloudflare API token for the control-plane deploy. It survives changes
+to a person's Cloudflare login. Create it in the production account's **Account API tokens**
+page; Cloudflare requires a Super Administrator to create one. Give the existing
+`threading-control-plane` Worker **Editor** access, **D1 Write** for its production database,
+and **Zone → Workers Routes → Write** for `threading.codes` if the deploy changes its custom
+domain. The deployment does not need R2 or Queue write access merely to retain Worker bindings.
+Infrastructure plans and applies are separate and need their own resource permissions.
+
+Store the token in team secret management as `CLOUDFLARE_API_TOKEN` for CI. On a Mac used for
+local releases, run `npm run auth:store` from an interactive terminal and paste the token at
+Keychain's hidden prompt. The command takes the account ID from the ignored
+`infra/terraform.tfvars` and stores the token in the login Keychain, never in the repository or
+shell history. `npm run deploy` automatically reads that item for Wrangler if the environment
+does not already provide `CLOUDFLARE_API_TOKEN`; it still reads the R2 state credentials from
+the environment. A missing Keychain item allows an explicitly selected Wrangler login as an
+interactive fallback, but unattended runs must supply the account-owned token.
 
 ## The rate-limit rule is capped by the zone plan
 

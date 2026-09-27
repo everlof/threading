@@ -8,8 +8,17 @@ const templateURL = new URL("wrangler.jsonc", serviceRoot);
 const generatedURL = new URL(".wrangler.production.generated.jsonc", serviceRoot);
 const generatedPath = fileURLToPath(generatedURL);
 const infraCLI = process.env.THREADING_INFRA_CLI ?? "terraform";
+const deployTokenKeychainService = "codes.threading.cloudflare.production-deploy";
 
 try {
+  const variables = await readFile(new URL("infra/terraform.tfvars", serviceRoot), "utf8");
+  const accountMatches = [...variables.matchAll(
+    /^\s*cloudflare_account_id\s*=\s*"([0-9a-f]{32})"\s*(?:#.*)?$/gmu,
+  )];
+  if (accountMatches.length !== 1) {
+    throw new Error("Production terraform.tfvars must define exactly one Cloudflare account ID");
+  }
+  const accountID = accountMatches[0][1];
   const databaseID = (await capture(infraCLI, [
     "-chdir=infra",
     "output",
@@ -27,6 +36,7 @@ try {
 
   const environment = {
     ...process.env,
+    CLOUDFLARE_ACCOUNT_ID: accountID,
     THREADING_WRANGLER_CONFIG: generatedPath,
   };
   await run(process.execPath, ["scripts/preflight.mjs"], environment);
@@ -34,10 +44,11 @@ try {
   await run("npm", ["test"], environment);
   await run("npm", ["run", "test:load"], environment);
   await run(process.execPath, ["scripts/verify-report-candidate.mjs"], environment);
+  const wranglerEnvironment = await withDeployToken(environment, accountID);
   await run("npx", [
     "wrangler", "d1", "migrations", "apply", "threading-control-plane",
     "--remote", "--config", generatedPath,
-  ], environment);
+  ], wranglerEnvironment);
   // `wrangler secret put` cannot address a Worker that does not exist yet, so the very first
   // deploy has to carry its secrets with it. THREADING_DEPLOY_SECRETS_FILE names a KEY=value
   // file for exactly that case; every later deploy leaves it unset and the already-installed
@@ -53,7 +64,7 @@ try {
   await run("npx", [
     "wrangler", "deploy", "--config", generatedPath,
     ...(secretsFile === undefined ? [] : ["--secrets-file", secretsFile]),
-  ], environment);
+  ], wranglerEnvironment);
   await run(process.execPath, ["scripts/verify-production.mjs"], environment);
 } finally {
   await rm(generatedURL, { force: true });
@@ -62,6 +73,29 @@ try {
 function isCloudflareIdentifier(value) {
   return /^[0-9a-f]{32}$/u.test(value)
     || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value);
+}
+
+async function withDeployToken(environment, accountID) {
+  if (environment.CLOUDFLARE_API_TOKEN || process.platform !== "darwin") return environment;
+  const child = spawn("/usr/bin/security", [
+    "find-generic-password", "-a", accountID,
+    "-s", deployTokenKeychainService, "-w",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+  let token = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { token += chunk; });
+  const code = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", resolve);
+  });
+  if (code === 44) return environment; // No account-owned token has been installed yet.
+  if (code !== 0) throw new Error("Could not read the production deploy token from Keychain");
+  token = token.trim();
+  if (!token.startsWith("cfat_") || /\s/u.test(token)) {
+    throw new Error("The production deploy token in Keychain is not a new account-owned token");
+  }
+  process.stderr.write("deploy: using the account-owned production token from Keychain\n");
+  return { ...environment, CLOUDFLARE_API_TOKEN: token };
 }
 
 async function capture(executable, args) {

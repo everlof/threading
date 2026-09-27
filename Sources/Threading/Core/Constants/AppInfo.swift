@@ -78,9 +78,8 @@ public enum BuildChannel: String, CaseIterable {
         self = (infoValue as? String).flatMap(BuildChannel.init(rawValue:)) ?? .dev
     }
 
-    /// Whether a build on this channel offers Hosted Direct — Threading Direct's Sign in with
-    /// Apple enrollment, hosted rendezvous and TURN, hosted push, hosted device credentials and
-    /// the hosted pairing link.
+    /// Whether a build on this channel offers Hosted Direct — accountless host enrollment,
+    /// hosted rendezvous and TURN, hosted push, hosted device credentials and pairing links.
     ///
     /// Remote Access itself ships on every channel. Its local ways in — This network, Through a
     /// VPN, Tailscale and the Tailscale Serve browser convenience — are listeners this Mac binds
@@ -88,20 +87,15 @@ public enum BuildChannel: String, CaseIterable {
     /// nothing the distribution method withholds. They stay off until the person turns Remote
     /// Access on.
     ///
-    /// Hosted Direct cannot ship that way. Enrolling the Mac as a host needs
-    /// `com.apple.developer.applesignin`, and that entitlement never reaches a Developer ID
-    /// provisioning profile — see `releasing.md`, "Sign in with Apple cannot be shipped by
-    /// Developer ID". A public build therefore builds an inert hosted controller: no endpoint, an
-    /// in-memory store, no Keychain read of a development build's hosted record and no request to
-    /// the hosted service. Its Settings page omits the Hosted Direct row rather than offering a
-    /// sign-in button that cannot work.
+    /// Public builds enroll with a private installation secret, so Developer ID distribution
+    /// does not require the Sign in with Apple entitlement. Development builds keep their
+    /// existing Apple and isolated development authentication paths.
     ///
     /// `.dev` is the channel every uninjected build lands on, so working on Hosted Direct needs
     /// no flag: build it the ordinary way and it is there.
     public var offersHostedDirect: Bool {
         switch self {
-        case .dev: true
-        case .nightly, .beta, .release: false
+        case .dev, .nightly, .beta, .release: true
         }
     }
 

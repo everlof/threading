@@ -20,6 +20,7 @@ final class PromptView: NSView, ThemedComponent {
     private let attachmentStack = NSStackView()
     private let scrollView = ThemedScrollView()
     private let textView = PromptTextView(frame: .zero, textContainer: nil)
+    private let textUndoManager = UndoManager()
     private let submitButton = ThemedButton()
 
     /// The half beside the send that offers to send it later. Built lazily and only ever added
@@ -348,7 +349,14 @@ final class PromptView: NSView, ThemedComponent {
     var stringValue: String {
         get { textView.string }
         set {
-            textView.string = newValue
+            // AppKit's typing undo records ranges in the current text storage. Replacing the
+            // draft outside the editor leaves those ranges pointing into the old string;
+            // undoing after a send or draft restore can then throw in NSTextStorage.
+            if textView.string != newValue {
+                textView.breakUndoCoalescing()
+                textUndoManager.removeAllActions()
+                textView.string = newValue
+            }
             textView.needsDisplay = true
 
             // A restored draft is read from its beginning. Setting the text leaves the view
@@ -2128,6 +2136,10 @@ private final class PromptAttachmentRemoveButton: ThemedControl {
 // MARK: - NSTextViewDelegate
 
 extension PromptView: NSTextViewDelegate {
+
+    func undoManager(for textView: NSTextView) -> UndoManager? {
+        textUndoManager
+    }
 
     func textDidChange(_ notification: Notification) {
         updateSubmitState()

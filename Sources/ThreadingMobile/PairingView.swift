@@ -51,10 +51,32 @@ enum MobileInvitationFailureMessage {
     }
 }
 
+/// A LAN invitation can be scanned while the phone's only ordinary route is cellular.
+/// This is advice, not a refusal: a VPN over cellular may still reach the private address.
+enum MobilePairingNetworkHint {
+    static func text(
+        for route: MobileInvitationRoute?,
+        path: MobileNetworkPathSummary?
+    ) -> String? {
+        guard case .connection(let link)? = route,
+              let host = link.baseURL.host,
+              RemoteLocalNetworkAddress.isPrivate(host),
+              let path,
+              path.status == .satisfied,
+              path.usesCellular,
+              !path.usesWiFi,
+              !path.usesWired else { return nil }
+        return MobileL10n.string(
+            "This code uses a local address. On cellular, join the Mac’s Wi-Fi or use a VPN that reaches it."
+        )
+    }
+}
+
 struct PairingView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.remoteTheme) private var theme
+    @StateObject private var network = MobileNetworkPathObserver()
     @State private var linkText = ""
     @State private var errorMessage: String?
     @State private var isConnecting = false
@@ -66,6 +88,18 @@ struct PairingView: View {
             ScrollView {
                 VStack(spacing: MobileDesign.Spacing.inset) {
                     scannerCard
+
+                    if let networkHint = MobilePairingNetworkHint.text(
+                        for: MobileInvitationRoute(payload: linkText),
+                        path: observedNetworkPath
+                    ) {
+                        Label(networkHint, systemImage: "wifi.exclamationmark")
+                            .font(.footnote)
+                            .foregroundStyle(theme.warning)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, MobileDesign.Spacing.tight)
+                            .accessibilityIdentifier("pairing.network-hint")
+                    }
 
                     linkCard
 
@@ -116,6 +150,17 @@ struct PairingView: View {
             .background(theme.ground.ignoresSafeArea())
         }
         .presentationDetents([.large])
+        .task {
+#if DEBUG
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == MobileDemoFixture.pairingCellular.rawValue,
+               let url = URL(string: "https://192.168.1.181:8761"),
+               let link = RemoteConnectionLink(baseURL: url, token: "ui-evidence") {
+                linkText = link.shareURL.absoluteString
+            }
+#endif
+            await network.run()
+        }
         // A tapped invitation opens this screen with its payload already in hand. It is shown in
         // the field rather than accepted invisibly, so a failure has somewhere to be reported and
         // the person can see what they are about to join.
@@ -244,6 +289,16 @@ struct PairingView: View {
     /// photographed one does.
     private var scannedPinnedIdentity: Bool {
         RemoteConnectionLink(string: linkText)?.pinnedFingerprintCode != nil
+    }
+
+    private var observedNetworkPath: MobileNetworkPathSummary? {
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            == MobileDemoFixture.pairingCellular.rawValue {
+            return MobileNetworkPathSummary(status: .satisfied, usesCellular: true)
+        }
+#endif
+        return network.path
     }
 
     /// One line, at the moment it is true and before anything is trusted.

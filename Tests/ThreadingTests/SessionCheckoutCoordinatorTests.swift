@@ -546,6 +546,71 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
     }
 
+    func testQueuedMoveFinishesWhenItsSourceWorktreeWasRemoved() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: main.path,
+            authorityBasis: .observedExecution,
+            reason: "the agent returned to main",
+            policy: .allowSameRepository,
+            waitForCurrentTurnBoundary: true
+        )
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        GitInfo.invalidateCache(for: sibling.path)
+
+        var succeeded: Bool?
+        coordinator.finishPendingMove(sessionID: session.id) { succeeded = $0 }
+
+        XCTAssertEqual(succeeded, true)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.folderPath, main.path)
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
+        coordinator.runtimeRelaunchDidStart(sessionID: session.id)
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+    }
+
+    func testMissingSourceWithoutAQueuedMoveCannotUseItsRememberedRepository() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        GitInfo.invalidateCache(for: sibling.path)
+
+        XCTAssertEqual(
+            failure(coordinator.validate(checkoutPath: main.path, forSessionID: session.id)),
+            .sourceNotCheckout
+        )
+    }
+
+    func testFailedMoveCanRetryAfterItsSourceWorktreeWasRemoved() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let target = try XCTUnwrap(GitInfo.worktreeLocation(for: main.path))
+        let failed = PendingCheckoutMove(
+            checkoutPath: main.path,
+            repositoryIdentity: target.repositoryIdentity,
+            worktreeIdentity: target.worktreeIdentity,
+            authorityBasis: .observedExecution,
+            reason: "the agent returned to main",
+            requestedAt: Date(),
+            phase: .failed,
+            failureDescription: "The chat does not currently belong to a Git checkout."
+        )
+        XCTAssertTrue(store.setPendingCheckoutMove(failed, forSessionID: session.id))
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        GitInfo.invalidateCache(for: sibling.path)
+
+        let coordinator = makeCoordinator()
+        coordinator.retryPendingMove(sessionID: session.id)
+
+        XCTAssertEqual(store.project(forSessionID: session.id)?.folderPath, main.path)
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+    }
+
     func testLaunchRecoveryLeavesFailedMoveForAnExplicitRetryOrCancel() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))

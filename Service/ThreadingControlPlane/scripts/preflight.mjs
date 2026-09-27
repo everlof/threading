@@ -94,9 +94,8 @@ if (countMatches(
 // never reaches a Developer ID provisioning profile, so `exportArchive` refuses outright, and
 // signing it by hand ships an entitlement the system rejects at runtime. It was removed on
 // 2026-08-23 for exactly that reason — see docs/architecture/releasing.md, "Sign in with Apple
-// cannot be shipped by Developer ID". Hosted sign-in on a *distributed* Mac build needs the
-// Services ID web flow instead; the native request still works in a development build, which
-// is what host enrollment is tested against.
+// cannot be shipped by Developer ID". Distributed Hosted Direct uses accountless installation
+// credentials; the native Apple request remains a development-only path.
 //
 // This assertion used to demand the opposite. Do not restore it without reading that record.
 const restrictedEntitlement = /<key>com\.apple\.developer\./u;
@@ -172,6 +171,7 @@ const expectedMigrations = [
   "0007_issue_report_quota.sql",
   "0008_development_auth_and_push_registrations.sql",
   "0009_service_failure_alerts.sql",
+  "0010_anonymous_host_identities.sql",
 ];
 if (JSON.stringify(migrations) !== JSON.stringify(expectedMigrations)) {
   failures.push("the production migration set differs from the reviewed ordered list");

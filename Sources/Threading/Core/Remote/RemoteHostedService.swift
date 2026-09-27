@@ -30,7 +30,9 @@ enum RemoteHostedServiceState: Equatable {
 private enum RemoteHostedServiceDefaults {
     static let keychainService = "codes.threading.remote.hosted-service"
     static let keychainAccount = "host-credentials-v1"
+    static let anonymousRecordKeychainAccount = "host-credentials-anonymous-v1"
     static let developmentKeychainAccount = "host-credentials-development-v1"
+    static let anonymousKeychainAccount = "host-installation-secret-v1"
     static let recordVersion = 1
     static let maximumPendingRevocations = 64
     static let credentialRenewalLeadTime: TimeInterval = 60 * 60
@@ -168,6 +170,101 @@ private final class InMemoryRemoteHostedServiceStore: RemoteHostedServicePersist
     func delete() throws { record = nil }
 }
 
+protocol RemoteHostedInstallationSecretPersisting: AnyObject {
+    func load() throws -> PeerControlPlaneBearer?
+    func save(_ secret: PeerControlPlaneBearer) throws
+    func isDisabled() throws -> Bool
+    func disable() throws
+    func delete() throws
+}
+
+private final class RemoteHostedInstallationSecretKeychainStore:
+    RemoteHostedInstallationSecretPersisting {
+    private static let disabled = "disabled-v1"
+    private var query: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: RemoteHostedServiceDefaults.keychainService,
+            kSecAttrAccount as String: RemoteHostedServiceDefaults.anonymousKeychainAccount,
+        ]
+    }
+
+    func load() throws -> PeerControlPlaneBearer? {
+        var read = query
+        read[kSecReturnData as String] = true
+        read[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(read as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            throw RemoteHostedServiceStoreError.corrupt
+        }
+        if value == Self.disabled { return nil }
+        guard value.hasPrefix("th_install_") else {
+            throw RemoteHostedServiceStoreError.corrupt
+        }
+        return try PeerControlPlaneBearer(value)
+    }
+
+    func isDisabled() throws -> Bool {
+        var read = query
+        read[kSecReturnData as String] = true
+        read[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(read as CFDictionary, &result)
+        if status == errSecItemNotFound { return false }
+        guard status == errSecSuccess, let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            throw RemoteHostedServiceStoreError.corrupt
+        }
+        return value == Self.disabled
+    }
+
+    func save(_ secret: PeerControlPlaneBearer) throws {
+        try saveValue(secret.withValue { $0 })
+    }
+
+    func disable() throws { try saveValue(Self.disabled) }
+
+    private func saveValue(_ value: String) throws {
+        let data = Data(value.utf8)
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
+        let updated = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else {
+            throw RemoteHostedServiceStoreError.keychain(updated)
+        }
+        var item = query
+        attributes.forEach { item[$0.key] = $0.value }
+        let added = SecItemAdd(item as CFDictionary, nil)
+        guard added == errSecSuccess else {
+            throw RemoteHostedServiceStoreError.keychain(added)
+        }
+    }
+
+    func delete() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw RemoteHostedServiceStoreError.keychain(status)
+        }
+    }
+}
+
+private final class InMemoryRemoteHostedInstallationSecretStore:
+    RemoteHostedInstallationSecretPersisting {
+    private var secret: PeerControlPlaneBearer?
+    private var disabled = false
+    func load() throws -> PeerControlPlaneBearer? { secret }
+    func save(_ secret: PeerControlPlaneBearer) throws { self.secret = secret; disabled = false }
+    func isDisabled() throws -> Bool { disabled }
+    func disable() throws { secret = nil; disabled = true }
+    func delete() throws { secret = nil; disabled = false }
+}
+
 /// Owns the Mac's low-frequency hosted control connection. The loopback remote server remains
 /// authoritative; this controller only publishes a direct ICE/TURN path to that same server.
 @MainActor
@@ -182,11 +279,13 @@ final class RemoteHostedServiceController {
     var onStateChange: (() -> Void)?
 
     private let store: RemoteHostedServicePersisting
+    private let installationSecretStore: RemoteHostedInstallationSecretPersisting
     private let endpoint: PeerControlPlaneServiceEndpoint?
     private let hostID: String
     private let hostName: String
     private let localDevelopmentAuthentication: Bool
     private let developmentBrowserAuthentication: Bool
+    private let anonymousAuthentication: Bool
     private var record: RemoteHostedServiceRecord?
     private var persistenceError: String?
     /// See `notificationProtocolVersion(of:)`.
@@ -213,6 +312,7 @@ final class RemoteHostedServiceController {
 
     init(
         store: (any RemoteHostedServicePersisting)? = nil,
+        installationSecretStore: (any RemoteHostedInstallationSecretPersisting)? = nil,
         endpoint: PeerControlPlaneServiceEndpoint? = RemoteHostedServiceController
             .configuredEndpoint(),
         hostID: String = RemoteHostIdentity.current.id,
@@ -220,9 +320,14 @@ final class RemoteHostedServiceController {
         localDevelopmentAuthentication: Bool = RemoteHostedServiceController
             .configuredLocalDevelopmentAuthentication(),
         developmentBrowserAuthentication: Bool? = nil,
+        anonymousAuthentication: Bool = AppInfo.buildChannel != .dev,
         connectivity: (any RemoteHostedConnectivityObserving)? = nil
     ) {
         self.store = store ?? Self.defaultStore(endpoint: endpoint)
+        self.installationSecretStore = installationSecretStore
+            ?? (AutomatedRun.isUnderway
+                ? InMemoryRemoteHostedInstallationSecretStore()
+                : RemoteHostedInstallationSecretKeychainStore())
         self.endpoint = endpoint
         self.hostID = hostID
         self.hostName = hostName
@@ -230,6 +335,7 @@ final class RemoteHostedServiceController {
         self.localDevelopmentAuthentication = localDevelopmentAuthentication
         self.developmentBrowserAuthentication = developmentBrowserAuthentication
             ?? Self.configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
+        self.anonymousAuthentication = anonymousAuthentication
         do {
             let loaded = try self.store.load()
             if let loaded, Self.isValid(loaded, endpoint: endpoint, hostID: hostID) {
@@ -283,14 +389,32 @@ final class RemoteHostedServiceController {
             state = .notConfigured
             return
         }
-        connectivity.start { [weak self] change in
-            self?.connectivityChanged(change)
-        }
         guard persistenceError == nil else {
             state = .unavailable("credentials")
             return
         }
+        if anonymousAuthentication {
+            do {
+                if try installationSecretStore.isDisabled() {
+                    state = .stopped
+                    return
+                }
+            } catch {
+                state = .unavailable("credentials")
+                return
+            }
+        }
+        connectivity.start { [weak self] change in
+            self?.connectivityChanged(change)
+        }
         guard record != nil else {
+            if anonymousAuthentication {
+                state = .connecting
+                connectionTask = Task { [weak self] in
+                    await self?.bootstrapAnonymousHost(targetPort: targetPort, generation: generation)
+                }
+                return
+            }
             if localDevelopmentAuthentication, endpoint?.isLoopback == true {
                 state = .connecting
                 connectionTask = Task { [weak self] in
@@ -329,6 +453,20 @@ final class RemoteHostedServiceController {
         state = .stopped
     }
 
+    var anonymousEnrollmentIsDisabled: Bool {
+        anonymousAuthentication && ((try? installationSecretStore.isDisabled()) == true)
+    }
+
+    var usesAnonymousEnrollment: Bool { anonymousAuthentication }
+
+    func enableAnonymousEnrollment() throws {
+        guard anonymousAuthentication else { return }
+        if try installationSecretStore.isDisabled() {
+            try installationSecretStore.delete()
+        }
+        if let desiredPort { start(targetPort: desiredPort) }
+    }
+
     /// The Mac woke or its network changed, so the control socket may be dead without knowing.
     ///
     /// A standing listener is asked to prove it (`checkLiveness`): a dead one ends as
@@ -348,7 +486,12 @@ final class RemoteHostedServiceController {
         state = .connecting
         let generation = lifecycleGeneration
         connectionTask = Task { [weak self] in
-            await self?.connect(targetPort: targetPort, generation: generation)
+            guard let self else { return }
+            if self.record == nil && self.anonymousAuthentication {
+                await self.bootstrapAnonymousHost(targetPort: targetPort, generation: generation)
+            } else {
+                await self.connect(targetPort: targetPort, generation: generation)
+            }
         }
     }
 
@@ -424,6 +567,61 @@ final class RemoteHostedServiceController {
         start(targetPort: targetPort)
     }
 
+    private func bootstrapAnonymousHost(targetPort: UInt16, generation: Int) async {
+        guard let endpoint else { return }
+        let client = PeerControlPlaneClient(endpoint: endpoint)
+        do {
+            // Save the owner secret before the first network call. A crash or lost reply can
+            // then retry without claiming the same host under a different secret.
+            let secret: PeerControlPlaneBearer
+            if let saved = try installationSecretStore.load() {
+                secret = saved
+            } else {
+                var bytes = [UInt8](repeating: 0, count: 32)
+                guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+                    throw PeerControlPlaneError.transport("entropy")
+                }
+                let encoded = Data(bytes).base64EncodedString()
+                    .replacingOccurrences(of: "+", with: "-")
+                    .replacingOccurrences(of: "/", with: "_")
+                    .replacingOccurrences(of: "=", with: "")
+                secret = try PeerControlPlaneBearer("th_install_\(encoded)")
+                try installationSecretStore.save(secret)
+            }
+            let session = try await client.signInAnonymousHost(
+                hostID: hostID,
+                installationSecret: secret
+            )
+            let hostCredential = try await client.enrollHost(
+                accessToken: session.accessToken,
+                hostID: hostID,
+                displayName: hostName
+            )
+            try persist(RemoteHostedServiceRecord(
+                version: RemoteHostedServiceDefaults.recordVersion,
+                endpoint: endpoint.baseURL,
+                session: session,
+                hostCredential: hostCredential,
+                pendingRevokedDeviceIDs: []
+            ))
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == lifecycleGeneration else { return }
+            if case PeerControlPlaneError.rejected(429, "installationLimit") = error {
+                state = .unavailable("pilot-full")
+            } else if case PeerControlPlaneError.rejected(401, _) = error {
+                state = .unavailable("credentials")
+            } else {
+                state = .unavailable("service")
+                scheduleReconnect(generation: generation)
+            }
+            return
+        }
+        guard generation == lifecycleGeneration else { return }
+        start(targetPort: targetPort)
+    }
+
     private func bootstrapDevelopmentBrowserAuthentication(
         targetPort: UInt16,
         generation: Int
@@ -488,6 +686,10 @@ final class RemoteHostedServiceController {
     }
 
     func signOut() async throws {
+        if anonymousAuthentication, record?.session.accountID.hasPrefix("anon_") == true {
+            try await deleteAccount()
+            return
+        }
         lifecycleGeneration &+= 1
         stopConnection(keepingDesiredPort: true)
         guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
@@ -522,16 +724,34 @@ final class RemoteHostedServiceController {
         lifecycleGeneration &+= 1
         stopConnection(keepingDesiredPort: true)
         guard let endpoint else { throw PeerControlPlaneError.invalidEndpoint }
-        guard var current = record else { throw PeerControlPlaneError.invalidCredential }
         state = .connecting
         let client = PeerControlPlaneClient(endpoint: endpoint)
         do {
-            let session = try await validSession(current: &current, client: client)
-            try await client.deleteAccount(accessToken: session.accessToken)
+            if var current = record {
+                let session = try await validSession(current: &current, client: client)
+                try await client.deleteAccount(accessToken: session.accessToken)
+            } else if anonymousAuthentication, let secret = try installationSecretStore.load() {
+                do {
+                    let session = try await client.signInAnonymousHost(
+                        hostID: hostID,
+                        installationSecret: secret
+                    )
+                    try await client.deleteAccount(accessToken: session.accessToken)
+                } catch PeerControlPlaneError.rejected(429, "installationLimit") {
+                    // The service checked for an existing installation before its capacity
+                    // gate. A full pilot with no local host record has no account to revoke.
+                }
+            } else if !anonymousAuthentication {
+                throw PeerControlPlaneError.invalidCredential
+            }
+            if anonymousAuthentication {
+                try installationSecretStore.disable()
+                connectivity.stop()
+            }
             try store.delete()
             record = nil
             persistenceError = nil
-            state = desiredPort == nil ? .stopped : .signInRequired
+            state = anonymousAuthentication || desiredPort == nil ? .stopped : .signInRequired
         } catch {
             state = .unavailable("service")
             throw error
@@ -846,10 +1066,32 @@ final class RemoteHostedServiceController {
            current.session.accessTokenExpiresAt > Date().addingTimeInterval(60) {
             return current.session
         }
-        guard current.session.refreshTokenExpiresAt > Date().addingTimeInterval(60) else {
-            throw PeerControlPlaneError.invalidCredential
+        let isAnonymous = anonymousAuthentication
+            && current.session.accountID == "anon_\(hostID)"
+        if current.session.refreshTokenExpiresAt <= Date().addingTimeInterval(60) {
+            guard isAnonymous, let secret = try installationSecretStore.load() else {
+                throw PeerControlPlaneError.invalidCredential
+            }
+            let session = try await client.signInAnonymousHost(
+                hostID: hostID,
+                installationSecret: secret
+            )
+            current.session = session
+            try persist(current)
+            return session
         }
-        let session = try await client.refresh(refreshToken: current.session.refreshToken)
+        let session: PeerControlPlaneSession
+        do {
+            session = try await client.refresh(refreshToken: current.session.refreshToken)
+        } catch PeerControlPlaneError.rejected(let status, _) where status == 401 && isAnonymous {
+            guard let secret = try installationSecretStore.load() else {
+                throw PeerControlPlaneError.invalidCredential
+            }
+            session = try await client.signInAnonymousHost(
+                hostID: hostID,
+                installationSecret: secret
+            )
+        }
         current.session = session
         try persist(current)
         return session
@@ -1004,11 +1246,16 @@ final class RemoteHostedServiceController {
                   self.desiredPort == targetPort else { return }
             self.retryTask = nil
             self.state = .connecting
-            await self.connect(targetPort: targetPort, generation: generation)
+            if self.record == nil && self.anonymousAuthentication {
+                await self.bootstrapAnonymousHost(targetPort: targetPort, generation: generation)
+            } else {
+                await self.connect(targetPort: targetPort, generation: generation)
+            }
         }
     }
 
     private func forgetRevokedAppleCredential() {
+        guard record?.session.accountID.hasPrefix("anon_") != true else { return }
         lifecycleGeneration &+= 1
         stopConnection(keepingDesiredPort: true)
         do {
@@ -1082,9 +1329,11 @@ final class RemoteHostedServiceController {
     ) -> RemoteHostedServicePersisting {
         !AutomatedRun.isUnderway
             ? RemoteHostedServiceKeychainStore(
-                account: configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
-                    ? RemoteHostedServiceDefaults.developmentKeychainAccount
-                    : RemoteHostedServiceDefaults.keychainAccount
+                account: AppInfo.buildChannel != .dev
+                    ? RemoteHostedServiceDefaults.anonymousRecordKeychainAccount
+                    : (configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
+                        ? RemoteHostedServiceDefaults.developmentKeychainAccount
+                        : RemoteHostedServiceDefaults.keychainAccount)
             )
             : InMemoryRemoteHostedServiceStore()
     }
@@ -1093,9 +1342,8 @@ final class RemoteHostedServiceController {
     ///
     /// No endpoint, so `start` settles on `.notConfigured` without a request, and nothing can
     /// issue a device credential, send a hosted push or mint a hosted pairing link. An in-memory
-    /// store, so a public build never reads the hosted Keychain record a development build left
-    /// behind. Both development authentication switches are forced off because they are launch
-    /// environment, and this build does not speak to the service at all.
+    /// store avoids reading any saved hosted credential. Both development authentication switches
+    /// are forced off because this controller does not speak to the service.
     /// See `BuildChannel.offersHostedDirect`.
     static func notOffered() -> RemoteHostedServiceController {
         RemoteHostedServiceController(

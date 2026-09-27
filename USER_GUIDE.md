@@ -1492,6 +1492,8 @@ If validation, transcript copying or the ownership transaction fails, the move s
 **Failed** and the chat remains fenced so another prompt cannot enter the wrong checkout. Use
 **Retry Checkout Move** after fixing the cause, or **Cancel Checkout Move** to keep the chat in
 its current checkout. Failed moves are not silently retried after relaunch.
+If the old worktree was removed while a move was pending, Retry can finish the saved move to
+its verified destination; Retry and Cancel remain in the menu even though the old folder is gone.
 
 Agents have the same operation through `set_session_checkout(checkout_path, authority_basis,
 reason)` and can withdraw it with `cancel_session_checkout_move()`. An agent must call the move

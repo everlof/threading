@@ -70,6 +70,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case localDiagnosticsEnabled
     case sentryDiagnosticsEnabled
     case remoteAccessEnabled
+    case remoteHostedEnrollmentEnabled
     case remoteNotificationMacActivityWindow
     case remoteHostedServiceEnvironment
     case remoteAccessDoorMigration
@@ -1222,6 +1223,13 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
     )
+    /// Public hosted enrollment needs its own affirmative choice. An existing LAN opt-in must
+    /// not publish a Mac over the Internet after an app update.
+    static let remoteHostedEnrollmentEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteHostedEnrollmentEnabled,
+        persistenceKey: "remoteHostedEnrollmentEnabled",
+        absence: .falseValue
+    )
     /// Whether Threading keeps this Mac awake while Remote Access is on. See
     /// `RemoteAccessKeepAwake`: off by default because it changes the Mac's power use, and
     /// catalogue-only because a phone can reach this Mac only while it is already awake.
@@ -1524,6 +1532,7 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
         .init(sentryDiagnosticsEnabled),
         .init(remoteAccessEnabled),
+        .init(remoteHostedEnrollmentEnabled),
         .init(remoteAccessKeepAwake),
         .init(remoteHostedServiceEnvironment),
         .init(remoteAccessDoorMigration),
@@ -1628,8 +1637,7 @@ enum AppSettingDefinitions {
                   "install", "symlink", "PATH", "terminal", "threading-ptyd", ".local/bin")
     ]
 
-    /// The Hosted Direct sign-in row's identity. The row describes a control a public build's
-    /// Remote Access page does not contain, so a search there must not promise it.
+    /// The Hosted Direct row's identity.
     static let hostedDirectIdentity = "remoteAccess.hostedDirect"
 
     /// Every definition a build on `channel` carries, in catalogue order.

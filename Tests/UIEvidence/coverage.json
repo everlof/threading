@@ -742,7 +742,7 @@
         "test": "ThreadingTests/ThemedControlTests/testRemoteAccessSetupPageRendersInBothAppearances"
       },
       "capture": {
-        "glob": "remote-access-settings-*.png"
+        "glob": "remote-access-*.png"
       }
     },
     {

@@ -4422,11 +4422,14 @@ final class ThemedControlTests: HostedStoreTestCase {
     func testRemoteAccessSetupPageRendersInBothAppearances() throws {
         let previousEnabled = AppSettings.shared.remoteAccessEnabled
         let previousTailscale = AppSettings.shared.remoteAccessTailscaleEnabled
+        let previousHosted = AppSettings.shared.remoteHostedEnrollmentEnabled
         AppSettings.shared.remoteAccessEnabled = false
         AppSettings.shared.remoteAccessTailscaleEnabled = true
+        AppSettings.shared.remoteHostedEnrollmentEnabled = false
         defer {
             AppSettings.shared.remoteAccessEnabled = previousEnabled
             AppSettings.shared.remoteAccessTailscaleEnabled = previousTailscale
+            AppSettings.shared.remoteHostedEnrollmentEnabled = previousHosted
         }
         let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
             .flatMap { $0.isEmpty ? nil : $0 }
@@ -4445,44 +4448,47 @@ final class ThemedControlTests: HostedStoreTestCase {
             ("dark", .darkAqua)
         ] {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
-            var png: Data?
-            appearance.performAsCurrentDrawingAppearance {
-                let controller = RemoteAccessPreferencesViewController()
-                let host = NSView(frame: NSRect(
-                    x: 0,
-                    y: 0,
-                    width: SettingsUIDefaults.pageWidth,
-                    height: 920
-                ))
-                controller.view.translatesAutoresizingMaskIntoConstraints = false
-                host.addSubview(controller.view)
-                NSLayoutConstraint.activate([
-                    controller.view.topAnchor.constraint(equalTo: host.topAnchor),
-                    controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-                    controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-                    controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
-                ])
-                host.appearance = appearance
-                controller.view.appearance = appearance
-                host.wantsLayer = true
-                host.layer?.backgroundColor = Design.Surface.ground.cgColor
-                AppThemeRefresh.repaint(host)
-                host.layoutSubtreeIfNeeded()
-                if let scrollView = controller.view as? NSScrollView {
-                    scrollView.contentView.scroll(to: .zero)
-                    scrollView.reflectScrolledClipView(scrollView.contentView)
+            for (surface, anonymous) in [("settings", false), ("accountless", true)] {
+                var png: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    let controller = RemoteAccessPreferencesViewController(
+                        hostedAnonymous: anonymous
+                    )
+                    let host = NSView(frame: NSRect(
+                        x: 0,
+                        y: 0,
+                        width: SettingsUIDefaults.pageWidth,
+                        height: 920
+                    ))
+                    controller.view.translatesAutoresizingMaskIntoConstraints = false
+                    host.addSubview(controller.view)
+                    NSLayoutConstraint.activate([
+                        controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+                        controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                        controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                        controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+                    ])
+                    host.appearance = appearance
+                    controller.view.appearance = appearance
+                    host.wantsLayer = true
+                    host.layer?.backgroundColor = Design.Surface.ground.cgColor
+                    AppThemeRefresh.repaint(host)
                     host.layoutSubtreeIfNeeded()
+                    if let scrollView = controller.view as? NSScrollView {
+                        scrollView.contentView.scroll(to: .zero)
+                        scrollView.reflectScrolledClipView(scrollView.contentView)
+                        host.layoutSubtreeIfNeeded()
+                    }
+                    png = try? renderedPNG(of: host)
                 }
-                png = try? renderedPNG(of: host)
-            }
 
-            let rendered = try XCTUnwrap(png)
-            XCTAssertGreaterThan(rendered.count, 20_000, "\(name) setup page rendered empty")
-            attach(rendered, named: "remote-access-settings-\(name)")
-            if let output {
-                try rendered.write(
-                    to: output.appendingPathComponent("remote-access-settings-\(name).png")
-                )
+                let rendered = try XCTUnwrap(png)
+                XCTAssertGreaterThan(rendered.count, 20_000, "\(name) setup page rendered empty")
+                let fileName = "remote-access-\(surface)-\(name).png"
+                attach(rendered, named: "remote-access-\(surface)-\(name)")
+                if let output {
+                    try rendered.write(to: output.appendingPathComponent(fileName))
+                }
             }
         }
     }

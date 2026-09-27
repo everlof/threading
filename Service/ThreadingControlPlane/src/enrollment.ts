@@ -26,6 +26,14 @@ export async function enrollHost(request: Request, env: Env): Promise<Response> 
   assertExactKeys(body, ["hostID", "displayName"]);
   const hostID = identifier(body.hostID, "hostID");
   const displayName = boundedDisplayName(body.displayName);
+  if (principal.accountID.startsWith("anon_")) {
+    const identity = await env.DB.prepare(
+      "SELECT host_id FROM anonymous_host_identities WHERE account_id = ?",
+    ).bind(principal.accountID).first<{ host_id: string }>();
+    if (identity?.host_id !== hostID) {
+      throw new HttpError(403, "forbidden", "Installation credential does not own this host");
+    }
+  }
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
     "SELECT account_id, revoked_at FROM hosts WHERE id = ?",
@@ -130,7 +138,8 @@ export async function issueDeviceCredential(
       ).bind(await sha256Hex(token), accountID, hostID, deviceID, expiresAt, now),
     ]);
   } catch (error) {
-    if (String(error).includes("threading_device_limit")) {
+    if (String(error).includes("threading_device_limit")
+      || String(error).includes("threading_anon_device_limit")) {
       throw new HttpError(429, "deviceLimit", "Host has too many active devices");
     }
     throw error;

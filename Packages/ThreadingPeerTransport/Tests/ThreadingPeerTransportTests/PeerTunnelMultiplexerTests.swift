@@ -85,6 +85,17 @@ final class PeerTunnelMultiplexerTests: XCTestCase {
         let clientEnd = try await clientFirst.receive()
         XCTAssertNil(clientEnd)
 
+        // A closed HTTP socket may still have a reset queued by its local pump. It must not
+        // drop a WebSocket sharing the same peer transport.
+        try await pair.left.sendWhenWritable(
+            PeerTunnelFrame.control(.reset, streamID: clientFirst.id).encoded()
+        )
+        let afterClose = Data("after-close".utf8)
+        try await clientSecond.send(afterClose)
+        let afterCloseReceived = try await serverSecond.receive()
+        XCTAssertEqual(afterCloseReceived, afterClose)
+        try await serverSecond.acknowledge(afterClose.count)
+
         await clientSecond.reset()
         do {
             _ = try await serverSecond.receive()
@@ -93,6 +104,45 @@ final class PeerTunnelMultiplexerTests: XCTestCase {
             XCTAssertEqual(error, .streamClosed(serverSecond.id))
         }
 
+        await client.close()
+        await server.close()
+    }
+
+    func testLateFramesForResetStreamDoNotCloseOtherSockets() async throws {
+        let pair = await InMemoryMessageTransport.makePair()
+        let client = PeerTunnelMultiplexer(role: .client, transport: pair.left)
+        let server = PeerTunnelMultiplexer(role: .server, transport: pair.right)
+        try await client.start()
+        try await server.start()
+
+        async let firstAccepted = server.acceptStream()
+        async let firstOpened = client.openStream()
+        let serverFirst = try await firstAccepted
+        try await serverFirst.accept()
+        let clientFirst = try await firstOpened
+
+        async let secondAccepted = server.acceptStream()
+        async let secondOpened = client.openStream()
+        let serverSecond = try await secondAccepted
+        try await serverSecond.accept()
+        let clientSecond = try await secondOpened
+
+        await clientFirst.reset()
+        // The reset and these already queued frames share the ordered transport. Once the
+        // server consumes the reset, none may turn a closed logical socket into a tunnel error.
+        try await pair.left.sendWhenWritable(
+            PeerTunnelFrame.control(.reset, streamID: clientFirst.id).encoded()
+        )
+        try await pair.left.sendWhenWritable(
+            PeerTunnelFrame.data(streamID: clientFirst.id, payload: Data("late".utf8)).encoded()
+        )
+        try await pair.left.sendWhenWritable(
+            PeerTunnelFrame.control(.end, streamID: clientFirst.id).encoded()
+        )
+        let livePayload = Data("still-live".utf8)
+        try await clientSecond.send(livePayload)
+        let received = try await serverSecond.receive()
+        XCTAssertEqual(received, livePayload)
         await client.close()
         await server.close()
     }

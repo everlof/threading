@@ -309,6 +309,9 @@ final class AppSettingDefinitionTests: XCTestCase {
                 valueType: .boolean
             ),
             .remoteAccessEnabled: .init(key: "remoteAccessEnabled", valueType: .boolean),
+            .remoteHostedEnrollmentEnabled: .init(
+                key: "remoteHostedEnrollmentEnabled", valueType: .boolean
+            ),
             .remoteNotificationMacActivityWindow: .init(
                 key: "remoteNotificationMacActivityWindow",
                 valueType: .string
@@ -601,8 +604,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
             "Reports from your phone", "Hosted Direct"
         ])
-        // A public build's page has no Hosted Direct sign-in, so its catalogue does not promise
-        // one; every other row is the same on every channel.
+        // Public builds offer Hosted Direct without account sign-in, so their catalogue includes
+        // the same row as development builds.
         let publicRemoteAccess = AppSettingDefinitions.definitions(on: .release)
             .flatMap(\.presentations)
             .filter { $0.pageID == "remote-access" }
@@ -611,7 +614,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(publicRemoteAccess, [
             "Remote Access", "Keep this Mac awake", "This network", "Tailscale",
             "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
-            "Reports from your phone"
+            "Reports from your phone", "Hosted Direct"
         ])
         XCTAssertEqual(
             AppSettingDefinitions.definitions(on: .dev),

@@ -163,7 +163,18 @@ final class SessionCheckoutCoordinator {
         guard sourceProject.executionHost == nil else { return .failure(.remoteHost) }
         let canonicalSourcePath = URL(fileURLWithPath: sourceProject.folderPath, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath().path
-        guard let source = GitInfo.worktreeLocation(for: canonicalSourcePath) else {
+        let requestedPath = URL(fileURLWithPath: checkoutPath, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath().path
+        // A queued move can outlive the checkout it is leaving. Its persisted repository
+        // identity is enough to finish that exact move after the old worktree is removed;
+        // it must not authorize a fresh request or a different destination.
+        let pending = session.pendingCheckoutMove
+        let sourceRepositoryIdentity = GitInfo.worktreeLocation(for: canonicalSourcePath)?.repositoryIdentity
+            ?? (pending?.checkoutPath == requestedPath
+                && !fileManager.fileExists(atPath: canonicalSourcePath)
+                && sourceProject.lastKnownRepositoryIdentity == pending?.repositoryIdentity
+                ? pending?.repositoryIdentity : nil)
+        guard let sourceRepositoryIdentity else {
             return .failure(.sourceNotCheckout)
         }
 
@@ -180,7 +191,7 @@ final class SessionCheckoutCoordinator {
         guard target.root.standardizedFileURL.resolvingSymlinksInPath().path == requested.path else {
             return .failure(.targetNotCheckoutRoot)
         }
-        guard target.repositoryIdentity == source.repositoryIdentity else {
+        guard target.repositoryIdentity == sourceRepositoryIdentity else {
             return .failure(.differentRepository)
         }
         guard !isManagedWorkspace(target.root) else { return .failure(.managedWorkspace) }

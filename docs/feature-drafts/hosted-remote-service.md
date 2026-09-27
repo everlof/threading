@@ -1,7 +1,8 @@
 # Hosted remote service
 
-> Status: native hosted transport and the stateless APNs alert broker are implemented; production
-> deployment and the broader widget/subscription product remain gated below. Re-check vendor
+> Status: native hosted transport, accountless Mac enrollment and the stateless APNs alert broker
+> are implemented in source. Production deployment, relay measurement and the broader
+> widget/subscription product remain gated below. Re-check vendor
 > limits and prices before procurement.
 
 ## Decision
@@ -15,7 +16,7 @@ This does **not** remove Tailscale. The supported transports remain deliberately
 - **Local** keeps working without an account, subscription or Internet service.
 - **Tailscale** remains the private, peer-to-peer remote path. The user owns their tailnet and
   Threading incurs no tunnel bandwidth charge.
-- **Hosted Direct** is the zero-install default: Threading's service introduces the peers, ICE
+- **Hosted Direct** is an explicit one-click opt-in without an account: Threading's service introduces the peers, ICE
   sends ordinary traffic directly when possible, and Cloudflare TURN relays only failed direct
   paths.
 - **Threading Relay** remains the compatibility path for browser sharing and an optional fallback.
@@ -92,7 +93,8 @@ provenance and advisory review on every update.
 The paid service should make these features dependable without making Threading's server the
 source of truth for a terminal session:
 
-1. Sign in with Apple, account recovery and subscription entitlement.
+1. Accountless host enrollment for pairing; optional account recovery and subscription entitlement
+   are separate later capabilities.
 2. Stable discovery of a user's Macs and their currently reachable transports.
 3. Native APNs notifications while the iOS app is suspended.
 4. Live Activity updates for a selected agent and WidgetKit refresh signals where the OS supports
@@ -125,9 +127,10 @@ iPhone -- built-in ICE/STUN direct ----------------------------> Mac
 
 The control plane does not proxy ordinary terminal traffic. It consists of:
 
-- **Identity:** Sign in with Apple authorization-code exchange, rotating app sessions, encrypted
-  Apple refresh tokens, bounded daily grant validation, server-to-server revocation notifications
-  and in-app account deletion.
+- **Identity:** A public Mac saves a high-entropy installation secret before enrolling, then
+  restores rotating sessions automatically. Anonymous enrollment has a D1-enforced 100-installation
+  pilot cap. Existing Apple account exchange, encrypted refresh tokens, grant validation and
+  deletion remain for development and later account features.
 - **Host and device registry:** D1-backed opaque host/device identifiers, independently scoped
   credentials, bounded active/retained rows, expiry and revocation state.
 - **Rendezvous:** stable endpoint metadata and a short-lived answer to "how can this paired device

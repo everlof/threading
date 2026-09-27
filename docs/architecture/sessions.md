@@ -520,6 +520,13 @@ settled serially. A failed validation, copy or store transaction keeps the durab
 input fence, and exposes explicit retry and cancel; launch restoration never turns that failure
 into an unrequested retry.
 
+The old worktree may be removed while that move waits. Settlement can use the project's saved
+repository identity only for the already-persisted destination, only when the source path is
+absent, and only after the destination's current repository and worktree identities are checked.
+A fresh move still requires a live source checkout. The session menu keeps Retry and Cancel
+visible when the old checkout has disappeared; otherwise the durable failure would hold app
+messages with no recovery action in the menu.
+
 Process observations are evidence for the request, not repeated requests. Once the durable move
 exists, a root process briefly observed in the source checkout cannot clear its sibling-checkout
 drift, and a different destination is logged as a conflict rather than retargeting the move. The

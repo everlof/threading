@@ -77,6 +77,11 @@ public actor PeerTunnelMultiplexer {
     private var nextClientStreamID: UInt32 = 1
     private var receiveTask: Task<Void, Never>?
     private var terminalError: Error?
+    // A socket pump can reset a stream while frames already sent by its peer are still in
+    // flight. Keep a bounded record so those frames cannot tear down the other logical sockets.
+    private var retiredStreamIDs: Set<UInt32> = []
+    private var retiredStreamOrder: [UInt32] = []
+    private static let maximumRetiredStreams = 128
 
     public init(role: PeerTunnelRole, transport: any PeerMessageTransport) {
         self.role = role
@@ -285,6 +290,9 @@ public actor PeerTunnelMultiplexer {
     }
 
     private func handle(_ frame: PeerTunnelFrame) async throws {
+        if frame.operation != .open, retiredStreamIDs.contains(frame.streamID) {
+            return
+        }
         switch frame.operation {
         case .open:
             try handleOpen(frame.streamID)
@@ -309,7 +317,7 @@ public actor PeerTunnelMultiplexer {
 
     private func handleOpen(_ streamID: UInt32) throws {
         guard role == .server, streamID.isMultiple(of: 2) == false,
-              streams[streamID] == nil else {
+              streams[streamID] == nil, !retiredStreamIDs.contains(streamID) else {
             throw PeerTunnelError.protocolViolation
         }
         guard streams.count < PeerTunnelBounds.maximumStreams else {
@@ -472,6 +480,7 @@ public actor PeerTunnelMultiplexer {
 
     private func failStream(_ streamID: UInt32, error: Error) {
         guard let state = streams.removeValue(forKey: streamID) else { return }
+        retire(streamID)
         state.pendingOpen?.continuation.resume(throwing: error)
         state.pendingReceive?.resume(throwing: error)
         state.pendingCredit?.continuation.resume(throwing: error)
@@ -484,6 +493,15 @@ public actor PeerTunnelMultiplexer {
               state.unacknowledgedInboundBytes == 0,
               state.inboundHead == state.inboundChunks.count else { return }
         streams[streamID] = nil
+        retire(streamID)
+    }
+
+    private func retire(_ streamID: UInt32) {
+        guard retiredStreamIDs.insert(streamID).inserted else { return }
+        retiredStreamOrder.append(streamID)
+        if retiredStreamOrder.count > Self.maximumRetiredStreams {
+            retiredStreamIDs.remove(retiredStreamOrder.removeFirst())
+        }
     }
 
     private func compactInboundChunksIfNeeded(streamID: UInt32) {

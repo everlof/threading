@@ -23,10 +23,10 @@ struct RemoteCredentialStoragePresentation: Equatable {
 final class RemoteAccessPreferencesViewController: NSViewController {
 
     private let credentialStorageIsShellReachable: Bool
-    /// Whether this build offers Hosted Direct. A build that does not — every public channel —
-    /// omits the Hosted Direct row, never creates the Sign in with Apple helper, and never offers
-    /// Threading Direct as a way in. See `BuildChannel.offersHostedDirect`.
+    /// Whether this build offers Hosted Direct. Public builds enroll without an account;
+    /// development builds keep the existing sign-in controls.
     private let hostedDirectIsOffered: Bool
+    private let hostedAnonymous: Bool
 
     // MARK: - Controls
 
@@ -110,6 +110,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private lazy var hostedSignInButton = HostedServiceSignInButton()
     private let hostedSignOutButton = ThemedButton()
     private let hostedDeleteAccountButton = ThemedButton()
+    private let hostedEnableButton = ThemedButton()
     private let hostedStatusLabel = NSTextField(labelWithString: "")
     private let hostedAccountControls = NSStackView()
     private let inputControlDefault = ThemedSegmentedControl()
@@ -144,11 +145,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     init(
         credentialStorageIsShellReachable: Bool = KeychainStoragePolicy.isShellReachable,
-        hostedDirectIsOffered: Bool = AppSettings.shared.hostedDirectIsOffered
+        hostedDirectIsOffered: Bool = AppSettings.shared.hostedDirectIsOffered,
+        hostedAnonymous: Bool? = nil
     ) {
         self.credentialStorageIsShellReachable = credentialStorageIsShellReachable
         self.hostedDirectIsOffered = hostedDirectIsOffered
-        hostedAppleSignIn = hostedDirectIsOffered ? RemoteHostedAppleSignIn() : nil
+        self.hostedAnonymous = hostedDirectIsOffered
+            && (hostedAnonymous ?? (AppInfo.buildChannel != .dev))
+        hostedAppleSignIn = hostedDirectIsOffered && !self.hostedAnonymous
+            ? RemoteHostedAppleSignIn() : nil
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -579,18 +584,27 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// The Hosted Direct account row's controls. Configured only in a build that offers Hosted
     /// Direct, because the row that holds them exists only there.
     private func configureHostedAccountControls() {
-        hostedSignInButton.configure(target: self, action: #selector(signInHostedService))
-        hostedSignInButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-in")
-        hostedSignOutButton.title = L10n.string("Sign Out")
-        hostedSignOutButton.target = self
-        hostedSignOutButton.action = #selector(signOutHostedService)
-        hostedSignOutButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-out")
-        hostedDeleteAccountButton.title = L10n.string("Delete Account")
+        if !hostedAnonymous {
+            hostedSignInButton.configure(target: self, action: #selector(signInHostedService))
+            hostedSignInButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-in")
+            hostedSignOutButton.title = L10n.string("Sign Out")
+            hostedSignOutButton.target = self
+            hostedSignOutButton.action = #selector(signOutHostedService)
+            hostedSignOutButton.setAccessibilityIdentifier("settings.remote-access.hosted-sign-out")
+        }
+        hostedDeleteAccountButton.title = hostedAnonymous
+            ? L10n.string("Remove Hosted Access") : L10n.string("Delete Account")
         hostedDeleteAccountButton.target = self
         hostedDeleteAccountButton.action = #selector(deleteHostedServiceAccount)
         hostedDeleteAccountButton.setAccessibilityIdentifier(
             "settings.remote-access.hosted-delete-account"
         )
+        if hostedAnonymous {
+            hostedEnableButton.title = L10n.string("Enable Hosted Access")
+            hostedEnableButton.target = self
+            hostedEnableButton.action = #selector(enableHostedAccess)
+            hostedEnableButton.setAccessibilityIdentifier("settings.remote-access.hosted-enable")
+        }
         hostedStatusLabel.applyFont(.subheading)
         hostedStatusLabel.textColor = Design.Text.secondary
         hostedSpinner.setAccessibilityLabel(L10n.string("Connecting…"))
@@ -599,9 +613,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         hostedAccountControls.spacing = Design.Spacing.small
         hostedAccountControls.addArrangedSubview(hostedSpinner)
         hostedAccountControls.addArrangedSubview(hostedStatusLabel)
-        hostedAccountControls.addArrangedSubview(hostedSignInButton)
-        hostedAccountControls.addArrangedSubview(hostedSignOutButton)
+        if !hostedAnonymous {
+            hostedAccountControls.addArrangedSubview(hostedSignInButton)
+            hostedAccountControls.addArrangedSubview(hostedSignOutButton)
+        }
         hostedAccountControls.addArrangedSubview(hostedDeleteAccountButton)
+        if hostedAnonymous { hostedAccountControls.addArrangedSubview(hostedEnableButton) }
     }
 
     // MARK: - Connection
@@ -622,12 +639,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 control: remoteAccessToggle
             )
         ]
-        // A public build cannot carry the Sign in with Apple entitlement, so it offers no sign-in
-        // row rather than a button that could never enroll this Mac.
         if hostedDirectIsOffered {
             rows.append(SettingsUI.row(
                 title: "Hosted Direct",
-                subtitle: "Uses Threading’s service only to introduce this Mac and iPhone.",
+                subtitle: "Threading’s service connects them and relays encrypted traffic when needed.",
                 help: HelpTopic(
                     title: L10n.string("Hosted Direct"),
                     paragraphs: [
@@ -1567,9 +1582,42 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         hostedSignInButton.isHidden = true
         hostedSignOutButton.isHidden = true
         hostedDeleteAccountButton.isHidden = true
+        hostedEnableButton.isHidden = true
         hostedSignInButton.isEnabled = hostedAccountTask == nil
         hostedSignOutButton.isEnabled = hostedAccountTask == nil
         hostedDeleteAccountButton.isEnabled = hostedAccountTask == nil
+        hostedEnableButton.isEnabled = hostedAccountTask == nil
+
+        if hostedAnonymous {
+            if coordinator.hostedAnonymousEnrollmentIsDisabled
+                || !AppSettings.shared.remoteHostedEnrollmentEnabled {
+                hostedStatusLabel.stringValue = L10n.string("Hosted access is off")
+                hostedEnableButton.isHidden = false
+                return
+            }
+            if let hostedAccountError {
+                hostedStatusLabel.stringValue = hostedAccountError
+            } else {
+                switch coordinator.hostedServiceState {
+                case .stopped:
+                    hostedStatusLabel.stringValue = L10n.string("On when Remote Access is on")
+                case .notConfigured:
+                    hostedStatusLabel.stringValue = L10n.string("Not configured in this build")
+                case .signInRequired:
+                    hostedStatusLabel.stringValue = L10n.string("Hosted access needs repair")
+                case .connecting:
+                    hostedStatusLabel.stringValue = L10n.string("Connecting…")
+                case .ready:
+                    hostedStatusLabel.stringValue = L10n.string("Ready · no account required")
+                case .unavailable(let reason):
+                    hostedStatusLabel.stringValue = reason == "pilot-full"
+                        ? L10n.string("Hosted access pilot is full")
+                        : L10n.string("Temporarily unavailable")
+                }
+            }
+            hostedDeleteAccountButton.isHidden = false
+            return
+        }
 
         if let hostedAccountError {
             hostedStatusLabel.stringValue = hostedAccountError
@@ -1657,13 +1705,21 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         guard hostedDirectIsOffered, hostedAccountTask == nil else { return }
         let request = ConfirmationRequest(
             prompt: .deleteHostedServiceAccount,
-            title: L10n.string("Delete hosted account?"),
-            message: L10n.string(
-                "This permanently removes your Threading service account, revokes direct "
-                    + "access for every paired iPhone, and signs this Mac out. Local chats and "
-                    + "settings stay on this Mac."
-            ),
-            confirmTitle: L10n.string("Delete Account")
+            title: hostedAnonymous
+                ? L10n.string("Remove hosted access?")
+                : L10n.string("Delete hosted account?"),
+            message: hostedAnonymous
+                ? L10n.string(
+                    "This revokes hosted access for every paired iPhone and removes this Mac’s "
+                        + "service identity. Local chats and settings stay on this Mac."
+                )
+                : L10n.string(
+                    "This permanently removes your Threading service account, revokes direct "
+                        + "access for every paired iPhone, and signs this Mac out. Local chats and "
+                        + "settings stay on this Mac."
+                ),
+            confirmTitle: hostedAnonymous
+                ? L10n.string("Remove Hosted Access") : L10n.string("Delete Account")
         )
         guard ConfirmationAlert.ask(request) else { return }
         hostedAccountError = nil
@@ -1673,11 +1729,24 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             do {
                 try await RemoteAccessCoordinator.shared.deleteHostedServiceAccount()
             } catch {
-                hostedAccountError = L10n.string("Account deletion failed. Try again.")
+                hostedAccountError = hostedAnonymous
+                    ? L10n.string("Could not remove hosted access. Try again.")
+                    : L10n.string("Account deletion failed. Try again.")
             }
             hostedAccountTask = nil
             refresh()
         }
+    }
+
+    @objc private func enableHostedAccess() {
+        guard hostedAnonymous else { return }
+        hostedAccountError = nil
+        do {
+            try RemoteAccessCoordinator.shared.enableHostedAnonymousEnrollment()
+        } catch {
+            hostedAccountError = L10n.string("Could not enable hosted access. Try again.")
+        }
+        refresh()
     }
 
     /// Applies one coherent listening-state page: the status row and the pairing card together.

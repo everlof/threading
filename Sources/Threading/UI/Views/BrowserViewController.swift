@@ -2856,9 +2856,24 @@ final class BrowserViewController: NSViewController {
         if let onAnnotationSendFailure { onAnnotationSendFailure(outcome); return }
         let alert = ThemedAlert()
         alert.messageText = L10n.string("Annotations are still pending")
-        alert.informativeText = outcome == .typedUnconfirmed
-            ? L10n.string("The message was typed, but delivery was not confirmed. Check the chat before sending again.")
-            : L10n.string("The chat could not accept the annotations. They are saved here; try sending again when the chat is ready.")
+        if outcome == .typedUnconfirmed {
+            alert.informativeText = L10n.string(
+                "The message was typed, but delivery was not confirmed. Check the chat before sending again."
+            )
+        } else if let annotationSessionID,
+                  let move = ProjectStore.shared.session(withID: annotationSessionID)?.pendingCheckoutMove {
+            alert.informativeText = move.phase == .failed
+                ? L10n.string(
+                    "This chat has a failed checkout move. The annotations are saved here. Retry or cancel the move from Move to Checkout, then send them again."
+                )
+                : L10n.string(
+                    "This chat is moving to another checkout. The annotations are saved here; send them after the move completes."
+                )
+        } else {
+            alert.informativeText = L10n.string(
+                "The chat could not accept the annotations. They are saved here; try sending again when the chat is ready."
+            )
+        }
         if let window = view.window { alert.beginSheetModal(for: window) }
     }
 

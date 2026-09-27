@@ -89,10 +89,9 @@ final class AppSettings {
     /// per-process scratch suite as every other recorded choice.
     private let userChoiceDefaults: UserDefaults
     /// Whether this build offers Hosted Direct. Remote Access's local ways in ship on every
-    /// channel; the hosted half needs an entitlement Developer ID cannot carry, so only `.dev`
-    /// offers it (`BuildChannel.offersHostedDirect`). Read by the coordinator, the Remote Access
-    /// page, the Privacy page and the share sheet, so a hosted dev test bundle can build a public
-    /// build's graph by injecting `false` here.
+    /// channel; public builds use accountless enrollment. Read by the coordinator, Remote
+    /// Access, Privacy and sharing, so tests can exercise an unavailable service by injecting
+    /// `false` here.
     let hostedDirectIsOffered: Bool
     private let workspaceNavigatorPersistence:
         RecoverableDefaultsStore<WorkspaceNavigatorSelection>
@@ -1293,7 +1292,12 @@ final class AppSettings {
         set { AppSettingDefinitions.remoteAccessEnabled.write(newValue, to: defaults) }
     }
 
-    /// The first-party hosted service selected by a developer-enabled build.
+    var remoteHostedEnrollmentEnabled: Bool {
+        get { AppSettingDefinitions.remoteHostedEnrollmentEnabled.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.remoteHostedEnrollmentEnabled.write(newValue, to: defaults) }
+    }
+
+    /// The first-party hosted service selected by this build.
     ///
     /// A public release installed over an internal build shares its defaults domain, so the
     /// public getter deliberately refuses to inherit a stored development endpoint.
@@ -1736,7 +1740,7 @@ final class AppSettings {
     /// hosted test bundle's real defaults domain is left alone for the reason
     /// `migrateRemoteAccessConnectionMode` states.
     private func clearRemoteAccessInheritedByAPublicBuild() {
-        guard !hostedDirectIsOffered,
+        guard !hostedDirectIsOffered || AppInfo.buildChannel != .dev,
               defaults != .standard || Self.importsLegacyPreferencesForSharedProcess else {
             return
         }

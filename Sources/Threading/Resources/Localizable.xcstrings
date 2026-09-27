@@ -15339,6 +15339,17 @@
         }
       }
     },
+    "Could not enable hosted access. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att aktivera värdbaserad åtkomst. Försök igen."
+          }
+        }
+      }
+    },
     "Could not encode the control request." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15413,6 +15424,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att läsa testinloggningen (%lld)."
+          }
+        }
+      }
+    },
+    "Could not remove hosted access. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att ta bort värdbaserad åtkomst. Försök igen."
           }
         }
       }
@@ -18527,6 +18549,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera HTTPS…"
+          }
+        }
+      }
+    },
+    "Enable Hosted Access" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera värdbaserad åtkomst"
           }
         }
       }
@@ -22761,6 +22794,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Direktanslutning"
+          }
+        }
+      }
+    },
+    "Hosted access is off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdbaserad åtkomst är av"
+          }
+        }
+      }
+    },
+    "Hosted access needs repair" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdbaserad åtkomst behöver repareras"
+          }
+        }
+      }
+    },
+    "Hosted access pilot is full" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pilotgruppen för värdbaserad åtkomst är full"
           }
         }
       }
@@ -28619,6 +28685,17 @@
         }
       }
     },
+    "No account required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget konto krävs"
+          }
+        }
+      }
+    },
     "No active windows" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30667,6 +30744,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "På växling"
+          }
+        }
+      }
+    },
+    "On when Remote Access is on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "På när fjärråtkomst är på"
           }
         }
       }
@@ -35650,6 +35738,17 @@
         }
       }
     },
+    "Ready · no account required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo · inget konto krävs"
+          }
+        }
+      }
+    },
     "Ready — interact with any story." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36570,6 +36669,17 @@
         }
       }
     },
+    "Remove Hosted Access" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort värdbaserad åtkomst"
+          }
+        }
+      }
+    },
     "Remove Icon" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36632,6 +36742,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort från kön"
+          }
+        }
+      }
+    },
+    "Remove hosted access?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort värdbaserad åtkomst?"
           }
         }
       }
@@ -51499,6 +51620,23 @@
         }
       }
     },
+    "This chat has a failed checkout move. The annotations are saved here. Retry or cancel the move from Move to Checkout, then send them again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This chat has a failed checkout move. The annotations are saved here. Retry or cancel the move from Move to Checkout, then send them again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En flytt av chatten till en annan checkout har misslyckats. Kommentarerna är sparade här. Försök igen eller avbryt flytten under Flytta till checkout och skicka sedan kommentarerna igen."
+          }
+        }
+      }
+    },
     "This chat has been shared. Nobody is watching it right now." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51506,6 +51644,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chatten har delats. Ingen tittar på den just nu."
+          }
+        }
+      }
+    },
+    "This chat is moving to another checkout. The annotations are saved here; send them after the move completes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This chat is moving to another checkout. The annotations are saved here; send them after the move completes."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten flyttas till en annan checkout. Kommentarerna är sparade här; skicka dem när flytten är klar."
           }
         }
       }
@@ -52095,6 +52250,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arkivet har ingen origin-fjärr."
+          }
+        }
+      }
+    },
+    "This revokes hosted access for every paired iPhone and removes this Mac’s service identity. Local chats and settings stay on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detta återkallar värdbaserad åtkomst för alla parkopplade iPhone-enheter och tar bort denna Macs tjänsteidentitet. Lokala chattar och inställningar finns kvar på denna Mac."
           }
         }
       }
@@ -53426,6 +53592,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threadings värdtjänst för tillägg är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "Threading’s service connects them and relays encrypted traffic when needed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threadings tjänst kopplar ihop dem och vidarebefordrar krypterad trafik vid behov."
           }
         }
       }
@@ -55657,17 +55834,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Användarnamn eller e-post (valfritt)"
-          }
-        }
-      }
-    },
-    "Uses Threading’s service only to introduce this Mac and iPhone." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Använder Threadings tjänst enbart för att presentera den här Macen och iPhone."
           }
         }
       }

@@ -516,6 +516,25 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     func deleteHostedServiceAccount() async throws {
         guard appSettings.hostedDirectIsOffered else { throw PeerControlPlaneError.invalidEndpoint }
         try await hostedService.deleteAccount()
+        if hostedService.usesAnonymousEnrollment {
+            appSettings.remoteHostedEnrollmentEnabled = false
+        }
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
+    var hostedAnonymousEnrollmentIsDisabled: Bool {
+        hostedService.usesAnonymousEnrollment
+            && (!appSettings.remoteHostedEnrollmentEnabled
+                || hostedService.anonymousEnrollmentIsDisabled)
+    }
+
+    func enableHostedAnonymousEnrollment() throws {
+        guard appSettings.hostedDirectIsOffered else { throw PeerControlPlaneError.invalidEndpoint }
+        try hostedService.enableAnonymousEnrollment()
+        appSettings.remoteHostedEnrollmentEnabled = true
+        if case .listening(let port) = status {
+            hostedService.start(targetPort: port)
+        }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
@@ -2189,7 +2208,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         transportGeneration += 1
         let generation = transportGeneration
         tailscale.stop()
-        hostedService.start(targetPort: port)
+        if !hostedService.usesAnonymousEnrollment || appSettings.remoteHostedEnrollmentEnabled {
+            hostedService.start(targetPort: port)
+        } else {
+            hostedService.stop()
+        }
         tailscaleServeStatus = .stopped
 
         if shouldRunTailscaleServe {

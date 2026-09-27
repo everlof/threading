@@ -19,6 +19,7 @@
     "verify:production": "node scripts/verify-production.mjs",
     "verify:development": "node scripts/verify-development.mjs",
     "deploy": "node scripts/deploy-production.mjs",
+    "auth:store": "node scripts/store-production-deploy-token.mjs",
     "deploy:development": "node scripts/deploy-development.mjs",
     "types": "wrangler types",
     "deploy:invitations": "npm run build:invitations && npm run check && npm run test:browser && vitest run test/invitation-page.test.ts && wrangler deploy --config wrangler.invitations.jsonc",

@@ -39,6 +39,7 @@ export async function verifyProduction({
         && value.rendezvousProtocol === expectedProtocolVersion
         && value.notificationProtocol === expectedNotificationProtocolVersion) {
         await verifyPushBoundaries(origin, fetchImplementation);
+        await verifyAnonymousEnrollmentRoute(origin, fetchImplementation);
         reportSuccess(`Production readiness verified at ${readinessURL}.\n`);
         return;
       }
@@ -101,6 +102,19 @@ async function verifyPushBoundaries(origin, fetchImplementation) {
     if (response.status !== 401) {
       throw new Error(`${path} did not require a host credential (HTTP ${response.status})`);
     }
+  }
+}
+
+async function verifyAnonymousEnrollmentRoute(origin, fetchImplementation) {
+  // An empty body exercises routing and validation without allocating an installation slot.
+  const response = await request(fetchImplementation, `${origin}/v1/auth/anonymous-host`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const body = JSON.parse(await boundedResponseText(response));
+  if (response.status !== 400 || body?.error?.code !== "invalidRequest") {
+    throw new Error("accountless host enrollment route is unavailable");
   }
 }
 

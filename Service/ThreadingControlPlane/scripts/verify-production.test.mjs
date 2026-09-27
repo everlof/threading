@@ -9,11 +9,14 @@ test("accepts only the reviewed ready response and hardening headers", async () 
     reportSuccess: () => undefined,
     fetchImplementation: async (url) => {
       requestedURL = url;
+      if (new URL(url).pathname === "/v1/auth/anonymous-host") {
+        return Response.json({ error: { code: "invalidRequest" } }, { status: 400 });
+      }
       if (new URL(url).pathname !== "/ready") return Response.json({}, { status: 401 });
       return readyResponse();
     },
   });
-  assert.equal(requestedURL, "https://remote.threading.codes/v1/push/retractions");
+  assert.equal(requestedURL, "https://remote.threading.codes/v1/auth/anonymous-host");
 });
 
 test("rejects a liveness response that does not prove dependency readiness", async () => {
@@ -54,6 +57,20 @@ test("rejects a stale notification protocol and a missing retraction route", asy
         const path = new URL(url).pathname;
         if (path === "/ready") return readyResponse();
         return Response.json({}, { status: path === "/v1/push" ? 401 : 404 });
+      },
+    }),
+    /production readiness failed after 1 attempts/u,
+  );
+});
+
+test("rejects a production service without the accountless enrollment route", async () => {
+  await assert.rejects(
+    verifyProduction({
+      attempts: 1,
+      fetchImplementation: async (url) => {
+        const path = new URL(url).pathname;
+        if (path === "/ready") return readyResponse();
+        return Response.json({}, { status: path === "/v1/auth/anonymous-host" ? 404 : 401 });
       },
     }),
     /production readiness failed after 1 attempts/u,

@@ -48,6 +48,23 @@ final class MobileInvitationRouteTests: XCTestCase {
         ))
     }
 
+    func testCellularHintAppliesOnlyToPrivateAddressWithoutWiFi() throws {
+        let cellular = MobileNetworkPathSummary(status: .satisfied, usesCellular: true)
+        let wifi = MobileNetworkPathSummary(
+            status: .satisfied, usesWiFi: true, usesCellular: true
+        )
+        let local = MobileInvitationRoute(payload: try makeLink().appOpenPayload)
+        let publicHost = MobileInvitationRoute(payload: try makeLink(
+            origin: "https://example.com:8760"
+        ).shareURL.absoluteString)
+
+        XCTAssertNotNil(MobilePairingNetworkHint.text(for: local, path: cellular))
+        XCTAssertNil(MobilePairingNetworkHint.text(for: local, path: wifi))
+        XCTAssertNil(MobilePairingNetworkHint.text(for: local, path: nil))
+        XCTAssertNil(MobilePairingNetworkHint.text(for: local, path: .init(status: .unsatisfied)))
+        XCTAssertNil(MobilePairingNetworkHint.text(for: publicHost, path: cellular))
+    }
+
     // MARK: - The scheme the invitation is addressed to
 
     func testTheBuiltAppRegistersTheThreadingScheme() throws {

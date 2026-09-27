@@ -1,12 +1,13 @@
 import XCTest
 import ThreadingRemoteKit
+import ThreadingPeerTransport
 @testable import Threading
 
-/// Remote Access ships on every channel; Hosted Direct is development-only.
+/// Remote Access and Hosted Direct ship on every channel.
 ///
 /// Public builds offer the local ways in — This network, Through a VPN, Tailscale and Tailscale
-/// Serve — so the Threading iPhone app can pair with a notarized Mac. Hosted Direct needs Sign in
-/// with Apple, an entitlement a Developer ID build cannot carry, so only `.dev` offers it. The
+/// Serve — so the Threading iPhone app can pair with a notarized Mac. Public Hosted Direct uses
+/// an installation secret instead of a Sign in with Apple entitlement. The
 /// master switch stays off by default everywhere, and a public build clears a switch it inherited
 /// from a development build exactly once.
 final class RemoteAccessChannelGateTests: XCTestCase {
@@ -23,14 +24,9 @@ final class RemoteAccessChannelGateTests: XCTestCase {
 
     // MARK: - The channel decides
 
-    func testOnlyADevelopmentBuildOffersHostedDirect() {
-        XCTAssertTrue(BuildChannel.dev.offersHostedDirect)
-        for channel in [BuildChannel.nightly, .beta, .release] {
-            XCTAssertFalse(
-                channel.offersHostedDirect,
-                "\(channel.rawValue) is distributed by Developer ID, which cannot carry the Sign "
-                    + "in with Apple entitlement Hosted Direct enrolls this Mac with"
-            )
+    func testEveryChannelOffersHostedDirect() {
+        for channel in BuildChannel.allCases {
+            XCTAssertTrue(channel.offersHostedDirect)
         }
     }
 
@@ -44,8 +40,7 @@ final class RemoteAccessChannelGateTests: XCTestCase {
 
     // MARK: - The page is on every channel
 
-    /// Every channel lists the Remote Access page and its local ways in; only the development
-    /// channel lists the Hosted Direct sign-in row a public build's page does not contain.
+    /// Every channel lists the Remote Access page and its local and hosted ways in.
     @MainActor
     func testEveryChannelShowsTheRemoteAccessPageWithItsLocalWaysIn() throws {
         XCTAssertNotNil(SettingsPages.page(id: SettingsPages.remoteAccessID))
@@ -61,7 +56,7 @@ final class RemoteAccessChannelGateTests: XCTestCase {
             XCTAssertEqual(
                 rows.contains("Hosted Direct"),
                 channel.offersHostedDirect,
-                "\(channel.rawValue) lists a sign-in row its page does not have"
+                "\(channel.rawValue) omits its Hosted Direct row"
             )
         }
     }
@@ -81,11 +76,24 @@ final class RemoteAccessChannelGateTests: XCTestCase {
     /// asked for.
     func testRemoteAccessIsOffUntilSomethingTurnsItOn() {
         XCTAssertEqual(AppSettingDefinitions.remoteAccessEnabled.absence.value, false)
+        XCTAssertEqual(AppSettingDefinitions.remoteHostedEnrollmentEnabled.absence.value, false)
         XCTAssertNil(
             AppSettingDefinitions.registeredDefaults[
                 AppSettingDefinitions.remoteAccessEnabled.persistenceKey
             ]
         )
+    }
+
+    @MainActor
+    func testHostedEnrollmentNeedsASeparateChoiceFromAnExistingLANOptIn() throws {
+        let defaults = try isolatedDefaults("hosted-opt-in")
+        let settings = AppSettings(defaults: defaults, hostedDirectIsOffered: true)
+        settings.remoteAccessEnabled = true
+        XCTAssertFalse(settings.remoteHostedEnrollmentEnabled)
+
+        settings.remoteHostedEnrollmentEnabled = true
+        let reopened = AppSettings(defaults: defaults, hostedDirectIsOffered: true)
+        XCTAssertTrue(reopened.remoteHostedEnrollmentEnabled)
     }
 
     @MainActor
@@ -167,14 +175,53 @@ final class RemoteAccessChannelGateTests: XCTestCase {
     }
 }
 
-/// A public build's coordinator: the listener is the real one, and the hosted half is inert.
+/// A coordinator explicitly configured without Hosted Direct: the listener is real, and the
+/// hosted half remains inert. Public builds now offer Hosted Direct after a separate opt-in.
 ///
 /// Inherits `HostedStoreTestCase` because starting the listener composes the shipping server
 /// services, which reach `ProjectStore.shared`.
 @MainActor
-final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
+final class RemoteAccessHostedDisabledCoordinatorTests: HostedStoreTestCase {
 
-    func testAPublicBuildReportsNoHostedServiceCredentialsOrPairingLink() throws {
+    func testEnablingPreservesExistingInstallationIdentity() throws {
+        let secret = try PeerControlPlaneBearer(
+            "th_install_" + String(repeating: "a", count: 43)
+        )
+        let store = TestInstallationSecretStore()
+        try store.save(secret)
+        let hosted = RemoteHostedServiceController(
+            installationSecretStore: store,
+            endpoint: nil,
+            anonymousAuthentication: true
+        )
+
+        try hosted.enableAnonymousEnrollment()
+
+        XCTAssertEqual(try store.load()?.withValue { $0 }, secret.withValue { $0 })
+    }
+
+    func testPublicHostedEnrollmentWaitsForItsOwnOptIn() throws {
+        let settings = try publicBuildSettings(hostedDirectIsOffered: true)
+        let hosted = RemoteHostedServiceController(
+            installationSecretStore: TestInstallationSecretStore(),
+            endpoint: nil,
+            localDevelopmentAuthentication: false,
+            developmentBrowserAuthentication: false,
+            anonymousAuthentication: true
+        )
+        let coordinator = makeCoordinator(settings, hostedService: hosted)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+        XCTAssertEqual(hosted.state, .stopped)
+        XCTAssertFalse(settings.remoteHostedEnrollmentEnabled)
+
+        try coordinator.enableHostedAnonymousEnrollment()
+        XCTAssertTrue(settings.remoteHostedEnrollmentEnabled)
+        XCTAssertEqual(hosted.state, .notConfigured)
+    }
+
+    func testAHostedDisabledBuildReportsNoServiceCredentialsOrPairingLink() throws {
         let settings = try publicBuildSettings()
         let coordinator = makeCoordinator(settings)
 
@@ -184,16 +231,16 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
         XCTAssertEqual(
             coordinator.hostedServiceState,
             .notConfigured,
-            "a public build's hosted controller has an endpoint to contact"
+            "a hosted-disabled controller has an endpoint to contact"
         )
         XCTAssertFalse(coordinator.canIssueHostedDeviceCredentials)
         if let payload = coordinator.pairingCodePayload,
            case .hostedPairing = RemoteInvitation(payload: payload) {
-            XCTFail("a public build put a hosted pairing link in its QR code")
+            XCTFail("a hosted-disabled build put a hosted pairing link in its QR code")
         }
     }
 
-    func testAPublicBuildRefusesHostedAccountOperations() async throws {
+    func testAHostedDisabledBuildRefusesHostedAccountOperations() async throws {
         let settings = try publicBuildSettings()
         let coordinator = makeCoordinator(settings)
 
@@ -203,15 +250,15 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
                 authorizationCode: "code",
                 rawNonce: "nonce"
             )
-            XCTFail("a public build accepted a Sign in with Apple credential")
+            XCTFail("a hosted-disabled build accepted a Sign in with Apple credential")
         } catch {}
         do {
             try await coordinator.signOutHostedService()
-            XCTFail("a public build signed out of a hosted account it cannot have")
+            XCTFail("a hosted-disabled build signed out of a hosted account it cannot have")
         } catch {}
         do {
             try await coordinator.deleteHostedServiceAccount()
-            XCTFail("a public build deleted a hosted account it cannot have")
+            XCTFail("a hosted-disabled build deleted a hosted account it cannot have")
         } catch {}
 
         coordinator.setHostedServiceEnvironment(.development)
@@ -221,12 +268,15 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
 
     // MARK: - Helpers
 
-    private func publicBuildSettings() throws -> AppSettings {
-        let name = "RemoteAccessPublicBuildCoordinatorTests.\(UUID().uuidString)"
+    private func publicBuildSettings(hostedDirectIsOffered: Bool = false) throws -> AppSettings {
+        let name = "RemoteAccessHostedDisabledCoordinatorTests.\(UUID().uuidString)"
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: name) }
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
-        let settings = AppSettings(defaults: defaults, hostedDirectIsOffered: false)
+        let settings = AppSettings(
+            defaults: defaults,
+            hostedDirectIsOffered: hostedDirectIsOffered
+        )
         // A port nothing else on this machine holds, and no routable door: the listener binds
         // loopback only, so the test publishes nothing on the developer's network.
         settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
@@ -235,17 +285,30 @@ final class RemoteAccessPublicBuildCoordinatorTests: HostedStoreTestCase {
         return settings
     }
 
-    private func makeCoordinator(_ settings: AppSettings) -> RemoteAccessCoordinator {
+    private func makeCoordinator(
+        _ settings: AppSettings,
+        hostedService: RemoteHostedServiceController? = nil
+    ) -> RemoteAccessCoordinator {
         let coordinator = RemoteAccessCoordinator(
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: settings,
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            hostedService: hostedService,
             tailnetTransport: RecordingTailnetTransport()
         )
         addTeardownBlock { [coordinator] in
             await MainActor.run { coordinator.stop() }
         }
         return coordinator
+    }
+
+    private final class TestInstallationSecretStore: RemoteHostedInstallationSecretPersisting {
+        private var secret: PeerControlPlaneBearer?
+        func load() throws -> PeerControlPlaneBearer? { secret }
+        func save(_ secret: PeerControlPlaneBearer) throws { self.secret = secret }
+        func isDisabled() throws -> Bool { false }
+        func disable() throws { secret = nil }
+        func delete() throws { secret = nil }
     }
 
     /// Spins the run loop until the listener has answered. `start` completes on main.

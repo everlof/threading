@@ -11694,6 +11694,17 @@
         }
       }
     },
+    "This code uses a local address. On cellular, join the Mac’s Wi-Fi or use a VPN that reaches it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här koden använder en lokal adress. Anslut till Macens Wi-Fi eller använd ett VPN som når den när du är på mobilnätet."
+          }
+        }
+      }
+    },
     "This controls how this chat responds when an account limit is reached." : {
       "extractionState" : "manual",
       "localizations" : {

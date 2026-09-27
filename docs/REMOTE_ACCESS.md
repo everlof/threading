@@ -33,11 +33,11 @@ works away from home.
     certificate-transparency entry naming this Mac and the tailnet, so the page says that beside
     the switch. **Serve's origin is never advertised to a phone**: it is terminated by a
     certificate this Mac does not hold, and a phone told to pin it would fail at the next renewal.
-- **Hosted Direct** (development builds only) becomes the native owner-device default after Sign
-  in with Apple. It uses the Threading service only for identity, ICE signaling and TURN fallback;
-  ordinary traffic goes directly between iPhone and Mac whenever ICE succeeds. Release, beta and
-  nightly builds do not offer it, because a Developer ID build cannot carry the Sign in with Apple
-  entitlement; see [Distributed-build gate](#distributed-build-gate-and-beta-limitations).
+- **Hosted Direct** is offered on every channel. After the person chooses **Enable Hosted
+  Access**, a public Mac creates a private installation secret and enrolls; no Apple sign-in is required. It
+  uses Threading's service for enrollment, ICE signaling and TURN fallback. Ordinary traffic goes
+  directly between iPhone and Mac whenever ICE succeeds. Development builds retain their
+  separate Apple and development-authentication routes.
 - **Relay is gone.** The Cloudflare Quick Tunnel's address changed every launch, which is fatal to
   "pair once, reconnect tomorrow", and a third party terminated its TLS. Nothing starts it, nothing
   advertises it, and `cloudflared` is no longer a dependency of anything. It was the only public
@@ -156,10 +156,18 @@ both directions; the render tests pin that the choice sits above the line and re
 
 1. Keep Threading running on the Mac.
 2. **This network** is on by default, so a phone on the same Wi-Fi needs nothing else.
-   **Tailscale** is the way in for reaching this Mac from anywhere, and its readiness card
-   identifies setup problems. A development build can also sign in with Apple under **Hosted
-   Direct** for zero-install access across networks; public builds do not offer it.
+   Choose **Enable Hosted Access** to let **Hosted Direct** connect across networks without
+   another installed service or an account; the Mac must be awake and online. **Tailscale** remains
+   an optional private way in, and its
+   readiness card identifies setup problems.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
+
+The iPhone checks the scanned or pasted link against its current network path. When the link
+names a private address and the phone is on cellular without Wi-Fi, the pairing screen explains
+that the phone needs Wi-Fi on the Mac's network or a VPN that reaches it. This is guidance rather
+than a pairing block: a VPN over cellular may already provide a valid route. A LAN-only code
+still cannot pair over ordinary cellular service; wait for Hosted Direct to show Ready and scan
+the hosted code instead.
 
 **A reason never lives only in a readiness row.** `TailscaleReadinessIssue` carries the failure
 stated as a fact, the remedy, the readiness row it belongs to (or `nil` for the Serve-only ones),
@@ -1480,7 +1488,7 @@ Pairing and sharing are deliberately different actions:
   one link instead of a guidance paragraph followed by two competing URLs. UIKit's scene
   delegate handles both warm and cold `NSUserActivity` delivery.
 
-- **Hosted Direct admits guest memberships** (development builds only). When the hosted listener is ready, the asynchronous
+- **Hosted Direct admits guest memberships.** When the hosted listener is ready, the asynchronous
   chat-share preparation issues a transport credential under `invite-<share ID>` for at most
   the invitation's 24-hour lifetime. Its payload uses the existing hosted pairing envelope but
   carries the exact-chat invitation bearer, never the owner bootstrap. The Mac remains the
@@ -1510,8 +1518,7 @@ Pairing and sharing are deliberately different actions:
   Network provisioning is one bounded asynchronous request per copy action; there are no
   session-sized view trees. Existing service limits cap active transport credentials at 64 per
   host; the UI permits only one preparation at a time.
-- **Browser-only guests use the existing client over Hosted Direct** (development builds only; a
-  public build's browser guest opens the Mac-served client over the private route). The public Worker serves
+- **Browser-only guests use the existing client over Hosted Direct.** The public Worker serves
   the shipping `Resources/RemoteClient` assets; `web/boot.mjs` supplies their fetch/WebSocket and
   storage adapters without replacing the chat UI. Browser WebRTC uses the native
   `threading.remote.v1` ordered channel and the v1 12-byte tunnel frame. REST and RFC 6455
@@ -2308,20 +2315,22 @@ None of this can reach a Mac that is asleep: a phone away from home finds it onl
 and online. The settings page says so where it is configured; see
 [A sleeping Mac answers no way in](#a-sleeping-mac-answers-no-way-in).
 
-Only development builds use it. A release, beta or nightly build holds
-`RemoteHostedServiceController.notOffered()`: no endpoint, so it settles on `.notConfigured`
-without a request; an in-memory store, so it never reads the hosted Keychain record a development
-build left behind; and therefore no sign-in, device credential, hosted push, hosted pairing link or
-hosted guest route. See [Distributed-build gate](#distributed-build-gate-and-beta-limitations).
+Public builds use the production service after an explicit Hosted Direct opt-in. An existing LAN
+choice never turns into Internet reachability merely because the app updates. The accountless
+installation secret stays in the Mac's Keychain and is saved before the first enrollment request, so a lost response can
+be retried without changing the host's service identity. Removing hosted access revokes its
+service account and devices, and records an opt-out locally until the person enables it again.
+The initial pilot admits at most 100 accountless installations and eight active device
+credentials per installation, enforced by D1 triggers. Each installation is bound to its one
+host ID.
 
 Physical-device development uses a separate `dev.remote.threading.codes` Worker and D1 database.
 A Debug Mac or Threading's internal auto-installed Release selects it under **Settings > Advanced
 > Developer Settings > Hosted service**; changing the selection replaces only Hosted Direct,
 leaving the local listener, private-network connections and app process running.
 `THREADING_CONTROL_PLANE_URL` remains the higher-priority launch override for custom and local
-service work. Public Release builds compile the surface out and always select production, even if
-installed over a developer build whose shared defaults domain contains `development` — and since a
-public build does not offer Hosted Direct, it contacts neither service.
+service work. Public Release builds always select production, even if installed over a developer
+build whose shared defaults domain contains `development`.
 
 A developer-enabled Mac pointed at the development origin starts a five-minute PKCE-style browser
 transaction and opens its Cloudflare Access-protected authorization path. Access allows exact
@@ -2730,19 +2739,12 @@ a second certificate for the same address.
 Remote Access ships on every channel. Release, beta and nightly builds offer its local ways in —
 **This network**, **Through a VPN**, **Tailscale** and **Open in a browser on your tailnet** — so
 the Threading iPhone app can pair with a notarized Mac. The master switch is off by default
-everywhere. `BuildChannel.offersHostedDirect`, true only for `dev`, is the one channel decision
-left (decided 2026-09-13):
+everywhere. `BuildChannel.offersHostedDirect` now includes public channels:
 
-- **Hosted Direct stays development-only.** Enrolling the Mac needs
-  `com.apple.developer.applesignin`, which a Developer ID build cannot carry (`releasing.md`,
-  "Sign in with Apple cannot be shipped by Developer ID"). A public build's coordinator holds
-  `RemoteHostedServiceController.notOffered()` — no endpoint, in-memory store — so it never reads a
-  development build's hosted Keychain record, never contacts the hosted service, cannot issue
-  hosted device credentials, send hosted push or mint a hosted pairing link, and refuses sign-in,
-  sign-out, account deletion and the developer environment switch. Its Settings page omits the
-  Hosted Direct row and the Threading Direct way in, settings search omits the row, the Privacy
-  page omits "Notification titles reach Apple", and the share sheet states the private-network
-  requirement without pointing at Hosted Direct.
+- **Public Hosted Direct is accountless.** A fresh Mac enrolls with a private installation secret
+  instead of the Sign in with Apple entitlement that Developer ID cannot carry. The Settings page
+  shows the Hosted Direct row and the Threading Direct way in without an Apple button. The person
+  can remove its hosted identity and re-enable enrollment later.
 - **An inherited opt-in is cleared once.** A public build installed over a development build shares
   its defaults domain. On its first launch `AppSettings` clears a stored `remoteAccessEnabled =
   true` without notifying and writes `didClearRemoteAccessForPublicChannel`, so it never starts a

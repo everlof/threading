@@ -1186,6 +1186,13 @@ the real main-menu items and a fixture window's responder chain so the shipping 
 too. Hosted `xcodebuild` cannot make that window genuinely key, so the test supplies it as the
 otherwise-targetless items' target — the same window `NSApplication` selects in the running app.
 
+Each `PromptView` owns the undo manager returned by its text-view delegate. AppKit's typing
+operations keep ranges into that prompt's text storage; replacing the string after a send or
+draft restore leaves those ranges invalid and a later ⌘Z can throw from `NSTextStorage`.
+`stringValue` ends typing coalescing and clears the prompt's history before changing the text.
+An equal assignment leaves the storage and history alone. The dedicated manager keeps this
+reset from erasing another editor's undo actions in the window.
+
 **A drag the composer can take lights the whole box while it is over it**: the accent ring at
 focus width over a well tinted `Design.Surface.fieldDropTarget` — the row wash's accent-at-alpha
 sentence composited over the field fill, because `applySurface` records exactly one fill and a
