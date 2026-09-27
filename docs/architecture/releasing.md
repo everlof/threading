@@ -234,6 +234,14 @@ built instead. The installer checks again both before and immediately after movi
 bundle, so a reopen during staging is refused and retried rather than turning a live bundle into
 an update casualty.
 
+For a **one-shot manual install after Threading closes**, use `scripts/install-when-closed.sh
+--app <built.app> --expected-sha256 <hash>` as a detached process. It checks every running
+`Threading.app` path, including Debug and export copies, and delegates the swap to
+`install-app.sh` only after they close. It exits if that exact executable is already installed and
+never opens the app. Do not submit it as a launchd `KeepAlive` job: an ad hoc installer with that
+setting restarted 71 times, missed a running export copy because it checked only `/Applications`,
+and repeatedly ran `open -a Threading`, taking focus each time.
+
 **An install receipt follows the executable, not the placeholder version.** Local builds all
 report `0.0.0`, so comparing `CFBundleVersion` can accept yesterday's app as today's. The installer
 hashes the built executable, checks the staged copy before the swap, and checks the installed copy
