@@ -3148,8 +3148,6 @@ enum MobileDashboardWorkingStatusProbe {
 #endif
 
 struct SessionDashboard: View {
-    @AppStorage("sessionDashboardShowHiddenProjects") private var showsHiddenProjects = false
-    @State private var pendingVisibilityProjectIDs = Set<String>()
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
@@ -4229,18 +4227,6 @@ struct SessionDashboard: View {
                 }
             } label: {
                 Label("Macs", systemImage: "laptopcomputer")
-            }
-        }
-    }
-
-    private func toggleProjectVisibility(_ project: RemoteProjectChoiceDTO) {
-        guard pendingVisibilityProjectIDs.insert(project.id).inserted else { return }
-        Task { @MainActor in
-            defer { pendingVisibilityProjectIDs.remove(project.id) }
-            do {
-                try await model.setProjectHidden(project.isHidden != true, projectID: project.id)
-            } catch {
-                actionError = error.localizedDescription
             }
         }
     }
