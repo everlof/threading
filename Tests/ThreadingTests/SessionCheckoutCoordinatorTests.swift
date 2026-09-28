@@ -798,6 +798,286 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
     }
 
+    func testObservedMoveWaitsForBackgroundAgentWithoutFencingInput() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        let checkout = try observed(sibling, branch: "feature/move", name: "sibling")
+        guard case .queued = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: checkout,
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        ) else { return XCTFail("Expected the observed move to queue") }
+
+        coordinator.finishPendingMove(
+            sessionID: session.id,
+            backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]
+        ) { XCTAssertTrue($0) }
+
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+        guard case .denied = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: checkout,
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        ) else { return XCTFail("The same observation must not requeue while the child runs") }
+
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+    }
+
+    func testRequestedMoveKeepsItsFenceWhileBackgroundWorkRuns() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        guard case .queued = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: sibling.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "Move after the child finishes",
+            policy: .allowExplicitRequests,
+            waitForCurrentTurnBoundary: true
+        ) else { return XCTFail("Expected the requested move to queue") }
+
+        coordinator.finishPendingMove(
+            sessionID: session.id,
+            backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]
+        ) { XCTAssertTrue($0) }
+
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        XCTAssertNotNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
+
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
+    }
+
+    func testDeferredObservedMoveIsDroppedWhenBackgroundWorkReturnsHome() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        coordinator.finishPendingMove(
+            sessionID: session.id,
+            backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]
+        ) { XCTAssertTrue($0) }
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(main, branch: "main", name: "main"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+    }
+
+    func testStopRoutePreservesBackgroundAgentThenMovesAtCleanStop() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        var snapshot = SessionRuntimeSnapshot.test(activity: .working)
+        let coordinator = SessionCheckoutCoordinator(
+            projects: store, runtimeSnapshot: { _ in snapshot }
+        )
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        let checkpointStore = GitTurnBaselineStore(
+            directory: root.appendingPathComponent("checkpoints"),
+            checkoutCoordinatorProvider: { coordinator },
+            contextProvider: { _ in nil }
+        )
+        let server = MCPServer()
+        server.gitTurnCheckpointStoreProvider = { checkpointStore }
+        server.checkoutCoordinatorProvider = { coordinator }
+        let token = MCPSessionRegistry.token(for: session.id)
+        let previousObserver = HookLifecycleRelay.observe
+        defer {
+            HookLifecycleRelay.observe = previousObserver
+            MCPSessionRegistry.remove(sessionID: session.id)
+        }
+
+        for tasks: [[String: String]] in [
+            [["id": "child", "type": "subagent", "status": "running"]], []
+        ] {
+            let acknowledged = expectation(description: "Stop acknowledged")
+            let relayed = expectation(description: "Stop relayed after checkout decision")
+            HookLifecycleRelay.observe = { report in
+                XCTAssertEqual(report.sessionID, session.id)
+                XCTAssertEqual(report.backgroundWork.count, tasks.count)
+                let expectedRoot = tasks.isEmpty ? self.sibling! : self.main!
+                XCTAssertEqual(
+                    self.identity(ofProjectFor: session.id),
+                    GitInfo.worktreeIdentity(for: expectedRoot.path)
+                )
+                XCTAssertNil(self.store.session(withID: session.id)?.pendingCheckoutMove)
+                snapshot = .test(
+                    activity: tasks.isEmpty ? .idle : .readyWithBackgroundWork,
+                    continuation: tasks.isEmpty ? SessionContinuationState.none : .delegated
+                )
+                relayed.fulfill()
+            }
+            server.routeLifecycle(HTTPRequest(
+                method: "POST",
+                path: MCPDefaults.lifecyclePathPrefix + token
+                    + "?event=\(HookLifecycleEvent.turnFinished.rawValue)",
+                headers: [:],
+                body: try JSONSerialization.data(withJSONObject: ["background_tasks": tasks])
+            )) { response in
+                XCTAssertEqual(response.status, HTTPResponse.accepted.status)
+                acknowledged.fulfill()
+            }
+            wait(for: [acknowledged, relayed], timeout: 5)
+            if !tasks.isEmpty {
+                XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+            }
+        }
+    }
+
+    func testNativeCheckpointCompletionPreservesBackgroundShell() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        let location = try XCTUnwrap(GitInfo.worktreeLocation(for: main.path))
+        let checkpointStore = GitTurnBaselineStore(
+            directory: root.appendingPathComponent("checkpoints"),
+            checkoutCoordinatorProvider: { coordinator },
+            contextProvider: { _ in
+                GitTurnCaptureContext(
+                    projectID: project.id, logicalProjectPath: self.main.path,
+                    root: location.root, repositoryIdentity: location.repositoryIdentity,
+                    worktreeIdentity: location.worktreeIdentity
+                )
+            }
+        )
+        let prepared = expectation(description: "before checkpoint")
+        checkpointStore.prepareTurn(sessionID: session.id) { _ in prepared.fulfill() }
+        wait(for: [prepared], timeout: 5)
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        let finished = expectation(description: "after checkpoint with shell still running")
+        checkpointStore.finishTurn(
+            sessionID: session.id,
+            backgroundWork: [BackgroundTask(id: "shell", kind: .shell)]
+        ) { checkpoint in
+            XCTAssertEqual(checkpoint?.status, .complete)
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 5)
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+    }
+
+    func testRetryWithoutProviderListCannotOverrideRuntimeContinuation() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        var snapshot = SessionRuntimeSnapshot.test(
+            activity: .readyWithBackgroundWork, continuation: .delegated
+        )
+        let coordinator = SessionCheckoutCoordinator(
+            projects: store, runtimeSnapshot: { _ in snapshot }
+        )
+        _ = coordinator.requestMove(
+            sessionID: session.id, checkoutPath: sibling.path,
+            authorityBasis: .explicitUserRequest, reason: "Move when safe",
+            policy: .allowExplicitRequests, waitForCurrentTurnBoundary: true
+        )
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
+
+        snapshot = .test(activity: .idle)
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
+    }
+
+    func testDriftDiscoveredBetweenTurnsDoesNotFenceRunningBackgroundWork() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = SessionCheckoutCoordinator(
+            projects: store,
+            runtimeSnapshot: { _ in .test(activity: .readyWithBackgroundWork, continuation: .delegated) }
+        )
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+
+        coordinator.finishPendingMove(sessionID: session.id, backgroundWork: []) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
+    }
+
+    func testDeferredMoveToNewTargetStillRequiresApproval() throws {
+        let third = root.appendingPathComponent("third")
+        try git(["worktree", "add", "-b", "feature/third", third.path], in: main)
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        coordinator.finishPendingMove(
+            sessionID: session.id, backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]
+        ) { XCTAssertTrue($0) }
+        guard case .approvalRequired = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(third, branch: "feature/third", name: "third"),
+            phase: .executing(observedAt: Date()),
+            policy: .alwaysAsk
+        ) else { return XCTFail("A new destination must still ask for approval") }
+        coordinator.finishPendingMove(sessionID: session.id, backgroundWork: []) { XCTAssertTrue($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+    }
+
+    func testDeferredMoveRejectsWorktreeReplacedAtSamePath() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()),
+            policy: .allowSameRepository
+        )
+        coordinator.finishPendingMove(
+            sessionID: session.id, backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]
+        ) { XCTAssertTrue($0) }
+        try git(["worktree", "move", sibling.path, root.appendingPathComponent("retired").path], in: main)
+        try git(["worktree", "add", "-b", "feature/replacement", sibling.path], in: main)
+        GitInfo.invalidateCache(for: sibling.path)
+
+        coordinator.finishPendingMove(sessionID: session.id, backgroundWork: []) { XCTAssertFalse($0) }
+        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove?.phase, .failed)
+    }
+
     /// The oscillation, reproduced: ownership follows an agent into a sibling, and the reading
     /// taken a moment earlier — against ownership that has since changed — names where it came
     /// from. Measured at 88 committed moves and 89 agent relaunches in 4m34s before this guard.

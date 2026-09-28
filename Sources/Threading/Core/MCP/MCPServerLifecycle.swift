@@ -92,13 +92,18 @@ extension MCPServer {
                     ThreadingLogger.mcp.debug(
                         "Turn finish checkpoint settled for \(sessionID.uuidString, privacy: .public): \(checkpoint?.status.rawValue ?? "none", privacy: .public)"
                     )
-                    // Stop is the provider's authoritative interactive-turn boundary even when
-                    // it reports work left running. Acknowledge before replacing the runtime:
+                    // Stop is the provider's authoritative interactive-turn boundary, but a
+                    // reported background child still belongs to this process. The checkout
+                    // coordinator must see that list before it may replace the runtime.
+                    // Acknowledge before replacing the runtime:
                     // the reporting curl is a child of that process and must be allowed to exit.
                     // Keep the lifecycle relay closed until the durable checkout fence settles,
                     // so no watcher or outbox can admit the next prompt into the old checkout.
                     respond(.accepted)
-                    SessionCheckoutCoordinator.shared.finishPendingMove(sessionID: sessionID) { succeeded in
+                    self.checkoutCoordinatorProvider().finishPendingMove(
+                        sessionID: sessionID,
+                        backgroundWork: report.backgroundWork
+                    ) { succeeded in
                         ThreadingLogger.mcp.debug(
                             "Turn finish checkout fence settled for \(sessionID.uuidString, privacy: .public): \(succeeded, privacy: .public)"
                         )

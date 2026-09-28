@@ -2965,7 +2965,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         if !isReplaying, case .turnFinished = event {
             isPreparingTurn = true
             refreshInputControl()
-            GitTurnBaselineStore.shared.finishTurn(sessionID: sessionID) { [weak self] checkpoint in
+            GitTurnBaselineStore.shared.finishTurn(
+                sessionID: sessionID,
+                backgroundWork: backgroundWorkInFlight
+            ) { [weak self] checkpoint in
                 guard let self else { return }
                 self.isPreparingTurn = false
                 self.settlingGitCheckpointID = checkpoint?.id

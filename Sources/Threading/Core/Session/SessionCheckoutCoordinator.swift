@@ -118,6 +118,10 @@ final class SessionCheckoutCoordinator {
     private var lastTurnBoundaryAt: [SessionID: Date] = [:]
     private var settlements: [SessionID: [@MainActor @Sendable (Bool) -> Void]] = [:]
 
+    /// An inferred move may wait for provider-owned background work without fencing the user's
+    /// input. The next clean Stop retries it only if the chat still belongs to the same checkout.
+    private var deferredObservedMoves: [SessionID: (move: PendingCheckoutMove, source: String?)] = [:]
+
     /// The worktree each session most recently *left*, and when — the dwell's whole memory.
     ///
     /// Kept here rather than on `SessionExecutionLocusTracker` on purpose: the tracker's memory is
@@ -215,6 +219,12 @@ final class SessionCheckoutCoordinator {
         approval: Bool? = nil,
         waitForCurrentTurnBoundary: Bool = false
     ) -> SessionCheckoutMoveRequestResult {
+        if authorityBasis == .observedExecution, deferredObservedMoves[sessionID] != nil {
+            return .denied
+        }
+        if authorityBasis != .observedExecution {
+            deferredObservedMoves[sessionID] = nil
+        }
         if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
             return .alreadyPending(pending)
         }
@@ -239,6 +249,18 @@ final class SessionCheckoutCoordinator {
                     recordAudit("Checkout move denied", sessionID: sessionID, pending: pending)
                     return .denied
                 }
+            }
+            if authorityBasis == .observedExecution,
+               runtimeSnapshot(sessionID).continuation.isActive {
+                deferredObservedMoves[sessionID] = (
+                    pending, currentWorktreeIdentity(forSessionID: sessionID)
+                )
+                recordAudit(
+                    "Checkout move deferred for background work",
+                    sessionID: sessionID,
+                    pending: pending
+                )
+                return .denied
             }
             guard projects.setPendingCheckoutMove(pending, forSessionID: sessionID) else {
                 return .failed("The checkout move could not be saved.")
@@ -271,6 +293,41 @@ final class SessionCheckoutCoordinator {
         policy: SessionCheckoutAuthorityPolicy = AppSettings.shared.sessionCheckoutAuthorityPolicy,
         approval: Bool? = nil
     ) -> SessionCheckoutMoveRequestResult {
+        if let deferred = deferredObservedMoves[sessionID] {
+            // Background children can work in another checkout before the next clean Stop.
+            // Keep the newest verified observation, or drop the move if work returned home.
+            if deferred.move.worktreeIdentity != checkout.worktreeIdentity {
+                switch validate(checkoutPath: checkout.root, forSessionID: sessionID) {
+                case .success(let target):
+                    if target.worktreeIdentity == deferred.source {
+                        deferredObservedMoves[sessionID] = nil
+                    } else {
+                        let pending = PendingCheckoutMove(
+                            checkoutPath: target.path,
+                            repositoryIdentity: target.repositoryIdentity,
+                            worktreeIdentity: target.worktreeIdentity,
+                            authorityBasis: .observedExecution,
+                            reason: "Observed running in \(checkout.displayName)",
+                            requestedAt: now()
+                        )
+                        if Self.requiresApproval(policy: policy, authorityBasis: .observedExecution) {
+                            deferredObservedMoves[sessionID] = nil
+                            guard let approval else { return .approvalRequired(pending) }
+                            guard approval else {
+                                recordAudit("Checkout move denied", sessionID: sessionID, pending: pending)
+                                return .denied
+                            }
+                        }
+                        deferredObservedMoves[sessionID] = (
+                            pending, deferred.source
+                        )
+                    }
+                case .failure:
+                    deferredObservedMoves[sessionID] = nil
+                }
+            }
+            return .denied
+        }
         // A queued move is already the answer to this question, and re-asking it every time
         // another tool call reports the same directory would rewrite the pending record and
         // restart its fence for no change.
@@ -317,6 +374,7 @@ final class SessionCheckoutCoordinator {
 
     @discardableResult
     func cancelPendingMove(sessionID: SessionID) -> Bool {
+        deferredObservedMoves[sessionID] = nil
         guard let pending = projects.session(withID: sessionID)?.pendingCheckoutMove else {
             return true
         }
@@ -352,9 +410,48 @@ final class SessionCheckoutCoordinator {
     /// Runs at the authoritative after-checkpoint fence. Completion is the outbox release.
     func finishPendingMove(
         sessionID: SessionID,
+        backgroundWork: [BackgroundTask]? = nil,
         completion: @escaping @MainActor @Sendable (Bool) -> Void
     ) {
         lastTurnBoundaryAt[sessionID] = now()
+        // An authoritative empty list supersedes the previous turn's continuation. Recovery,
+        // retry and launch callers without a provider list must respect the runtime's work.
+        let hasBackgroundWork = backgroundWork.map { !$0.isEmpty }
+            ?? runtimeSnapshot(sessionID).continuation.isActive
+        if hasBackgroundWork {
+            if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove,
+               pending.authorityBasis == .observedExecution {
+                let source = currentWorktreeIdentity(forSessionID: sessionID)
+                guard projects.setPendingCheckoutMove(nil, forSessionID: sessionID) else {
+                    completion(false)
+                    return
+                }
+                inputFences.remove(sessionID)
+                deferredObservedMoves[sessionID] = (pending, source)
+                recordAudit(
+                    "Checkout move deferred for background work",
+                    sessionID: sessionID,
+                    pending: pending,
+                    detail: backgroundWork.map { "\($0.count) task(s) still running" } ?? ""
+                )
+            }
+            // A user-requested move keeps its durable fence; an inferred move is unfenced so
+            // the parent can keep talking while its children finish. Neither may kill them.
+            completion(true)
+            return
+        }
+        if let deferred = deferredObservedMoves.removeValue(forKey: sessionID),
+           projects.session(withID: sessionID)?.pendingCheckoutMove == nil,
+           currentWorktreeIdentity(forSessionID: sessionID) == deferred.source {
+            // Restore the authorized request itself, including its original identities. The
+            // ordinary settlement below revalidates them rather than granting a fresh target.
+            guard projects.setPendingCheckoutMove(deferred.move, forSessionID: sessionID) else {
+                deferredObservedMoves[sessionID] = deferred
+                completion(false)
+                return
+            }
+            inputFences.insert(sessionID)
+        }
         guard let session = projects.session(withID: sessionID),
               let pending = session.pendingCheckoutMove else {
             completion(true)
@@ -714,6 +811,7 @@ final class SessionCheckoutCoordinator {
 
     /// Forgets a session's damping state. For tests and for a session leaving the store.
     func forgetMoveHistory(sessionID: SessionID) {
+        deferredObservedMoves[sessionID] = nil
         departures[sessionID] = nil
         observedMoveHistory[sessionID] = nil
         departingIdentities[sessionID] = nil

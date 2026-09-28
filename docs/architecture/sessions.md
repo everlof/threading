@@ -637,6 +637,15 @@ anything. Under the default `allowExplicitRequests`, an observed same-repository
 automatically after the active turn's final checkpoint; `alwaysAsk` preserves a confirmation for
 someone who explicitly wants every ownership change confirmed.
 
+That checkpoint is not permission to replace a process while it still owns background work.
+The terminal's `Stop` payload and the native stream's in-flight task list reach the checkout
+fence before it can replace the runtime. An inferred move is released from its input fence and
+retried at the next clean turn boundary, provided the chat still belongs to the original
+checkout. The retry retains the authorized target's identities for ordinary revalidation;
+following a newly observed target still obeys the authority policy. A requested move stays
+queued. Recovery, retry and launch paths without a provider task list respect the runtime's
+continuation; an authoritative empty list can clear the preceding turn's continuation.
+
 Everything that is *not* moved still has to stop lying, since some drift can never move — a chat
 working outside its own repository is refused as `differentRepository`, correctly — and an offer
 may sit unanswered. The hover card names where the agent actually is, directly beneath the branch

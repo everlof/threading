@@ -71,6 +71,7 @@ final class GitTurnBaselineStore {
 
     private let persistence: RecoverableFileStore<GitTurnCheckpointArchive>
     private let contextProvider: @MainActor (SessionID) -> GitTurnCaptureContext?
+    private let checkoutCoordinatorProvider: @MainActor () -> SessionCheckoutCoordinator
     private let maximumPerSession: Int
     private let maximumTotal: Int
     private var archive: GitTurnCheckpointArchive
@@ -100,6 +101,7 @@ final class GitTurnBaselineStore {
         fileManager: FileManager = .default,
         maximumPerSession: Int = GitTurnCheckpointDefaults.maximumPerSession,
         maximumTotal: Int = GitTurnCheckpointDefaults.maximumTotal,
+        checkoutCoordinatorProvider: @escaping @MainActor () -> SessionCheckoutCoordinator = { .shared },
         contextProvider: (@MainActor (SessionID) -> GitTurnCaptureContext?)? = nil
     ) {
         let root = directory ?? fileManager
@@ -119,6 +121,7 @@ final class GitTurnBaselineStore {
         )
         self.maximumPerSession = max(1, maximumPerSession)
         self.maximumTotal = max(1, maximumTotal)
+        self.checkoutCoordinatorProvider = checkoutCoordinatorProvider
         self.contextProvider = contextProvider ?? { sessionID in
             guard let project = ProjectStore.shared.project(forSessionID: sessionID),
                   let execution = ProjectStore.shared.executionProject(forSessionID: sessionID),
@@ -179,7 +182,7 @@ final class GitTurnBaselineStore {
                 // Transcript recovery and process-exit paths can close a provider-owned turn
                 // without traversing the blocking Stop hook. The incomplete checkpoint is the
                 // final decision for that turn; checkout settlement must still cross after it.
-                SessionCheckoutCoordinator.shared.finishPendingMove(
+                checkoutCoordinatorProvider().finishPendingMove(
                     sessionID: sessionID,
                     completion: { _ in }
                 )
@@ -407,12 +410,16 @@ final class GitTurnBaselineStore {
         sessionID: SessionID,
         assistantTurnID: String? = nil,
         providerTurnID: String? = nil,
+        backgroundWork: [BackgroundTask]? = nil,
         settlePendingCheckoutMove: Bool = true,
         completion: @escaping @MainActor (GitTurnCheckpoint?) -> Void
     ) {
         let release: @MainActor (GitTurnCheckpoint?) -> Void = { checkpoint in
             if settlePendingCheckoutMove {
-                SessionCheckoutCoordinator.shared.finishPendingMove(sessionID: sessionID) { _ in
+                self.checkoutCoordinatorProvider().finishPendingMove(
+                    sessionID: sessionID,
+                    backgroundWork: backgroundWork
+                ) { _ in
                     completion(checkpoint)
                 }
             } else {

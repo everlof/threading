@@ -227,6 +227,10 @@ final class MCPServer: @unchecked Sendable {
         .shared
     }
 
+    @MainActor var checkoutCoordinatorProvider: @MainActor () -> SessionCheckoutCoordinator = {
+        .shared
+    }
+
     /// The listening port, or nil until the listener is ready. Launches read this to decide
     /// whether to register the server at all.
     var port: UInt16? {
