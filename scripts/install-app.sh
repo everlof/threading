@@ -92,6 +92,20 @@ running_pids_at() {
     return 0
 }
 
+# Installing /Applications does not replace a copy launched from a build or export directory.
+# Name those processes in the receipt so a successful install is not mistaken for a running
+# update, and so a later `open -a Threading` cannot silently reactivate the old copy.
+running_other_copies() {
+    local pid path
+    while read -r pid path; do
+        if [[ "$path" == *"/$SCHEME.app/Contents/MacOS/$SCHEME" \
+            && "$path" != "$DEST/Contents/MacOS/$SCHEME" ]]; then
+            printf '  pid %s: %s\n' "$pid" "$path"
+        fi
+    done < <(ps -Ao pid=,comm=)
+    return 0
+}
+
 # A bundle moved aside while a process was still running it is not litter: it is the file that
 # process reads from. Deleting it is how you get the running app SIGKILLed on its next page fault,
 # so an aside bundle is named for the pids that were running it and removed once none of them are.
@@ -276,4 +290,10 @@ register_bundle "$DEST"
 
 say "Installed: $SCHEME $installed_version ($installed_build)"
 echo "  $DEST"
-echo "  open it with: open -a $SCHEME"
+other_copies="$(running_other_copies)"
+if [[ -n "$other_copies" ]]; then
+    echo "  another Threading copy is still running; this install is not active yet:"
+    printf '%s\n' "$other_copies"
+    echo "  quit that copy before opening the installed app"
+fi
+echo "  open it with: open \"$DEST\""

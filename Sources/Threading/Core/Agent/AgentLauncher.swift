@@ -463,8 +463,8 @@ enum AgentLauncher {
     /// Builds the one-shot, headless run behind the AI settings search, on whichever runtime
     /// claims `.headlessResearch`.
     ///
-    /// `codexResearchPlan`'s posture — default account through `env -u`, no session of ours,
-    /// read-only where the runtime has a sandbox to say so — but with Threading's MCP endpoint
+    /// `codexResearchPlan`'s posture — no session of ours, read-only where the runtime has a
+    /// sandbox to say so — but routed to the authenticated account with Threading's MCP endpoint
     /// attached and *scoped*: the endpoint belongs to an ad-hoc registration
     /// (`MCPSessionRegistry.beginAdHoc`), so the run is advertised and admitted exactly the
     /// tools it was launched for, rather than a catalogue a cheap model would spend its run
@@ -474,6 +474,7 @@ enum AgentLauncher {
     /// on capability the answer does not need.
     static func settingsResearchPlan(
         kind: AgentKind,
+        account: AgentAccount,
         sessionID: SessionID,
         prompt: String,
         in folder: String
@@ -481,6 +482,7 @@ enum AgentLauncher {
         let mcpDecision = liveMCPDecision()
         guard let command = settingsResearchCommand(
             kind: kind,
+            account: account,
             prompt: prompt,
             mcpConfigPath: MCPSessionRegistry.writeConfiguration(
                 for: sessionID,
@@ -499,17 +501,14 @@ enum AgentLauncher {
     /// than a URL, so does the stdio form without a live helper.
     static func settingsResearchCommand(
         kind: AgentKind,
+        account: AgentAccount,
         prompt: String,
         mcpConfigPath: String?,
         binding: MCPServerBinding?
     ) -> ShellCommand? {
-        guard kind.supports(.headlessResearch) else { return nil }
+        guard kind.supports(.headlessResearch), account.provider == kind else { return nil }
 
-        var command = ShellCommand()
-        command.append(word: "env")
-        if let accountKey = kind.accountEnvironmentKey {
-            command.append(flag: "-u", value: accountKey)
-        }
+        var command = AgentAccountRouting.prefix(for: kind, account: account)
 
         switch kind {
         case .claude:

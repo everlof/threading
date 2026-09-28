@@ -292,6 +292,7 @@ final class ProjectStore {
         }
         let removedSessionIDs = Set(removedProject.sessions.map(\.id))
         let removedTerminalIDs = Set(removedProject.terminals.map(\.id))
+        BrowserAccessStore().revoke(sessionIDs: removedSessionIDs)
         // Checkpoint refs are collected here rather than before the commit, with the same
         // reasoning as the cleanup above. Losing the repository is not destructive: discard
         // keeps a checkpoint's metadata when its root no longer resolves, and the orphaned-ref
@@ -1620,6 +1621,7 @@ final class ProjectStore {
         // Threading's private namespace, and follows the authoritative commit so a refused
         // deletion cannot erase the history of a session that is still there.
         GitTurnBaselineStore.shared.remove(sessionID: sessionID)
+        BrowserAccessStore().revoke(sessionID: sessionID)
         AgentWorkTraceStore.shared.remove(sessionID: sessionID, projectID: projectID)
         ConversationHandoffStore.remove(for: sessionID)
         ExecutionAuditStore.shared.removeInBackground(sessionIDs: [sessionID])

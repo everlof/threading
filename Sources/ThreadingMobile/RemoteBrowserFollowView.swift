@@ -227,6 +227,9 @@ struct RemoteBrowserFollowView: View {
                 if let rememberTitle = permission.rememberTitle {
                     permissionButton(rememberTitle, decision: .allowRemembered, request: permission)
                 }
+                if let allSitesTitle = permission.allSitesTitle {
+                    permissionButton(allSitesTitle, decision: .allowAllSites, request: permission)
+                }
                 permissionButton(permission.denyTitle, decision: .deny, request: permission)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

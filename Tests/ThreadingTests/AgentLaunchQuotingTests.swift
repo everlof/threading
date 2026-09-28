@@ -258,6 +258,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
             ShellCommand.executing(
                 XCTUnwrap(AgentLauncher.settingsResearchCommand(
                     kind: .codex,
+                    account: AgentAccount(provider: .codex, handle: .standard, configPath: "/tmp/codex"),
                     prompt: "find the setting",
                     mcpConfigPath: nil,
                     binding: .http(url: endpoint)
@@ -648,6 +649,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         for kind in AgentKind.allCases {
             let command = AgentLauncher.settingsResearchCommand(
                 kind: kind,
+                account: AgentAccount(provider: kind, handle: .standard, configPath: "/tmp/account"),
                 prompt: "p",
                 mcpConfigPath: "/tmp/mcp.json",
                 binding: .http(url: "http://127.0.0.1:9/mcp/t")
@@ -666,6 +668,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
     func testClaudeSettingsResearchRunsScopedPrintModeOnTheDefaultAccount() throws {
         let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
             kind: .claude,
+            account: AgentAccount(provider: .claude, handle: .standard, configPath: "/tmp/claude"),
             prompt: "make it stop flashing",
             mcpConfigPath: "/tmp/scope.json",
             binding: nil
@@ -688,11 +691,32 @@ final class AgentLaunchQuotingTests: XCTestCase {
         ])
     }
 
+    func testClaudeSettingsResearchRoutesAnAlternateSignedInAccount() throws {
+        let account = AgentAccount(
+            provider: .claude,
+            handle: AccountHandle(storedName: "alternate"),
+            configPath: "/tmp/claude-alternate"
+        )
+        let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
+            kind: .claude,
+            account: account,
+            prompt: "find a setting",
+            mcpConfigPath: "/tmp/scope.json",
+            binding: nil
+        ))
+        let words = try Self.tokenizing(
+            ShellCommand.executing(command, in: "/tmp/scratch").source
+        )
+
+        XCTAssertEqual(Array(words.prefix(2)), ["env", "CLAUDE_CONFIG_DIR=/tmp/claude-alternate"])
+    }
+
     /// The Codex one-shot: `codexResearchPlan`'s posture plus the scoped MCP overrides, and
     /// `--skip-git-repo-check` because the run works in a scratch directory, not a checkout.
     func testCodexSettingsResearchRunsScopedReadOnlyExecOnTheDefaultAccount() throws {
         let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
             kind: .codex,
+            account: AgentAccount(provider: .codex, handle: .standard, configPath: "/tmp/codex"),
             prompt: "make it stop flashing",
             mcpConfigPath: nil,
             binding: .http(url: "http://127.0.0.1:9/mcp/t")
@@ -727,6 +751,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         )
         let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
             kind: .codex,
+            account: AgentAccount(provider: .codex, handle: .standard, configPath: "/tmp/codex"),
             prompt: "make it stop flashing",
             mcpConfigPath: nil,
             binding: .stdio(invocation)
@@ -762,12 +787,14 @@ final class AgentLaunchQuotingTests: XCTestCase {
     func testASettingsResearchRunWithoutItsEndpointRefusesToLaunch() {
         XCTAssertNil(AgentLauncher.settingsResearchCommand(
             kind: .claude,
+            account: AgentAccount(provider: .claude, handle: .standard, configPath: "/tmp/claude"),
             prompt: "p",
             mcpConfigPath: nil,
             binding: .http(url: "http://127.0.0.1:9/mcp/t")
         ))
         XCTAssertNil(AgentLauncher.settingsResearchCommand(
             kind: .codex,
+            account: AgentAccount(provider: .codex, handle: .standard, configPath: "/tmp/codex"),
             prompt: "p",
             mcpConfigPath: "/tmp/scope.json",
             binding: nil

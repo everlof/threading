@@ -25,6 +25,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private let browserAccessStore: BrowserAccessStore
     private let chromeAutomationProfile: ChromeAutomationProfile
     private var persistentOriginKeys: [String] = []
+    private var persistentSessionIDs: [SessionID] = []
     private let credentialStore: BrowserCredentialStore
     private let projects: ProjectStore
     private var credentialProvider: BrowserCredentialProvider = .fallback
@@ -54,6 +55,7 @@ final class ToolsPreferencesViewController: NSViewController {
         case websiteAccessCaption
         case websiteAccessEmpty
         case websiteAccessOrigin(Int)
+        case websiteAccessSession(Int)
         case websiteAccessRevokeAll
         case extensionCaption(Int)
         case extensionField(section: Int, field: Int)
@@ -165,6 +167,9 @@ final class ToolsPreferencesViewController: NSViewController {
             : []
         exemptSubmissions = BrowserSubmissionExemptions.shared.grants
         persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
+        persistentSessionIDs = browserAccessStore.allowedSessions.sorted {
+            $0.uuidString < $1.uuidString
+        }
         presentationRows = makePresentationRows()
         updateCardDecorations()
 
@@ -241,11 +246,14 @@ final class ToolsPreferencesViewController: NSViewController {
             PresentationRow.browserSignInSubmissionExemption
         ))
         rows.append(contentsOf: [.chromeAutomation, .websiteAccessCaption])
-        if persistentOriginKeys.isEmpty {
+        if persistentOriginKeys.isEmpty && persistentSessionIDs.isEmpty {
             rows.append(.websiteAccessEmpty)
         } else {
             rows.append(contentsOf: persistentOriginKeys.indices.map(
                 PresentationRow.websiteAccessOrigin
+            ))
+            rows.append(contentsOf: persistentSessionIDs.indices.map(
+                PresentationRow.websiteAccessSession
             ))
             rows.append(.websiteAccessRevokeAll)
         }
@@ -288,7 +296,8 @@ final class ToolsPreferencesViewController: NSViewController {
                 } else {
                     browserSignInBounds = (rowIndex, rowIndex)
                 }
-            case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessRevokeAll:
+            case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessSession,
+                 .websiteAccessRevokeAll:
                 if var bounds = websiteBounds {
                     bounds.last = rowIndex
                     websiteBounds = bounds
@@ -735,10 +744,10 @@ final class ToolsPreferencesViewController: NSViewController {
 
     private func websiteAccessEmptyRow() -> NSView {
         SettingsUI.row(
-            title: "No websites always allowed",
+            title: "No persistent browser access",
             subtitle: """
-                Agents can still ask for one-time access. Persistent website grants will appear \
-                here.
+                Agents can still ask for one-time access. Persistent website and chat grants \
+                will appear here.
                 """
         )
     }
@@ -758,10 +767,26 @@ final class ToolsPreferencesViewController: NSViewController {
         )
     }
 
+    private func websiteAccessSessionRow(at index: Int) -> NSView {
+        guard persistentSessionIDs.indices.contains(index) else { return NSView() }
+        let sessionID = persistentSessionIDs[index]
+        let revoke = SettingsUI.button(
+            "Revoke",
+            target: self,
+            action: #selector(revokeSessionWebsiteAccess(_:))
+        )
+        revoke.tag = index
+        return SettingsUI.row(
+            title: projects.session(withID: sessionID)?.displayTitle ?? sessionID.uuidString,
+            subtitle: "This chat's agent may use every website in Threading's signed-in browser.",
+            control: revoke
+        )
+    }
+
     private func websiteAccessRevokeAllRow() -> NSView {
         SettingsUI.row(
             title: "All persistent access",
-            subtitle: "One-time grants end with the running app and are not listed here.",
+            subtitle: "Website and chat grants are listed above. One-time grants end with the app.",
             control: SettingsUI.button(
                 "Revoke All…",
                 target: self,
@@ -1069,13 +1094,19 @@ final class ToolsPreferencesViewController: NSViewController {
         render()
     }
 
+    @objc private func revokeSessionWebsiteAccess(_ sender: ThemedButton) {
+        guard persistentSessionIDs.indices.contains(sender.tag) else { return }
+        browserAccessStore.revoke(sessionID: persistentSessionIDs[sender.tag])
+        render()
+    }
+
     @objc private func revokeAllWebsiteAccess() {
         let request = ConfirmationRequest(
             prompt: .revokeAllWebsiteAccess,
             title: L10n.string("Revoke Persistent Website Access?"),
             message: L10n.string("""
                 Agents will need to ask again before using these websites in Threading's signed-in \
-                browser. One-time grants are unaffected.
+                browser. Chat-wide grants are also revoked. One-time grants are unaffected.
                 """),
             confirmTitle: L10n.string("Revoke All")
         )
@@ -1155,7 +1186,8 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
              .browserSignInVaultEmpty, .browserSignInVaultIdentity,
              .browserSignInVaultAdd, .browserSignInSubmissionExemption:
             return 0
-        case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessRevokeAll:
+        case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessSession,
+             .websiteAccessRevokeAll:
             return 0
         case .note, .group, .browserSignInCaption, .chromeAutomation,
              .websiteAccessCaption, .extensionCaption:
@@ -1221,6 +1253,8 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
             return websiteAccessEmptyRow()
         case .websiteAccessOrigin(let index):
             return websiteAccessOriginRow(at: index)
+        case .websiteAccessSession(let index):
+            return websiteAccessSessionRow(at: index)
         case .websiteAccessRevokeAll:
             return websiteAccessRevokeAllRow()
         case .extensionCaption(let index):

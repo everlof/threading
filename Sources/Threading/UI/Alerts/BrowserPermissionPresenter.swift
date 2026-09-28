@@ -10,7 +10,7 @@ enum BrowserPermissionPresenter {
         in window: NSWindow?,
         completion: @escaping (Int?) -> Void
     ) {
-        guard (1...2).contains(request.options.count),
+        guard (1...3).contains(request.options.count),
               request.options.allSatisfy(\.isEnabled) else {
             completion(nil)
             return
@@ -22,12 +22,14 @@ enum BrowserPermissionPresenter {
             message: request.message,
             allowTitle: request.options[0].title,
             rememberTitle: request.options.count > 1 ? request.options[1].title : nil,
+            allSitesTitle: request.options.count > 2 ? request.options[2].title : nil,
             denyTitle: request.cancelTitle,
             dismiss: { presentation.dismiss() },
             settle: { decision in
                 switch decision {
                 case .allowOnce: completion(0)
                 case .allowRemembered: completion(1)
+                case .allowAllSites: completion(2)
                 case .deny: completion(nil)
                 }
             }
@@ -41,6 +43,7 @@ enum BrowserPermissionPresenter {
             switch chosen {
             case 0: decision = .allowOnce
             case 1: decision = .allowRemembered
+            case 2: decision = .allowAllSites
             default: decision = .deny
             }
             BrowserPermissionRequests.shared.resolve(

@@ -137,6 +137,7 @@ struct BrowserOrigin: Hashable, Equatable {
 enum BrowserAccessDecision {
     case allowOnce
     case allowPersistently
+    case allowAllForSession
     case deny
 }
 
@@ -157,12 +158,13 @@ typealias BrowserSiteDataDecisionProvider = (
     _ decide: @escaping (Bool) -> Void
 ) -> Void
 
-/// Persistent "always allow" choices. Per-session "allow once" choices deliberately live in the
-/// coordinator so they vanish with the running app and never become an invisible long-term grant.
+/// Persistent grants for one origin or one chat's access to all browser origins. Per-session
+/// "allow once" choices live in the coordinator and vanish with the running app.
 @MainActor
 final class BrowserAccessStore {
     private enum Keys {
         static let allowedOrigins = "browser.allowedOrigins"
+        static let allowedSessions = "browser.allowedSessions"
     }
 
     private let defaults: UserDefaults
@@ -184,6 +186,27 @@ final class BrowserAccessStore {
         defaults.set(Array(origins).sorted(), forKey: Keys.allowedOrigins)
     }
 
+    func allowsAllOrigins(for sessionID: SessionID) -> Bool {
+        allowedSessions.contains(sessionID)
+    }
+
+    func allowAllOrigins(for sessionID: SessionID) {
+        var sessions = allowedSessions
+        guard sessions.insert(sessionID).inserted else { return }
+        defaults.set(sessions.map(\.uuidString).sorted(), forKey: Keys.allowedSessions)
+    }
+
+    func revoke(sessionID: SessionID) {
+        revoke(sessionIDs: [sessionID])
+    }
+
+    func revoke(sessionIDs: Set<SessionID>) {
+        var sessions = allowedSessions
+        guard !sessions.isDisjoint(with: sessionIDs) else { return }
+        sessions.subtract(sessionIDs)
+        defaults.set(sessions.map(\.uuidString).sorted(), forKey: Keys.allowedSessions)
+    }
+
     func revoke(_ origin: BrowserOrigin) {
         revoke(key: origin.key)
     }
@@ -196,9 +219,15 @@ final class BrowserAccessStore {
 
     func revokeAll() {
         defaults.removeObject(forKey: Keys.allowedOrigins)
+        defaults.removeObject(forKey: Keys.allowedSessions)
     }
 
     var allowedOrigins: Set<String> {
         Set(defaults.stringArray(forKey: Keys.allowedOrigins) ?? [])
+    }
+
+    var allowedSessions: Set<SessionID> {
+        Set((defaults.stringArray(forKey: Keys.allowedSessions) ?? [])
+            .compactMap(SessionID.init(uuidString:)))
     }
 }

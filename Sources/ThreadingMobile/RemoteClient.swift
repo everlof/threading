@@ -112,6 +112,11 @@ enum RemoteClientError: LocalizedError {
         return status
     }
 
+    var isAuthorizationRefusal: Bool {
+        if case .unauthorized = self { return true }
+        return statusCode == 401
+    }
+
     var refusalCode: String? {
         guard case let .server(_, code, _) = self else { return nil }
         return code
@@ -388,6 +393,9 @@ struct RemoteConnectionFailure: Equatable {
         /// remedy is scanning the code again, and only after checking that the Mac is the one
         /// that changed.
         case pinnedIdentityMismatch
+        /// The Mac answered but no longer accepts this device's saved bearer. More retries
+        /// cannot repair a revoked or unavailable pairing.
+        case authorizationLost
         /// iOS refused the connection because Local Network access was never granted. It is a
         /// no-route POSIX error on a private address, which is indistinguishable from an absent
         /// host until the address is taken into account.
@@ -416,7 +424,7 @@ struct RemoteConnectionFailure: Equatable {
 
     var recovery: Recovery {
         switch cause {
-        case .addressChanged, .pinnedIdentityMismatch: return .pairAgain
+        case .addressChanged, .pinnedIdentityMismatch, .authorizationLost: return .pairAgain
         case .localNetworkDenied: return .openLocalNetworkSettings
         case .upgradeRequired:
             return .openUpdatePage(updatePage ?? RemoteUpdateDefaults.downloadPage)
@@ -433,6 +441,8 @@ struct RemoteConnectionFailure: Equatable {
         case .openUpdatePage: return MobileL10n.string("Open the download page")
         }
     }
+
+    var shouldRetryAutomatically: Bool { cause != .authorizationLost }
 
     static func helloTimeout() -> RemoteConnectionFailure {
         RemoteConnectionFailure(
@@ -467,6 +477,15 @@ struct RemoteConnectionFailure: Equatable {
         )
     }
 
+    static func authorizationLost() -> RemoteConnectionFailure {
+        RemoteConnectionFailure(
+            cause: .authorizationLost,
+            message: MobileL10n.string(
+                "This Mac no longer recognizes this device. Scan a new QR code to connect again."
+            )
+        )
+    }
+
     /// Classifies a transport error against the address it was aimed at.
     ///
     /// The address is part of the diagnosis rather than decoration: Local Network denial and an
@@ -496,6 +515,9 @@ struct RemoteConnectionFailure: Equatable {
         }
         if let remote = error as? RemoteClientError, case let .upgradeRequired(target) = remote {
             return upgradeRequired(target)
+        }
+        if let remote = error as? RemoteClientError, remote.isAuthorizationRefusal {
+            return authorizationLost()
         }
         if isLocalNetworkDenial(error, host: host) {
             return RemoteConnectionFailure(

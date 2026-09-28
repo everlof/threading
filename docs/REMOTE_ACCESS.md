@@ -203,8 +203,9 @@ bootstrap that must still be redeemed by the loopback remote server. The Mac exc
 bootstrap for a unique 256-bit, device-bound owner credential, rotates the code, issues the
 phone's durable hosted credential, and revokes the temporary pairing route. A QR code for a bound
 door redeems the same owner bootstrap over that door. The Mac stores the device record in the
-data-protection Keychain when the signed build can access it and iOS stores the paired host and its
-credentials in its Keychain. An ad-hoc Mac build falls back to the login Keychain and says so in
+data-protection Keychain when the build can access it and iOS stores the paired host and its
+credentials in its Keychain. A Mac build without a usable Keychain access group falls back to the
+login Keychain and says so in
 Settings. Pairing therefore survives a Threading restart and also survives turning Remote Access
 off and back on. Settings
 lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
@@ -2409,7 +2410,16 @@ feature lock.
   write commits before the legacy item is removed, corrupt or future-version data stays untouched,
   and a protected empty sentinel prevents a login-Keychain item planted after the first upgraded
   launch from becoming authority. Once present, the protected item is the only item read for
-  authorization.
+  authorization. Switching between a profile-signed export and a profile-less local Mac build
+  therefore switches credential stores. A pairing created in the login Keychain after a protected
+  empty sentinel cannot be promoted on the next profile-signed launch; that would let a shell
+  add an owner credential. The local auto-installer keeps the installed app's Keychain choice:
+  a protected installation requires a valid Developer ID profile, while a login-Keychain
+  installation stays there even if a profile later appears. A first installation uses the profile
+  when available. Moving between those stores requires an explicit migration. Pair again if the
+  Mac no longer recognizes a saved bearer. The phone treats that
+  401 as a pairing
+  action and stops automatic retries instead of letting later 429 responses hide the cause.
 - **APNs routing metadata is a separate, authorization-free Keychain item.** It follows the same
   protected-when-available storage and validation-first migration rules, but contains no bearer.
   Startup joins each record to a current device-bound capability before making it active, so a

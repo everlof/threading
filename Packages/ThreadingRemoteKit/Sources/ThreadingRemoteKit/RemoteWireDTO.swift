@@ -2786,12 +2786,14 @@ public struct RemoteBrowserPermissionDTO: Codable, Equatable, Identifiable, Send
     public let message: String
     public let allowTitle: String
     public let rememberTitle: String?
+    public let allSitesTitle: String?
     public let denyTitle: String
 
     public init(
         id: String, title: String, message: String,
         allowTitle: String = "Allow Once",
         rememberTitle: String? = "Always Allow This Host",
+        allSitesTitle: String? = nil,
         denyTitle: String = "Deny"
     ) {
         self.id = id
@@ -2799,12 +2801,13 @@ public struct RemoteBrowserPermissionDTO: Codable, Equatable, Identifiable, Send
         self.message = message
         self.allowTitle = allowTitle
         self.rememberTitle = rememberTitle
+        self.allSitesTitle = allSitesTitle
         self.denyTitle = denyTitle
     }
 }
 
 public enum RemoteBrowserPermissionDecision: String, Codable, Sendable {
-    case allowOnce, allowRemembered, deny
+    case allowOnce, allowRemembered, allowAllSites, deny
 }
 
 public struct RemoteBrowserPermissionReplyDTO: Codable, Sendable {

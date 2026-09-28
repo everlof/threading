@@ -1863,7 +1863,14 @@ final class RemoteAppModel: ObservableObject {
             forgetDiscovered(hostID: hostID)
             let failure = connectionFailure(for: host, error: error)
             phase = .offline(failure)
-            scheduleThemeEventsRecovery(for: hostID)
+            if failure.shouldRetryAutomatically {
+                scheduleThemeEventsRecovery(for: hostID)
+            } else {
+                clearThemeEventSocket(reason: "authorizationLost")
+                themeEventsRecoveryTask?.cancel()
+                themeEventsRecoveryTask = nil
+                themeEventsRecoveryHostID = nil
+            }
             var fields = refreshBaseFields.merging([
                 .result: "failed",
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
@@ -3266,6 +3273,11 @@ final class RemoteAppModel: ObservableObject {
                         // The hosted manager coalesces its negotiation in an unstructured task.
                         // Stop that owner before the structured race waits for its losing child.
                         await self?.hostedConnectionFailed(hostID: host.id)
+                    },
+                    failureRank: { error in
+                        let refusal = RemoteConnectionAttempt.underlying(error)
+                            as? RemoteClientError
+                        return refusal?.isAuthorizationRefusal == true ? 0 : 1
                     }
                 )
             } onCancel: { [weak self] in
@@ -3370,6 +3382,7 @@ final class RemoteAppModel: ObservableObject {
         attempt: (Int, ConnectionCandidate) async throws -> Value
     ) async throws -> Value {
         var lastError: Error = RemoteClientError.invalidResponse
+        var authorizationRefusal: Error?
         var closedDoors: Set<String> = []
         for (index, candidate) in candidates.enumerated() {
             if let doorID = candidate.doorID, closedDoors.contains(doorID) { continue }
@@ -3382,6 +3395,10 @@ final class RemoteAppModel: ObservableObject {
                     underlying: error,
                     host: candidate.link.baseURL.host
                 )
+                if let remote = RemoteConnectionAttempt.underlying(error) as? RemoteClientError,
+                   remote.isAuthorizationRefusal, authorizationRefusal == nil {
+                    authorizationRefusal = lastError
+                }
                 closeDoor(
                     for: error,
                     candidates: candidates,
@@ -3393,7 +3410,7 @@ final class RemoteAppModel: ObservableObject {
                 )
             }
         }
-        throw lastError
+        throw authorizationRefusal ?? lastError
     }
 
     /// Ends the rest of one door's port walk when its failure ruled the address out, and says so
@@ -4344,6 +4361,7 @@ final class RemoteAppModel: ObservableObject {
     private func scheduleThemeEventsRecovery(for hostID: String) {
         guard !isDemo, activeHostID == hostID, themeEventsTask == nil,
               themeEventsRecoveryTask == nil else { return }
+        if case let .offline(failure) = phase, !failure.shouldRetryAutomatically { return }
         let delay = MobileSocketRecoveryBackoff.delay(forAttempt: connectionRecoveryAttempt)
         connectionRecoveryAttempt &+= 1
         if case .offline = phase {

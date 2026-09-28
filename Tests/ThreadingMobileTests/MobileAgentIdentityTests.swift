@@ -666,6 +666,24 @@ final class MobileWorkspaceActivityTests: XCTestCase {
         }
     }
 
+    func testChatWideBrowserAnswerUsesItsOwnPermissionDecision() async {
+        let question = RemoteBrowserPermissionDTO(
+            id: "all-sites", title: "Host", message: "Page",
+            allSitesTitle: "Always Allow This Agent"
+        )
+        let state = MobileBrowserPermissionPromptState(request: question)
+        XCTAssertEqual(state.request?.allSitesTitle, "Always Allow This Agent")
+        await state.decide(question, decision: .allowAllSites, reload: {
+            XCTFail("Successful reply needs no second fetch")
+            return RemoteWorkspaceDTO(browserTabs: [])
+        }) { id, decision in
+            XCTAssertEqual(id, "all-sites")
+            XCTAssertEqual(decision, .allowAllSites)
+            return RemoteWorkspaceDTO(browserTabs: [])
+        }
+        XCTAssertNil(state.request)
+    }
+
     func testBrowserPromptRefreshesStaleAnswerWithoutRetargetingIt() async {
         let first = RemoteBrowserPermissionDTO(id: "one", title: "Host", message: "Page")
         let next = RemoteBrowserPermissionDTO(id: "two", title: "Next host", message: "Page")

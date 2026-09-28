@@ -6356,6 +6356,17 @@
         }
       }
     },
+    "Agents can still ask for one-time access. Persistent website and chat grants will appear here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenter kan fortfarande be om åtkomst för en gång. Varaktiga behörigheter för webbplatser och chattar visas här."
+          }
+        }
+      }
+    },
     "Agents can still ask for one-time access. Persistent website grants will appear here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6517,6 +6528,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenter läser och redigerar filerna i dina projekt. macOS frågar separat för mapparna Skrivbord, Dokument och Hämtade filer, och för externa volymer och nätverksvolymer – ett projekt någon annanstans kräver ingen behörighet alls."
+          }
+        }
+      }
+    },
+    "Agents will need to ask again before using these websites in Threading's signed-in browser. Chat-wide grants are also revoked. One-time grants are unaffected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenter måste fråga igen innan de använder dessa webbplatser i Threadings inloggade webbläsare. Behörigheter för hela chatten återkallas också. Engångsbehörigheter påverkas inte."
           }
         }
       }
@@ -6974,6 +6996,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alltid"
+          }
+        }
+      }
+    },
+    "Always Allow This Agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt alltid denna agent"
           }
         }
       }
@@ -29308,6 +29341,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga behörighetskontroller alls."
+          }
+        }
+      }
+    },
+    "No persistent browser access" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen varaktig webbläsaråtkomst"
           }
         }
       }
@@ -51709,6 +51753,17 @@
         }
       }
     },
+    "This chat's agent may use every website in Threading's signed-in browser." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten i den här chatten får använda alla webbplatser i Threadings inloggade webbläsare."
+          }
+        }
+      }
+    },
     "This checkout has more than %lld visible files, so workspace mentions are unavailable." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56792,6 +56847,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Webbplatsåtkomst och behörigheter för webbläsarverktyg"
+          }
+        }
+      }
+    },
+    "Website and chat grants are listed above. One-time grants end with the app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behörigheter för webbplatser och chattar visas ovan. Engångsbehörigheter upphör när appen stängs."
           }
         }
       }
@@ -63110,6 +63176,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” har kopierats till Threading och är inaktiverad tills du aktiverar den."
+          }
+        }
+      }
+    },
+    "“Always Allow This Agent” gives this chat access to every website in this browser, including sites visited later. Revoke it in Settings ▸ Tools." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”Tillåt alltid denna agent” ger den här chatten åtkomst till alla webbplatser i webbläsaren, även sådana som besöks senare. Återkalla i Inställningar ▸ Verktyg."
           }
         }
       }

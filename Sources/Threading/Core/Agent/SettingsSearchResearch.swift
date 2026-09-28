@@ -3,15 +3,14 @@ import Foundation
 /// Answers a settings search the term filter could not: one headless agent run reads the
 /// settings catalogue over a scoped MCP endpoint and names the pages the query *meant*.
 ///
-/// `CommitMessageComposer`'s pattern, applied to Settings: a read-only one-shot on the default
+/// `CommitMessageComposer`'s pattern, applied to Settings: a read-only one-shot on a signed-in
 /// account, stdout and stderr merged into one pipe, the run's final message taken as the
 /// answer. Like the other research runs it is manual only — a run spends the user's usage, so
 /// the Ask AI button asks for it and nothing fires it automatically. One run at a time:
 /// Settings is one surface, so re-entrancy is refused rather than queued.
 ///
-/// Unlike the Codex-only research features this one picks its runtime: the first with
-/// `.headlessResearch` and an enabled login answers, so a Claude-only user gets the search a
-/// Codex-only user already had.
+/// Unlike the Codex-only research features this one picks its runtime: the first
+/// `.headlessResearch` account whose CLI confirms a live login answers.
 @MainActor
 enum SettingsSearchResearch {
 
@@ -65,13 +64,15 @@ enum SettingsSearchResearch {
 
     // MARK: - Properties
 
-    /// The runtime that will answer, or nil when nothing eligible is logged in — which is when
-    /// the Ask AI affordance stays hidden. First claimant of `.headlessResearch` with an
-    /// enabled login, in declaration order.
+    /// Whether a research-capable account is configured. Authentication is checked on the
+    /// worker when the user clicks Ask AI, since a config directory can outlive its login.
     static var provider: AgentKind? {
-        AgentKind.allCases.first {
-            $0.supports(.headlessResearch) && !AgentAccountDiscovery.accounts(for: $0).isEmpty
-        }
+        candidateAccounts.first?.provider
+    }
+
+    private static var candidateAccounts: [AgentAccount] {
+        AgentKind.allCases.filter { $0.supports(.headlessResearch) }
+            .flatMap { AgentAccountDiscovery.accounts(for: $0) }
     }
 
     /// Whether a run is in flight, so the button and a second click can refuse politely.
@@ -81,35 +82,71 @@ enum SettingsSearchResearch {
 
     static func run(
         query: String,
+        onProviderSelected: @escaping @MainActor @Sendable (AgentKind) -> Void,
         completion: @escaping @MainActor @Sendable (Result<[Match], ResearchError>) -> Void
     ) {
         guard !isRunning else {
             completion(.failure(.alreadyRunning))
             return
         }
-        guard let kind = provider else {
+        let candidates = candidateAccounts
+        guard !candidates.isEmpty else {
             completion(.failure(.unavailable))
             return
         }
 
+        isRunning = true
+        let shell = AgentLauncher.loginShellPath
+        queue.async {
+            // Usually 1–8 accounts; even with 128 stale entries, one worker spends at most
+            // this wall budget probing logins before reporting unavailable.
+            let deadline = ProcessInfo.processInfo.systemUptime
+                + SettingsResearchDefaults.authenticationTimeout
+            let account = firstAuthenticatedAccount(in: candidates) {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else { return false }
+                return isAuthenticated(
+                    $0,
+                    shell: shell,
+                    timeout: min(remaining, AccountProbeDefaults.timeout)
+                )
+            }
+            DispatchQueue.main.async {
+                guard let account else {
+                    isRunning = false
+                    completion(.failure(.unavailable))
+                    return
+                }
+                onProviderSelected(account.provider)
+                start(query: query, account: account, completion: completion)
+            }
+        }
+    }
+
+    private static func start(
+        query: String,
+        account: AgentAccount,
+        completion: @escaping @MainActor @Sendable (Result<[Match], ResearchError>) -> Void
+    ) {
         let scopeSessionID = MCPSessionRegistry.beginAdHoc(
             allowedTools: [MCPBuiltInTool.listSettings.rawValue]
         )
         guard let plan = AgentLauncher.settingsResearchPlan(
-            kind: kind,
+            kind: account.provider,
+            account: account,
             sessionID: scopeSessionID,
             prompt: prompt(query: query),
             in: FileManager.default.temporaryDirectory.path
         ) else {
             MCPSessionRegistry.endAdHoc(scopeSessionID)
+            isRunning = false
             completion(.failure(.launchFailed))
             return
         }
 
-        isRunning = true
         queue.async {
             let (output, failure) = execute(plan)
-            let answer = output.flatMap { answerText(fromOutput: $0, kind: kind) }
+            let answer = output.flatMap { answerText(fromOutput: $0, kind: account.provider) }
 
             DispatchQueue.main.async {
                 isRunning = false
@@ -121,11 +158,60 @@ enum SettingsSearchResearch {
                     completion(.success(validated(raw)))
                 } else {
                     ThreadingLogger.agent.error(
-                    "Settings research returned no readable answer (\(output?.count ?? 0, privacy: .public) bytes)"
+                        "Settings research returned no readable answer (\(output?.count ?? 0, privacy: .public) bytes)"
                     )
                     completion(.failure(.noAnswer))
                 }
             }
+        }
+    }
+
+    /// Config files establish candidates, while the CLI confirms the login itself. Keep the
+    /// selection pure so the account-order and fallback behavior can be tested without a CLI.
+    nonisolated static func firstAuthenticatedAccount(
+        in candidates: [AgentAccount],
+        authenticate: (AgentAccount) -> Bool
+    ) -> AgentAccount? {
+        candidates.first(where: authenticate)
+    }
+
+    nonisolated private static func isAuthenticated(
+        _ account: AgentAccount,
+        shell: String,
+        timeout: TimeInterval
+    ) -> Bool {
+        var command = AgentAccountRouting.prefix(for: account.provider, account: account)
+        switch account.provider {
+        case .claude:
+            command.append(word: AgentDefaults.claudeExecutable)
+            command.append(word: "auth")
+            command.append(word: "status")
+            command.append(word: "--json")
+        case .codex:
+            command.append(word: AgentDefaults.codexExecutable)
+            command.append(word: "login")
+            command.append(word: "status")
+        case .grok, .openCode, .cursor:
+            return false
+        }
+
+        guard let result = try? BoundedChildProcess.run(
+            executable: shell,
+            arguments: ["-l", "-c", command.source],
+            environment: AgentEnvironment.launchEnvironment(),
+            timeout: timeout,
+            maximumOutputBytes: AccountProbeDefaults.maximumOutputBytes,
+            output: .standardOutput
+        ), result.termination == .exited(0), !result.outputWasTruncated else { return false }
+
+        switch account.provider {
+        case .claude:
+            struct Status: Decodable { let loggedIn: Bool }
+            return (try? JSONDecoder().decode(Status.self, from: result.output))?.loggedIn == true
+        case .codex:
+            return true
+        case .grok, .openCode, .cursor:
+            return false
         }
     }
 
@@ -321,6 +407,7 @@ enum SettingsResearchDefaults {
     /// a background task. A fast model answers well inside this; a wedged one should not hold
     /// the pane for a minute and a half.
     static let timeout: TimeInterval = 60
+    static let authenticationTimeout: TimeInterval = 20
     static let maximumOutputBytes = 8 * 1024 * 1024
 
     /// The key carrying the reply in Claude's `--print --output-format json` envelope.

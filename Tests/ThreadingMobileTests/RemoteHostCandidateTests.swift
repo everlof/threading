@@ -986,6 +986,31 @@ final class RemoteHostCandidateTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testAnAuthenticationRefusalSurvivesALaterRouteFailure() async {
+        let host = pairedHost(endpoints: [
+            endpoint(.lan, "https://192.168.1.42:8760/"),
+            endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
+        ], policy: .privateOnly)
+
+        do {
+            let _: URL = try await RemoteAppModel.walk(
+                connectionCandidates(host),
+                trace: "walk",
+                phase: "request"
+            ) { _, candidate in
+                if candidate.kind == .lan { throw RemoteClientError.unauthorized }
+                throw URLError(.secureConnectionFailed)
+            }
+            XCTFail("Every route should have failed.")
+        } catch {
+            XCTAssertTrue(
+                (RemoteConnectionAttempt.underlying(error) as? RemoteClientError)?
+                    .isAuthorizationRefusal == true
+            )
+        }
+    }
+
     /// Cancellation is not a door verdict. A refresh that is replaced mid-walk stops, and it does
     /// not leave a conclusion about the address behind it.
     @MainActor

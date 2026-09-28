@@ -550,6 +550,11 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+The browser origin prompt's chat-wide grant is host-only authorization UI. Its entity is the
+calling chat, and Threading owns the origin check, exact choice, durable scope, deletion cleanup
+and revocation. Extensions cannot replace its actions or grant themselves browser access; the
+existing themed alert and settings rows remain the native presentation.
+
 The Curfew menu's usage-percentage choices reuse the host-owned session scheduling surface and
 integer-input alert. Threading retains threshold validation, account/window binding, durable
 arming and lifting, and every hold/interrupt decision. A percentage choice introduces no extension

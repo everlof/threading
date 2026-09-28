@@ -7,9 +7,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 The live browser and the rendered-document web view are deliberately separate. Each live
 `BrowserViewController` uses the persistent website data store and can carry authenticated state;
 agent access therefore goes through an app-level origin grant even though Threading's MCP server
-itself is pre-approved. Localhost is admitted for development, other origins offer once,
-persistent-host, or deny choices. After an action navigates, the new origin is checked before
-any resulting page state is returned.
+itself is pre-approved. Localhost is admitted for development. Other origins offer once,
+persistent-host, this-chat/all-websites, or deny choices. The chat-wide choice is explicit,
+persists across app launches, and is revoked with the session on permanent deletion or from
+Settings ▸ Tools. It authorizes browser access only; sensitive actions and website-data clearing
+retain their separate prompts. After an action navigates, the new origin is checked before any
+resulting page state is returned.
 
 The paired iPhone's Workspace Browser mirrors Mac-rendered snapshots, including localhost
 pages. Agents use `browser_navigate` with the same local URL they use on the Mac; they do not
@@ -104,7 +107,7 @@ while the sheet is up.
 before any page content is returned, so a granted origin that bounces to another one prompts
 again instead of leaking the destination's content.
 
-**6. Only two things skip the prompt, and both are pinned by parse.** Loopback (see above) and
+**6. Only two page identities skip the prompt without a user grant, and both are pinned by parse.** Loopback (see above) and
 `about:blank` — the whole `about:` scheme used to qualify while the prompt described it as "this
 blank page"; only the blank document does now.
 
@@ -705,8 +708,8 @@ downloads show a timed browser toast naming the file with Reveal in Finder; the 
 menu retains the path after the toast leaves. Download failures keep their alert. The browser host
 owns the save decision, destination and reveal action; the toast only presents the receipt.
 JavaScript alert, confirm, and prompt dialogs are also native sheets tied to the
-browser window. Persistent website grants can be reviewed individually or revoked together on the
-Tools settings page.
+browser window. Persistent website and chat-wide grants can be reviewed individually or revoked
+together on the Tools settings page.
 
 Do not wait on `requestAnimationFrame` in an agent action: WebKit pauses it in an occluded
 display-panel tab. Browser waits use bounded timers, navigation and snapshots have timeouts, and

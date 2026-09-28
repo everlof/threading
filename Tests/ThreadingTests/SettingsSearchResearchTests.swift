@@ -8,6 +8,28 @@ import XCTest
 @MainActor
 final class SettingsSearchResearchTests: XCTestCase {
 
+    func testSearchSkipsSignedOutAccountsAndFallsBackToAnotherProvider() {
+        let candidates = [
+            AgentAccount(provider: .claude, handle: .standard, configPath: "/tmp/claude"),
+            AgentAccount(
+                provider: .claude,
+                handle: AccountHandle(storedName: "alternate"),
+                configPath: "/tmp/claude-alternate"
+            ),
+            AgentAccount(provider: .codex, handle: .standard, configPath: "/tmp/codex")
+        ]
+
+        let alternate = SettingsSearchResearch.firstAuthenticatedAccount(in: candidates) {
+            $0.configPath == "/tmp/claude-alternate"
+        }
+        XCTAssertEqual(alternate?.configPath, "/tmp/claude-alternate")
+
+        let codex = SettingsSearchResearch.firstAuthenticatedAccount(in: candidates) {
+            $0.provider == .codex
+        }
+        XCTAssertEqual(codex?.provider, .codex)
+    }
+
     // MARK: - The prompt
 
     /// What the run is asked is a decision worth pinning: the tool it must call, the reply

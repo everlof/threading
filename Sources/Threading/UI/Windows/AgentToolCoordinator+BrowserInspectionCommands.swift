@@ -462,6 +462,9 @@ extension AgentToolCoordinator {
             case .allowPersistently:
                 self.browserAccessStore.allowPersistently(origin)
                 completion(true)
+            case .allowAllForSession:
+                self.browserAccessStore.allowAllOrigins(for: sessionID)
+                completion(true)
             case .deny:
                 completion(false)
             }
@@ -476,12 +479,24 @@ extension AgentToolCoordinator {
             return
         }
 
-        // Three affirmative answers and a way out, so this goes through `choose` rather than
-        // `ask`: "Always Allow This Host" is this prompt's own remembered answer, scoped to one
-        // host and revocable in Settings ▸ Tools. A "Don't ask again" box beside it would
-        // remember *something* about every host at once, which is why the register marks a
-        // grant `.alwaysAsks` and why `choose` refuses a suppressible prompt.
-        let request = ChoiceRequest(
+        let request = Self.browserAccessChoiceRequest(to: url, origin: origin, purpose: purpose)
+
+        BrowserPermissionPresenter.choose(request, for: sessionID, in: browserPresentationWindow(for: sessionID)) { chosen in
+            switch chosen {
+            case 0: applyDecision(.allowOnce)
+            case 1: applyDecision(.allowPersistently)
+            case 2: applyDecision(.allowAllForSession)
+            default: applyDecision(.deny)
+            }
+        }
+    }
+
+    /// The two remembered answers have different scopes. The choice states that scope itself;
+    /// a generic suppression box could not distinguish one host from the whole chat.
+    static func browserAccessChoiceRequest(
+        to url: URL, origin: BrowserOrigin, purpose: String
+    ) -> ChoiceRequest {
+        ChoiceRequest(
             prompt: .grantBrowserOriginAccess,
             title: L10n.format("Allow the agent to use %@?", origin.displayName),
             message: L10n.format("""
@@ -489,22 +504,19 @@ extension AgentToolCoordinator {
                 contain signed-in sessions and cookies that are not available to the agent's shell.
 
                 Page content is untrusted. Allow access only when %@ is relevant to your task.
-                """, L10n.string(purpose), BrowserOrigin.displayURL(url), origin.displayName),
+                """, L10n.string(purpose), BrowserOrigin.displayURL(url), origin.displayName)
+                + "\n\n" + L10n.string("""
+                    “Always Allow This Agent” gives this chat access to every website in this \
+                    browser, including sites visited later. Revoke it in Settings ▸ Tools.
+                    """),
             options: [
                 ConfirmationOption(title: L10n.string("Allow Once")),
-                ConfirmationOption(title: L10n.string("Always Allow This Host"))
+                ConfirmationOption(title: L10n.string("Always Allow This Host")),
+                ConfirmationOption(title: L10n.string("Always Allow This Agent"))
             ],
             cancelTitle: L10n.string("Deny"),
             style: .informational
         )
-
-        BrowserPermissionPresenter.choose(request, for: sessionID, in: browserPresentationWindow(for: sessionID)) { chosen in
-            switch chosen {
-            case 0: applyDecision(.allowOnce)
-            case 1: applyDecision(.allowPersistently)
-            default: applyDecision(.deny)
-            }
-        }
     }
 
     /// Asks the same question as `authorizeBrowserAccess` and hands back the destination itself,
@@ -529,6 +541,7 @@ extension AgentToolCoordinator {
     func hasBrowserAccess(to origin: BrowserOrigin, for sessionID: SessionID) -> Bool {
         origin.scheme == "about"
             || origin.isLocal
+            || browserAccessStore.allowsAllOrigins(for: sessionID)
             || browserAccessStore.isPersistentlyAllowed(origin)
             || temporaryBrowserOrigins[sessionID, default: []].contains(origin)
     }

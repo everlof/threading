@@ -544,6 +544,17 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(presentation.identityCode, host.pinnedFingerprintCode)
     }
 
+    func testRejectedSavedBearerOffersPairingInsteadOfAnotherConnectionAttempt() throws {
+        let presentation = MobileConnectionRecoveryPresentation.resolve(
+            failure: .authorizationLost(),
+            host: try pairedHost()
+        )
+
+        XCTAssertEqual(presentation.title, MobileL10n.string("Pair this Mac again"))
+        XCTAssertEqual(presentation.primaryRecovery, .pairAgain)
+        XCTAssertFalse(presentation.offersPairAgain)
+    }
+
     // MARK: - One list, one row
 
     /// Chats and terminals stand on one plate in the order the arrangement asks for, each kind in

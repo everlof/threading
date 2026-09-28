@@ -4030,9 +4030,12 @@ alongside its document-space coordinates. Element details are labelled as page-d
 is labelled as user-authored context. The agent cannot create or change notes.
 
 Local development pages are available immediately. Before an agent can read or act on another
-website, Threading asks whether to allow it once, always allow that origin, or deny it. Persistent
-grants are listed under **Settings ▸ Tools ▸ Website Access**, where they can be revoked. Redirects
-are checked again before the destination page is returned to the agent.
+website, Threading asks whether to allow it once, always allow that origin, always allow this
+chat's agent to use all websites, or deny it. The chat-wide choice also covers sites visited later
+and persists across app launches. Persistent grants are listed under **Settings ▸ Tools ▸ Website
+Access**, where they can be revoked. Redirects are checked again before the destination page is
+returned to the agent. Form submissions, website-data clearing and other sensitive actions keep
+their separate confirmations.
 
 Passwords, file selection, download destinations, and form submissions stay with you. Threading
 reveals the browser or opens a native sheet for those boundaries instead of passing their secrets
@@ -5017,8 +5020,9 @@ Storage's checkouts, Tools' tool groups — match at page level and open at the 
 
 Whenever something is typed, a quiet **Ask AI** button appears inside the search field's
 trailing edge — with results and without, because the filter matches words while the setting
-you *mean* may use different ones. Clicking it runs a short one-off agent turn (Claude Code
-if it has a login, otherwise Codex; the button is absent without either) that reads only the
+you *mean* may use different ones. Clicking it runs a short one-off agent turn on the first
+enabled account that is still signed in (Claude Code first, then Codex; the button is absent
+without a configured account). The run reads only the
 catalogue of Settings pages and their settings, and answers in the right pane with up to four
 suggestions, each named by its full path — *General › Notifications › Alert sound* — with one
 sentence on why and an **Open** button. Opening a suggestion that names a setting scrolls to

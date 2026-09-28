@@ -339,6 +339,25 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
         }
     }
 
+    func testAuthorizationRefusalSurvivesAnotherRoutesTransportFailure() async {
+        do {
+            let _: FirstSuccessfulTaskRace.Winner<String> = try await
+                FirstSuccessfulTaskRace.run([
+                    .init(id: "tailscale", failurePriority: 0) {
+                        throw URLError(.secureConnectionFailed)
+                    },
+                    .init(id: "lan", failurePriority: 1) {
+                        throw RemoteClientError.unauthorized
+                    },
+                ], failureRank: { error in
+                    (error as? RemoteClientError)?.isAuthorizationRefusal == true ? 0 : 1
+                })
+            XCTFail("Every route should have failed.")
+        } catch {
+            XCTAssertTrue((error as? RemoteClientError)?.isAuthorizationRefusal == true)
+        }
+    }
+
     private func record(origin: String) -> RemoteDiagnosticUploadRequestDTO {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -77,6 +77,7 @@ final class BrowserPermissionRequests {
         message: String,
         allowTitle: String = "Allow Once",
         rememberTitle: String? = "Always Allow This Host",
+        allSitesTitle: String? = nil,
         denyTitle: String = "Deny",
         dismiss: @escaping () -> Void,
         settle: @escaping (RemoteBrowserPermissionDecision) -> Void
@@ -93,7 +94,8 @@ final class BrowserPermissionRequests {
         requests[id] = Pending(
             sessionID: sessionID,
             request: .init(id: id, title: title, message: message,
-                           allowTitle: allowTitle, rememberTitle: rememberTitle, denyTitle: denyTitle),
+                           allowTitle: allowTitle, rememberTitle: rememberTitle,
+                           allSitesTitle: allSitesTitle, denyTitle: denyTitle),
             settle: settle, dismiss: dismiss, deadline: now().advanced(by: Self.lifetime)
         )
         queues[sessionID, default: []].append(id)
@@ -113,6 +115,7 @@ final class BrowserPermissionRequests {
     ) -> Bool {
         guard let pending = requests[id], pending.sessionID == sessionID else { return false }
         guard decision != .allowRemembered || pending.request.rememberTitle != nil else { return false }
+        guard decision != .allowAllSites || pending.request.allSitesTitle != nil else { return false }
         let wasHead = queues[sessionID]?.first == id
         let expired = now() >= pending.deadline
         requests.removeValue(forKey: id)

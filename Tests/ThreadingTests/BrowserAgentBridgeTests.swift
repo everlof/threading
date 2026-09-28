@@ -319,6 +319,22 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertTrue(store.allowedOrigins.isEmpty)
     }
 
+    @MainActor
+    func testChatWideBrowserAccessPersistsAndCanBeRevoked() throws {
+        let suite = "BrowserSessionAccessTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let session = SessionID()
+        let other = SessionID()
+
+        BrowserAccessStore(defaults: defaults).allowAllOrigins(for: session)
+        let reopened = BrowserAccessStore(defaults: defaults)
+        XCTAssertTrue(reopened.allowsAllOrigins(for: session))
+        XCTAssertFalse(reopened.allowsAllOrigins(for: other))
+        reopened.revoke(sessionID: session)
+        XCTAssertFalse(BrowserAccessStore(defaults: defaults).allowsAllOrigins(for: session))
+    }
+
     func testNetworkEntriesRedactSensitiveQueryValues() {
         let entry = BrowserNetworkEntry(
             method: "GET",
@@ -454,6 +470,8 @@ final class BrowserAgentBridgeTests: XCTestCase {
         )
         store.allowPersistently(first)
         store.allowPersistently(second)
+        let chat = SessionID()
+        store.allowAllOrigins(for: chat)
 
         let controller = ToolsPreferencesViewController(
             groups: [],
@@ -490,6 +508,14 @@ final class BrowserAgentBridgeTests: XCTestCase {
             "the first virtualized Website Access row was not materialized"
         )
         XCTAssertNotNil(websiteCell(containing: second.key))
+        let chatCell = try XCTUnwrap(websiteCell(containing: chat.uuidString))
+        let revokeChat = try XCTUnwrap(
+            descendants(in: chatCell)
+                .compactMap { $0 as? ThemedButton }
+                .first { $0.title == "Revoke" }
+        )
+        _ = revokeChat.sendAction(revokeChat.action, to: revokeChat.target)
+        XCTAssertFalse(store.allowsAllOrigins(for: chat))
 
         let revoke = try XCTUnwrap(
             descendants(in: firstWebsiteCell)

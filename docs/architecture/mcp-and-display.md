@@ -425,9 +425,14 @@ run reading them. So the restriction is the server's:
   click, naming exactly these tools. Toggles govern what full sessions may reach.
 
 The launch line is built by `AgentLauncher.settingsResearchCommand` on whichever runtime claims
-`.headlessResearch` (Claude first, then Codex — the first with an enabled login answers):
-`codexResearchPlan`'s posture — default account through `env -u`, read-only sandbox, no session
-of ours — plus the scoped MCP wiring. Claude runs `--print --output-format json --tools ''
+`.headlessResearch` (Claude first, then Codex). Discovery supplies enabled candidate accounts;
+the search checks each candidate with its CLI's auth-status command on one worker, within a
+20-second total budget, before choosing one. A config directory alone can remain after sign-out,
+so it cannot prove the helper
+can run. The chosen account is routed through `AgentAccountRouting`, including `env -u` for a
+default login and an explicit config directory for an alternate one. The run has
+`codexResearchPlan`'s read-only sandbox posture and no session of ours, plus the scoped MCP
+wiring. Claude runs `--print --output-format json --tools ''
 --strict-mcp-config` with only `mcp__threading__list_settings` pre-approved; Codex takes the
 per-run `mcp_servers` overrides plus `--skip-git-repo-check`, because the run works in a
 scratch directory. The command lines are pinned word-for-word in `AgentLaunchQuotingTests`, and

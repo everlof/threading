@@ -241,7 +241,9 @@ enum RemoteRouteWalkDeadline {
 /// Races a small, caller-bounded set of independent ways to obtain the same read-only result.
 ///
 /// The first valid success wins. An early failure does not suppress a slower success, and if
-/// every attempt fails the caller's priority chooses the stable error presented to the user.
+/// every attempt fails the caller's error rank and route priority choose the stable error
+/// presented to the user. A caller can surface a definitive auth refusal above a transport
+/// failure without allowing that refusal to suppress a slower successful route.
 /// This helper deliberately knows nothing about URLs or transports; `RemoteAppModel` supplies a
 /// fixed set of hosted/private lanes and keeps each lane's port walk sequential.
 enum FirstSuccessfulTaskRace {
@@ -283,7 +285,8 @@ enum FirstSuccessfulTaskRace {
 
     static func run<Value: Sendable>(
         _ attempts: [Attempt<Value>],
-        winnerSelected: @escaping @Sendable (String) async -> Void = { _ in }
+        winnerSelected: @escaping @Sendable (String) async -> Void = { _ in },
+        failureRank: @Sendable (Error) -> Int = { _ in 0 }
     ) async throws -> Winner<Value> {
         guard !attempts.isEmpty else { throw RaceError.noAttempts }
 
@@ -323,7 +326,8 @@ enum FirstSuccessfulTaskRace {
 
             if Task.isCancelled { throw CancellationError() }
             let selected = failures.min {
-                ($0.priority, $0.insertionOrder) < ($1.priority, $1.insertionOrder)
+                (failureRank($0.error), $0.priority, $0.insertionOrder)
+                    < (failureRank($1.error), $1.priority, $1.insertionOrder)
             }
             throw selected?.error ?? RaceError.noAttempts
         }

@@ -539,7 +539,7 @@ struct MobileConnectionRecoveryPresentation: Equatable {
     ) -> MobileConnectionRecoveryPresentation {
         let title: String
         switch failure.cause {
-        case .addressChanged:
+        case .addressChanged, .authorizationLost:
             title = MobileL10n.string("Pair this Mac again")
         case .pinnedIdentityMismatch:
             title = MobileL10n.string("Check this Mac’s identity")
@@ -4565,7 +4565,7 @@ struct SessionDashboard: View {
         case .pinnedIdentityMismatch: return "exclamationmark.shield"
         case .localNetworkDenied: return "network.slash"
         case .upgradeRequired: return "arrow.down.circle"
-        case .addressChanged: return "qrcode.viewfinder"
+        case .addressChanged, .authorizationLost: return "qrcode.viewfinder"
         case .helloTimeout, .remoteAction, .transport: return "wifi.exclamationmark"
         }
     }

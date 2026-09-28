@@ -46,10 +46,13 @@ final class SettingsAISearchViewController: NSViewController {
         guard !SettingsSearchResearch.isRunning else { return }
         if case .answered(let answered, _) = phase, answered == query { return }
 
-        let providerName = SettingsSearchResearch.provider?.displayName ?? ""
-        apply(.running(query: query, providerName: providerName))
+        apply(.running(query: query, providerName: ""))
 
-        SettingsSearchResearch.run(query: query) { [weak self] result in
+        SettingsSearchResearch.run(query: query, onProviderSelected: { [weak self] kind in
+            guard let self, case .running(let current, _) = self.phase,
+                  current == query else { return }
+            self.apply(.running(query: query, providerName: kind.displayName))
+        }) { [weak self] result in
             guard let self else { return }
             // Only the run for the query on screen may answer; a stale completion after the
             // user asked again would replace the newer question's progress.
@@ -106,10 +109,10 @@ final class SettingsAISearchViewController: NSViewController {
             spinner.isAnimating = true
             spinner.translatesAutoresizingMaskIntoConstraints = false
 
-            let label = SettingsUI.note(
-                L10n.format("Asking %@…", providerName),
-                localizes: false
-            )
+            let message = providerName.isEmpty
+                ? L10n.string("Searching…")
+                : L10n.format("Asking %@…", providerName)
+            let label = SettingsUI.note(message, localizes: false)
             let row = NSStackView(views: [spinner, label])
             row.orientation = .horizontal
             row.spacing = Design.Spacing.small

@@ -273,6 +273,25 @@ final class RemoteConnectionFailureTests: XCTestCase {
         )
     }
 
+    func testAnAuthenticatedMacRefusingTheSavedBearerRequiresPairingAgain() {
+        for error: RemoteClientError in [
+            .unauthorized,
+            .server(status: 401, code: "futureAuthRefusal"),
+        ] {
+            let failure = RemoteConnectionFailure.transport(
+                error,
+                host: "192.168.1.42"
+            )
+            XCTAssertEqual(failure.cause, .authorizationLost)
+            XCTAssertEqual(failure.recovery, .pairAgain)
+            XCTAssertFalse(failure.shouldRetryAutomatically)
+            XCTAssertEqual(
+                failure.message,
+                "This Mac no longer recognizes this device. Scan a new QR code to connect again."
+            )
+        }
+    }
+
     func testALocalNetworkDenialIsItsOwnStateRatherThanAChangedAddress() {
         let denial = URLError(
             .cannotConnectToHost,

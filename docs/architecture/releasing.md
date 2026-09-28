@@ -171,9 +171,21 @@ update` passes `protocol.file.allow=always`, because git refuses the `file` tran
 submodule fetch by default; the clone had never needed to fetch a submodule commit until that
 same round, so the refusal surfaced only then.
 
-**A build action *can* be Developer ID signed** — this is the "switch every target to manual
-signing" alternative the section above names, taken from the command line where it applies to
-every target at once:
+**With an installed `Threading Provisioning Profile`, auto-install archives and exports with
+Developer ID**, preserving the app's and helpers' profile-backed entitlements. The exported app
+uses the same protected Keychain as a public export, so changing between those two builds does
+not discard an iPhone's device authorization. The auto-installer reads the installed bundle's
+signed Keychain access group before building and again before installing. It stays in that realm:
+an existing login-Keychain install remains profile-less until an explicit migration, and an
+existing protected install fails the round when no valid profile is available. An expired or
+incapable installed profile also fails the round. Archive and
+export are separate actions because a profile specifier on a plain `build` action applies to
+Swift packages and helper targets that cannot accept one. The exported product is still a local
+development build: it carries `THREADING_INTERNAL` and the source revision, and is not notarized.
+
+**Without that profile, a build action *can* be Developer ID signed** — this is the "switch every
+target to manual signing" alternative the section above names, taken from the command line where
+it applies to every target at once:
 
 ```
 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: …"
@@ -181,7 +193,7 @@ PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
 ```
 
 Two things make it work. Every entitlement file in the disposable build checkout is derived with
-its profile-backed keys removed, because an ordinary auto-install names no profile. None of them is
+its profile-backed keys removed. None of them is
 passed as `CODE_SIGN_ENTITLEMENTS` on the command line: that setting would apply to every target,
 replacing the extension helpers' sandbox files with the host app's hardened-runtime relaxations.
 Each helper therefore keeps its project-declared file, which is why the derivation edits the files
@@ -205,9 +217,15 @@ for three days, leaving `/Applications/Threading.app` at the last commit that ha
 The profile-signed release path is unaffected: the Developer ID profile's entitlements dict
 carries `keychain-access-groups` (see [the Sign in with Apple
 section](#sign-in-with-apple-cannot-be-shipped-by-developer-id) for what that dict actually holds),
-so only the profile-less local loop needs the key dropped. The cost of dropping it belongs in the
-feature's own notes: a locally auto-installed build cannot share a Keychain access group across
-processes, so trigger source credentials work only in a profile-signed release.
+so only the profile-less fallback needs the key dropped. That fallback cannot share a Keychain
+access group across processes, so trigger source credentials require a profile-signed build.
+The same split applies to remote owner-device credentials. A profile-less build reads the login
+Keychain while a profile-signed build reads the protected Keychain; switching between them can
+make a phone's saved bearer unavailable while the pinned certificate stays the same. The protected
+store never trusts a newer login-Keychain record over an existing protected item. The first
+switch from an old profile-less local build to a manually launched profiled export can therefore
+require one new QR scan. The auto-installer now preserves the installed build's credential realm;
+verify which bundle owns the listener before interpreting a phone's 401 as a network failure.
 
 `scripts/check_bundle_entitlements.py` then reads the signed product and requires all seven
 first-party helpers to match those files exactly after resolving the embedded profile's standard
@@ -222,9 +240,9 @@ surfaces only after a Release build.
 
 The result is a bundle whose designated requirement is byte-identical to the shipping one —
 `identifier "codes.threading"` and a Developer ID leaf for the team — which is what makes the
-TCC grants survive the swap. It is *not* a shipping artefact: unnotarized, untimestamped, single
-architecture, and missing the managed capability. It still cannot answer "did the entitlement
-change work?"; only the export can.
+TCC grants survive the swap. It is *not* a shipping artefact: unnotarized and single architecture.
+The profile-less fallback remains untimestamped and lacks managed capabilities; the profiled path
+passes through Developer ID export and can verify its entitlements.
 
 **It never quits or moves the running app.** Threading hosts live agent sessions in PTYs, and any
 agent committing to master would otherwise end a turn somebody is in the middle of. Once a build

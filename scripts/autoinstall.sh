@@ -31,13 +31,11 @@
 # select the isolated hosted service. The public archive does not receive that compile condition
 # and remains locked to production even when both builds share the same defaults domain.
 #
-# **Why an entitlement is dropped.** A profile-backed entitlement needs a provisioning profile,
-# which an ordinary local auto-install deliberately does not use. Every entitlement plist in the
-# disposable build checkout — the app's and each helper's — is therefore derived with that family
-# removed. Helpers keep their own target entitlement files: overriding the entitlements setting on
-# the xcodebuild command line would replace every helper's declaration and disable their sandboxes.
-# The cost is named where it lands: a locally auto-installed build cannot share a Keychain access
-# group, so trigger source credentials only work in a profile-signed release.
+# A local Developer ID provisioning profile keeps this build in the same protected Keychain as a
+# public export. The installed app's signing realm stays fixed across automatic updates. An
+# existing profile-less installation keeps its login-Keychain lane; a protected installation
+# requires the profile. The profile-less entitlement files are derived in the disposable checkout
+# with profile-backed keys removed.
 #
 # **Why it never quits or moves the running app.** Threading hosts live agent sessions in PTYs,
 # and any agent committing to master would otherwise stop your session mid-turn. A completed build
@@ -60,6 +58,9 @@ done < <(env)
 readonly SCHEME="Threading"
 readonly BRANCH="master"
 readonly SIGNING_IDENTITY="Developer ID Application: MJUKIS AB (SMQ3E8Y57T)"
+readonly TEAM_ID="SMQ3E8Y57T"
+readonly BUNDLE_ID="codes.threading"
+readonly PROFILE_NAME="Threading Provisioning Profile"
 readonly INSTALL_DIR="/Applications"
 readonly ENTITLEMENTS_IN_REPO="Sources/Threading/Resources/Threading.entitlements"
 readonly HISTORY_KEPT_LINES=200
@@ -75,7 +76,13 @@ readonly STATE="$HOME_DIR/state"
 readonly BUILD_LOG="$HOME_DIR/build.log"
 readonly BUILDER_LOG="$HOME_DIR/builder.log"
 readonly HISTORY="$HOME_DIR/history.log"
-readonly PRODUCT="$DERIVED/Build/Products/Release/$SCHEME.app"
+readonly LOCAL_PRODUCT="$DERIVED/Build/Products/Release/$SCHEME.app"
+readonly PROFILE_BUILD="$HOME_DIR/profiled"
+readonly PROFILE_ARCHIVE="$PROFILE_BUILD/$SCHEME.xcarchive"
+readonly PROFILE_EXPORT="$PROFILE_BUILD/export"
+PRODUCT="$LOCAL_PRODUCT"
+SELECTED_PROFILE=""
+TARGET_CREDENTIAL_REALM=""
 
 readonly LOCK="$STATE/builder.lock"
 readonly BUILDER_PID_FILE="$STATE/builder.pid"
@@ -264,13 +271,119 @@ prepare_checkout() {
 # same way it treats a failed build: reported once, out loud. A commit that deletes or breaks the
 # entitlements file used to kill the builder here with a Python traceback and nothing else.
 prepare_round() {
-    local sha="$1" dropped
+    local sha="$1" dropped installed_realm
     prepare_checkout "$sha" || return 1
+    SELECTED_PROFILE="$(find_local_profile)" || return 1
+    installed_realm="$(credential_realm_for_bundle "$INSTALL_DIR/$SCHEME.app")" || return 1
+    case "$installed_realm" in
+        protected)
+            if [[ -z "$SELECTED_PROFILE" ]]; then
+                log_line "cannot update: installed Threading uses the protected Keychain, but no Developer ID profile is available"
+                return 1
+            fi
+            TARGET_CREDENTIAL_REALM="protected"
+            ;;
+        login)
+            # A profile appearing later must not silently strand the phones paired to the
+            # existing login-Keychain build. Moving to the protected store is an explicit step.
+            if [[ -n "$SELECTED_PROFILE" ]]; then
+                log_line "preserving the installed app's login-Keychain pairing; profile-backed upgrade needs an explicit migration"
+                SELECTED_PROFILE=""
+            fi
+            TARGET_CREDENTIAL_REALM="login"
+            ;;
+        missing)
+            TARGET_CREDENTIAL_REALM="login"
+            [[ -n "$SELECTED_PROFILE" ]] && TARGET_CREDENTIAL_REALM="protected"
+            ;;
+    esac
+    if [[ "$TARGET_CREDENTIAL_REALM" == "protected" ]]; then
+        PRODUCT="$PROFILE_EXPORT/$SCHEME.app"
+        log_line "signing with local Developer ID profile: $SELECTED_PROFILE"
+        return 0
+    fi
+    PRODUCT="$LOCAL_PRODUCT"
     dropped="$(derive_entitlements)" || return 1
     if [[ -n "$dropped" ]]; then
         log_line "signing without profile-backed entitlements: $dropped"
     fi
     return 0
+}
+
+# The signed access group determines which Keychain the app actually reads. Keep an existing
+# installation in that realm; crossing it silently can invalidate every paired phone even while
+# the TLS certificate and its human pairing code remain unchanged.
+credential_realm_for_bundle() {
+    python3 - "$1" "$TEAM_ID.codes.threading.triggers" <<'PYTHON'
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+app, expected_group = sys.argv[1:3]
+if not Path(app).exists():
+    print("missing")
+    sys.exit(0)
+result = subprocess.run(
+    ["codesign", "-d", "--entitlements", "-", "--xml", app],
+    capture_output=True,
+)
+if result.returncode != 0:
+    sys.exit(f"cannot read installed Threading entitlements: {app}")
+try:
+    groups = plistlib.loads(result.stdout).get("keychain-access-groups")
+except (ValueError, TypeError, plistlib.InvalidFileException):
+    sys.exit(f"cannot decode installed Threading entitlements: {app}")
+if groups is None:
+    print("login")
+elif groups == [expected_group]:
+    print("protected")
+else:
+    sys.exit(f"unrecognized installed Threading Keychain access group: {groups!r}")
+PYTHON
+}
+
+# A profile that exists but cannot authorize this build is an error, not a reason to silently
+# switch credential stores. The caller may keep a pre-existing login-Keychain installation in its
+# profile-less lane even when a valid profile is present.
+find_local_profile() {
+    python3 - "$HOME/Library/MobileDevice/Provisioning Profiles" "$PROFILE_NAME" \
+        "$TEAM_ID.$BUNDLE_ID" "$CHECKOUT/$ENTITLEMENTS_IN_REPO" "$CHECKOUT/scripts" <<'PYTHON'
+import datetime
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+directory, name, app_id, declaration, scripts = sys.argv[1:6]
+sys.path.insert(0, scripts)
+from profile_backed_entitlements import profile_backed_entitlements
+
+required = profile_backed_entitlements(plistlib.loads(Path(declaration).read_bytes()))
+for path in sorted(Path(directory).glob("*.provisionprofile")):
+    decoded = subprocess.run(["security", "cms", "-D", "-i", str(path)], capture_output=True)
+    if decoded.returncode != 0:
+        continue
+    profile = plistlib.loads(decoded.stdout)
+    if profile.get("Name") != name:
+        continue
+    if profile.get("Entitlements", {}).get("com.apple.application-identifier") != app_id:
+        print(f"{name!r} does not authorize {app_id}", file=sys.stderr)
+        sys.exit(1)
+    expiration = profile.get("ExpirationDate")
+    if not profile.get("ProvisionsAllDevices") or not isinstance(expiration, datetime.datetime):
+        print(f"{name!r} is not a valid Developer ID profile", file=sys.stderr)
+        sys.exit(1)
+    if expiration.replace(tzinfo=datetime.timezone.utc) <= datetime.datetime.now(datetime.timezone.utc):
+        print(f"{name!r} has expired", file=sys.stderr)
+        sys.exit(1)
+    missing = sorted(required - set(profile["Entitlements"]))
+    if missing:
+        print(f"{name!r} does not authorize: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+    print(name)
+    sys.exit(0)
+PYTHON
 }
 
 # Derived from the repository's own entitlements on every build rather than kept as a second copy
@@ -332,25 +445,16 @@ build_the_checkout() {
     cd "$CHECKOUT"
 
     set -m
-    xcodebuild \
-        -project "$CHECKOUT/$SCHEME.xcodeproj" \
-        -scheme "$SCHEME" \
-        -configuration Release \
-        -destination 'generic/platform=macOS' \
-        -derivedDataPath "$DERIVED" \
-        ARCHS=arm64 \
-        CODE_SIGN_STYLE=Manual \
-        CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
-        PROVISIONING_PROFILE_SPECIFIER="" \
-        CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-        'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) THREADING_INTERNAL' \
-        THREADING_SOURCE_REVISION="$sha" \
-        build >>"$BUILD_LOG" 2>&1 &
+    if [[ -n "$SELECTED_PROFILE" ]]; then
+        build_profiled_checkout "$sha" &
+    else
+        build_profileless_checkout "$sha" &
+    fi
     local build_pid=$!
     set +m
 
-    # With job control on, the background job's pid is also its process group id, which is what
-    # the trigger signals to cancel it.
+    # The background function owns archive and export together under one process group. A newer
+    # commit can cancel the whole round, including an export in progress.
     echo "$build_pid" > "$BUILD_GROUP_FILE"
     wait "$build_pid" || status=$?
     rm -f "$BUILD_GROUP_FILE"
@@ -382,10 +486,106 @@ build_the_checkout() {
         --root "$CHECKOUT" "$PRODUCT" >>"$BUILD_LOG" 2>&1; then
         status=1
     fi
+    if [[ $status -eq 0 && -n "$SELECTED_PROFILE" ]] && ! verify_protected_credential_store \
+        >>"$BUILD_LOG" 2>&1; then
+        status=1
+    fi
     return "$status"
 }
 
+verify_protected_credential_store() {
+    python3 - "$PRODUCT" "$TEAM_ID" <<'PYTHON'
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+app, team = sys.argv[1:3]
+profile = Path(app) / "Contents/embedded.provisionprofile"
+if not profile.is_file():
+    sys.exit("profiled auto-install has no embedded provisioning profile")
+signed = subprocess.run(
+    ["codesign", "-d", "--entitlements", "-", "--xml", app],
+    capture_output=True,
+)
+if signed.returncode != 0:
+    sys.exit("profiled auto-install has no readable signed entitlements")
+groups = plistlib.loads(signed.stdout).get("keychain-access-groups")
+expected = [f"{team}.codes.threading.triggers"]
+if groups != expected:
+    sys.exit(f"profiled auto-install cannot use the protected Keychain: {groups!r}")
+print("profiled auto-install retains the protected Keychain access group")
+PYTHON
+}
+
+build_profileless_checkout() {
+    local sha="$1"
+    set -e
+    xcodebuild \
+        -project "$CHECKOUT/$SCHEME.xcodeproj" \
+        -scheme "$SCHEME" \
+        -configuration Release \
+        -destination 'generic/platform=macOS' \
+        -derivedDataPath "$DERIVED" \
+        ARCHS=arm64 \
+        CODE_SIGN_STYLE=Manual \
+        CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+        PROVISIONING_PROFILE_SPECIFIER="" \
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+        'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) THREADING_INTERNAL' \
+        THREADING_SOURCE_REVISION="$sha" \
+        build >>"$BUILD_LOG" 2>&1
+}
+
+build_profiled_checkout() {
+    local sha="$1"
+    set -e
+    mkdir -p "$PROFILE_BUILD"
+    rm -rf "$PROFILE_ARCHIVE" "$PROFILE_EXPORT"
+    xcodebuild archive \
+        -project "$CHECKOUT/$SCHEME.xcodeproj" \
+        -scheme "$SCHEME" \
+        -configuration Release \
+        -destination 'generic/platform=macOS' \
+        -allowProvisioningUpdates \
+        -derivedDataPath "$DERIVED" \
+        -archivePath "$PROFILE_ARCHIVE" \
+        ARCHS=arm64 \
+        'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) THREADING_INTERNAL' \
+        THREADING_SOURCE_REVISION="$sha" \
+        ENABLE_HARDENED_RUNTIME=YES \
+        >>"$BUILD_LOG" 2>&1
+
+    python3 - "$PROFILE_BUILD/ExportOptions.plist" "$TEAM_ID" "$BUNDLE_ID" \
+        "$SELECTED_PROFILE" <<'PYTHON'
+import plistlib
+import sys
+from pathlib import Path
+
+output, team, bundle, profile = sys.argv[1:5]
+Path(output).write_bytes(plistlib.dumps({
+    "method": "developer-id",
+    "teamID": team,
+    "signingStyle": "manual",
+    "signingCertificate": "Developer ID Application",
+    "provisioningProfiles": {bundle: profile},
+}))
+PYTHON
+    xcodebuild -exportArchive \
+        -archivePath "$PROFILE_ARCHIVE" \
+        -exportOptionsPlist "$PROFILE_BUILD/ExportOptions.plist" \
+        -exportPath "$PROFILE_EXPORT" \
+        >>"$BUILD_LOG" 2>&1
+    codesign --verify --deep --strict "$PRODUCT" >>"$BUILD_LOG" 2>&1
+}
+
 install_the_build() {
+    local installed_realm
+    installed_realm="$(credential_realm_for_bundle "$INSTALL_DIR/$SCHEME.app")" || return 1
+    if [[ "$installed_realm" != "missing" && "$installed_realm" != "$TARGET_CREDENTIAL_REALM" ]]; then
+        log_line "refusing install: Threading's credential store changed during the build"
+        return 1
+    fi
     # The installer next to this script, not the one in the checkout: they are a matched pair, and
     # the checkout is at an arbitrary older commit.
     "$SOURCE_REPO/scripts/install-app.sh" \

@@ -121,6 +121,9 @@ struct MobileBrowserPermissionPrompt: ViewModifier {
         if let title = request.rememberTitle {
             actions.append(action(title, request: request, decision: .allowRemembered))
         }
+        if let title = request.allSitesTitle {
+            actions.append(action(title, request: request, decision: .allowAllSites))
+        }
         actions.append(action(request.denyTitle, request: request, decision: .deny))
         return actions
     }

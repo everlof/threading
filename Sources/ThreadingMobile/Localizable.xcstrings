@@ -11551,6 +11551,17 @@
         }
       }
     },
+    "This Mac no longer recognizes this device. Scan a new QR code to connect again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här Mac-datorn känner inte längre igen enheten. Skanna en ny QR-kod för att ansluta igen."
+          }
+        }
+      }
+    },
     "This Mac’s address has changed. Scan its QR code again." : {
       "extractionState" : "manual",
       "localizations" : {
