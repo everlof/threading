@@ -3,6 +3,60 @@ import XCTest
 
 @MainActor
 final class BrowserDownloadCoordinatorTests: XCTestCase {
+    func testRendersCompletionToastInBrowserShell() async throws {
+        let originalTheme = AppThemePalette.current
+        AppThemePalette.set(.system)
+        defer { AppThemePalette.set(originalTheme) }
+
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let browser = BrowserViewController()
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 700, height: 520),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        appearance.performAsCurrentDrawingAppearance {
+            window.contentViewController = browser
+            window.orderFront(nil)
+        }
+        defer { window.orderOut(nil) }
+
+        let destination = URL(fileURLWithPath: "/tmp/artifact.bin")
+        appearance.performAsCurrentDrawingAppearance {
+            browser.presentSavedDownloadToast(for: destination)
+        }
+        let toast = try XCTUnwrap(
+            descendants(in: browser.view)
+                .compactMap { $0 as? ToastView }
+                .first { $0.request.identifier == "browser.download.complete" }
+        )
+        XCTAssertEqual(toast.request.detail, "artifact.bin")
+        XCTAssertEqual(toast.request.actionTitle, L10n.string("Reveal in Finder"))
+
+        if let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            try await Task.sleep(nanoseconds: 500_000_000)
+            browser.view.layoutSubtreeIfNeeded()
+            let region = NSRect(x: 0, y: 0, width: 700, height: 160)
+            let bitmap = try XCTUnwrap(browser.view.bitmapImageRepForCachingDisplay(in: region))
+            appearance.performAsCurrentDrawingAppearance {
+                browser.view.cacheDisplay(in: region, to: bitmap)
+            }
+            let output = URL(fileURLWithPath: directory)
+                .appendingPathComponent("browser-download-toast.png")
+            try FileManager.default.createDirectory(
+                at: output.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output)
+        }
+    }
+
+    private func descendants(in root: NSView) -> [NSView] {
+        root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
     func testAgentRequestOwnsApprovedDestinationUntilCompletion() async throws {
         var prepared: [URL] = []
         let coordinator = BrowserDownloadCoordinator { prepared.append($0) }

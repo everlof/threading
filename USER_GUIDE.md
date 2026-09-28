@@ -3990,6 +3990,8 @@ device-scale, browser-engine, or complete hardware emulation.
 The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
 to edit. Focus and text selection use the ordinary macOS text editor.
 When the browser tab is visible, Cmd+F opens its native find bar inside that tab.
+After a download finishes, a brief toast names the saved file and offers **Reveal in Finder**.
+You can find it later in the browser's recent downloads menu.
 
 The agent driving that session sees and acts on this same tab—it can open pages, go back or
 forward, reload, read a semantic page outline, click, hover, drag between page elements, type, and

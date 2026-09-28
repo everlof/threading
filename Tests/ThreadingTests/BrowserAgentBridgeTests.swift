@@ -3148,6 +3148,15 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertTrue(savePanelMessage.contains("returned to the agent"))
         XCTAssertTrue(download.text.contains(downloadURL.path), download.text)
         XCTAssertEqual(try Data(contentsOf: downloadURL), downloadData)
+        let completionToast = try XCTUnwrap(
+            descendantViews(in: browser.view)
+                .compactMap { $0 as? ToastView }
+                .first { $0.request.identifier == "browser.download.complete" }
+        )
+        XCTAssertEqual(completionToast.request.message, L10n.string("Download Complete"))
+        XCTAssertEqual(completionToast.request.detail, downloadURL.lastPathComponent)
+        XCTAssertEqual(completionToast.request.actionTitle, L10n.string("Reveal in Finder"))
+        XCTAssertTrue(window.sheets.isEmpty)
     }
 
     func testIsolatedPlaywrightScenarioUsesFreshStrictContextAndCachesScreenshot() async throws {

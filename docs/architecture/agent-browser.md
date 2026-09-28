@@ -700,8 +700,11 @@ returned to the agent. The browser-level navigation guard remains active through
 input change events, so an indirect `requestSubmit()` is still blocked. `browser_download` binds one
 semantic action to the next WebKit download and waits through a native save panel whose copy says
 the chosen destination will be returned to the agent; cancellation and targets that do not start a
-download are explicit failures. Ordinary downloads still use the same native save panel and visible
-completion alert. JavaScript alert, confirm, and prompt dialogs are also native sheets tied to the
+download are explicit failures. Ordinary downloads still use the same native save panel. Successful
+downloads show a timed browser toast naming the file with Reveal in Finder; the recent-downloads
+menu retains the path after the toast leaves. Download failures keep their alert. The browser host
+owns the save decision, destination and reveal action; the toast only presents the receipt.
+JavaScript alert, confirm, and prompt dialogs are also native sheets tied to the
 browser window. Persistent website grants can be reviewed individually or revoked together on the
 Tools settings page.
 

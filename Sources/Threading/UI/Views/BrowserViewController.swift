@@ -540,6 +540,7 @@ final class BrowserViewController: NSViewController {
     private var testConditionsMenuSession: AnyObject?
     private var overflowMenuSession: AnyObject?
     private var downloadsMenuSession: AnyObject?
+    private lazy var downloadToasts = ToastPresenter(host: view, above: view.bottomAnchor)
 
     // MARK: - Web View
 
@@ -4225,20 +4226,19 @@ extension BrowserViewController: WKDownloadDelegate {
             return
         }
 
-        let alert = ThemedAlert()
-        alert.messageText = L10n.string("Download Complete")
-        alert.informativeText = destination.lastPathComponent
-        alert.addButton(withTitle: L10n.string("Reveal in Finder"))
-        alert.addButton(withTitle: L10n.string("Done"))
-        let reveal: (NSApplication.ModalResponse) -> Void = { response in
-            guard response == ThemedAlert.firstButtonResponse else { return }
-            NSWorkspace.shared.activateFileViewerSelecting([destination])
-        }
-        if let window = view.window {
-            alert.beginSheetModal(for: window, completionHandler: reveal)
-        } else {
-            reveal(alert.runModal())
-        }
+        presentSavedDownloadToast(for: destination)
+    }
+
+    func presentSavedDownloadToast(for destination: URL) {
+        downloadToasts.present(ToastRequest(
+            message: L10n.string("Download Complete"),
+            detail: destination.lastPathComponent,
+            actionTitle: L10n.string("Reveal in Finder"),
+            action: {
+                NSWorkspace.shared.activateFileViewerSelecting([destination])
+            },
+            identifier: "browser.download.complete"
+        ))
     }
 
     func download(

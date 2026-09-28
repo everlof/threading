@@ -920,6 +920,27 @@
       }
     },
     {
+      "id": "browser-download-toast",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Browser download completion",
+      "description": "The real browser download path shows a transient receipt with a Finder action in the browser pane.",
+      "states": ["Completed download"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Dark"],
+        "sizes": ["700-point browser pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/BrowserDownloadCoordinatorTests.swift",
+        "test": "ThreadingTests/BrowserDownloadCoordinatorTests/testRendersCompletionToastInBrowserShell"
+      },
+      "capture": {
+        "glob": "browser-download-toast.png"
+      }
+    },
+    {
       "id": "browser-chrome",
       "kind": "surface",
       "status": "implemented",
