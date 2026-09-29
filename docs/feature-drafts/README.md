@@ -22,11 +22,6 @@ An idea investigated to the point of *no*, *not yet*, or *only this much* belong
 should reopen it. A draft that turns out to be a bad idea moves there rather than being deleted —
 the investigation is the value, and an idea deleted without a record comes back.
 
-## Active prototype
-
-  with local enrollment, biometric-gated signatures, a disposable Keychain operation and a
-  protected-storage GitHub profile trial. Includes hands-on steps and the remaining trust limits.
-
 ## Drafts, by priority
 
 The grouping below is the priority statement, kept here and nowhere else — each draft's own
