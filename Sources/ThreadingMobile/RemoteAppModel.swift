@@ -445,6 +445,8 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var widgetHostID: String?
     @Published private(set) var widgetIssue: MobileUsageGlanceIssue?
     @Published var widgetUsageRoute: UsageGlanceRoute?
+    /// Set when a Face ID approval alert is opened: Face ID Approvals, for the Mac that sent it.
+    @Published var secretApprovalOpen: SecretApprovalOpen?
     @Published private(set) var widgetUsageFocus: MobileUsageAccountFocus?
     @Published private(set) var widgetUsageFocusReady = false
     var usageGlance: MobileUsageGlancePublisher?
@@ -2580,6 +2582,22 @@ final class RemoteAppModel: ObservableObject {
     /// UIKit may describe one tap both on `UIScene.ConnectionOptions` and through the user-
     /// notification-center delegate. The event identity is admitted synchronously, before any
     /// refresh can restore continuity, so both callbacks converge on one task and one route.
+    struct SecretApprovalOpen: Identifiable, Equatable {
+        let id: String
+    }
+
+    /// Opens Face ID Approvals on the Mac the alert came from. The screen itself fetches the
+    /// request over the pinned connection; the alert carried nothing about it.
+    func openSecretApprovalFromNotification(_ event: RemoteNotificationEventDTO) -> Bool {
+        let candidate = hosts.first {
+            ($0.hostID ?? $0.id) == event.hostID && $0.isOwnerDevice
+        } ?? hosts.first { ($0.hostID ?? $0.id) == event.hostID }
+        guard let candidate else { return false }
+        if activeHostID != candidate.id { selectHost(candidate.id) }
+        secretApprovalOpen = SecretApprovalOpen(id: event.id)
+        return true
+    }
+
     @discardableResult
     func openSessionFromNotification(
         _ event: RemoteNotificationEventDTO,

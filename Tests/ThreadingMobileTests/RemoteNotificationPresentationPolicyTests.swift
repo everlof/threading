@@ -25,6 +25,22 @@ final class RemoteNotificationPresentationPolicyTests: XCTestCase {
         XCTAssertFalse(second.includesResponsePreviews)
     }
 
+    /// A Face ID approval lives two minutes: it must reach whoever is looking at the app, and it
+    /// is on unless turned off.
+    @MainActor
+    func testFaceIDApprovalsShowInTheForegroundAndAreOnByDefault() throws {
+        XCTAssertTrue(RemoteNotificationPresentationPolicy.presentsInForeground(.secretApproval))
+        XCTAssertFalse(RemoteNotificationPresentationPolicy.presentsInForeground(.turnCompleted))
+        let suite = "RemoteNotificationPresentationPolicyTests.approvals.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = RemoteNotificationManager(defaults: defaults)
+        XCTAssertTrue(manager.enabledKinds.contains(.secretApproval))
+        XCTAssertTrue(manager.soundEnabledKinds.contains(.secretApproval))
+        manager.secretApprovalsEnabled = false
+        XCTAssertFalse(RemoteNotificationManager(defaults: defaults).enabledKinds.contains(.secretApproval))
+    }
+
     /// Only a failure that says nothing about the binding may keep it; a refusal or a refresh
     /// the phone could not even attempt must let the Mac fall back to Live-only honestly.
     func testOnlyTransientHostedRefreshFailuresPreserveThePushBinding() {

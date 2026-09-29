@@ -31,12 +31,12 @@
     "vaporwave": "dark"
   },
   "captures": [
-    {"id": "secret-approval-lab-registration-feedback", "entryID": "ios-secret-approval", "demo": "secret-approval-lab", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "stable-display", "assertions": ["keyboardShownOnce", "hostInteractionPrepared"], "interaction": {"tapAccessibilityLabel": "Enroll with Face ID protection", "waitForAccessibilityLabels": ["This is a preview. Pair with your Mac to register this iPhone."]}},
-    {"id": "secret-approval-lab-pending", "entryID": "ios-secret-approval", "demo": "secret-approval-pending", "appearance": "dark", "theme": "custom"},
-    {"id": "secret-approval-lab-github-success", "entryID": "ios-secret-approval", "demo": "secret-approval-github-success", "appearance": "light", "theme": "custom-light"},
-    {"id": "secret-approval-lab-custom-dark", "entryID": "ios-secret-approval", "demo": "secret-approval-lab", "appearance": "dark", "theme": "custom"},
-    {"id": "secret-approval-lab-custom-light", "entryID": "ios-secret-approval", "demo": "secret-approval-lab", "appearance": "light", "theme": "custom-light"},
-    {"id": "secret-approval-lab-system", "entryID": "ios-secret-approval", "demo": "secret-approval-lab", "appearance": "dark", "theme": "fallback"},
+    {"id": "secret-approvals-enroll-custom-dark", "entryID": "ios-secret-approval", "demo": "secret-approvals-enroll", "appearance": "dark", "theme": "custom"},
+    {"id": "secret-approvals-enroll-keyboard-open-custom-light", "entryID": "ios-secret-approval", "demo": "secret-approvals-enroll", "appearance": "light", "theme": "custom-light", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
+    {"id": "secret-approvals-ready-custom-light", "entryID": "ios-secret-approval", "demo": "secret-approvals-ready", "appearance": "light", "theme": "custom-light"},
+    {"id": "secret-approvals-request-custom-dark", "entryID": "ios-secret-approval", "demo": "secret-approvals-request", "appearance": "dark", "theme": "custom"},
+    {"id": "secret-approvals-request-system", "entryID": "ios-secret-approval", "demo": "secret-approvals-request", "appearance": "dark", "theme": "fallback"},
+    {"id": "secret-approvals-approved-custom-light", "entryID": "ios-secret-approval", "demo": "secret-approvals-approved", "appearance": "light", "theme": "custom-light"},
     {"id": "pairing-storage-recovery-custom-dark", "entryID": "ios-pairing", "demo": "pairing-storage-recovery", "appearance": "dark", "theme": "custom"},
     {"id": "welcome-custom-light", "entryID": "ios-welcome", "demo": "welcome", "appearance": "light", "theme": "custom-light"},
     {"id": "welcome-custom-dark", "entryID": "ios-welcome", "demo": "welcome", "appearance": "dark", "theme": "custom"},
@@ -286,11 +286,11 @@
     {
       "id": "ios-secret-approval",
       "kind": "surface", "status": "implemented", "priority": "critical",
-      "title": "Face ID secret approval lab",
-      "description": "Host-owned Debug enrollment and approval screen, with no simulator authentication bypass.",
-      "states": ["Enrollment", "Registration refusal after tapping the button", "Disconnected approval"],
+      "title": "Face ID approvals",
+      "description": "Enroll this iPhone, wait for keyvault, and approve or deny a request with Face ID, with no simulator authentication bypass.",
+      "states": ["Enrollment", "Enrollment with the code field focused", "Ready and listening", "A request waiting", "Approved"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
-      "capture": {"glob": "ios/secret-approval-lab-*.png"},
+      "capture": {"glob": "ios/secret-approvals-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied", "System"]}
     },
     {

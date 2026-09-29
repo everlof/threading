@@ -1956,14 +1956,16 @@ Publication is refused on this route: a phone cannot open a change request.
 Notification preferences can be set before pairing from the iPhone's Settings. If permission is
 still undecided after pairing or accepting a shared chat, the dashboard explains what
 notifications do before iOS is asked. The system prompt appears only after **Turn on
-notifications**. Notification settings keep six choices independent:
+notifications**. Notification settings keep seven choices independent:
 
 - a chat shared with this phone;
 - a Native chat waiting for a permission decision;
 - a session whose provider-neutral activity state changed to waiting for the user's response;
 - a declared agent turn that finished, targeted to the participant who initiated that turn;
 - another participant explicitly asking for this person's input;
-- an update the user explicitly asked the agent to send.
+- an update the user explicitly asked the agent to send;
+- a Face ID approval keyvault is waiting for (only the enrolled phone; see
+  [Face ID approvals](#face-id-approvals)).
 
 The response-needed event is an activity edge supplied by the hook/BEL/session layer; the
 notification service never scrapes Claude Code or Codex terminal text. A structured Native
@@ -2896,8 +2898,15 @@ holds the secret: it seals it to the phone and hands back what the phone opened.
   twelve short lines. The broker adds `requester`, the connecting process chain as the kernel
   reports it (`LOCAL_PEERPID`), so the phone shows who asks rather than who claims to. One request
   at a time; it expires after 120 seconds.
-- **Approving.** `/api/secret-approval` takes the same owner, device and pinned-route rules as the
-  lab, and bypasses the REST replay cache. The phone fetches the pending request, shows it, and
+- **Telling the phone.** A request raises a `secretApproval` notification for the enrolled device
+  and owner grant only. Its words are fixed ("Face ID approval waiting"); what is asked, and by
+  whom, is read inside the app over the pinned route, never in the alert. It goes live to an open
+  app and through APNs to a closed one, expires from APNs after 120 seconds, and is never
+  retracted. The hosted broker delivers it from notification protocol 3; an older broker is not
+  sent one at all. While Face ID Approvals is open, the phone also looks for a request every two
+  seconds, so the alert is a shortcut, not the only way in.
+- **Approving.** `/api/secret-approval` takes the owner, device and pinned-route rules above and
+  bypasses the REST replay cache. The phone fetches the pending request, shows it, and
   after one Face ID opens the envelope and signs the request's canonical bytes (domain
   `Threading.SecretApproval.v1`). The Mac verifies the signature against the enrolled key,
   consumes the request, and returns the opened secret to the waiting client only. The client
@@ -2908,15 +2917,6 @@ holds the secret: it seals it to the phone and hands back what the phone opened.
 Like Touch ID, this is a person's decision per use, not a sandbox: any process running as the
 user may connect and ask, and the phone shows who did.
 
-## Debug Face ID approval experiment
-
-Debug builds expose a host-owned disposable-credential experiment through local Remote Access
-settings and the iPhone Developer settings. Its separate, locally enabled authority requires a
-current device-bound interactive owner. The fixed `/api/labs/secret-approval` route deliberately
-bypasses REST mutation replay caching; a signed approval is consumed once before credential use.
-Release builds contain no route or lab UI. See the [PoC contract and trial guide](feature-drafts/faceid-secret-approval-poc.md).
-
-The GitHub mode is selected only through local token entry in a provisioned hardened Mac build.
-It signs the exact GET method and `https://api.github.com/user` destination, consumes approval
-before reading the dedicated protected Keychain item, refuses redirects and retries, and returns
-only a bounded username and receipt. It has no generic fetch, credential lookup or shell operation.
+The Mac logs each step under the `secret-approval` category of `codes.threading`: a code issued
+or expired, an enrollment accepted or refused and why, each request with its client, the phone
+checking, and the answer. Never a code, a key or a secret; the requester chain is hashed.

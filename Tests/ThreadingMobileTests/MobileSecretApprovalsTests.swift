@@ -6,6 +6,30 @@ import ThreadingRemoteKit
 final class MobileSecretApprovalsTests: XCTestCase {
     /// The phone and the Mac show one fingerprint for the enrolled key, so a person can compare
     /// them by eye. Same bytes in, same sixteen hex digits out, grouped in fours.
+    func testTheCodeFieldKeepsEightDigitsInTwoGroups() {
+        XCTAssertEqual(MobileSecretApprovals.formatted("12345678"), "1234 5678")
+        XCTAssertEqual(MobileSecretApprovals.formatted("1234 5678"), "1234 5678")
+        XCTAssertEqual(MobileSecretApprovals.formatted("12a34-5678 99"), "1234 5678")
+        XCTAssertEqual(MobileSecretApprovals.formatted("123"), "123")
+        XCTAssertEqual(MobileSecretApprovals.digits("1234 5678"), "12345678")
+    }
+
+    func testTheCountdownNeverGoesBelowZero() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(MobileSecretApprovals.remaining(until: 1_095, now: now), "1:35")
+        XCTAssertEqual(MobileSecretApprovals.remaining(until: 990, now: now), "0:00")
+    }
+
+    func testEveryEvidenceStateResolves() {
+        XCTAssertEqual(MobileSecretApprovals.Preview.demo("secret-approvals-enroll"), .enroll)
+        XCTAssertEqual(MobileSecretApprovals.Preview.demo("secret-approvals-ready"), .ready)
+        XCTAssertEqual(MobileSecretApprovals.Preview.demo("secret-approvals-approved"), .approved)
+        guard case .request(let request) = MobileSecretApprovals.Preview.demo("secret-approvals-request") else {
+            return XCTFail("the request state needs a request")
+        }
+        XCTAssertTrue(request.isWellFormed, "the evidence request must be one the app would show")
+    }
+
     func testTheFingerprintIsTheMacsFormat() throws {
         let key = try P256.KeyAgreement.PrivateKey(rawRepresentation: Data(repeating: 0x11, count: 32))
         let fingerprint = MobileSecretApprovalKeys.fingerprint(key.publicKey.x963Representation)

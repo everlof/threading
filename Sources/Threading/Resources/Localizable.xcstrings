@@ -1442,6 +1442,23 @@
         }
       }
     },
+    "%@ — open Threading on the iPhone and approve it with Face ID. %@ left." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — open Threading on the iPhone and approve it with Face ID. %@ left."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — öppna Threading på iPhonen och godkänn med Face ID. %@ kvar."
+          }
+        }
+      }
+    },
     "%@ — the default for new chats in Settings." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11221,6 +11238,23 @@
         }
       }
     },
+    "Choose Enroll iPhone, then on the iPhone open Threading › Settings › Security › Face ID Approvals and type the code shown here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Enroll iPhone, then on the iPhone open Threading › Settings › Security › Face ID Approvals and type the code shown here."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj Registrera iPhone. Öppna sedan Threading › Inställningar › Säkerhet › Face ID-godkännanden på iPhonen och skriv koden som visas här."
+          }
+        }
+      }
+    },
     "Choose Existing Checkout…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14098,6 +14132,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut en händelsekälla"
+          }
+        }
+      }
+    },
+    "Connect keyvault" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect keyvault"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut keyvault"
           }
         }
       }
@@ -24865,6 +24916,23 @@
         }
       }
     },
+    "Its key is %@. The iPhone shows the same key under Face ID Approvals." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its key is %@. The iPhone shows the same key under Face ID Approvals."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess nyckel är %@. iPhonen visar samma nyckel under Face ID-godkännanden."
+          }
+        }
+      }
+    },
     "Its own workspace keeps that chat out of the checkout you left open. Available for a Git project whose agent has session tools." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29520,6 +29588,23 @@
         }
       }
     },
+    "No iPhone enrolled yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No iPhone enrolled yet"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen iPhone registrerad ännu"
+          }
+        }
+      }
+    },
     "No iPhone enrolled yet. Remote Access must be on and the phone paired." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31168,6 +31253,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna Inställningar → Face ID-godkännanden på iPhone och ange %@. Koden gäller i fem minuter och fem försök."
+          }
+        }
+      }
+    },
+    "On the iPhone: Threading › Settings › Security › Face ID Approvals. The code works for %@ more." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the iPhone: Threading › Settings › Security › Face ID Approvals. The code works for %@ more."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "På iPhonen: Threading › Inställningar › Säkerhet › Face ID-godkännanden. Koden fungerar i %@ till."
           }
         }
       }
@@ -39309,6 +39411,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör isolerat webbläsartest"
+          }
+        }
+      }
+    },
+    "Run once in Terminal, so keyvault seals its Touch ID key for this iPhone:" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Run once in Terminal, so keyvault seals its Touch ID key for this iPhone:"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör en gång i Terminal, så förseglar keyvault sin Touch ID-nyckel för den här iPhonen:"
           }
         }
       }
@@ -55214,6 +55333,23 @@
         }
       }
     },
+    "Type this code on your iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type this code on your iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv den här koden på din iPhone"
+          }
+        }
+      }
+    },
     "Types" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57261,6 +57397,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på ditt godkännande för att fortsätta"
+          }
+        }
+      }
+    },
+    "Waiting for your iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på din iPhone"
           }
         }
       }
@@ -60666,6 +60819,23 @@
         }
       }
     },
+    "iPhone enrolled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone enrolled"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone registrerad"
+          }
+        }
+      }
+    },
     "identity rendering" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60882,6 +61052,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "nycklar"
+          }
+        }
+      }
+    },
+    "keyvault can ask your iPhone instead of this Mac’s Touch ID. The iPhone shows what is asked and who asks, and needs Face ID every time." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault can ask your iPhone instead of this Mac’s Touch ID. The iPhone shows what is asked and who asks, and needs Face ID every time."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault kan fråga din iPhone i stället för den här Macens Touch ID. iPhonen visar vad som frågas och vem som frågar, och kräver Face ID varje gång."
           }
         }
       }

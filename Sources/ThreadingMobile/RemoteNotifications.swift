@@ -253,7 +253,8 @@ enum HostedPushRefreshFailurePolicy {
 /// have an in-app representation.
 enum RemoteNotificationPresentationPolicy {
     static func presentsInForeground(_ kind: RemoteNotificationKind) -> Bool {
-        kind == .agentMessage
+        // A Face ID approval lives two minutes; it has to reach whoever is looking at the app.
+        kind == .agentMessage || kind == .secretApproval
     }
 }
 
@@ -528,7 +529,11 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         _ event: RemoteNotificationEventDTO,
         origin: RemoteNotificationOpenOrigin
     ) {
-        guard model.openSessionFromNotification(event, origin: origin) else { return }
+        // Not a chat: it opens Face ID Approvals for the Mac that sent it.
+        let opened = event.kind == .secretApproval
+            ? model.openSecretApprovalFromNotification(event)
+            : model.openSessionFromNotification(event, origin: origin)
+        guard opened else { return }
         MobileDiagnostics.record(.notificationOpened, fields: [
             .trace: event.id,
             .kind: event.kind.rawValue,
@@ -1367,6 +1372,9 @@ final class RemoteNotificationManager: ObservableObject {
     @Published var attentionRequestsEnabled: Bool {
         didSet { defaults.set(attentionRequestsEnabled, forKey: Keys.attentionRequests) }
     }
+    @Published var secretApprovalsEnabled: Bool {
+        didSet { defaults.set(secretApprovalsEnabled, forKey: Keys.secretApprovals) }
+    }
     @Published var peoplePresenceEnabled: Bool {
         didSet { defaults.set(peoplePresenceEnabled, forKey: Keys.peoplePresence) }
     }
@@ -1395,6 +1403,9 @@ final class RemoteNotificationManager: ObservableObject {
     }
     @Published var sharedChatSoundsEnabled: Bool {
         didSet { defaults.set(sharedChatSoundsEnabled, forKey: Keys.sharedChatSounds) }
+    }
+    @Published var secretApprovalSoundsEnabled: Bool {
+        didSet { defaults.set(secretApprovalSoundsEnabled, forKey: Keys.secretApprovalSounds) }
     }
 
     private let center = UNUserNotificationCenter.current()
@@ -1426,6 +1437,8 @@ final class RemoteNotificationManager: ObservableObject {
         static let attentionSounds = "remoteNotificationAttentionSounds"
         static let updateSounds = "remoteNotificationUpdateSounds"
         static let sharedChatSounds = "remoteNotificationSharedChatSounds"
+        static let secretApprovals = "remoteNotificationsSecretApprovals"
+        static let secretApprovalSounds = "remoteNotificationSecretApprovalSounds"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -1447,6 +1460,8 @@ final class RemoteNotificationManager: ObservableObject {
             Keys.attentionSounds: true,
             Keys.updateSounds: false,
             Keys.sharedChatSounds: false,
+            Keys.secretApprovals: true,
+            Keys.secretApprovalSounds: true,
         ])
         sharedChatsEnabled = defaults.bool(forKey: Keys.sharedChats)
         permissionsEnabled = defaults.bool(forKey: Keys.permissions)
@@ -1464,6 +1479,8 @@ final class RemoteNotificationManager: ObservableObject {
         attentionSoundsEnabled = defaults.bool(forKey: Keys.attentionSounds)
         updateSoundsEnabled = defaults.bool(forKey: Keys.updateSounds)
         sharedChatSoundsEnabled = defaults.bool(forKey: Keys.sharedChatSounds)
+        secretApprovalsEnabled = defaults.bool(forKey: Keys.secretApprovals)
+        secretApprovalSoundsEnabled = defaults.bool(forKey: Keys.secretApprovalSounds)
 
         observers.append(NotificationCenter.default.addObserver(
             forName: RemoteNotificationBridge.deviceTokenNotification,
@@ -1518,6 +1535,7 @@ final class RemoteNotificationManager: ObservableObject {
         if turnCompletionsEnabled { result.append(.turnCompleted) }
         if agentUpdatesEnabled { result.append(.agentMessage) }
         if attentionRequestsEnabled { result.append(.attentionRequest) }
+        if secretApprovalsEnabled { result.append(.secretApproval) }
         return result
     }
 
@@ -1530,6 +1548,7 @@ final class RemoteNotificationManager: ObservableObject {
         if turnCompletionSoundsEnabled { result.append(.turnCompleted) }
         if updateSoundsEnabled { result.append(.agentMessage) }
         if attentionSoundsEnabled { result.append(.attentionRequest) }
+        if secretApprovalSoundsEnabled { result.append(.secretApproval) }
         return result
     }
 
@@ -1645,7 +1664,7 @@ final class RemoteNotificationManager: ObservableObject {
             // otherwise-compatible notifications. The second registration upgrades the
             // preference atomically on hosts that know the optional features.
             let optionalKinds: Set<RemoteNotificationKind> = [
-                .attentionRequest, .agentQuestion, .turnCompleted,
+                .attentionRequest, .agentQuestion, .turnCompleted, .secretApproval,
             ]
             let baselineKinds = kinds.filter { !optionalKinds.contains($0) }
             let baselineRegistration = RemoteNotificationRegistrationDTO(
@@ -2070,6 +2089,7 @@ final class RemoteNotificationManager: ObservableObject {
         case .turnCompleted: return turnCompletionsEnabled
         case .agentMessage: return agentUpdatesEnabled
         case .attentionRequest: return attentionRequestsEnabled
+        case .secretApproval: return secretApprovalsEnabled
         }
     }
 
@@ -2185,6 +2205,7 @@ struct NotificationSettingsView: View {
                 Toggle("Agent finishes a turn", isOn: $notifications.turnCompletionsEnabled)
                 Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
                 Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
+                Toggle("Face ID approvals for keyvault", isOn: $notifications.secretApprovalsEnabled)
             } header: {
                 Text("Notify me about")
             }
@@ -2227,6 +2248,8 @@ struct NotificationSettingsView: View {
                         .disabled(!notifications.agentUpdatesEnabled)
                     Toggle("Newly shared chats", isOn: $notifications.sharedChatSoundsEnabled)
                         .disabled(!notifications.sharedChatsEnabled)
+                    Toggle("Face ID approvals", isOn: $notifications.secretApprovalSoundsEnabled)
+                        .disabled(!notifications.secretApprovalsEnabled)
                 }
             } header: {
                 Text("Sounds")
@@ -2320,6 +2343,8 @@ struct NotificationSettingsView: View {
         .onChange(of: notifications.attentionSoundsEnabled) { _, _ in sync() }
         .onChange(of: notifications.updateSoundsEnabled) { _, _ in sync() }
         .onChange(of: notifications.sharedChatSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.secretApprovalsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.secretApprovalSoundsEnabled) { _, _ in sync() }
     }
 
     @ViewBuilder

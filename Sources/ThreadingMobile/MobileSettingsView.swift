@@ -150,11 +150,6 @@ struct MobileSettingsView: View {
                     ] == nil {
                         settingsSection("Developer") {
                             SettingsNavigationRow(
-                                symbol: "faceid", title: "Face ID approval",
-                                detail: "Disposable credential experiment"
-                            ) { MobileSecretApprovalLab() }
-                            ThemedRowDivider()
-                            SettingsNavigationRow(
                                 symbol: "square.grid.2x2",
                                 title: "Connection progress",
                                 detail: "Body and navigation loading states"

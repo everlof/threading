@@ -26,6 +26,8 @@ export enum NotificationKind {
   turnCompleted = "turnCompleted",
   agentMessage = "agentMessage",
   attentionRequest = "attentionRequest",
+  // keyvault waits for Face ID on one exact phone. Fixed words; the request is read in the app.
+  secretApproval = "secretApproval",
 }
 type RetractableNotificationKind = NotificationKind.turnCompleted
   | NotificationKind.agentQuestion | NotificationKind.permissionRequest;
@@ -40,6 +42,7 @@ function supportsRetraction(kind: NotificationKind): kind is RetractableNotifica
     case NotificationKind.sharedSession:
     case NotificationKind.agentMessage:
     case NotificationKind.attentionRequest:
+    case NotificationKind.secretApproval:
       return false;
   }
   const unclassified: never = kind;
@@ -47,6 +50,16 @@ function supportsRetraction(kind: NotificationKind): kind is RetractableNotifica
 }
 
 const kinds = new Set<NotificationKind>(Object.values(NotificationKind));
+
+// How long APNs may hold an alert for an offline phone. A Face ID approval is dead after two
+// minutes, and an approval prompt arriving later would only mislead.
+export function alertLifetimeSeconds(kind: string): number {
+  switch (kind) {
+    case NotificationKind.secretApproval: return 120;
+    case NotificationKind.permissionRequest: return 3_600;
+    default: return 86_400;
+  }
+}
 const destinationKinds = new Set(["session", "attachment", "browserTab", "extensionPanel"]);
 const machineTokenPattern = /^[A-Za-z0-9._:-]+$/u;
 const apnsKeyCache = new WeakMap<object, Promise<CryptoKey>>();
@@ -113,9 +126,7 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
       "apns-topic": configuredAPNSTopic(env),
       "apns-push-type": "alert",
       "apns-priority": "10",
-      "apns-expiration": String(Math.floor(event.createdAt + (
-        event.kind === "permissionRequest" ? 3_600 : 86_400
-      ))),
+      "apns-expiration": String(Math.floor(event.createdAt + alertLifetimeSeconds(event.kind))),
       "apns-collapse-id": await eventCollapseID(event),
     },
     body: apnsBody,

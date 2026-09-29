@@ -81,7 +81,7 @@ describe("service release surfaces", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ready",
       rendezvousProtocol: 1,
-      notificationProtocol: 2,
+      notificationProtocol: 3,
     });
   });
 
@@ -92,7 +92,7 @@ describe("service release surfaces", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ok",
       rendezvousProtocol: 1,
-      notificationProtocol: 2,
+      notificationProtocol: 3,
     });
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(response.headers.get("Content-Security-Policy")).toBe("default-src 'none'");
@@ -130,7 +130,7 @@ describe("service release surfaces", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ready",
       rendezvousProtocol: 1,
-      notificationProtocol: 2,
+      notificationProtocol: 3,
     });
   });
 

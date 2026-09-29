@@ -5955,25 +5955,21 @@ hidden-project controls on the right.
 
 ### Face ID approvals (keyvault)
 
-**Settings → Remote Access → Face ID Approvals** lets keyvault ask your paired iPhone to approve
-with Face ID instead of this Mac's Touch ID. It is off until you turn it on. Choose **Enroll
-iPhone**, then on the iPhone open **Settings → Face ID Approvals** and enter the eight-digit code
-(it works for five minutes). Compare the key the phone shows with the one on the Mac. When
-keyvault asks, open **Face ID Approvals** on the iPhone: it shows what is asked and which process
-on the Mac asked; **Approve with Face ID** or **Deny**. Requests expire after two minutes.
-**Forget iPhone** on the Mac, or **Forget on this iPhone**, ends it. See
+keyvault can ask your iPhone to approve with Face ID instead of this Mac's Touch ID. It is off
+until you turn it on.
+
+1. On the Mac: **Settings → Remote Access → Face ID Approvals**, turn on **Approve with Face ID
+   on iPhone**, and choose **Enroll iPhone**. An eight-digit code appears in large digits; it
+   works for five minutes.
+2. On the iPhone: **Settings → Security → Face ID Approvals**, type the code and choose **Enroll
+   with Face ID**. Check that the key the phone shows matches the one on the Mac.
+3. In Terminal, once: `keyvault device add iphone`. The Mac's page shows this command with a
+   **Copy** button.
+
+When keyvault asks, the iPhone gets a **Face ID approval waiting** notification; open it, or
+open Face ID Approvals, which finds the request by itself. It shows what is asked and which
+process on the Mac asked: **Approve with Face ID** or **Deny**. A request expires after two
+minutes. **Forget iPhone** on the Mac, or **Forget this iPhone** on the phone, ends it. The alert
+can be turned off under the iPhone's notification settings. See
 [Remote access](docs/REMOTE_ACCESS.md#face-id-approvals).
 
-### Debug: Face ID secret approval experiment
-
-Debug builds include **Settings → Remote Access → Developer → Start experiment** on the Mac
-and **Settings → Developer → Face ID approval** on iPhone. Enroll with the temporary code shown
-on the Mac, request the fixed test operation, and approve with Face ID. This uses only a random
-disposable Keychain credential; existing passwords and tokens are never read. A physical Face ID
-iPhone and the paired Mac's pinned HTTPS route are required. **Stop experiment** on the Mac
-revokes enrollment and deletes the test item. A provisioned, hardened trial build also offers
-**Start GitHub trial**: enter a separate short-lived fine-grained token locally on the Mac, then
-approve one read of your GitHub username on iPhone. That mode requires protected Keychain storage
-and sends the token only to GitHub; existing saved account credentials are not discovered or reused.
-See the [PoC trial guide](docs/feature-drafts/faceid-secret-approval-poc.md)
-for setup, storage limitations and verification scope.

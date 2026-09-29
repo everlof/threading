@@ -11,9 +11,13 @@ public extension RemoteNotificationKind {
         switch self {
         case .turnCompleted: return .completedTurn
         case .agentQuestion, .permissionRequest: return .responseRequest
-        case .sharedSession, .agentMessage, .attentionRequest: return .independentEvent
+        case .sharedSession, .agentMessage, .attentionRequest, .secretApproval: return .independentEvent
         }
     }
 
     var supportsRetraction: Bool { lifecycle != .independentEvent }
+
+    /// The session slot, and so the thread, of every Face ID approval alert: a machine token, so
+    /// a newer alert replaces an older one and nothing mistakes it for a chat.
+    static let secretApprovalThread = "secret-approval"
 }

@@ -35,7 +35,7 @@ enum MobileDemoScene: Equatable {
     case pairingStorageRecovery
     case settings
     case connectionProgressLab
-    case secretApprovalLab
+    case secretApprovals
     case connectionStatus
     case appIconSettings
     case collaborationSettings
@@ -132,7 +132,7 @@ extension MobileDemoScene {
         case "pairing", "pairing-cellular": return .pairing
         case let id where id.hasPrefix("welcome"): return .welcome
         case "settings", "marketing-settings": return .settings
-        case "secret-approval-lab", "secret-approval-pending", "secret-approval-github-success": return .secretApprovalLab
+        case let id where id.hasPrefix("secret-approvals"): return .secretApprovals
         case "connection-progress-lab": return .connectionProgressLab
         case "connection-status": return .connectionStatus
         case "app-icon-settings": return .appIconSettings
@@ -256,9 +256,10 @@ enum MobileDemoFixture: String, CaseIterable {
     case appDiagnosticsSettingsOn = "app-diagnostics-settings-on"
     case notificationSettings = "notification-settings"
     case macAppearanceSettings = "mac-appearance-settings"
-    case secretApprovalPending = "secret-approval-pending"
-    case secretApprovalGitHubSuccess = "secret-approval-github-success"
-    case secretApprovalLab = "secret-approval-lab"
+    case secretApprovalsEnroll = "secret-approvals-enroll"
+    case secretApprovalsReady = "secret-approvals-ready"
+    case secretApprovalsRequest = "secret-approvals-request"
+    case secretApprovalsApproved = "secret-approvals-approved"
     case connectionProgressLab = "connection-progress-lab"
     case connectionStatus = "connection-status"
     case diagnostics = "diagnostics"
@@ -505,16 +506,10 @@ struct RootView: View {
             }
         case .settings:
             MobileSettingsView()
-        case .secretApprovalLab:
+        case .secretApprovals:
             NavigationStack {
-                MobileSecretApprovalLab(previewChallenge:
-                    ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "secret-approval-pending"
-                        ? RemoteSecretApprovalLab.Challenge(
-                            experimentID: UUID(), id: UUID(), deviceID: "preview-only", expiresAt: 0, githubProfile: true
-                        ) : nil,
-                    previewGitHubLogin: ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "secret-approval-github-success"
-                        ? "octocat" : nil
-                )
+                MobileSecretApprovals(preview: MobileSecretApprovals.Preview.demo(
+                    ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]))
             }
         case .connectionProgressLab:
             NavigationStack {
@@ -1129,6 +1124,10 @@ struct RootView: View {
         .sheet(isPresented: $showsSettings) {
             MobileSettingsView()
                 .mobileTheme(theme)
+        }
+        // A Face ID approval alert opens its own sheet; one cannot stand over Settings.
+        .onChange(of: model.secretApprovalOpen) { _, open in
+            if open != nil { showsSettings = false }
         }
     }
 }

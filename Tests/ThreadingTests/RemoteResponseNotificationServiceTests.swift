@@ -382,6 +382,37 @@ final class RemoteResponseNotificationServiceTests: HostedStoreTestCase {
         service.reset()
     }
 
+    /// keyvault's Face ID alert goes to the enrolled phone on the grant it enrolled with, nowhere
+    /// else, and in fixed words: the request itself is read inside the app.
+    func testAFaceIDApprovalAlertReachesOnlyTheEnrolledPhoneAndSaysNothingOfTheRequest() async throws {
+        let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())
+        let sent = expectation(description: "Hosted alert sent")
+        var delivered: [RemoteNotificationEventDTO] = []
+        service.configureHostedPushSender(
+            serviceURL: { URL(string: "https://example.test")! }, isAvailable: { true }
+        ) { event, _, _ in
+            delivered.append(event)
+            sent.fulfill()
+            return .init(statusCode: 200, reason: "Accepted", apnsID: nil)
+        }
+        register(service, enabledKinds: [.secretApproval])
+        XCTAssertEqual(service.secretApprovalRequested(requestID: UUID(), shareID: "someone-else", deviceID: "phone"), 0,
+                       "another grant on the same phone is not the enrolled one")
+        XCTAssertEqual(service.secretApprovalRequested(requestID: UUID(), shareID: "owner", deviceID: "other-phone"), 0,
+                       "another phone is not the enrolled one")
+        let id = UUID()
+        XCTAssertEqual(service.secretApprovalRequested(requestID: id, shareID: "owner", deviceID: "phone"), 1)
+        await fulfillment(of: [sent], timeout: 2)
+        let event = try XCTUnwrap(delivered.first)
+        XCTAssertEqual(delivered.count, 1)
+        XCTAssertEqual(event.kind, .secretApproval)
+        XCTAssertEqual(event.id, id.uuidString.lowercased())
+        XCTAssertEqual(event.sessionID, RemoteNotificationKind.secretApprovalThread)
+        XCTAssertEqual(event.title, "Face ID approval waiting")
+        XCTAssertEqual(event.titleLocalization?.key, "Face ID approval waiting")
+        service.reset()
+    }
+
     func testAnswerBeforeQueuedSenderRunsPreventsPermissionPush() async throws {
         let sessionID = try makeSession()
         let service = RemoteNotificationService(subscriptionStore: InMemoryRemoteNotificationSubscriptionStore())

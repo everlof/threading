@@ -1957,6 +1957,23 @@
         }
       }
     },
+    "Approved. Your Mac has what it asked for; nothing was kept on this iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approved. Your Mac has what it asked for; nothing was kept on this iPhone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänt. Din Mac har fått det den bad om; inget sparades på den här iPhonen."
+          }
+        }
+      }
+    },
     "Archive" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2019,6 +2036,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Be om synpunkter"
+          }
+        }
+      }
+    },
+    "Asked by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asked by %@"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågat av %@"
           }
         }
       }
@@ -2519,6 +2553,23 @@
         }
       }
     },
+    "Can’t reach your Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t reach your Mac"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Når inte din Mac"
+          }
+        }
+      }
+    },
     "Carry this conversation to another agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2653,6 +2704,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Leta efter en förfrågan"
+          }
+        }
+      }
+    },
+    "Check now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check now"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kolla nu"
           }
         }
       }
@@ -4581,6 +4649,23 @@
         }
       }
     },
+    "Enroll with Face ID" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enroll with Face ID"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registrera med Face ID"
+          }
+        }
+      }
+    },
     "Enroll with Face ID protection" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4865,6 +4950,40 @@
         }
       }
     },
+    "Face ID approval waiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID approval waiting"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID-godkännande väntar"
+          }
+        }
+      }
+    },
+    "Face ID approvals" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID approvals"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID-godkännanden"
+          }
+        }
+      }
+    },
     "Face ID approvals are off on your Mac, or this iPhone is not its enrolled phone." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4878,6 +4997,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Face ID-godkännanden är avstängda på din Mac, eller så är den här iPhonen inte dess registrerade telefon."
+          }
+        }
+      }
+    },
+    "Face ID approvals for keyvault" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID approvals for keyvault"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID-godkännanden för keyvault"
           }
         }
       }
@@ -4916,6 +5052,23 @@
         }
       }
     },
+    "Face ID for keyvault" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID for keyvault"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID för keyvault"
+          }
+        }
+      }
+    },
     "Face ID is required every time. The request expires after two minutes." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4929,6 +5082,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Face ID krävs varje gång. Förfrågan går ut efter två minuter."
+          }
+        }
+      }
+    },
+    "Face ID is required. Expires in %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID is required. Expires in %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID krävs. Går ut om %@."
           }
         }
       }
@@ -4963,6 +5133,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Face ID är inte tillgängligt. Slå på Face ID för den här appen i iPhone-inställningar och lås upp telefonen."
+          }
+        }
+      }
+    },
+    "Face ID protects the two keys this creates. They never leave this iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID protects the two keys this creates. They never leave this iPhone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID skyddar de två nycklar som skapas. De lämnar aldrig den här iPhonen."
           }
         }
       }
@@ -5204,6 +5391,23 @@
         }
       }
     },
+    "Forget" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm"
+          }
+        }
+      }
+    },
     "Forget %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5250,6 +5454,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Glöm på den här iPhonen"
+          }
+        }
+      }
+    },
+    "Forget this iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget this iPhone"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm den här iPhonen"
+          }
+        }
+      }
+    },
+    "Forget this iPhone?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forget this iPhone?"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glömma den här iPhonen?"
           }
         }
       }
@@ -7486,6 +7724,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "På denna iPhone"
+          }
+        }
+      }
+    },
+    "On your Mac, open Settings › Remote Access › Face ID Approvals, turn it on and choose Enroll iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On your Mac, open Settings › Remote Access › Face ID Approvals, turn it on and choose Enroll iPhone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Inställningar › Fjärråtkomst › Face ID-godkännanden på din Mac, slå på det och välj Registrera iPhone."
           }
         }
       }
@@ -12802,6 +13057,23 @@
         }
       }
     },
+    "This iPhone is enrolled. Check that your Mac shows the same key, then run keyvault device add iphone on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This iPhone is enrolled. Check that your Mac shows the same key, then run keyvault device add iphone on the Mac."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här iPhonen är registrerad. Kontrollera att din Mac visar samma nyckel och kör sedan keyvault device add iphone på Macen."
+          }
+        }
+      }
+    },
     "This iPhone is enrolled. Compare its key with the one your Mac shows." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12843,6 +13115,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här iPhone-enheten litar bara på Mac-datorns identitet."
+          }
+        }
+      }
+    },
+    "This iPhone’s key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This iPhone’s key"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här iPhonens nyckel"
           }
         }
       }
@@ -13465,6 +13754,23 @@
         }
       }
     },
+    "Type the eight-digit code your Mac shows:" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type the eight-digit code your Mac shows:"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv den åttasiffriga koden som din Mac visar:"
+          }
+        }
+      }
+    },
     "Types “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14062,6 +14368,23 @@
         }
       }
     },
+    "Waiting for keyvault on %@. A request appears here by itself, and as a notification when this app is closed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for keyvault on %@. A request appears here by itself, and as a notification when this app is closed."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på keyvault på %@. En förfrågan dyker upp här av sig själv, och som en notis när appen är stängd."
+          }
+        }
+      }
+    },
     "Waiting for permission" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14490,6 +14813,23 @@
         }
       }
     },
+    "Your Mac shows the same key under Settings › Remote Access › Face ID Approvals." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Mac shows the same key under Settings › Remote Access › Face ID Approvals."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Din Mac visar samma nyckel under Inställningar › Fjärråtkomst › Face ID-godkännanden."
+          }
+        }
+      }
+    },
     "Your Mac uses %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14705,6 +15045,57 @@
         }
       }
     },
+    "keyvault asks to open a key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault asks to open a key"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault vill öppna en nyckel"
+          }
+        }
+      }
+    },
+    "keyvault can no longer ask this iPhone until you enroll it again. Forget it on your Mac too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault can no longer ask this iPhone until you enroll it again. Forget it on your Mac too."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault kan inte fråga den här iPhonen förrän du registrerar den igen. Glöm den på din Mac också."
+          }
+        }
+      }
+    },
+    "keyvault on %@ can ask this iPhone to open one of its keys. You see what is asked and who asks, and Face ID approves it once." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault on %@ can ask this iPhone to open one of its keys. You see what is asked and who asks, and Face ID approves it once."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault på %@ kan be den här iPhonen öppna en av sina nycklar. Du ser vad som frågas och vem som frågar, och Face ID godkänner det en gång."
+          }
+        }
+      }
+    },
     "keyvault on your Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14718,6 +15109,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "keyvault på din Mac"
+          }
+        }
+      }
+    },
+    "keyvault on your Mac asks to open a key. Open to approve or deny." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault on your Mac asks to open a key. Open to approve or deny."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keyvault på din Mac vill öppna en nyckel. Öppna för att godkänna eller neka."
           }
         }
       }

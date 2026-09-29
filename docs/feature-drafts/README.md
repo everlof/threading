@@ -24,7 +24,6 @@ the investigation is the value, and an idea deleted without a record comes back.
 
 ## Active prototype
 
-- [Face ID secret approval](faceid-secret-approval-poc.md) — Debug-only Mac/iPhone experiment
   with local enrollment, biometric-gated signatures, a disposable Keychain operation and a
   protected-storage GitHub profile trial. Includes hands-on steps and the remaining trust limits.
 

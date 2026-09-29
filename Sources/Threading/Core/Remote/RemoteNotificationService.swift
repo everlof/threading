@@ -1187,6 +1187,30 @@ final class RemoteNotificationService {
         }.pushTargets
     }
 
+    /// Tells the enrolled iPhone that keyvault is waiting for its Face ID. Only that phone, on the
+    /// owner grant it enrolled with, and in words that say nothing about the request: the title,
+    /// the item and who asked are read inside the app, after it has reached this Mac directly.
+    @discardableResult
+    func secretApprovalRequested(requestID: UUID, shareID: String, deviceID: String) -> Int {
+        let event = RemoteNotificationEventDTO(
+            id: requestID.uuidString.lowercased(),
+            kind: .secretApproval,
+            hostID: RemoteHostIdentity.current.id,
+            sessionID: Self.secretApprovalSessionID,
+            title: "Face ID approval waiting",
+            body: "keyvault on your Mac asks to open a key. Open to approve or deny.",
+            titleLocalization: .init(key: "Face ID approval waiting", arguments: []),
+            bodyLocalization: .init(key: "keyvault on your Mac asks to open a key. Open to approve or deny.", arguments: [])
+        )
+        return deliverIndependentEvent(event) {
+            $0.authorization.shareID == shareID && $0.deviceID == deviceID && $0.authorization.canManageHost
+        }.pushTargets
+    }
+
+    /// A machine token in the session slot, so a newer approval alert replaces an older one
+    /// (`session:secretApproval:secret-approval`) and nothing mistakes it for a chat.
+    static let secretApprovalSessionID = RemoteNotificationKind.secretApprovalThread
+
     func revoke(shareID: String) {
         // Authorization was already revoked in its owning Keychain store. Drop live delivery
         // unconditionally; a secondary-store refusal may leave inert cleanup work, never access.
@@ -1738,7 +1762,12 @@ actor RemoteAPNSPushSender {
         request.setValue("10", forHTTPHeaderField: "apns-priority")
         // Keep a temporarily-offline phone useful without allowing a stale approval prompt to
         // arrive days later. Requested agent updates can remain relevant for the rest of a day.
-        let retention: TimeInterval = event.kind == .permissionRequest ? 3_600 : 86_400
+        // A Face ID approval is dead after two minutes; delivering it later would only mislead.
+        let retention: TimeInterval = switch event.kind {
+        case .permissionRequest: 3_600
+        case .secretApproval: TimeInterval(RemoteSecretApproval.approvalLifetime)
+        default: 86_400
+        }
         request.setValue(
             String(Int(event.createdAt + retention)),
             forHTTPHeaderField: "apns-expiration"

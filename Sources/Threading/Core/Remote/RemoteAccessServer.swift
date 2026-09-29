@@ -76,13 +76,6 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
         get { lock.withLock { secretApprovalsStorage } }
         set { lock.withLock { secretApprovalsStorage = newValue } }
     }
-#if DEBUG
-    private var secretApprovalLabStorage: SecretApprovalLab?
-    var secretApprovalLab: SecretApprovalLab? {
-        get { lock.withLock { secretApprovalLabStorage } }
-        set { lock.withLock { secretApprovalLabStorage = newValue } }
-    }
-#endif
     private weak var authorizerStorage: (any RemoteAuthorizing)?
     private weak var invitationRedeemerStorage: (any RemoteInvitationRedeeming)?
     private weak var sessionCommandsStorage: (any RemoteSessionCommands)?
@@ -175,12 +168,6 @@ final class RemoteAccessServer: @unchecked Sendable {
         get { dependencies.secretApprovals }
         set { dependencies.secretApprovals = newValue }
     }
-#if DEBUG
-    var secretApprovalLab: SecretApprovalLab? {
-        get { dependencies.secretApprovalLab }
-        set { dependencies.secretApprovalLab = newValue }
-    }
-#endif
 
     /// Resolves owner-device and exact-session guest bearer tokens. Read from the server queue,
     /// so the coordinator's authority store must be thread-safe.
@@ -421,12 +408,6 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             handleSecretApproval(request, respond: respond)
             return
         }
-#if DEBUG
-        if RemoteRouter.normalizedPath(request.path) == RemoteSecretApprovalLab.path {
-            handleSecretApprovalLab(request, respond: respond)
-            return
-        }
-#endif
         guard request.method == "POST",
               let rawRequestID = request.header(RemoteRouter.requestIDHeader)
         else {
@@ -895,42 +876,6 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
         }
     }
-
-#if DEBUG
-    private func handleSecretApprovalLab(
-        _ request: HTTPRequest,
-        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
-    ) {
-        guard let authorization = authorizeREST(request, respond: respond) else { return }
-        guard request.method == "POST", authorization.canManageHost,
-              let device = authorization.boundDeviceID,
-              let lab = secretApprovalLab else {
-            respond(.respond(RemoteRouter.error(404, "Not Found")))
-            return
-        }
-        guard request.body.count <= RemoteSecretApprovalLab.maximumRequestBytes,
-              let payload = try? JSONDecoder().decode(RemoteSecretApprovalLab.Request.self, from: request.body)
-        else {
-            respond(.respond(RemoteRouter.error(400, "Bad Request")))
-            return
-        }
-        Task {
-            do {
-                let result = try await lab.handle(payload, device: device, share: authorization.shareID) {
-                    self.authorizer?.isCurrent(authorization) == true
-                }
-                respond(.respond(RemoteRouter.json(result)))
-            } catch is SecretApprovalGitHubFailure {
-                respond(.respond(RemoteRouter.error(502, "GitHub profile request failed")))
-            } catch is URLError {
-                respond(.respond(RemoteRouter.error(502, "GitHub profile request failed")))
-            } catch {
-                // Never echo enrollment material, signatures, or Keychain diagnostics remotely.
-                respond(.respond(RemoteRouter.error(403, "Secret approval refused")))
-            }
-        }
-    }
-#endif
 
     private static func mutationFingerprint(for request: HTTPRequest) -> Data {
         var input = Data(request.method.utf8)

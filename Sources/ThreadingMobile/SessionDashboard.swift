@@ -3853,6 +3853,18 @@ struct SessionDashboard: View {
                     .mobileTheme(theme)
                 }
             }
+            .sheet(item: $model.secretApprovalOpen) { _ in
+                NavigationStack {
+                    MobileSecretApprovals()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { model.secretApprovalOpen = nil }
+                            }
+                        }
+                }
+                .environmentObject(model)
+                .mobileTheme(theme)
+            }
             .sheet(item: $shareRequest) { request in
                 ShareChatSheet(
                     chatTitle: request.session.title,

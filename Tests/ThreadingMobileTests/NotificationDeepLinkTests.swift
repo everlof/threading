@@ -171,6 +171,28 @@ final class NotificationDeepLinkTests: XCTestCase {
         XCTAssertEqual(model.navigationPath, expected)
     }
 
+    /// A Face ID approval alert is not a chat: it opens Face ID Approvals for the Mac that sent
+    /// it, and an alert from a Mac this phone does not know opens nothing.
+    func testAFaceIDApprovalAlertOpensApprovalsForItsMac() throws {
+        let (model, _, defaults, suite) = try makeDemoModel()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let hostID = try XCTUnwrap(model.activeHostID)
+        let alert = RemoteNotificationEventDTO(
+            id: "approval-1", kind: .secretApproval, hostID: hostID,
+            sessionID: RemoteNotificationKind.secretApprovalThread,
+            title: "Face ID approval waiting", body: "keyvault on your Mac asks to open a key.", createdAt: 123)
+        XCTAssertTrue(model.openSecretApprovalFromNotification(alert))
+        XCTAssertEqual(model.secretApprovalOpen?.id, "approval-1")
+        XCTAssertTrue(model.navigationPath.isEmpty, "no chat is opened for it")
+        model.secretApprovalOpen = nil
+        let stranger = RemoteNotificationEventDTO(
+            id: "approval-2", kind: .secretApproval, hostID: "unknown-mac",
+            sessionID: RemoteNotificationKind.secretApprovalThread,
+            title: "Face ID approval waiting", body: "", createdAt: 123)
+        XCTAssertFalse(model.openSecretApprovalFromNotification(stranger))
+        XCTAssertNil(model.secretApprovalOpen)
+    }
+
     func testLegacyPairedHostRecordDecodesWithoutHostedRoute() throws {
         let link = try XCTUnwrap(RemoteConnectionLink(
             string: "https://mac.example.test/#capability"

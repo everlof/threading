@@ -10,8 +10,8 @@ import Foundation
 /// against the enrolled device and returns the secret to the waiting client, which checks the
 /// secret itself. Nothing on the Mac can open an envelope, and the Mac keeps no secret.
 ///
-/// Off unless enabled on the Mac and enrolled from the phone. See
-/// `docs/feature-drafts/faceid-secret-approval-poc.md`.
+/// Off unless enabled on the Mac and enrolled from the phone. See `docs/REMOTE_ACCESS.md`,
+/// "Face ID approvals".
 public enum RemoteSecretApproval {
     public static let path = "/api/secret-approval"
     public static let signingDomain = "Threading.SecretApproval.v1\n"

@@ -1130,25 +1130,31 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                     appearance: appearance,
                     credentialStorageIsShellReachable: isShellReachable
                 )
-#if DEBUG
-                let lab = page.controller.children.compactMap {
-                    $0 as? SecretApprovalLabSettingsViewController
+                let approvals = page.controller.children.compactMap {
+                    $0 as? SecretApprovalSettingsViewController
                 }.first
-                lab?.apply(.init(enrollmentCode: nil, enabled: false, protectedStorageAvailable: !isShellReachable))
-                XCTAssertNotNil(lab)
-#endif
+                approvals?.apply(.init(
+                    enabled: true, enrollmentCode: nil,
+                    enrollment: SecretApprovalEnrollment(deviceID: "render", shareID: "render",
+                                                         signingKey: Data(repeating: 4, count: 65),
+                                                         agreementKey: Data(repeating: 4, count: 65),
+                                                         enrolledAt: Date(timeIntervalSince1970: 0)),
+                    pendingTitle: nil, isShellReachable: isShellReachable))
+                XCTAssertNotNil(approvals)
                 let complete = page.trimmedToContent()
-                if let start = self.button(in: complete.view, id: "settings.secret-approval.start") {
-                    let frame = start.convert(start.bounds, to: complete.host)
-                    XCTAssertTrue(complete.host.bounds.contains(frame), "The experiment must be inside the rendered shell")
-                }
-                if let token = self.descendants(in: complete.view).first(where: {
-                    $0.accessibilityIdentifier() == "settings.secret-approval.github-token"
-                }) as? ThemedSecureField {
-                    XCTAssertGreaterThanOrEqual(token.bounds.width, SettingsUIDefaults.controlWidth,
-                                                "The token editor must remain usable beside wrapped instructions in every theme")
+                let storage = self.descendants(in: complete.view).first {
+                    $0.accessibilityIdentifier() == "settings.secret-approvals.storage"
+                } as? NSTextField
+                XCTAssertEqual(storage?.stringValue,
+                               KeychainStoragePolicy.storageDescription(isShellReachable: isShellReachable),
+                               "Face ID approvals must say where the enrollment is kept")
+                if let command = self.descendants(in: complete.view).first(where: {
+                    $0.accessibilityIdentifier() == "settings.secret-approvals.command"
+                }) {
+                    let frame = command.convert(command.bounds, to: complete.host)
+                    XCTAssertTrue(complete.host.bounds.contains(frame), "The keyvault command must be inside the rendered shell")
                 } else {
-                    XCTFail("The GitHub trial needs a secure token editor")
+                    XCTFail("An enrolled iPhone needs the keyvault command beside it")
                 }
                 png = self.pngData(of: complete.host)
             }

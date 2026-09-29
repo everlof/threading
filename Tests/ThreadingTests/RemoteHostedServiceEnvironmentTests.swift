@@ -1,5 +1,6 @@
 import XCTest
 import ThreadingPeerTransport
+import ThreadingRemoteKit
 @testable import Threading
 
 @MainActor
@@ -19,6 +20,16 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
         defaults = nil
         suiteName = nil
         try super.tearDownWithError()
+    }
+
+    func testABrokerThatDoesNotKnowFaceIDApprovalsIsNeverSentOne() {
+        // Protocol 2 answers 400 to an unknown kind: the Mac must not send one at all.
+        XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 2))
+        XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 0))
+        XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 3))
+        for kind in RemoteNotificationKind.allCases where kind != .secretApproval {
+            XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(kind, brokerVersion: 1), "\(kind)")
+        }
     }
 
     func testDeveloperEnvironmentChoicePersistsAndDefaultsToProduction() {

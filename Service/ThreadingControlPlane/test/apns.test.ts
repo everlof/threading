@@ -135,6 +135,32 @@ describe("hosted APNs broker", () => {
     });
   });
 
+  it("delivers a Face ID approval alert that APNs drops after two minutes", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+    }));
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    const event = body.event as Record<string, unknown>;
+    event.kind = NotificationKind.secretApproval;
+    event.sessionID = "secret-approval";
+    event.title = "Face ID approval waiting";
+    event.body = "keyvault on your Mac asks to open a key. Open to approve or deny.";
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(200);
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(Number(headers.get("apns-expiration"))).toBe(Math.floor(Number(event.createdAt) + 120));
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload).toMatchObject({
+      aps: { alert: { title: "Face ID approval waiting" } },
+      event: { kind: "secretApproval", sessionID: "secret-approval" },
+    });
+  });
+
   it("never writes preview text or raw routing identifiers to provider logs", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);

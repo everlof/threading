@@ -59,6 +59,14 @@ enum RemoteNotificationBrokerCompatibility {
     /// A service too old to publish a version at all answers `0`, which is the same decision.
     static let turnGenerationVersion = 2
 
+    /// The first that knows `secretApproval`. An older one would answer 400, so this Mac does
+    /// not send it one at all: the phone still finds the request when the app is open.
+    static let secretApprovalVersion = 3
+
+    static func delivers(_ kind: RemoteNotificationKind, brokerVersion version: Int) -> Bool {
+        kind != .secretApproval || version >= secretApprovalVersion
+    }
+
     static func payload(
         _ event: RemoteNotificationEventDTO,
         forBrokerVersion version: Int
@@ -790,16 +798,21 @@ final class RemoteHostedServiceController {
             )
         }
         do {
+            let brokerVersion = await notificationProtocolVersion(of: endpoint)
+            guard RemoteNotificationBrokerCompatibility.delivers(event.kind, brokerVersion: brokerVersion) else {
+                return RemoteAPNSDeliveryResult(
+                    statusCode: nil,
+                    reason: "The hosted service does not deliver this kind of alert yet.",
+                    apnsID: nil
+                )
+            }
             let current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
             let result = try await PeerControlPlaneClient(endpoint: endpoint).sendHostedPush(
                 hostCredential: current.hostCredential.credential,
                 payload: RemoteHostedPushEnvelope(
                     registrationID: registrationID,
                     playsSound: playsSound,
-                    event: RemoteNotificationBrokerCompatibility.payload(
-                        event,
-                        forBrokerVersion: await notificationProtocolVersion(of: endpoint)
-                    )
+                    event: RemoteNotificationBrokerCompatibility.payload(event, forBrokerVersion: brokerVersion)
                 )
             )
             return RemoteAPNSDeliveryResult(

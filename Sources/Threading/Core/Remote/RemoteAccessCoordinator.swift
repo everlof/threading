@@ -214,9 +214,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         )
         server.authorizer = authority
         server.secretApprovals = SecretApprovalBroker.shared
-#if DEBUG
-        server.secretApprovalLab = SecretApprovalLab.shared
-#endif
+        // A request the phone should hear about now, not when someone next opens the app.
+        Task {
+            await SecretApprovalBroker.shared.observeRequests { request, shareID in
+                Task { @MainActor in
+                    let sent = RemoteNotificationService.shared.secretApprovalRequested(
+                        requestID: request.id, shareID: shareID, deviceID: request.deviceID)
+                    ThreadingLogger.secretApproval.info("Alerted the iPhone: \(sent, privacy: .public) push target(s)")
+                }
+            }
+        }
         server.invitationRedeemer = self
         server.hostCommands = self
         // Doors come and go with the interfaces under them, so the status the settings page
@@ -2032,16 +2039,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         mirrors.remoteAccessStopped()
         notifications.reset()
         authority.removeAll()
-#if DEBUG
-        if let lab = server.secretApprovalLab {
-            Task {
-                do { try await lab.disable() }
-                catch {
-                    ThreadingLogger.remote.error("Secret approval lab cleanup failed; authority was cleared")
-                }
-            }
-        }
-#endif
         pairingBootstrapToken = nil
         pairingRedemptions.removeAll()
         status = .disabled

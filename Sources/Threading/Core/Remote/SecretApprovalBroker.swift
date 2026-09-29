@@ -106,6 +106,10 @@ actor SecretApprovalBroker {
         let enrollment: SecretApprovalEnrollment?
         let pendingTitle: String?
         let isShellReachable: Bool
+        /// When the enrollment code stops working; nil without a live code.
+        var enrollmentExpiresAt: Date? = nil
+        /// When the waiting request expires; nil without one.
+        var pendingExpiresAt: Date? = nil
     }
 
     // MARK: Properties
@@ -120,6 +124,9 @@ actor SecretApprovalBroker {
     private var enrollment: SecretApprovalEnrollment?
     private var pending: RemoteSecretApproval.Pending?
     private var waiter: CheckedContinuation<Data, Error>?
+    /// Told of each new request so the enrolled iPhone can be alerted. It gets the request as the
+    /// phone will see it; the envelope inside stays sealed to the phone.
+    private var onRequest: (@Sendable (RemoteSecretApproval.Pending, _ shareID: String) -> Void)?
 
     // MARK: Initialization
 
@@ -133,9 +140,22 @@ actor SecretApprovalBroker {
 
     // MARK: Local settings
 
+    func observeRequests(_ observer: (@Sendable (RemoteSecretApproval.Pending, _ shareID: String) -> Void)?) {
+        onRequest = observer
+    }
+
     func status() -> Status {
-        Status(enabled: isEnabled(), enrollmentCode: enrollmentCode, enrollment: try? currentEnrollment(),
-               pendingTitle: pending?.title, isShellReachable: store.isShellReachable)
+        // A code past its deadline or out of attempts is gone, not merely refused: the page must
+        // never show a code the phone can no longer use.
+        if enrollmentCode != nil, now() >= enrollmentDeadline || attempts >= RemoteSecretApproval.maximumEnrollmentAttempts {
+            enrollmentCode = nil
+            ThreadingLogger.secretApproval.info("Enrollment code expired unused")
+        }
+        expireIfDue()
+        return Status(enabled: isEnabled(), enrollmentCode: enrollmentCode, enrollment: try? currentEnrollment(),
+                      pendingTitle: pending?.title, isShellReachable: store.isShellReachable,
+                      enrollmentExpiresAt: enrollmentCode == nil ? nil : enrollmentDeadline,
+                      pendingExpiresAt: pending.map { Date(timeIntervalSince1970: TimeInterval($0.expiresAt)) })
     }
 
     /// Local only: an eight-digit code the phone types within five minutes, five attempts.
@@ -145,10 +165,12 @@ actor SecretApprovalBroker {
         enrollmentCode = code
         enrollmentDeadline = now().addingTimeInterval(RemoteSecretApproval.enrollmentLifetime)
         attempts = 0
+        ThreadingLogger.secretApproval.notice("Enrollment code issued, valid \(Int(RemoteSecretApproval.enrollmentLifetime), privacy: .public) s")
         return code
     }
 
     func cancelEnrollment() {
+        if enrollmentCode != nil { ThreadingLogger.secretApproval.info("Enrollment cancelled on this Mac") }
         enrollmentCode = nil
     }
 
@@ -159,6 +181,7 @@ actor SecretApprovalBroker {
         enrollment = nil
         loaded = true
         enrollmentCode = nil
+        ThreadingLogger.secretApproval.notice("iPhone forgotten on this Mac")
         finish(throwing: Failure.wrongDevice)
     }
 
@@ -182,17 +205,32 @@ actor SecretApprovalBroker {
     /// request at a time: a second one is refused rather than queued behind a person's decision.
     func unwrap(client: String, title: String, lines: [String], requester: String,
                 envelope: RemoteSecretApproval.Envelope) async throws -> Data {
-        guard isEnabled() else { throw Failure.disabled }
-        guard let enrollment = try currentEnrollment() else { throw Failure.notEnrolled }
-        guard envelope.recipient == enrollment.agreementKey else { throw Failure.wrongDevice }
+        guard isEnabled() else {
+            ThreadingLogger.secretApproval.notice("Request from \(client, privacy: .public) refused: Face ID approvals are off")
+            throw Failure.disabled
+        }
+        guard let enrollment = try currentEnrollment() else {
+            ThreadingLogger.secretApproval.notice("Request from \(client, privacy: .public) refused: no iPhone enrolled")
+            throw Failure.notEnrolled
+        }
+        guard envelope.recipient == enrollment.agreementKey else {
+            ThreadingLogger.secretApproval.notice("Request from \(client, privacy: .public) refused: sealed to another iPhone")
+            throw Failure.wrongDevice
+        }
         expireIfDue()
-        guard pending == nil else { throw Failure.busy }
+        guard pending == nil else {
+            ThreadingLogger.secretApproval.notice("Request from \(client, privacy: .public) refused: another is waiting")
+            throw Failure.busy
+        }
         let request = RemoteSecretApproval.Pending(
             id: UUID(), deviceID: enrollment.deviceID,
             expiresAt: Int64(now().timeIntervalSince1970) + RemoteSecretApproval.approvalLifetime,
             client: client, title: title, lines: lines, requester: requester, envelope: envelope)
         guard request.isWellFormed else { throw Failure.malformed }
         pending = request
+        ThreadingLogger.secretApproval.notice(
+            "Request from \(client, privacy: .public), asked by \(requester, privacy: .private(mask: .hash)), waits \(RemoteSecretApproval.approvalLifetime, privacy: .public) s for the iPhone")
+        onRequest?(request, enrollment.shareID)
         let id = request.id
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(RemoteSecretApproval.approvalLifetime) * 1_000_000_000)
@@ -209,10 +247,14 @@ actor SecretApprovalBroker {
         switch request.action {
         case .enroll:
             guard let code = enrollmentCode, attempts < RemoteSecretApproval.maximumEnrollmentAttempts,
-                  now() < enrollmentDeadline else { throw Failure.enrollmentRefused }
+                  now() < enrollmentDeadline else {
+                ThreadingLogger.secretApproval.notice("Enrollment refused: no live code on this Mac")
+                throw Failure.enrollmentRefused
+            }
             attempts += 1
             guard request.enrollmentCode == code,
                   let signing = request.signingKey, let agreement = request.agreementKey else {
+                ThreadingLogger.secretApproval.notice("Enrollment refused: wrong code, attempt \(self.attempts, privacy: .public)")
                 throw Failure.enrollmentRefused
             }
             let candidate = SecretApprovalEnrollment(deviceID: device, shareID: share, signingKey: signing,
@@ -222,11 +264,13 @@ actor SecretApprovalBroker {
             enrollment = candidate
             loaded = true
             enrollmentCode = nil
+            ThreadingLogger.secretApproval.notice("iPhone enrolled, key \(candidate.fingerprint, privacy: .public)")
             finish(throwing: Failure.wrongDevice)     // anything sealed to a previous phone
             return .init()
         case .pending:
             try requireEnrolled(device: device, share: share)
             expireIfDue()
+            ThreadingLogger.secretApproval.debug("The iPhone checked: \(self.pending == nil ? "nothing waiting" : "a request is waiting", privacy: .public)")
             return .init(pending: pending)
         case .approve:
             let enrolled = try requireEnrolled(device: device, share: share)
@@ -238,12 +282,17 @@ actor SecretApprovalBroker {
                   key.isValidSignature(signature, for: try pending.signingData()),
                   let secret = request.secret, !secret.isEmpty,
                   secret.count <= RemoteSecretApproval.maximumSecretBytes,
-                  isAuthorized() else { throw Failure.approvalRefused }
+                  isAuthorized() else {
+                ThreadingLogger.secretApproval.notice("Approval refused: not the request shown, or a bad signature")
+                throw Failure.approvalRefused
+            }
+            ThreadingLogger.secretApproval.notice("Approved with Face ID on the iPhone")
             finish(returning: secret)
             return .init(receipt: pending.id)
         case .deny:
             try requireEnrolled(device: device, share: share)
             guard let pending, request.requestID == pending.id else { throw Failure.approvalRefused }
+            ThreadingLogger.secretApproval.notice("Denied on the iPhone")
             finish(throwing: Failure.denied)
             return .init(receipt: pending.id)
         }
@@ -268,19 +317,30 @@ actor SecretApprovalBroker {
 
     @discardableResult
     private func requireEnrolled(device: String, share: String) throws -> SecretApprovalEnrollment {
-        guard let enrolled = try currentEnrollment() else { throw Failure.notEnrolled }
-        guard enrolled.deviceID == device, enrolled.shareID == share else { throw Failure.wrongDevice }
+        guard let enrolled = try currentEnrollment() else {
+            ThreadingLogger.secretApproval.notice("An iPhone asked, but none is enrolled")
+            throw Failure.notEnrolled
+        }
+        guard enrolled.deviceID == device, enrolled.shareID == share else {
+            ThreadingLogger.secretApproval.notice(
+                "Refused an iPhone that is not the enrolled one (device matches: \(enrolled.deviceID == device, privacy: .public), pairing matches: \(enrolled.shareID == share, privacy: .public))")
+            throw Failure.wrongDevice
+        }
         return enrolled
     }
 
     private func expireIfDue() {
         if let pending, Int64(now().timeIntervalSince1970) >= pending.expiresAt {
+            ThreadingLogger.secretApproval.notice("Request expired unanswered")
             finish(throwing: Failure.expired)
         }
     }
 
     private func expire(_ id: UUID) {
-        if pending?.id == id { finish(throwing: Failure.expired) }
+        if pending?.id == id {
+            ThreadingLogger.secretApproval.notice("Request expired unanswered")
+            finish(throwing: Failure.expired)
+        }
     }
 
     /// Consumes the request before resuming: an approval can never be used twice.

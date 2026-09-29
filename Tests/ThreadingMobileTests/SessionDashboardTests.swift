@@ -1255,9 +1255,10 @@ final class MobileDemoSceneTests: XCTestCase {
         for fixture in MobileDemoFixture.allCases {
             let expected: (id: String, scene: MobileDemoScene)
             switch fixture {
-            case .secretApprovalLab: expected = ("secret-approval-lab", .secretApprovalLab)
-            case .secretApprovalPending: expected = ("secret-approval-pending", .secretApprovalLab)
-            case .secretApprovalGitHubSuccess: expected = ("secret-approval-github-success", .secretApprovalLab)
+            case .secretApprovalsEnroll: expected = ("secret-approvals-enroll", .secretApprovals)
+            case .secretApprovalsReady: expected = ("secret-approvals-ready", .secretApprovals)
+            case .secretApprovalsRequest: expected = ("secret-approvals-request", .secretApprovals)
+            case .secretApprovalsApproved: expected = ("secret-approvals-approved", .secretApprovals)
             case .terminalANSI: expected = ("terminal-ansi", .terminal)
             case .terminalAttachments: expected = ("terminal-attachments", .terminal)
             case .terminalAttachmentNotice: expected = ("terminal-attachment-notice", .terminal)

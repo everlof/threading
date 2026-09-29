@@ -36,13 +36,71 @@ final class SecretApprovalSettingsRenderTests: XCTestCase {
             enrolledAt: Date(timeIntervalSince1970: 1_900_000_000))
         let coding = SecretApprovalBroker(store: Store(), isEnabled: { true })
         let code = try await coding.beginEnrollment()
+        // A request really waiting: sealed to the enrolled key, and left waiting until the
+        // renders are done (`releaseWaiting` answers it).
+        let waiting = SecretApprovalBroker(store: Store(enrolled), isEnabled: { true })
+        let envelope = try await waiting.wrap(Data("render".utf8))
+        Task { _ = try? await waiting.unwrap(client: "keyvault", title: "keyvault show", lines: ["item: beta"],
+                                             requester: "bash < claude", envelope: envelope) }
+        while await waiting.status().pendingTitle == nil { await Task.yield() }
+        waitingBroker = waiting
         return [
-            ("off", SecretApprovalBroker(store: Store(), isEnabled: { false }), "Off."),
-            ("enrolling", coding, code),
+            ("off", SecretApprovalBroker(store: Store(), isEnabled: { false }), "Touch ID"),
+            ("no-iphone", SecretApprovalBroker(store: Store(), isEnabled: { true }), "No iPhone enrolled yet"),
+            ("enrolling", coding, SecretApprovalSettingsViewController.grouped(code)),
             ("enrolled", SecretApprovalBroker(store: Store(enrolled), isEnabled: { true }), enrolled.fingerprint),
+            ("waiting", waiting, "keyvault show"),
             ("enrolled-login-keychain", SecretApprovalBroker(store: Store(enrolled, shellReachable: true), isEnabled: { true }),
              "login Keychain")
         ]
+    }
+
+    private var waitingBroker: SecretApprovalBroker?
+
+    private func releaseWaiting() async {
+        try? await waitingBroker?.forgetDevice()
+        waitingBroker = nil
+    }
+
+    func testTheCodeReadsInTwoGroupsAndTimeLeftNeverGoesNegative() {
+        XCTAssertEqual(SecretApprovalSettingsViewController.grouped("12345678"), "1234 5678")
+        XCTAssertEqual(SecretApprovalSettingsViewController.grouped("123"), "123")
+        let now = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(SecretApprovalSettingsViewController.remaining(until: now.addingTimeInterval(245), now: now), "4:05")
+        XCTAssertEqual(SecretApprovalSettingsViewController.remaining(until: now.addingTimeInterval(-5), now: now), "0:00")
+    }
+
+    func testTheCardSaysOneThingAtATime() {
+        func status(enabled: Bool = true, code: String? = nil, enrolled: Bool = false, pending: String? = nil) -> SecretApprovalBroker.Status {
+            .init(enabled: enabled, enrollmentCode: code,
+                  enrollment: enrolled ? SecretApprovalEnrollment(deviceID: "d", shareID: "s", signingKey: Data(), agreementKey: Data(),
+                                                                  enrolledAt: Date()) : nil,
+                  pendingTitle: pending, isShellReachable: false)
+        }
+        XCTAssertEqual(SecretApprovalSettingsViewController.shape(for: status(enabled: false, enrolled: true)), .off)
+        XCTAssertEqual(SecretApprovalSettingsViewController.shape(for: status()), .noPhone)
+        XCTAssertEqual(SecretApprovalSettingsViewController.shape(for: status(code: "12345678", enrolled: true)), .code)
+        XCTAssertEqual(SecretApprovalSettingsViewController.shape(for: status(enrolled: true)), .enrolled)
+        XCTAssertEqual(SecretApprovalSettingsViewController.shape(for: status(enrolled: true, pending: "keyvault show")), .waiting)
+    }
+
+    func testAnExpiredCodeIsGoneFromTheStatus() async throws {
+        final class Clock: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = Date(timeIntervalSince1970: 1_000)
+            var now: Date { lock.withLock { value } }
+            func advance(_ seconds: TimeInterval) { lock.withLock { value.addTimeInterval(seconds) } }
+        }
+        let clock = Clock()
+        let broker = SecretApprovalBroker(store: Store(), now: { clock.now }, isEnabled: { true })
+        _ = try await broker.beginEnrollment()
+        let coding = await broker.status()
+        XCTAssertNotNil(coding.enrollmentCode)
+        XCTAssertNotNil(coding.enrollmentExpiresAt)
+        clock.advance(RemoteSecretApproval.enrollmentLifetime + 1)
+        let later = await broker.status()
+        XCTAssertNil(later.enrollmentCode, "the page must never show a code the phone can no longer use")
+        XCTAssertNil(later.enrollmentExpiresAt)
     }
 
     func testRendersEveryStateToImages() async throws {
@@ -100,6 +158,7 @@ final class SecretApprovalSettingsRenderTests: XCTestCase {
                 try data.write(to: directory.appendingPathComponent("\(name).png"))
             }
         }
+        await releaseWaiting()
     }
 
     // MARK: - Fixture
@@ -108,7 +167,7 @@ final class SecretApprovalSettingsRenderTests: XCTestCase {
     /// appearance, a host on the theme's ground, and the section laid out in it.
     private static func fixture(_ controller: SecretApprovalSettingsViewController,
                                 appearance: NSAppearance) -> (NSWindow, NSView) {
-        let size = NSSize(width: width, height: 420)
+        let size = NSSize(width: width, height: 620)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

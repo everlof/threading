@@ -3593,6 +3593,9 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     case turnCompleted
     case agentMessage
     case attentionRequest
+    /// keyvault on the Mac is waiting for a Face ID approval from this exact phone. Fixed words:
+    /// what is asked, and by whom, is shown only inside the app, over the pinned connection.
+    case secretApproval
 }
 
 /// The authenticated in-app destination a notification opens.

@@ -105,6 +105,65 @@ final class SecretApprovalBrokerTests: XCTestCase {
         XCTAssertNil(after.pending)
     }
 
+    /// The phone hears about a request the moment it exists, for the grant it enrolled with, and
+    /// the alert is told nothing the phone could not already see.
+    func testEachRequestIsAnnouncedForTheEnrolledGrant() async throws {
+        final class Heard: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [(UUID, String, String)] = []
+            func add(_ item: (UUID, String, String)) { lock.withLock { items.append(item) } }
+            var all: [(UUID, String, String)] { lock.withLock { items } }
+        }
+        let heard = Heard()
+        let broker = makeBroker()
+        await broker.observeRequests { request, shareID in heard.add((request.id, request.deviceID, shareID)) }
+        let phone = Phone()
+        try await enrolled(broker, phone)
+        let (waiting, pending) = try await ask(broker, envelope: try await broker.wrap(secret))
+        XCTAssertEqual(heard.all.count, 1)
+        XCTAssertEqual(heard.all.first?.0, pending.id)
+        XCTAssertEqual(heard.all.first?.1, device)
+        XCTAssertEqual(heard.all.first?.2, share)
+        _ = try await handle(broker, .init(action: .deny, requestID: pending.id))
+        _ = try? await waiting.value
+        // A refused request (another one waiting) is not announced.
+        let (second, _) = try await ask(broker, envelope: try await broker.wrap(secret))
+        do {
+            _ = try await broker.unwrap(client: "keyvault", title: "t", lines: [], requester: "r",
+                                        envelope: try await broker.wrap(secret))
+            XCTFail("a second request must be refused while one waits")
+        } catch {
+            XCTAssertEqual(error as? SecretApprovalBroker.Failure, .busy)
+        }
+        XCTAssertEqual(heard.all.count, 2)
+        try await broker.forgetDevice()
+        _ = try? await second.value
+    }
+
+    func testTheStatusSaysWhenTheRequestAndTheCodeRunOut() async throws {
+        let broker = makeBroker()
+        let phone = Phone()
+        _ = try await broker.beginEnrollment()
+        let coding = await broker.status()
+        XCTAssertEqual(coding.enrollmentExpiresAt, clock.now().addingTimeInterval(RemoteSecretApproval.enrollmentLifetime))
+        try await enrolled(broker, phone)
+        let enrolledStatus = await broker.status()
+        XCTAssertNil(enrolledStatus.enrollmentExpiresAt)
+        let (waiting, pending) = try await ask(broker, envelope: try await broker.wrap(secret))
+        let status = await broker.status()
+        XCTAssertEqual(status.pendingTitle, pending.title)
+        XCTAssertEqual(status.pendingExpiresAt, Date(timeIntervalSince1970: TimeInterval(pending.expiresAt)))
+        clock.advance(TimeInterval(RemoteSecretApproval.approvalLifetime))
+        let expiredStatus = await broker.status()
+        XCTAssertNil(expiredStatus.pendingTitle, "the page must not show a request that has run out")
+        do {
+            _ = try await waiting.value
+            XCTFail("an expired request must end its wait")
+        } catch {
+            XCTAssertEqual(error as? SecretApprovalBroker.Failure, .expired)
+        }
+    }
+
     func testTheMacCannotOpenWhatItSeals() async throws {
         let broker = makeBroker()
         let phone = Phone()
