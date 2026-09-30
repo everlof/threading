@@ -437,6 +437,9 @@ public enum PTYHostReplay: Codable, Equatable, Sendable {
 public struct PTYHostAttached: Codable, Equatable, Sendable {
     public let id: PTYHostSessionIdentity
     public let pid: Int32
+    /// The saved process incarnation, including when replaying an exited session. Nil means
+    /// the daemon cannot supply it; a PID alone must not authorize process metadata sampling.
+    public let startTime: PTYHostProcessStartTime?
     /// The grid the session already has. The watcher adopts it; it does not impose its own.
     public let grid: PTYHostGrid
     public let replay: PTYHostReplay
@@ -454,10 +457,12 @@ public struct PTYHostAttached: Codable, Equatable, Sendable {
         grid: PTYHostGrid,
         replay: PTYHostReplay,
         totalBytesWritten: UInt64,
-        replayByteCount: Int? = nil
+        replayByteCount: Int? = nil,
+        startTime: PTYHostProcessStartTime? = nil
     ) {
         self.id = id
         self.pid = pid
+        self.startTime = startTime
         self.grid = grid
         self.replay = replay
         self.totalBytesWritten = totalBytesWritten

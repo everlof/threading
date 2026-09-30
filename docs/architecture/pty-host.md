@@ -44,7 +44,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `spawned` | ← | 0 | `id`, `pid`, `startTime` |
 | `spawnRefused` | ← | 0 | `id`, `reason` (`alreadyExists`, `executableUnavailable`, `retiring`, `capacity`, `unsupportedChannel`) |
 | `attach` | → | 0 | `id`, `replayBudget` |
-| `attached` | ← | 0 | `id`, `pid`, `grid`, `replay` (`.exact(fromOffset:)` \| `.cut` \| `.none`), `totalBytesWritten`, optional `replayByteCount` |
+| `attached` | ← | 0 | `id`, `pid`, `grid`, `replay` (`.exact(fromOffset:)` \| `.cut` \| `.none`), `totalBytesWritten`, optional `replayByteCount`, optional `startTime` |
 | *(replay bytes)* | ← | 1 | screen seed ‖ ring slice ‖ mode seed, in that order |
 | `output` | ← | 1 | raw bytes, no envelope |
 | `input` | → | 2 | raw bytes, no envelope |
@@ -237,6 +237,12 @@ the ring offset, excludes seeds and markers, and includes history that may no lo
 The field is additive and optional for wire compatibility. Nil means the peer did not state a
 boundary; zero explicitly means empty replay. A host requiring replay suppression must not guess
 that nil means zero. Existing Mac attachment consumers remain unchanged by this added metadata.
+
+`attached.startTime` carries the kernel start time saved with that session's process incarnation,
+including an exited session retained for replay. It is never re-probed from the current holder of
+the PID when attaching. The additive optional field decodes as nil from older daemons; a host
+sampling process metadata must validate both PID and start time, and disable sampling when the
+start time is absent. Live terminal-reported metadata remains usable without process sampling.
 
 `RemoteRingBuffer` keeps its header claim — replaying the raw byte stream "is the only
 representation guaranteed to reproduce what SwiftTerm itself rendered" — and gains two members:

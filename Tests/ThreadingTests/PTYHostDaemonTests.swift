@@ -372,12 +372,19 @@ final class PTYHostDaemonTests: XCTestCase {
         let client = try connect(to: daemon)
         let id = Self.newIdentity()
 
-        _ = try spawn(on: client, id: id, script: "printf bye; exit 7")
+        let spawned = try spawn(on: client, id: id, script: "printf bye; exit 7")
         try client.waitForOutput(containing: "bye", timeout: Fixture.childTimeout)
 
         let exited = try nextExit(on: client)
         XCTAssertEqual(exited.status, 7)
         XCTAssertFalse(exited.signalled)
+
+        let rejoined = try connect(to: daemon)
+        let attached = try attach(on: rejoined, id: id)
+        XCTAssertEqual(attached.pid, spawned.pid)
+        XCTAssertEqual(attached.startTime, spawned.startTime,
+                       "an exited replay retains its original incarnation, not a new PID probe")
+        XCTAssertEqual(try nextExit(on: rejoined).status, 7)
     }
 
     func testReportsASignalledChildAsSignalled() throws {
@@ -509,6 +516,7 @@ final class PTYHostDaemonTests: XCTestCase {
         let rejoined = try connect(to: daemon)
         let attached = try attach(on: rejoined, id: id)
         XCTAssertEqual(attached.pid, spawned.pid, "the same child, not a new one")
+        XCTAssertEqual(attached.startTime, spawned.startTime, "the same process incarnation")
         XCTAssertEqual(attached.replay, .cut, "a close without seeds is answered with a cut")
 
         // The bytes written while nobody was attached are in the ring, so the rejoining watcher

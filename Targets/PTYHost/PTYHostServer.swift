@@ -743,7 +743,8 @@ final class PTYHostServer: @unchecked Sendable {
             grid: session.grid,
             replay: replay.kind,
             totalBytesWritten: session.ring.totalBytesWritten,
-            replayByteCount: replay.payloads.reduce(0) { $0 + $1.count }
+            replayByteCount: replay.payloads.reduce(0) { $0 + $1.count },
+            startTime: session.startTime
         )))
         for payload in replay.payloads {
             for chunk in Self.chunks(of: payload) {

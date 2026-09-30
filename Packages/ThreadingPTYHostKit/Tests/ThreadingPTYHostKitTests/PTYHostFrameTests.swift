@@ -23,6 +23,28 @@ final class PTYHostFrameTests: XCTestCase {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
+    func testAttachedProcessIncarnationRoundTripsAndLegacyReplyRemainsReadable() throws {
+        let start = PTYHostProcessStartTime(seconds: 1_770_000_000, microseconds: 123_456)
+        let attached = PTYHostAttached(id: identity, pid: 4711, grid: grid, replay: .none,
+                                      totalBytesWritten: 0, startTime: start)
+        try roundTrip(.attached(attached))
+        let bytes = try encoder.encode(attached)
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        let encodedStart = try XCTUnwrap(fields["startTime"] as? [String: Any])
+        XCTAssertEqual(encodedStart["seconds"] as? UInt64, start.seconds)
+        XCTAssertEqual(encodedStart["microseconds"] as? UInt64, start.microseconds)
+
+        fields.removeValue(forKey: "startTime")
+        let legacy = try decoder.decode(PTYHostAttached.self,
+            from: JSONSerialization.data(withJSONObject: fields))
+        XCTAssertNil(legacy.startTime)
+        XCTAssertEqual(legacy, PTYHostAttached(id: identity, pid: 4711, grid: grid,
+                                             replay: .none, totalBytesWritten: 0))
+        let reencoded = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(legacy))
+                                     as? [String: Any])
+        XCTAssertNil(reencoded["startTime"], "legacy absence stays absent on the wire")
+    }
+
     private func roundTrip(_ frame: PTYHostFrame, file: StaticString = #filePath, line: UInt = #line) throws {
         let data = try encoder.encode(frame)
         let decoded = try decoder.decode(PTYHostFrame.self, from: data)
