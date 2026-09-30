@@ -116,6 +116,14 @@ clock. Hosts own localization, account resolution, activity, commands and extens
 The value does not own persistence or layout: the Mac view owns its constraints, identity badge
 and trailing-control reservation. No new extension surface is introduced.
 
+The Linux preview lays out independent title, identity/account and status text inside each mounted
+row. Short IDs remain visible and full accessible identity stays separate from text truncation.
+`Retained` describes runtime ownership, never agent activity. Linux has no scheduler, so it supplies
+no scheduled-start claim. It keeps valid durable snooze deadlines in the snapshot and resolves the
+visible state at the host clock; the earliest mounted expiry invalidates the cached navigator.
+This remains a shared semantic row value with host-specific layout, not a second persistence model
+or a complete portable sidebar. No new extension surface is introduced.
+
 `PTYHostSocket` is the shared Unix connection leaf: it receives a path, deadline and desired
 blocking mode, then returns an owned descriptor or a portable `PTYHostClientError`. It does not
 import host registration, diagnostics, stores or UI. `PTYHostConnectionBinding` carries shared typed-session admission and attempt-scoped rollback;

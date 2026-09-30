@@ -441,6 +441,30 @@ while True:
             agent_owned.add((runtime['id'], runtime['pid']))
         assert json.loads((agent_project / 'codex.json').read_text())['input'] == ''
         snapshot('provider-commands')
+        press_accessible()
+        invoke('linux.project.saved-agents')
+        title('^Threading agents - ' + re.escape(str(agent_project)) + '$')
+        listed = listing()
+        assert listed.get_child_count() == 2
+        with sqlite3.connect(agent_store / 'threading.db') as database:
+            identities = dict(database.execute('SELECT kind,id FROM session'))
+        saved_rows = {listed.get_child_at_index(i).get_accessible_id(): listed.get_child_at_index(i)
+                for i in range(2)}
+        assert set(saved_rows) == set(identities.values())
+        for identifier in identities.values():
+            assert saved_rows[identifier].get_name().endswith(' retained'), saved_rows[identifier].get_name()
+        snapshot('provider-rows-retained')
+        # Activate by durable row identity after the layout change; the same cached child owns
+        # both the visual row and the terminal. Retained never asserts that an agent is working.
+        action = saved_rows[identities['codex']].get_action_iface()
+        open_index = next(i for i in range(action.get_n_actions()) if action.get_action_name(i) == 'open')
+        assert action.do_action(open_index)
+        title('^Threading terminal - ACTIONS CODEX READY$')
+        assert json.loads((agent_project / 'codex.json').read_text())['input'] == ''
+        live = {(item['id'], item['pid']) for item in sessions() if item.get('exit') is None}
+        assert agent_owned <= live, 'saved row activation replaced a retained agent'
+        with sqlite3.connect(agent_store / 'threading.db') as database:
+            assert dict(database.execute('SELECT kind,id FROM session')) == identities
         close_window()
     print('PASS native Actions button states/cancel, folder chooser/cancel, keyboard and AT-SPI activation, disabled admission, '
           'bounded nine-command list, focus/input isolation, exact shell reuse and named-account provider creation', flush=True)

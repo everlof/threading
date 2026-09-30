@@ -104,6 +104,19 @@ def panes():
     return listed, terminal
 
 
+def idle_labels():
+    frame = app.get_child_at_index(0)
+    children = [frame.get_child_at_index(i) for i in range(frame.get_child_count())]
+    assert [item.get_role_name() for item in children] == ['list', 'push button'], \
+        'expiry must work before any terminal exists'
+    listed = children[0]
+    assert listed.get_child_count() == 2
+    actual = {listed.get_child_at_index(i).get_accessible_id(): listed.get_child_at_index(i).get_name()
+              for i in range(2)}
+    assert actual == expected, actual
+    return listed.get_selection_iface().get_selected_child(0).get_accessible_id()
+
+
 def labels(selected):
     listed, terminal = panes()
     assert listed.get_child_count() == 2
@@ -170,6 +183,14 @@ def capture(name):
         mask = tuple(pixel != background for pixel in pixels)
         assert 20 < sum(mask) < 26 * 26 - 20, (name, index, 'empty or opaque-square mark', sum(mask))
         assert not any(mask[y * 26 + x] for x, y in [(0, 0), (25, 0), (0, 25), (25, 25)])
+        # Identity is its own second line, so a long primary title cannot consume its pixels.
+        # The lower eight pixels were blank under the previous single centered text run.
+        detail_geometry = f'{rect.width - 64}x8+{rect.x + 52}+{rect.y + 34}'
+        detail = subprocess.run(['convert', str(destination), '-crop', detail_geometry, '+repage',
+                                 '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
+        assert len(detail) == (rect.width - 64) * 8 * 4
+        assert any(detail[i:i + 4] != background for i in range(0, len(detail), 4)), \
+            (name, index, 'provider/account detail was lost below the long title')
         crops.append(mask)
     return crops
 
@@ -187,6 +208,16 @@ try:
         # Return to the ordinary project entry point; the existing terminal is explicitly reused.
         with sqlite3.connect(store / 'threading.db') as database:
             database.execute("DELETE FROM app_state WHERE key IN ('selectedSessionID', 'selectedTerminalID')")
+            # JSONEncoder stores Date as seconds since 2001. Both an empty workspace and a
+            # retained terminal must refresh an idle picker across a real snooze deadline.
+            now = time.time() - 978307200
+            identifier = provider_ids['codex']
+            record = json.loads(database.execute('SELECT data FROM session WHERE id = ?',
+                                                  (identifier,)).fetchone()[0])
+            record.update(snoozedAt=now - 60, snoozedUntil=now + 20)
+            database.execute('UPDATE session SET data = ? WHERE id = ?', (json.dumps(record), identifier))
+            expected[identifier] += ' Snoozed'
+            before = dict(database.execute('SELECT id, data FROM session'))
         log_path = Path('out/provider-marks-' + label + '.log')
         with log_path.open('w+') as log:
             process = subprocess.Popen([launch_binary, '--app', str(store), endpoint, '/usr/bin/python3',
@@ -194,6 +225,21 @@ try:
             try:
                 window = title('^Threading experiment - ' + re.escape(str(project)) + '$')
                 app = eventually(application, 'native accessibility registration')
+                if not missing:
+                    key('Left')
+                    title('^Threading agents - ' + re.escape(str(project)) + '$')
+                    selected_id = eventually(idle_labels, 'snoozed row before any terminal exists')
+                    subprocess.run(['import', '-window', window, 'out/provider-marks-idle-snoozed.png'],
+                                   check=True, timeout=5)
+                    expected[provider_ids['codex']] = expected[provider_ids['codex']].removesuffix(' Snoozed')
+                    # No key, pointer event or action may wake the Swift loop during this wait.
+                    # AT-SPI property reads alone must keep responding through the deadline.
+                    assert eventually(idle_labels, 'no-terminal snooze deadline expires', timeout=25) == selected_id
+                    subprocess.run(['import', '-window', window, 'out/provider-marks-idle-expired.png'],
+                                   check=True, timeout=5)
+                    assert not marker.exists(), 'viewing/expiring a saved row spawned a child'
+                    key('Escape')
+                    title('^Threading experiment - ' + re.escape(str(project)) + '$')
                 if missing:
                     key('Right')
                     title('^Threading terminals - ' + re.escape(str(project)) + '$')
@@ -214,6 +260,12 @@ try:
                 select(identifiers[1])
                 eventually(lambda: labels(identifiers[1]), 'provider/account/ID in selected Codex row')
                 capture('provider-marks-' + label + '-codex-selected')
+                if missing:
+                    expected[provider_ids['codex']] = expected[provider_ids['codex']].removesuffix(' Snoozed')
+                    # No input or selection change drives this update. The visible expiry must
+                    # invalidate both the cached raster and accessibility while preserving UUID.
+                    eventually(lambda: labels(identifiers[1]), 'visible snooze deadline expires', timeout=25)
+                    capture('provider-marks-snooze-expired')
                 eventually(same_shell, 'picker preserved child and durable titles')
                 key('Tab')
                 title(r'^Threading terminal - SAVED SHELL 1 READY( \[(history cut|restored)\])?$')

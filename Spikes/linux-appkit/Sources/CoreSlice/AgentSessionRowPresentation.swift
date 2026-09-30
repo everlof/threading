@@ -7,8 +7,28 @@ struct AgentSessionRowPresentation: Equatable, Sendable {
     let kind: AgentKind
     let accountHandle: AccountHandle
     let title: String
+    let attention: Attention?
 
-    init(session: AgentSession, usesAgentTitle: Bool, untitledTitle: String) {
+    /// Durable attention precedence is shared; wording, clocks and scheduled-start admission
+    /// remain with the host. The snooze predicate is lazy because an earlier state wins without
+    /// consulting the clock or asking the host for another fact.
+    enum Attention: Equatable, Sendable {
+        case scheduled
+        case woke
+        case snoozed
+
+        static func resolve(isScheduled: Bool, hasWoken: Bool,
+                            isSnoozed: @autoclosure () -> Bool) -> Self? {
+            if isScheduled { return .scheduled }
+            if hasWoken { return .woke }
+            if isSnoozed() { return .snoozed }
+            return nil
+        }
+    }
+
+    init(session: AgentSession, usesAgentTitle: Bool, untitledTitle: String,
+         attention: Attention? = nil) {
+        self.attention = attention
         id = session.id
         kind = session.kind
         accountHandle = session.accountHandle
@@ -28,7 +48,10 @@ struct AgentSessionRowPresentation: Equatable, Sendable {
         Self(id: id, kind: kind, accountHandle: accountHandle, title: untitledTitle)
     }
 
-    private init(id: SessionID, kind: AgentKind, accountHandle: AccountHandle, title: String) {
+    /// A host may resolve facts through its ownership boundary before assembling the row.
+    init(id: SessionID, kind: AgentKind, accountHandle: AccountHandle, title: String,
+         attention: Attention? = nil) {
+        self.attention = attention
         self.id = id
         self.kind = kind
         self.accountHandle = accountHandle
