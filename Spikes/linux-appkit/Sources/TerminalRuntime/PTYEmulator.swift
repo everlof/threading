@@ -142,9 +142,14 @@ final class PTYEmulator: TerminalDelegate {
     private var selecting = false
     private var cursorVisible = true
     private var suppressReplies = false
+    private static let maximumDirectoryBytes = 4096
+    private let localHostName: String
+    private var workingDirectoryUpdate: String?
 
-    init(columns: Int, rows: Int, send: @escaping (Data) -> Void) throws {
+    init(columns: Int, rows: Int, localHostName: String = ProcessInfo.processInfo.hostName,
+         send: @escaping (Data) -> Void) throws {
         guard Self.valid(columns, rows) else { throw Failure.invalidGrid }
+        self.localHostName = localHostName.lowercased()
         sendBytes = send
         terminal = Terminal(delegate: self, options: TerminalOptions(cols: columns, rows: rows, scrollback: 2000))
         selection = SelectionService(terminal: terminal)
@@ -158,8 +163,35 @@ final class PTYEmulator: TerminalDelegate {
         terminal.terminalLock.withLock {
             suppressReplies = replaying
             defer { suppressReplies = false }
-            terminal.feed(byteArray: Array(bytes))
+            terminal.feed(buffer: Array(bytes)[...], recordingCurrentDirectory: !replaying)
         }
+    }
+    /// One latest value, consumed by the host's serial worker, never a per-output write queue.
+    func takeWorkingDirectoryUpdate() -> String? {
+        defer { workingDirectoryUpdate = nil }
+        return workingDirectoryUpdate
+    }
+    func hostCurrentDirectoryUpdated(source: Terminal) {
+        guard !suppressReplies, let reported = source.hostCurrentDirectory,
+              let path = Self.localDirectoryPath(reported, localHostName: localHostName) else { return }
+        workingDirectoryUpdate = path
+    }
+    static func localDirectoryPath(_ raw: String, localHostName: String) -> String? {
+        guard raw.utf8.prefix(maximumDirectoryBytes + 1).count <= maximumDirectoryBytes else { return nil }
+        let path: String
+        if raw.hasPrefix("/") { path = raw }
+        else {
+            guard let url = URLComponents(string: raw), url.scheme?.lowercased() == "file",
+                  url.user == nil, url.password == nil, url.port == nil,
+                  url.query == nil, url.fragment == nil else { return nil }
+            let host = (url.host ?? "").lowercased()
+            guard host.isEmpty || host == "localhost" || host == localHostName.lowercased() else { return nil }
+            path = url.path
+        }
+        guard path.hasPrefix("/"), !path.hasPrefix("//"),
+              path.utf8.count <= maximumDirectoryBytes,
+              !path.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { return nil }
+        return path
     }
     func resize(columns: Int, rows: Int) throws {
         guard Self.valid(columns, rows) else { throw Failure.invalidGrid }

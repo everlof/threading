@@ -125,6 +125,9 @@ dbus-run-session -- python3 /terminal_catalogue_smoke.py "$bin/WindowHarness" "$
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 /terminal_catalogue_limits_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+python3 /terminal_directory_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+python3 /terminal_directory_identity_smoke.py "$bin/WindowHarness" "$fixture/terminal-restart-store" "$fixture"
 RESTART
 runuser -u threading-preview-test -- xvfb-run -a dbus-run-session -- bash /desktop-test.sh
 echo 'PASS installed package, live-child reinstall, saved-terminal restart, desktop entry and non-root native window'

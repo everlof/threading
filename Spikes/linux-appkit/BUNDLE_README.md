@@ -52,5 +52,8 @@ terminals are also available from their project's picker.
 Opening a saved terminal explicitly starts a fresh shell if its prior child has exited or is
 absent. The saved terminal keeps its identity and settings. Its recorded working directory is
 used when available, with the owning project as fallback.
+Live shells update that directory through local OSC 7 reports or one-second process sampling.
+A shell without OSC 7 that changes directory and exits between samples may retain its previous
+directory. Busy storage can also leave the last saved directory; the shell keeps running.
 Shells created in this window appear in the saved-terminal picker immediately. Opening the same
 shell from its project or saved row reuses its retained runtime.

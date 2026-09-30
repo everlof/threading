@@ -27,6 +27,22 @@ export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev >/dev/null
 ./package-app.sh
+# Exercise the same Release emulator/client modules before leaving the build container.
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PortablePTYClientHarness
+contract_bin=$(swift build -c release --show-bin-path)
+contract_fixture=$(mktemp -d /tmp/threading-contracts.XXXXXXXX)
+out/threading-linux-preview-ubuntu24.04-arm64/bin/threading-ptyd \
+  --socket "$contract_fixture/pty.sock" --state "$contract_fixture/daemon" >"$contract_fixture/daemon.log" 2>&1 &
+contract_daemon=$!
+trap 'kill "$contract_daemon" 2>/dev/null || true; wait "$contract_daemon" 2>/dev/null || true; rm -rf -- "$contract_fixture"' EXIT
+for ((attempt=0; attempt<100; attempt++)); do
+  [[ -S "$contract_fixture/pty.sock" ]] && break
+  kill -0 "$contract_daemon" || { cat "$contract_fixture/daemon.log"; exit 1; }
+  sleep .1
+done
+timeout 30 "$contract_bin/PortablePTYClientHarness" "$contract_fixture/pty.sock"
+# Run the cleanup trap without depending on the container CLI forwarding stdin EOF.
+exit 0
 BUILD
 
 grep -Fxq "source_revision=$source_revision" out/threading-linux-preview-ubuntu24.04-arm64/BUNDLE-MANIFEST
@@ -40,6 +56,8 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/terminal_restart_smoke.py:/terminal_restart_smoke.py:ro" \
   -v "$PWD/tests/terminal_catalogue_smoke.py:/terminal_catalogue_smoke.py:ro" \
   -v "$PWD/tests/terminal_catalogue_limits_smoke.py:/terminal_catalogue_limits_smoke.py:ro" \
+  -v "$PWD/tests/terminal_directory_smoke.py:/terminal_directory_smoke.py:ro" \
+  -v "$PWD/tests/terminal_directory_identity_smoke.py:/terminal_directory_identity_smoke.py:ro" \
   -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \
   -v "$PWD/tests/saved_terminal_refusal_smoke.py:/saved_terminal_refusal_smoke.py:ro" \
   -v "$PWD/tests/bundle_runtime_smoke.sh:/runner.sh:ro" \

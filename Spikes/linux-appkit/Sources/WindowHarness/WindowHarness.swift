@@ -191,80 +191,90 @@ struct WindowHarness {
 
     @MainActor static func main() async {
         do {
-            #if os(Linux)
-            let mode = CommandLine.arguments.dropFirst().first
-            if mode == "--attach" {
-                let args = Array(CommandLine.arguments.dropFirst(2))
-                guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach STORE SOCKET TERMINAL_UUID") }
-                try showAttachment(args)
-                return
-            }
-            if mode == "--attach-agent" {
-                let args = Array(CommandLine.arguments.dropFirst(2))
-                guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach-agent STORE SOCKET SESSION_UUID") }
-                try showAttachment(args, agent: true)
-                return
-            }
-            if mode == "--terminal" {
-                try showTerminal(Array(CommandLine.arguments.dropFirst(2)))
-                return
-            }
-            if mode == "--app" || mode == "--app-project" {
-                let args = Array(CommandLine.arguments.dropFirst(2))
-                let targeted = mode == "--app-project"
-                guard (targeted ? args.count == 4 : args.count >= 3), args[2].hasPrefix("/") else {
-                    throw WindowFailure("usage: WindowHarness --app EXISTING_STORE SOCKET ABS_SHELL [ARG ...] | --app-project EXISTING_STORE SOCKET ABS_SHELL PROJECT")
-                }
-                let requestedProject = targeted ? args[3] : nil
-                let snapshot = try await Task.detached {
-                    try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1])
-                }.value
-                try show(snapshot, launch: targeted ? Array(args.prefix(3)) : args)
-                return
-            }
-            if mode == "--app-codex" || mode == "--app-codex-project"
-                || mode == "--app-claude" || mode == "--app-claude-project"
-                || mode == "--app-agents" || mode == "--app-agents-project" {
-                let args = Array(CommandLine.arguments.dropFirst(2))
-                let targeted = mode!.hasSuffix("-project")
-                let combined = mode!.hasPrefix("--app-agents")
-                guard args.count == (combined ? (targeted ? 6 : 5) : (targeted ? 5 : 4)),
-                      args[2].hasPrefix("/") else {
-                    throw WindowFailure("usage: WindowHarness --app-{codex|claude} STORE SOCKET ABS_SHELL ABS_AGENT [PROJECT] | --app-agents STORE SOCKET ABS_SHELL CODEX_OR_- CLAUDE_OR_- [PROJECT]")
-                }
-                let codex = combined ? (args[3] == "-" ? nil : args[3])
-                    : (mode!.hasPrefix("--app-codex") ? args[3] : nil)
-                let claude = combined ? (args[4] == "-" ? nil : args[4])
-                    : (mode!.hasPrefix("--app-claude") ? args[3] : nil)
-                guard (codex != nil || claude != nil),
-                      codex.map({ $0.hasPrefix("/") }) ?? true,
-                      claude.map({ $0.hasPrefix("/") }) ?? true else {
-                    throw WindowFailure("configured agent executables must be absolute paths")
-                }
-                let requestedProject = targeted ? args.last : nil
-                let prepared = try await Task.detached {
-                    (try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1]),
-                     codex == nil ? [.standard] : discoverAccounts(for: .codex),
-                     claude == nil ? [.standard] : discoverAccounts(for: .claude))
-                }.value
-                try show(prepared.0, launch: Array(args.prefix(3)), agentExecutable: codex,
-                         claudeExecutable: claude, codexAccounts: prepared.1,
-                         claudeAccounts: prepared.2)
-                return
-            }
-            guard CommandLine.arguments.count == 2 else { throw WindowFailure("usage: WindowHarness EXISTING_STORE") }
-            let path = CommandLine.arguments[1]
-            // Database open, recovery and graph decoding never run on the UI actor. Only immutable
-            // values cross back. The snapshot is deliberately fixed for this window's lifetime.
-            let snapshot = try await Task.detached { try loadSnapshot(path) }.value
-            try show(snapshot)
-            #else
-            throw WindowFailure("WindowHarness requires Linux")
-            #endif
+            try await run()
         } catch {
+            #if os(Linux)
+            await GraphicalTerminal.waitForPendingStops()
+            #endif
             FileHandle.standardError.write(Data("WindowHarness: \(error)\n".utf8))
             exit(1)
         }
+        #if os(Linux)
+        await GraphicalTerminal.waitForPendingStops()
+        #endif
+    }
+
+    @MainActor private static func run() async throws {
+        #if os(Linux)
+        let mode = CommandLine.arguments.dropFirst().first
+        if mode == "--attach" {
+            let args = Array(CommandLine.arguments.dropFirst(2))
+            guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach STORE SOCKET TERMINAL_UUID") }
+            try showAttachment(args)
+            return
+        }
+        if mode == "--attach-agent" {
+            let args = Array(CommandLine.arguments.dropFirst(2))
+            guard args.count == 3 else { throw WindowFailure("usage: WindowHarness --attach-agent STORE SOCKET SESSION_UUID") }
+            try showAttachment(args, agent: true)
+            return
+        }
+        if mode == "--terminal" {
+            try showTerminal(Array(CommandLine.arguments.dropFirst(2)))
+            return
+        }
+        if mode == "--app" || mode == "--app-project" {
+            let args = Array(CommandLine.arguments.dropFirst(2))
+            let targeted = mode == "--app-project"
+            guard (targeted ? args.count == 4 : args.count >= 3), args[2].hasPrefix("/") else {
+                throw WindowFailure("usage: WindowHarness --app EXISTING_STORE SOCKET ABS_SHELL [ARG ...] | --app-project EXISTING_STORE SOCKET ABS_SHELL PROJECT")
+            }
+            let requestedProject = targeted ? args[3] : nil
+            let snapshot = try await Task.detached {
+                try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1])
+            }.value
+            try show(snapshot, launch: targeted ? Array(args.prefix(3)) : args)
+            return
+        }
+        if mode == "--app-codex" || mode == "--app-codex-project"
+            || mode == "--app-claude" || mode == "--app-claude-project"
+            || mode == "--app-agents" || mode == "--app-agents-project" {
+            let args = Array(CommandLine.arguments.dropFirst(2))
+            let targeted = mode!.hasSuffix("-project")
+            let combined = mode!.hasPrefix("--app-agents")
+            guard args.count == (combined ? (targeted ? 6 : 5) : (targeted ? 5 : 4)),
+                  args[2].hasPrefix("/") else {
+                throw WindowFailure("usage: WindowHarness --app-{codex|claude} STORE SOCKET ABS_SHELL ABS_AGENT [PROJECT] | --app-agents STORE SOCKET ABS_SHELL CODEX_OR_- CLAUDE_OR_- [PROJECT]")
+            }
+            let codex = combined ? (args[3] == "-" ? nil : args[3])
+                : (mode!.hasPrefix("--app-codex") ? args[3] : nil)
+            let claude = combined ? (args[4] == "-" ? nil : args[4])
+                : (mode!.hasPrefix("--app-claude") ? args[3] : nil)
+            guard (codex != nil || claude != nil),
+                  codex.map({ $0.hasPrefix("/") }) ?? true,
+                  claude.map({ $0.hasPrefix("/") }) ?? true else {
+                throw WindowFailure("configured agent executables must be absolute paths")
+            }
+            let requestedProject = targeted ? args.last : nil
+            let prepared = try await Task.detached {
+                (try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1]),
+                 codex == nil ? [.standard] : discoverAccounts(for: .codex),
+                 claude == nil ? [.standard] : discoverAccounts(for: .claude))
+            }.value
+            try show(prepared.0, launch: Array(args.prefix(3)), agentExecutable: codex,
+                     claudeExecutable: claude, codexAccounts: prepared.1,
+                     claudeAccounts: prepared.2)
+            return
+        }
+        guard CommandLine.arguments.count == 2 else { throw WindowFailure("usage: WindowHarness EXISTING_STORE") }
+        let path = CommandLine.arguments[1]
+        // Database open, recovery and graph decoding never run on the UI actor. Only immutable
+        // values cross back. The snapshot is deliberately fixed for this window's lifetime.
+        let snapshot = try await Task.detached { try loadSnapshot(path) }.value
+        try show(snapshot)
+        #else
+        throw WindowFailure("WindowHarness requires Linux")
+        #endif
     }
 
     #if os(Linux)

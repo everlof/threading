@@ -127,6 +127,12 @@ unchanged. A failed ownership query does not authorize a start, and a lost spawn
 authorize a retry. A definitive refusal permits another explicit activation and fresh survey.
 Newly created shells enter the saved-terminal picker as soon as their record is saved. Project
 and saved-row navigation share one retained runtime, including after a same-ID restart.
+Saved shells remember their live working directory through local OSC 7 reports and a one-second
+Linux root-process sample. Sampling requires the daemon's original PID/start-time identity;
+older replies still permit live OSC updates. Reopening uses the remembered directory, with the
+owning project as fallback when it is gone. Busy storage does not interrupt the shell. Close/exit
+attempts a final write, and app shutdown waits at most two seconds. A shell without OSC 7 can
+change directory and exit between samples, leaving the previous directory saved.
 It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
 `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
@@ -143,6 +149,10 @@ ownership. The installed Release package runs these same fixtures in `./bundle-s
 Native AT-SPI coverage also checks immediate saved-row admission and project/saved-picker runtime
 reuse without duplicate records or terminal counts, the 512-row/eight-runtime limits, and counts
 after folder import.
+The directory fixtures exercise plain bash without OSC 7, Unicode paths, same-ID restart,
+live reattachment, original project ownership and deleted-directory fallback. Controlled peers
+cover missing/wrong process start times, unrelated PIDs, historical and fragmented replay OSC 7,
+and valid live directory reports when process sampling is unavailable.
 In a Codex-enabled project list, Ctrl+Shift+I opens the native login chooser; Up/Down and Enter
 select the login used by the next Ctrl+Shift+A launch. It lists the standard home and up to 31
 marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window opens. An explicit

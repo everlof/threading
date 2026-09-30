@@ -209,6 +209,7 @@ func checkSelection() throws {
 func run() throws {
     try checkInbox()
     try checkEmulator()
+    try checkWorkingDirectoryReports()
     try checkKeyboard()
     try checkScrollback()
     try checkSelection()
