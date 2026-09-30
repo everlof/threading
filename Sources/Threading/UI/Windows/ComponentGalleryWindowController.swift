@@ -156,6 +156,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SeparatorView",
         "ShortcutRecorderView",
         "SidebarBackdropView",
+        "SidebarBrandBandView",
         "SidebarBrandView",
         "SidebarEdgeRevealCoordinator",
         "SimulatorRecordingBadge",
@@ -170,8 +171,10 @@ final class ComponentGalleryViewController: NSViewController {
         "SubmissionStatusView",
         "TerminalStatusBanner",
         "ThreadingMarkView",
+        "ThemeLogoView",
         "ThemeSwatchImage",
         "ThemeSwatchView",
+        "ThemeTransitionOverlayView",
         "ThemedActionPopoverViewController",
         "ThemedButton",
         "ThemedAlert",
@@ -278,6 +281,9 @@ final class ComponentGalleryViewController: NSViewController {
     /// The mark stories' views, retained so the replay control can reach them.
     private var markSamples: [ThreadingMarkView] = []
     private var particleMarkSamples: [ThreadingMarkView] = []
+    private var themeLogoSample: ThemeLogoView?
+    private var themeLogoSampleHovered = false
+    private var arrivalStage: ThemedSurfaceView?
     private let appearanceToggle = ThemedToggle()
     private let receiptLabel = NSTextField(
         labelWithString: L10n.string("Ready — interact with any story.")
@@ -3750,6 +3756,30 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSidebarBrandSample()
                 ),
                 story(
+                    "SidebarBrandBandView",
+                    "The header's own ground when a theme states a band: its gradient runs from "
+                        + "the column's top edge to the header's bottom, and the header's controls "
+                        + "and wordmark take the band's ink. Empty under a theme without one — "
+                        + "switch the theme above to compare.",
+                    makeSidebarBrandBandSample()
+                ),
+                story(
+                    "ThemeLogoView",
+                    "A theme's logo that moves. Fizz holds its hover lift and lets particles "
+                        + "stream from its top, Press plays its beat with a burst, Launch plays "
+                        + "the first-appearance beat. Reduce Motion and the Theme animations "
+                        + "setting leave it still.",
+                    makeThemeLogoSample()
+                ),
+                story(
+                    "ThemeTransitionOverlayView",
+                    "How a theme arrives: particles in the incoming theme's colours cross the "
+                        + "window while a wash rises to hide the swap and lifts off the new "
+                        + "chrome. Play runs it over this card with the current theme's "
+                        + "transition, or a sparkle in its accent when it states none.",
+                    makeThemeArrivalSample()
+                ),
+                story(
                     "AgentWorkloadAnalyzerView",
                     "The spectrum material's workload reading in place of the brand: seven "
                         + "fixed bands off the shared AgentIntensity envelope, the working "
@@ -4938,6 +4968,139 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return pane
+    }
+
+    private func makeSidebarBrandBandSample() -> NSView {
+        let band = SidebarBrandBandView()
+
+        let pane = ThemedSurfaceView()
+        pane.applySurface(fill: Design.Surface.background, radius: .control)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(band)
+
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth),
+            pane.heightAnchor.constraint(equalToConstant: PaneHeaderView.bandHeight),
+            band.topAnchor.constraint(equalTo: pane.topAnchor),
+            band.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            band.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: pane.trailingAnchor)
+        ])
+
+        return pane
+    }
+
+    /// The app's own icon dressed as a theme logo, so the story moves under every theme rather
+    /// than only under one that ships a logo. Shown at the mark samples' inspection size; the
+    /// sidebar wears it at 24pt.
+    private func makeThemeLogoSample() -> NSView {
+        let logo = ThemeLogoView()
+        themeLogoSample = logo
+        configureThemeLogoSample()
+
+        NSLayoutConstraint.activate([
+            logo.widthAnchor.constraint(equalToConstant: 44),
+            logo.heightAnchor.constraint(equalToConstant: 44)
+        ])
+
+        let row = NSStackView(views: [
+            logo,
+            button("Fizz", action: #selector(toggleThemeLogoFizz(_:))),
+            button("Press", action: #selector(pressThemeLogo(_:))),
+            button("Launch", action: #selector(launchThemeLogo(_:)))
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.large
+        return row
+    }
+
+    /// Restated before every gesture: the particles' inks are the current theme's, and the
+    /// gallery's theme can change between two presses.
+    private func configureThemeLogoSample() {
+        guard let logo = themeLogoSample else { return }
+        let spec = SidebarStyle.Brand.LogoMotion(
+            hover: .lift,
+            press: .pop,
+            launch: .bounce,
+            particles: ThemeParticles(style: .fizz, colors: [.role(.accent)], density: 0.8)
+        )
+        let particles = spec.particles.map {
+            ThemeBackdropAppearance.particles(
+                $0,
+                theme: AppThemePalette.current,
+                appearance: logo.effectiveAppearance
+            )
+        }
+        logo.configure(
+            image: NSImage(named: NSImage.applicationIconName),
+            motion: SidebarAppearance.Brand.LogoMotion(spec: spec, particles: particles)
+        )
+        if themeLogoSampleHovered { logo.setHovered(true) }
+    }
+
+    @objc private func toggleThemeLogoFizz(_ sender: Any?) {
+        themeLogoSampleHovered.toggle()
+        configureThemeLogoSample()
+        themeLogoSample?.setHovered(themeLogoSampleHovered)
+        showReceipt(
+            themeLogoSampleHovered ? L10n.string("Logo fizzing.") : L10n.string("Logo at rest.")
+        )
+    }
+
+    @objc private func pressThemeLogo(_ sender: Any?) {
+        configureThemeLogoSample()
+        themeLogoSample?.playPress()
+        showReceipt(L10n.string("Logo press played."))
+    }
+
+    @objc private func launchThemeLogo(_ sender: Any?) {
+        configureThemeLogoSample()
+        themeLogoSample?.playLaunch()
+        showReceipt(L10n.string("Logo launch played."))
+    }
+
+    private func makeThemeArrivalSample() -> NSView {
+        let stage = ThemedSurfaceView()
+        stage.applySurface(fill: Design.Surface.background, radius: .control)
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        arrivalStage = stage
+
+        NSLayoutConstraint.activate([
+            stage.widthAnchor.constraint(equalToConstant: SidebarDefaults.defaultWidth * 1.5),
+            stage.heightAnchor.constraint(equalToConstant: PaneHeaderView.bandHeight * 3)
+        ])
+
+        let column = NSStackView(views: [
+            stage,
+            button("Play", action: #selector(playThemeArrival(_:)))
+        ])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
+        return column
+    }
+
+    @objc private func playThemeArrival(_ sender: Any?) {
+        guard let stage = arrivalStage else { return }
+        guard ThemeParticleHold.motionAllowed else {
+            showReceipt(L10n.string("Theme animations are off."))
+            return
+        }
+        let sample = ThemeTransition(
+            particles: ThemeParticles(style: .sparkle, colors: [.role(.accent)], density: 0.8),
+            shimmer: true
+        )
+        guard let palette = ThemeTransitionPresenter.palette(
+            for: AppThemeLibrary.current,
+            fallback: sample
+        ) else { return }
+        stage.subviews.compactMap { $0 as? ThemeTransitionOverlayView }
+            .forEach { $0.removeFromSuperview() }
+        let overlay = ThemeTransitionOverlayView(frame: stage.bounds)
+        stage.addSubview(overlay)
+        overlay.play(palette) {}
+        showReceipt(L10n.string("Arrival played."))
     }
 
     private func makeAgentWorkloadAnalyzerSample() -> NSView {

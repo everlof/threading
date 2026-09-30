@@ -33,6 +33,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case discoversProjectIcons
     case discoversAccountAvatars
     case harmonizesTerminalBackgrounds
+    case playsThemeMotion
     case convertsDroppedImages
     case copiesTerminalSelection
     case notifiesOnAttention
@@ -887,6 +888,13 @@ enum AppSettingDefinitions {
         presentations: [row("profiles", 3, "Text & Colour", "Keep backgrounds in tune with the theme",
                             ["background", "colour", "colors"])]
     )
+    static let playsThemeMotion = AppSettingDescriptor<Bool>(
+        identity: .playsThemeMotion,
+        persistenceKey: "playsThemeMotion",
+        absence: .registered(true),
+        presentations: [row("themes", 2, "App", "Theme animations",
+                            ["animation", "motion", "particles", "bubbles", "transition"])]
+    )
     static let convertsDroppedImages = AppSettingDescriptor<Bool>(
         identity: .convertsDroppedImages,
         persistenceKey: "convertsDroppedImages",
@@ -1525,7 +1533,8 @@ enum AppSettingDefinitions {
         .init(nativeSidebarGroupByFact),
         .init(nativeSidebarSortByFact), .init(promptReturnKey),
         .init(discoversProjectIcons), .init(discoversAccountAvatars),
-        .init(harmonizesTerminalBackgrounds), .init(convertsDroppedImages),
+        .init(harmonizesTerminalBackgrounds), .init(playsThemeMotion),
+        .init(convertsDroppedImages),
         .init(copiesTerminalSelection), .init(notifiesOnAttention),
         .init(disabledAttentionAlerts), .init(legacyPlaysAttentionAlertSound),
         .init(attentionAlertSound), .init(terminalBellSound), .init(soundEventChoices),

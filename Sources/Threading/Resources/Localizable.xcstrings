@@ -4788,6 +4788,17 @@
         }
       }
     },
+    "A theme's logo that moves. Fizz holds its hover lift and lets particles stream from its top, Press plays its beat with a burst, Launch plays the first-appearance beat. Reduce Motion and the Theme animations setting leave it still." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett temas logotyp som rör sig. Bubbla håller dess lyft och låter partiklar strömma från toppen, Tryck spelar dess rörelse med en skur, Start spelar rörelsen vid första visningen. Minska rörelse och inställningen Temaanimationer håller den stilla."
+          }
+        }
+      }
+    },
     "A theme-owned heading whose authored line break remains visible and meaningful." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8121,6 +8132,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arrangera"
+          }
+        }
+      }
+    },
+    "Arrival played." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ankomsten spelades upp."
           }
         }
       }
@@ -22122,6 +22144,17 @@
         }
       }
     },
+    "Fizz" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bubbla"
+          }
+        }
+      }
+    },
     "Flag the session and wait for you" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24290,6 +24323,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hur något inskickat slutade. Tryck på varje: formuleringen och symbolen bär utfallet, så det överlever Differentiera utan färg — och varje ändring aviseras för VoiceOver."
+          }
+        }
+      }
+    },
+    "How a theme arrives: particles in the incoming theme's colours cross the window while a wash rises to hide the swap and lifts off the new chrome. Play runs it over this card with the current theme's transition, or a sparkle in its accent when it states none." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hur ett tema anländer: partiklar i det inkommande temats färger korsar fönstret medan en slöja stiger för att dölja bytet och lyfter från det nya utseendet. Spela upp kör den över det här kortet med det aktuella temats övergång, eller ett glitter i dess accentfärg när det inte anger någon."
           }
         }
       }
@@ -26583,6 +26627,17 @@
         }
       }
     },
+    "Launch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start"
+          }
+        }
+      }
+    },
     "Launch and drive this project's app to see a change working" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27828,6 +27883,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inloggningsnamn"
+          }
+        }
+      }
+    },
+    "Logo at rest." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logotypen vilar."
+          }
+        }
+      }
+    },
+    "Logo fizzing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logotypen bubblar."
+          }
+        }
+      }
+    },
+    "Logo launch played." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logotypens start spelades upp."
+          }
+        }
+      }
+    },
+    "Logo press played." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logotypens tryck spelades upp."
           }
         }
       }
@@ -29379,6 +29478,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Film"
+          }
+        }
+      }
+    },
+    "Moving backgrounds, logo effects and the transition a theme plays when you switch to it. Off keeps a theme's look but holds it still; Reduce Motion always turns them off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rörliga bakgrunder, logotypeffekter och övergången ett tema spelar när du byter till det. Av behåller temats utseende men håller det stilla; Minska rörelse stänger alltid av dem."
           }
         }
       }
@@ -35562,6 +35672,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Presentationsutseende"
+          }
+        }
+      }
+    },
+    "Press" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck"
           }
         }
       }
@@ -45429,6 +45550,17 @@
         }
       }
     },
+    "SidebarBrandBandView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SidebarBrandBandView"
+          }
+        }
+      }
+    },
     "SidebarBrandView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51005,6 +51137,17 @@
         }
       }
     },
+    "The header's own ground when a theme states a band: its gradient runs from the column's top edge to the header's bottom, and the header's controls and wordmark take the band's ink. Empty under a theme without one — switch the theme above to compare." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rubrikens egen bakgrund när ett tema anger ett band: dess gradient går från kolumnens överkant till rubrikens nederkant, och rubrikens kontroller och ordmärke får bandets färg. Tom under ett tema utan band — byt tema ovan för att jämföra."
+          }
+        }
+      }
+    },
     "The host could not reach %@: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53290,6 +53433,28 @@
         }
       }
     },
+    "Theme animations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temaanimationer"
+          }
+        }
+      }
+    },
+    "Theme animations are off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temaanimationer är avstängda."
+          }
+        }
+      }
+    },
     "Theme audit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53334,6 +53499,17 @@
         }
       }
     },
+    "ThemeLogoView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemeLogoView"
+          }
+        }
+      }
+    },
     "ThemeSwatchImage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53363,6 +53539,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ThemeSwatchView valde %@."
+          }
+        }
+      }
+    },
+    "ThemeTransitionOverlayView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemeTransitionOverlayView"
           }
         }
       }

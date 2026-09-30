@@ -230,6 +230,24 @@ final class ThemePreferencesViewController: NSViewController {
         ])
     }
 
+    /// A theme's own motion, on or off — the user's switch beside Reduce Motion rather than
+    /// instead of it.
+    private lazy var themeMotionToggle: ThemedToggle = {
+        let toggle = SettingsUI.toggle(
+            isOn: AppSettings.shared.playsThemeMotion,
+            target: self,
+            action: #selector(themeMotionChanged)
+        )
+        toggle.setAccessibilityIdentifier("settings.themes.theme-motion")
+        return toggle
+    }()
+
+    /// The write posts `AppSettingsDidChange`, which `ThemeParticleHold` answers by stilling or
+    /// restarting every field and logo — nothing here has to name them.
+    @objc private func themeMotionChanged() {
+        AppSettings.shared.playsThemeMotion = themeMotionToggle.state == .on
+    }
+
     /// The app's own theme — the window, sidebar, panels and text — chosen for the whole app.
     ///
     /// App-wide rather than per-session, unlike the terminal palette below it: there is one
@@ -281,6 +299,13 @@ final class ThemePreferencesViewController: NSViewController {
                 title: "Classic skins",
                 subtitle: "Import a classic Winamp .wsz skin, or drop one on this page. Files stay on this Mac.",
                 control: importButton
+            ),
+            SettingsUI.row(
+                title: "Theme animations",
+                subtitle: "Moving backgrounds, logo effects and the transition a theme plays "
+                    + "when you switch to it. Off keeps a theme's look but holds it still; "
+                    + "Reduce Motion always turns them off.",
+                control: themeMotionToggle
             )
         ])
         reloadAppThemeControls()
@@ -512,7 +537,7 @@ final class ThemePreferencesViewController: NSViewController {
     /// settings page that silently declined to remember one would be the worse bug.
     private func applyAppTheme(id: AppThemeID) {
         guard let theme = AppThemeLibrary.theme(withID: id) else { return }
-        AppThemeLibrary.apply(theme)
+        ThemeSwitch.apply(theme)
         // The subtitle describes the *chosen* theme, so it moves with the choice — otherwise
         // it keeps describing the theme that was selected when the card was built.
         appThemeSubtitle?.stringValue = theme.summary ?? ""
@@ -657,7 +682,7 @@ final class ThemePreferencesViewController: NSViewController {
             }
         }
         if let lastImported {
-            AppThemeLibrary.apply(lastImported)
+            ThemeSwitch.apply(lastImported)
         }
         if !failures.isEmpty {
             presentAlert(

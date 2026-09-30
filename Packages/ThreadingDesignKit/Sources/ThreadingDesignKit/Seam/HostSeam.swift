@@ -49,11 +49,11 @@ public struct AppThemeDidChange: AppEvent {
     public let themeID: AppThemeID
 }
 
-// MARK: - The five settings
+// MARK: - The six settings
 
 /// The preferences the design system reads, as a plugin sees them.
 ///
-/// `DesignSettings` already names exactly five values and is compiled from the application's own
+/// `DesignSettings` already names exactly six values and is compiled from the application's own
 /// file. This supplies them without a `UserDefaults` the plugin has no business reading: the host
 /// installs what the user chose.
 public struct AppSettings {
@@ -62,6 +62,8 @@ public struct AppSettings {
     public nonisolated(unsafe) static var chromeFontFamily: String?
     public nonisolated(unsafe) static var conversationFontFamily: String?
     public nonisolated(unsafe) static var promptReturnKey: PromptReturnKey = .matchesComposer
+    /// A plugin's panes wear the host's ambient particles too; the host states whether they move.
+    public nonisolated(unsafe) static var playsThemeMotion = true
 
     public static let shared = AppSettings()
     public init() {}

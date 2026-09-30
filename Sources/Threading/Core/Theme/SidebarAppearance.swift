@@ -52,6 +52,13 @@ public enum SidebarAppearance {
     public struct Background: Equatable {
         public var gradient: Gradient?
         public var image: ImageLayer?
+        public var particles: Particles?
+
+        /// A stated particle block with its inks resolved against the variant that stated it.
+        public struct Particles: Equatable {
+            public let spec: ThemeParticles
+            public let colors: [NSColor]
+        }
 
         public struct Gradient: Equatable {
             public let colors: [NSColor]
@@ -79,7 +86,7 @@ public enum SidebarAppearance {
         guard let stated = theme.variant(for: appearance)?.sidebar?.background else {
             return nil
         }
-        return ThemeBackdropAppearance.resolve(stated, themeID: theme.id)
+        return ThemeBackdropAppearance.resolve(stated, themeID: theme.id, appearance: appearance)
     }
 
     // MARK: - Brand
@@ -97,6 +104,24 @@ public enum SidebarAppearance {
         public let title: String?
         /// The recipe the wordmark label records, so the theme sweep re-resolves it.
         public let titleRole: Design.FontRole
+        /// The wordmark's ink: the stated title colour, else the band's ink, else nil for the
+        /// label every brand drew before either existed.
+        public let titleColor: NSColor?
+        /// The header's own ground, when the theme states one.
+        public let band: Band?
+        /// How the logo moves, with its particles' inks already resolved.
+        public let motion: LogoMotion?
+
+        public struct Band: Equatable {
+            public let gradient: Background.Gradient
+            /// What the header's controls and wordmark draw in over the band.
+            public let ink: NSColor
+        }
+
+        public struct LogoMotion: Equatable {
+            public let spec: SidebarStyle.Brand.LogoMotion
+            public let particles: Background.Particles?
+        }
     }
 
     /// Always answers: absence at every level means the Threading mark beside the app's name.
@@ -128,6 +153,24 @@ public enum SidebarAppearance {
             text = (custom?.isEmpty == false ? custom : nil) ?? AppInfo.name
         }
 
+        let band = stated?.band.flatMap { band in
+            ThemeBackdropAppearance.gradient(band.gradient).map { gradient in
+                Brand.Band(
+                    gradient: gradient,
+                    ink: band.ink ?? theme.resolved(.label, appearance: appearance)
+                )
+            }
+        }
+
+        let motion = stated?.motion.map { motion in
+            Brand.LogoMotion(
+                spec: motion,
+                particles: motion.particles.map {
+                    ThemeBackdropAppearance.particles($0, theme: theme, appearance: appearance)
+                }
+            )
+        }
+
         return Brand(
             logo: logo,
             title: text,
@@ -135,7 +178,43 @@ public enum SidebarAppearance {
                 family: title?.fontFamily,
                 size: title?.fontSize.map { CGFloat($0) },
                 weight: (title?.weight ?? .semibold).fontWeight
-            )
+            ),
+            titleColor: title?.color ?? band?.ink,
+            band: band,
+            motion: motion
+        )
+    }
+
+    // MARK: - The Band as a Ground
+
+    /// The ink family for the header's controls while a band is stated — `InkSource.brandBand`'s
+    /// answer. Cut from the band's one ink the way the title band's is, because the band is a
+    /// ground the theme authors directly rather than through roles.
+    public static var bandInk: Design.Ink {
+        let base = brand(for: NSAppearance.currentDrawing()).band?.ink ?? Design.Text.label
+        return Design.Ink(
+            base: base,
+            label: base,
+            secondary: base.withAlphaComponent(0.7),
+            tertiary: base.withAlphaComponent(0.45),
+            quaternary: base.withAlphaComponent(0.25)
+        )
+    }
+
+    /// The single colour that stands in for the band when a component must composite against
+    /// it: the average of its stops, which is what the eye reads the band as.
+    public static var bandGround: NSColor {
+        guard let colors = brand(for: NSAppearance.currentDrawing()).band?.gradient.colors
+            .compactMap({ $0.usingColorSpace(.sRGB) }),
+              !colors.isEmpty else {
+            return Design.Surface.ground
+        }
+        let count = CGFloat(colors.count)
+        return NSColor(
+            srgbRed: colors.map(\.redComponent).reduce(0, +) / count,
+            green: colors.map(\.greenComponent).reduce(0, +) / count,
+            blue: colors.map(\.blueComponent).reduce(0, +) / count,
+            alpha: 1
         )
     }
 
@@ -165,27 +244,34 @@ public enum ThemeBackdropAppearance {
     public static func material(for appearance: NSAppearance) -> Resolved? {
         let theme = AppThemePalette.current
         guard let stated = theme.material(for: appearance).backdrop else { return nil }
-        return resolve(stated, themeID: theme.id)
+        return resolve(stated, themeID: theme.id, appearance: appearance)
     }
 
     /// Stated style in, drawable values out. Nil when nothing resolves — an image whose name
     /// answers to no asset, a gradient with fewer than two stops — so a caller can hide the
     /// whole layer rather than draw an empty one.
-    public static func resolve(_ stated: ThemeBackdrop, themeID: AppThemeID) -> Resolved? {
+    ///
+    /// Particle inks resolve against the current palette in `appearance`: every region that
+    /// draws a backdrop draws the theme in force, and an adaptive theme's two variants may
+    /// name the same role and mean two different reds.
+    public static func resolve(
+        _ stated: ThemeBackdrop,
+        themeID: AppThemeID,
+        appearance: NSAppearance = NSAppearance.currentDrawing()
+    ) -> Resolved? {
         guard !stated.isEmpty else { return nil }
 
         var resolved = Resolved()
 
-        if let gradient = stated.gradient,
-           (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count),
-           gradient.angleDegrees.isFinite,
-           gradient.stops.allSatisfy({ (0...1).contains($0.position) }) {
-            let ordered = gradient.stops.sorted { $0.position < $1.position }
-            resolved.gradient = Resolved.Gradient(
-                colors: ordered.map(\.color),
-                locations: ordered.map { CGFloat($0.position) },
-                angleDegrees: CGFloat(gradient.angleDegrees),
-                drift: gradient.drift
+        if let gradient = stated.gradient {
+            resolved.gradient = self.gradient(gradient)
+        }
+
+        if let particles = stated.particles {
+            resolved.particles = self.particles(
+                particles,
+                theme: AppThemePalette.current,
+                appearance: appearance
             )
         }
 
@@ -198,7 +284,40 @@ public enum ThemeBackdropAppearance {
             )
         }
 
-        return resolved.gradient == nil && resolved.image == nil ? nil : resolved
+        return resolved.gradient == nil && resolved.image == nil && resolved.particles == nil
+            ? nil
+            : resolved
+    }
+
+    /// Sorted stops, the one order every region draws a gradient in — or nil for a gradient
+    /// no region can draw: too few or too many stops, a position outside 0…1, an angle that is
+    /// not a number.
+    public static func gradient(_ stated: ThemeBackdrop.Gradient) -> Resolved.Gradient? {
+        guard (2...ThemeBackdropLimits.maximumGradientStops).contains(stated.stops.count),
+              stated.angleDegrees.isFinite,
+              stated.stops.allSatisfy({ (0...1).contains($0.position) }) else {
+            return nil
+        }
+        let ordered = stated.stops.sorted { $0.position < $1.position }
+        return Resolved.Gradient(
+            colors: ordered.map(\.color),
+            locations: ordered.map { CGFloat($0.position) },
+            angleDegrees: CGFloat(stated.angleDegrees),
+            drift: stated.drift
+        )
+    }
+
+    /// A particle block with its inks turned into colours for the variant in `appearance`.
+    public static func particles(
+        _ stated: ThemeParticles,
+        theme: AppTheme,
+        appearance: NSAppearance
+    ) -> Resolved.Particles {
+        var colors: [NSColor] = []
+        appearance.performAsCurrentDrawingAppearance {
+            colors = stated.resolvedInks.map { $0.resolved(in: theme, appearance: appearance) }
+        }
+        return Resolved.Particles(spec: stated, colors: colors)
     }
 
     /// The tier that owns the theme answers for its bytes: a contributed theme's were read out

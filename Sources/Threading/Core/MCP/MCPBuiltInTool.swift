@@ -105,6 +105,8 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case createAppTheme
   case duplicateAppTheme
   case updateAppTheme
+  case previewAppTheme
+  case addAppThemeFont
   case extensionListComponents
   case extensionScaffoldProject
   case extensionProposeInstall

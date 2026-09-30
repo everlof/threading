@@ -1118,6 +1118,8 @@ struct AppThemeBackdropArguments: Codable, Sendable {
   let removeGradient: Bool?
   let image: AppThemeSidebarImageArguments?
   let removeImage: Bool?
+  let particles: AppThemeParticlesArguments?
+  let removeParticles: Bool?
   let remove: Bool?
 
   init(
@@ -1125,12 +1127,16 @@ struct AppThemeBackdropArguments: Codable, Sendable {
     removeGradient: Bool? = nil,
     image: AppThemeSidebarImageArguments? = nil,
     removeImage: Bool? = nil,
+    particles: AppThemeParticlesArguments? = nil,
+    removeParticles: Bool? = nil,
     remove: Bool? = nil
   ) {
     self.gradient = gradient
     self.removeGradient = removeGradient
     self.image = image
     self.removeImage = removeImage
+    self.particles = particles
+    self.removeParticles = removeParticles
     self.remove = remove
   }
 
@@ -1139,7 +1145,116 @@ struct AppThemeBackdropArguments: Codable, Sendable {
     case removeGradient = "remove_gradient"
     case image
     case removeImage = "remove_image"
+    case particles
+    case removeParticles = "remove_particles"
     case remove
+  }
+}
+
+/// A theme's particles as a patch: every field optional, merged onto the block already stated
+/// (so `{"density": 0.8}` alone thickens an existing field) — `style` is required only when
+/// there is nothing to merge onto.
+struct AppThemeParticlesArguments: Codable, Sendable {
+  let style: String?
+  let shape: String?
+  let colors: [String]?
+  let density: Double?
+  let size: Double?
+  let speed: Double?
+  let opacity: Double?
+
+  init(
+    style: String? = nil,
+    shape: String? = nil,
+    colors: [String]? = nil,
+    density: Double? = nil,
+    size: Double? = nil,
+    speed: Double? = nil,
+    opacity: Double? = nil
+  ) {
+    self.style = style
+    self.shape = shape
+    self.colors = colors
+    self.density = density
+    self.size = size
+    self.speed = speed
+    self.opacity = opacity
+  }
+}
+
+/// The header band behind the sidebar's brand row and controls.
+struct AppThemeSidebarBandArguments: Codable, Sendable {
+  let gradient: AppThemeGradientArguments?
+  let ink: String?
+
+  init(gradient: AppThemeGradientArguments? = nil, ink: String? = nil) {
+    self.gradient = gradient
+    self.ink = ink
+  }
+}
+
+/// The logo's gestures and particles. Every field optional and merged onto what is stated.
+struct AppThemeLogoMotionArguments: Codable, Sendable {
+  let hover: String?
+  let press: String?
+  let launch: String?
+  let particles: AppThemeParticlesArguments?
+  let origin: AppThemeLogoOriginArguments?
+  let working: Bool?
+
+  init(
+    hover: String? = nil,
+    press: String? = nil,
+    launch: String? = nil,
+    particles: AppThemeParticlesArguments? = nil,
+    origin: AppThemeLogoOriginArguments? = nil,
+    working: Bool? = nil
+  ) {
+    self.hover = hover
+    self.press = press
+    self.launch = launch
+    self.particles = particles
+    self.origin = origin
+    self.working = working
+  }
+}
+
+struct AppThemeLogoOriginArguments: Codable, Sendable {
+  let x: Double?
+  let y: Double?
+
+  init(x: Double? = nil, y: Double? = nil) {
+    self.x = x
+    self.y = y
+  }
+}
+
+/// How a switch into the variant is carried. Merged onto the stated transition like particles.
+struct AppThemeTransitionArguments: Codable, Sendable {
+  let particles: AppThemeParticlesArguments?
+  let duration: Double?
+  let wash: String?
+  let washOpacity: Double?
+  let shimmer: Bool?
+
+  init(
+    particles: AppThemeParticlesArguments? = nil,
+    duration: Double? = nil,
+    wash: String? = nil,
+    washOpacity: Double? = nil,
+    shimmer: Bool? = nil
+  ) {
+    self.particles = particles
+    self.duration = duration
+    self.wash = wash
+    self.washOpacity = washOpacity
+    self.shimmer = shimmer
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case particles, duration, wash
+    case washOpacity = "wash_opacity"
+    case shimmer
   }
 }
 
@@ -1149,12 +1264,29 @@ struct AppThemeSidebarTitleArguments: Codable, Sendable {
   let fontSize: Double?
   let weight: String?
   let hidden: Bool?
+  let color: String?
+
+  init(
+    text: String? = nil,
+    fontFamily: String? = nil,
+    fontSize: Double? = nil,
+    weight: String? = nil,
+    hidden: Bool? = nil,
+    color: String? = nil
+  ) {
+    self.text = text
+    self.fontFamily = fontFamily
+    self.fontSize = fontSize
+    self.weight = weight
+    self.hidden = hidden
+    self.color = color
+  }
 
   private enum CodingKeys: String, CodingKey {
     case text
     case fontFamily = "font_family"
     case fontSize = "font_size"
-    case weight, hidden
+    case weight, hidden, color
   }
 }
 
@@ -1170,9 +1302,15 @@ struct AppThemeSidebarArguments: Codable, Sendable {
   let removeGradient: Bool?
   let image: AppThemeSidebarImageArguments?
   let removeImage: Bool?
+  let particles: AppThemeParticlesArguments?
+  let removeParticles: Bool?
   let logo: AppThemeSidebarLogoArguments?
+  let logoMotion: AppThemeLogoMotionArguments?
+  let removeLogoMotion: Bool?
   let title: AppThemeSidebarTitleArguments?
   let removeTitle: Bool?
+  let band: AppThemeSidebarBandArguments?
+  let removeBand: Bool?
   let navigatorWell: AppThemeSidebarNavigatorWellArguments?
   let removeNavigatorWell: Bool?
   let remove: Bool?
@@ -1182,9 +1320,15 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     removeGradient: Bool? = nil,
     image: AppThemeSidebarImageArguments? = nil,
     removeImage: Bool? = nil,
+    particles: AppThemeParticlesArguments? = nil,
+    removeParticles: Bool? = nil,
     logo: AppThemeSidebarLogoArguments? = nil,
+    logoMotion: AppThemeLogoMotionArguments? = nil,
+    removeLogoMotion: Bool? = nil,
     title: AppThemeSidebarTitleArguments? = nil,
     removeTitle: Bool? = nil,
+    band: AppThemeSidebarBandArguments? = nil,
+    removeBand: Bool? = nil,
     navigatorWell: AppThemeSidebarNavigatorWellArguments? = nil,
     removeNavigatorWell: Bool? = nil,
     remove: Bool? = nil
@@ -1193,9 +1337,15 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     self.removeGradient = removeGradient
     self.image = image
     self.removeImage = removeImage
+    self.particles = particles
+    self.removeParticles = removeParticles
     self.logo = logo
+    self.logoMotion = logoMotion
+    self.removeLogoMotion = removeLogoMotion
     self.title = title
     self.removeTitle = removeTitle
+    self.band = band
+    self.removeBand = removeBand
     self.navigatorWell = navigatorWell
     self.removeNavigatorWell = removeNavigatorWell
     self.remove = remove
@@ -1206,8 +1356,15 @@ struct AppThemeSidebarArguments: Codable, Sendable {
     case removeGradient = "remove_gradient"
     case image
     case removeImage = "remove_image"
-    case logo, title
+    case particles
+    case removeParticles = "remove_particles"
+    case logo
+    case logoMotion = "logo_motion"
+    case removeLogoMotion = "remove_logo_motion"
+    case title
     case removeTitle = "remove_title"
+    case band
+    case removeBand = "remove_band"
     case navigatorWell = "navigator_well"
     case removeNavigatorWell = "remove_navigator_well"
     case remove
@@ -1408,6 +1565,8 @@ struct AppThemeVariantArguments: Codable, Sendable {
   let terminalColors: [String: String]?
   let sidebar: AppThemeSidebarArguments?
   let chrome: AppThemeChromeArguments?
+  let transition: AppThemeTransitionArguments?
+  let removeTransition: Bool?
 
   /// Defaulted so the call sites (and tests) written before `sidebar` and `chrome` existed
   /// keep reading as they did.
@@ -1416,19 +1575,24 @@ struct AppThemeVariantArguments: Codable, Sendable {
     material: AppThemeMaterialArguments? = nil,
     terminalColors: [String: String]? = nil,
     sidebar: AppThemeSidebarArguments? = nil,
-    chrome: AppThemeChromeArguments? = nil
+    chrome: AppThemeChromeArguments? = nil,
+    transition: AppThemeTransitionArguments? = nil,
+    removeTransition: Bool? = nil
   ) {
     self.roles = roles
     self.material = material
     self.terminalColors = terminalColors
     self.sidebar = sidebar
     self.chrome = chrome
+    self.transition = transition
+    self.removeTransition = removeTransition
   }
 
   private enum CodingKeys: String, CodingKey {
     case roles, material
     case terminalColors = "terminal_colors"
-    case sidebar, chrome
+    case sidebar, chrome, transition
+    case removeTransition = "remove_transition"
   }
 }
 
@@ -1463,6 +1627,28 @@ struct DuplicateAppThemeArguments: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case themeID = "theme_id"
     case name, apply
+  }
+}
+
+struct PreviewAppThemeArguments: Codable, Sendable {
+  let themeID: String?
+  let appearance: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case themeID = "theme_id"
+    case appearance
+  }
+}
+
+struct AddAppThemeFontArguments: Codable, Sendable {
+  let themeID: String?
+  let source: AppThemeImageArguments?
+  let replaceExisting: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case themeID = "theme_id"
+    case source
+    case replaceExisting = "replace_existing"
   }
 }
 
@@ -2592,6 +2778,9 @@ enum MCPPropertyType: Encodable, Sendable {
   case number
   case boolean
   case integerOrString
+  /// A word or an object — the sidebar logo's `"mark"`/`"hidden"` or `{path|base64}`. Stated as
+  /// both types so a client validating against the schema accepts the image form it documents.
+  case stringOrObject
   case array
   /// A nested object, whose members are described by the schema's own `properties`.
   ///
@@ -2613,6 +2802,8 @@ enum MCPPropertyType: Encodable, Sendable {
       try container.encode("boolean")
     case .integerOrString:
       try container.encode(["integer", "string"])
+    case .stringOrObject:
+      try container.encode(["string", "object"])
     case .array:
       try container.encode("array")
     case .object:
@@ -2724,6 +2915,8 @@ enum MCPTools {
   static let createAppTheme = MCPBuiltInTool.createAppTheme.rawValue
   static let duplicateAppTheme = MCPBuiltInTool.duplicateAppTheme.rawValue
   static let updateAppTheme = MCPBuiltInTool.updateAppTheme.rawValue
+  static let previewAppTheme = MCPBuiltInTool.previewAppTheme.rawValue
+  static let addAppThemeFont = MCPBuiltInTool.addAppThemeFont.rawValue
 
   static let extensionListComponents = MCPBuiltInTool.extensionListComponents.rawValue
   static let extensionScaffoldProject = MCPBuiltInTool.extensionScaffoldProject.rawValue
@@ -2760,6 +2953,8 @@ enum MCPTools {
     .createAppTheme,
     .duplicateAppTheme,
     .updateAppTheme,
+    .previewAppTheme,
+    .addAppThemeFont,
   ].map(\.rawValue)
   static let extensionAuthoringTools = names(in: .extensionAuthoring)
 
@@ -7847,6 +8042,111 @@ enum MCPTools {
       )
     ),
     MCPToolDefinition(
+      tool: .previewAppTheme,
+      name: "preview_app_theme",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Preview app theme",
+      detail: "Render a theme on a sample window, light and dark, without applying it.",
+      symbol: "eye",
+      decodeArguments: { container in
+        try container.decodeIfPresent(PreviewAppThemeArguments.self, forKey: .arguments)
+          ?? PreviewAppThemeArguments(themeID: nil, appearance: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.previewAppTheme(arguments, completion: completion)
+      },
+      description: """
+        See what an app theme looks like: renders it on a sample window — the sidebar with \
+        its brand, band and ambient particles, a pane with its backdrop, a card, buttons \
+        and the paired terminal colours — and returns the PNG for you to inspect. Works \
+        for any theme, applied or not, and in both appearances of an adaptive one. Sample \
+        rows stand in for the user's projects, so nothing of theirs is captured. Motion is \
+        shown as a still frame of where particles would be. Use it after create_app_theme \
+        or update_app_theme and before telling the user a theme is finished.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "theme_id": MCPPropertySchema(
+            type: .string,
+            description: "Stable ID from list_app_themes. Omit for the active theme."
+          ),
+          "appearance": MCPPropertySchema(
+            type: .string,
+            description: "\"light\", \"dark\", or \"both\" (side by side). Defaults to every "
+              + "variant the theme has."
+          ),
+        ],
+        required: []
+      )
+    ),
+    MCPToolDefinition(
+      tool: .addAppThemeFont,
+      name: "add_app_theme_font",
+      groupID: "appearance",
+      family: .appearance,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Add a font to an app theme",
+      detail: "Give a custom theme a font file its title or material can name by family.",
+      symbol: "textformat",
+      decodeArguments: { container in
+        try container.decodeIfPresent(AddAppThemeFontArguments.self, forKey: .arguments)
+          ?? AddAppThemeFontArguments(themeID: nil, source: nil, replaceExisting: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.addAppThemeFont(arguments, completion: completion)
+      },
+      description: """
+        Give a custom app theme its own font: a .ttf, .otf or .ttc file is stored with the \
+        theme (copied on duplicate, deleted with it) and made available to this app only. \
+        Returns the family names it supplies; then name one in update_app_theme — \
+        sidebar.title.font_family for the wordmark, material.font_family or \
+        heading_style.font_family for prose. At most 4 fonts per theme, 16 MB each. \
+        replace_existing: true removes the theme's current fonts first (and alone, with no \
+        source, just removes them).
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "theme_id": MCPPropertySchema(
+            type: .string,
+            description: "The custom theme's stable ID."
+          ),
+          "source": MCPPropertySchema(
+            type: .object,
+            description: "The font file: {path} on this Mac or {base64} bytes.",
+            properties: [
+              "path": MCPPropertySchema(
+                type: .string,
+                description: "An absolute or ~-relative path to a font file."
+              ),
+              "base64": MCPPropertySchema(
+                type: .string,
+                description: "The font bytes, base64-encoded."
+              ),
+            ]
+          ),
+          "replace_existing": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the theme's current fonts before adding this one."
+          ),
+        ],
+        required: ["theme_id"]
+      )
+    ),
+    MCPToolDefinition(
       tool: .extensionListComponents,
       name: "extension_list_components",
       groupID: "extension-authoring",
@@ -8593,6 +8893,51 @@ enum MCPTools {
       })
   }
 
+  /// One particle vocabulary for its three homes — an ambient field, a logo, a transition.
+  private static func appParticlesSchema(_ description: String) -> MCPPropertySchema {
+    MCPPropertySchema(
+      type: .object,
+      description: description,
+      properties: [
+        "style": MCPPropertySchema(
+          type: .string,
+          description: "\"fizz\" rises and quickens like carbonation, \"snow\" falls and "
+            + "sways, \"sparkle\" twinkles in place, \"confetti\" is thrown and tumbles "
+            + "down, \"embers\" drift up and flicker out. Required unless the block already "
+            + "exists."
+        ),
+        "shape": MCPPropertySchema(
+          type: .string,
+          description: "Overrides the style's own artwork: \"bubble\", \"dot\", \"spark\", "
+            + "\"flake\" or \"ribbon\"."
+        ),
+        "colors": MCPPropertySchema(
+          type: .array,
+          description: "1–4 inks, each a role name (\"accent\", \"label\", …) resolved "
+            + "against this variant, or #RRGGBB(AA). Default the accent.",
+          items: MCPArrayItemSchema(type: .string)
+        ),
+        "density": MCPPropertySchema(
+          type: .number,
+          description: "0–1: how much of the host's particle budget to use. Default 0.5."
+        ),
+        "size": MCPPropertySchema(
+          type: .number,
+          description: "Points across a particle, 1–24. Omit for the style's own size."
+        ),
+        "speed": MCPPropertySchema(
+          type: .number,
+          description: "Multiplier on the style's speed, 0.25–3. Default 1."
+        ),
+        "opacity": MCPPropertySchema(
+          type: .number,
+          description: "0–1. An ambient field is additionally capped at 0.6 so it never "
+            + "competes with text."
+        ),
+      ]
+    )
+  }
+
   private static var appVariantSchema: [String: MCPPropertySchema] {
     [
       "roles": MCPPropertySchema(
@@ -8639,6 +8984,44 @@ enum MCPTools {
           adaptive theme must state chrome in both variants or neither.
           """,
         properties: appChromeSchema
+      ),
+      "transition": MCPPropertySchema(
+        type: .object,
+        description: """
+          How a deliberate switch INTO this variant is carried: particles in its colours \
+          cross the window, a wash dims the old chrome toward the incoming ground, the \
+          theme swaps under it at the wash's peak, and the wash lifts. Plays on picks in \
+          Settings, set_app_theme, and create/update with apply — never on launch or when \
+          macOS changes appearance. Reduce Motion and the user's Theme animations setting \
+          turn it off. Fields merge onto a stated transition.
+          """,
+        properties: [
+          "particles": appParticlesSchema(
+            "The particles that cross the window. \"fizz\" rises from the bottom edge, "
+              + "\"snow\" and \"confetti\" fall from the top, \"sparkle\" twinkles across it."
+          ),
+          "duration": MCPPropertySchema(
+            type: .number,
+            description: "Seconds, 0.4–2.4. Default 1.2."
+          ),
+          "wash": MCPPropertySchema(
+            type: .string,
+            description: "A role or #RRGGBB the window dims toward. Default \"ground\"."
+          ),
+          "wash_opacity": MCPPropertySchema(
+            type: .number,
+            description: "How far the wash rises at the swap, 0–0.9. Default 0.55."
+          ),
+          "shimmer": MCPPropertySchema(
+            type: .boolean,
+            description: "Adds a diagonal band of light sweeping the window, in the first "
+              + "particle colour with a bright core."
+          ),
+        ]
+      ),
+      "remove_transition": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the transition: switches into this variant repaint at once."
       ),
     ]
   }
@@ -8746,12 +9129,112 @@ enum MCPTools {
         description: "True returns the navigator to the transparent sidebar default."
       ),
       "logo": MCPPropertySchema(
-        type: .string,
+        type: .stringOrObject,
         description: """
           What sits in the brand slot: "mark" (the Threading mark, drawn in the \
           theme's ink), "hidden" (wordmark alone), or an object {path} or {base64} \
-          supplying the theme's own logo image.
-          """
+          supplying the theme's own logo image (drawn in a 24-point square, aspect-fit).
+          """,
+        properties: imageSource
+      ),
+      "logo_motion": MCPPropertySchema(
+        type: .object,
+        description: """
+          Makes the theme's own logo image move: a beat for hover, press and launch, and \
+          particles it gives off — a stream while hovered, a burst on press and launch, and \
+          (working: true) a stream that follows how busy the agents are. Needs an image \
+          logo. Fields merge onto what is stated; a beat of "none" clears it.
+          """,
+        properties: [
+          "hover": MCPPropertySchema(
+            type: .string,
+            description: "\"lift\" (held while hovered), \"tilt\", \"wobble\", \"bounce\", "
+              + "\"spin\", \"shake\", \"pop\" or \"none\"."
+          ),
+          "press": MCPPropertySchema(
+            type: .string,
+            description: "A beat played on a press of the brand row; same words as hover."
+          ),
+          "launch": MCPPropertySchema(
+            type: .string,
+            description: "A beat played once when the sidebar first appears, with a burst."
+          ),
+          "particles": appParticlesSchema(
+            "What the logo gives off. \"fizz\" rises from the origin — bubbles from a neck."
+          ),
+          "origin": MCPPropertySchema(
+            type: .object,
+            description: "Where particles leave the logo, in its unit square: x from the "
+              + "leading edge, y from the top. Default {x: 0.5, y: 0} — the top centre.",
+            properties: [
+              "x": MCPPropertySchema(type: .number, description: "0–1 from the leading edge."),
+              "y": MCPPropertySchema(type: .number, description: "0–1 from the top."),
+            ]
+          ),
+          "working": MCPPropertySchema(
+            type: .boolean,
+            description: "True streams particles while any agent works, faster the busier."
+          ),
+        ]
+      ),
+      "remove_logo_motion": MCPPropertySchema(
+        type: .boolean,
+        description: "True stills the logo."
+      ),
+      "band": MCPPropertySchema(
+        type: .object,
+        description: """
+          A band of the theme's own colour behind the whole header row — brand and the \
+          list's + and arrangement controls — from the window's top edge to the header's \
+          rule, so the rows below keep the sidebar's ground. `ink` is what the wordmark, \
+          the Threading mark and the controls draw in over it; it must keep 3:1 against \
+          every stop.
+          """,
+        properties: [
+          "gradient": MCPPropertySchema(
+            type: .object,
+            description: "The band's fill, same form as the sidebar gradient.",
+            properties: [
+              "angle_degrees": MCPPropertySchema(
+                type: .number,
+                description: "CSS convention; default 180 (flows toward the bottom)."
+              ),
+              "stops": MCPPropertySchema(
+                type: .array,
+                description: "2–8 stops, each a colour at a position along the run.",
+                items: MCPArrayItemSchema(
+                  type: .object,
+                  properties: [
+                    "color": MCPPropertySchema(type: .string, description: "#RRGGBB or #RRGGBBAA."),
+                    "position": MCPPropertySchema(
+                      type: .number,
+                      description: "0 at the start of the run, 1 at its end."
+                    ),
+                  ],
+                  required: ["color", "position"]
+                )
+              ),
+            ]
+          ),
+          "ink": MCPPropertySchema(
+            type: .string,
+            description: "#RRGGBB drawn over the band. Default the variant's label."
+          ),
+        ]
+      ),
+      "remove_band": MCPPropertySchema(
+        type: .boolean,
+        description: "True returns the header to the sidebar's own ground."
+      ),
+      "particles": appParticlesSchema(
+        "An ambient field moving under the project list, over the gradient and image — "
+          + "bubbles rising through the column, snow falling past it. Held still (a scatter) "
+          + "under Reduce Motion and the Theme animations setting, and frozen while the "
+          + "window is unseen."
+      ),
+      "remove_particles": MCPPropertySchema(
+        type: .boolean,
+        description: "True removes the sidebar's ambient particles."
       ),
       "title": MCPPropertySchema(
         type: .object,
@@ -8781,6 +9264,11 @@ enum MCPTools {
             type: .boolean,
             description: "True shows the logo alone. Refused when the logo is "
               + "also hidden."
+          ),
+          "color": MCPPropertySchema(
+            type: .string,
+            description: "The wordmark's own #RRGGBB. Default the band's ink when a band is "
+              + "stated, else the label. Held to 3:1 against what it sits on."
           ),
         ]
       ),
@@ -8929,6 +9417,14 @@ enum MCPTools {
           "remove_image": MCPPropertySchema(
             type: .boolean,
             description: "True removes the picture and keeps any gradient."
+          ),
+          "particles": appParticlesSchema(
+            "An ambient field moving over the broad grounds' wash and picture, capped at "
+              + "0.6 opacity; still under Reduce Motion and the Theme animations setting."
+          ),
+          "remove_particles": MCPPropertySchema(
+            type: .boolean,
+            description: "True removes the broad grounds' particles."
           ),
           "remove": MCPPropertySchema(
             type: .boolean,

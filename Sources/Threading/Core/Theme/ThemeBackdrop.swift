@@ -24,21 +24,31 @@ import ThreadingRemoteKit
 /// contributed themes resolve the same names against their package through
 /// `ExtensionAppearanceRegistry`. A name that resolves to nothing degrades to the default
 /// treatment — the rule a dangling font family already follows.
-public struct ThemeBackdrop: Codable, Equatable {
+public struct ThemeBackdrop: Equatable {
 
     /// Drawn first, over the theme's own surface colour.
     public var gradient: Gradient?
     /// Drawn over the gradient (or the surface): a tiled pattern or a fitted picture.
     public var image: ImageLayer?
+    /// A field of particles moving over both — bubbles rising through the column, snow falling
+    /// past a pane. The host holds its strength under
+    /// `ThemeParticleLimits.ambientOpacityCeiling` and stills it (a scatter, not a blank) under
+    /// Reduce Motion, the Theme Motion setting, and while its window is unseen.
+    public var particles: ThemeParticles?
 
-    public init(gradient: Gradient? = nil, image: ImageLayer? = nil) {
+    public init(
+        gradient: Gradient? = nil,
+        image: ImageLayer? = nil,
+        particles: ThemeParticles? = nil
+    ) {
         self.gradient = gradient
         self.image = image
+        self.particles = particles
     }
 
     /// Nothing stated at all — indistinguishable from a document without the block, and what
-    /// an update that removes both halves normalises to.
-    public var isEmpty: Bool { gradient == nil && image == nil }
+    /// an update that removes every part normalises to.
+    public var isEmpty: Bool { gradient == nil && image == nil && particles == nil }
 
     // MARK: - Gradient
 
@@ -99,6 +109,26 @@ public struct ThemeBackdrop: Codable, Equatable {
 }
 
 // MARK: - Codable (hex colours)
+
+extension ThemeBackdrop: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case gradient, image, particles
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        gradient = try container.decodeIfPresent(Gradient.self, forKey: .gradient)
+        image = try container.decodeIfPresent(ImageLayer.self, forKey: .image)
+        particles = try container.decodeIfPresent(ThemeParticles.self, forKey: .particles)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(gradient, forKey: .gradient)
+        try container.encodeIfPresent(image, forKey: .image)
+        try container.encodeIfPresent(particles, forKey: .particles)
+    }
+}
 
 extension ThemeBackdrop.Gradient: Codable {
     private enum CodingKeys: String, CodingKey {

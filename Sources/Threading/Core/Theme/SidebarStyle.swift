@@ -82,18 +82,34 @@ public struct SidebarStyle: Codable, Equatable {
 
     // MARK: - Brand
 
-    public struct Brand: Codable, Equatable {
+    public struct Brand: Equatable {
         /// What sits in the logo slot. Absent means the Threading mark.
         public var logo: Logo
         /// The wordmark beside it. Absent means the app's own name in the default style.
         public var title: Title?
+        /// A band of the theme's own colour behind the whole header row — brand and the list's
+        /// controls — running up under the toolbar to the window's top edge. Absent means the
+        /// header sits on the sidebar's ground like everything else.
+        public var band: Band?
+        /// How the theme's logo image answers the pointer, a launch and working agents, and
+        /// what it gives off while it does. Absent means the logo holds still.
+        public var motion: LogoMotion?
 
-        public init(logo: Logo = .mark, title: Title? = nil) {
+        public init(
+            logo: Logo = .mark,
+            title: Title? = nil,
+            band: Band? = nil,
+            motion: LogoMotion? = nil
+        ) {
             self.logo = logo
             self.title = title
+            self.band = band
+            self.motion = motion
         }
 
-        public var isEmpty: Bool { logo == .mark && title == nil }
+        public var isEmpty: Bool {
+            logo == .mark && title == nil && band == nil && motion == nil
+        }
 
         public enum Logo: Equatable {
             /// The Threading mark, drawn live in the theme's ink.
@@ -104,7 +120,7 @@ public struct SidebarStyle: Codable, Equatable {
             case asset(String)
         }
 
-        public struct Title: Codable, Equatable {
+        public struct Title: Equatable {
             /// Absent means the app's own name (`AppInfo.name`).
             public var text: String?
             /// A family on this machine; a name that resolves to nothing degrades to the
@@ -116,24 +132,30 @@ public struct SidebarStyle: Codable, Equatable {
             /// A brand that is only a logo. The logo cannot also be hidden — validation
             /// refuses a brand with nothing left in it.
             public var hidden: Bool
+            /// The wordmark's own ink. Absent means the band's ink when a band is stated and
+            /// the variant's label otherwise. Held to the label's 3:1 floor against whatever
+            /// it sits on — the band's stops, or the sidebar's ground and wash.
+            public var color: NSColor?
 
             public init(
                 text: String? = nil,
                 fontFamily: String? = nil,
                 fontSize: Double? = nil,
                 weight: Weight? = nil,
-                hidden: Bool = false
+                hidden: Bool = false,
+                color: NSColor? = nil
             ) {
                 self.text = text
                 self.fontFamily = fontFamily
                 self.fontSize = fontSize
                 self.weight = weight
                 self.hidden = hidden
+                self.color = color
             }
 
             public var isEmpty: Bool {
                 text == nil && fontFamily == nil && fontSize == nil
-                    && weight == nil && !hidden
+                    && weight == nil && !hidden && color == nil
             }
 
             public enum Weight: String, Codable, CaseIterable {
@@ -148,20 +170,192 @@ public struct SidebarStyle: Codable, Equatable {
                     }
                 }
             }
+        }
 
-            private enum CodingKeys: String, CodingKey {
-                case text, fontFamily, fontSize, weight, hidden
-            }
+        // MARK: - Band
 
-            public init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                text = try container.decodeIfPresent(String.self, forKey: .text)
-                fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
-                fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize)
-                weight = try container.decodeIfPresent(Weight.self, forKey: .weight)
-                hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+        /// The header's own ground. Its gradient runs from the window's top edge to the
+        /// header's rule; `ink` is what the brand and the list's controls draw in over it.
+        public struct Band: Equatable {
+            public var gradient: Gradient
+            /// Absent means the variant's label. Held to the label's 3:1 floor against every
+            /// stop, because the band carries the `+` that adds a project.
+            public var ink: NSColor?
+
+            public init(gradient: Gradient, ink: NSColor? = nil) {
+                self.gradient = gradient
+                self.ink = ink
             }
         }
+
+        // MARK: - Motion
+
+        /// The logo as something that moves: three gestures, one ambient behaviour, and the
+        /// particles all four give off. It moves the theme's own logo image — validation
+        /// refuses it beside the Threading mark, which is drawn live and has gestures of its
+        /// own.
+        public struct LogoMotion: Equatable {
+            /// While the pointer is over the brand row.
+            public var hover: Beat?
+            /// On a press anywhere on the brand row.
+            public var press: Beat?
+            /// Once per run, when the sidebar first appears.
+            public var launch: Beat?
+            /// Given off as a stream while hovered, as a burst on press and launch, and — when
+            /// `working` is true — as a stream whose rate follows the agents at work.
+            public var particles: ThemeParticles?
+            /// Where particles leave the logo, in the logo slot's unit square: x from the
+            /// leading edge, y from the top. Absent means the top centre — a bottle's neck.
+            public var origin: Origin?
+            /// Streams particles while any agent is working, faster the busier they are.
+            public var working: Bool
+
+            public init(
+                hover: Beat? = nil,
+                press: Beat? = nil,
+                launch: Beat? = nil,
+                particles: ThemeParticles? = nil,
+                origin: Origin? = nil,
+                working: Bool = false
+            ) {
+                self.hover = hover
+                self.press = press
+                self.launch = launch
+                self.particles = particles
+                self.origin = origin
+                self.working = working
+            }
+
+            public var isEmpty: Bool {
+                hover == nil && press == nil && launch == nil && particles == nil
+                    && origin == nil && !working
+            }
+
+            public var resolvedOrigin: Origin { origin ?? Origin(x: 0.5, y: 0) }
+
+            /// A gesture the host knows how to play on a logo. Every beat returns the logo
+            /// exactly where it started, so an interrupted one never leaves it askew.
+            public enum Beat: String, Codable, CaseIterable {
+                /// Rises and grows a little, held while hovered.
+                case lift
+                /// Leans a few degrees and rights itself.
+                case tilt
+                /// Rocks side to side and settles.
+                case wobble
+                /// Drops, springs back, and settles.
+                case bounce
+                /// One full turn.
+                case spin
+                /// A quick side-to-side shudder.
+                case shake
+                /// Squashes, then pops out past its size and back.
+                case pop
+            }
+
+            public struct Origin: Codable, Equatable {
+                public var x: Double
+                public var y: Double
+
+                public init(x: Double, y: Double) {
+                    self.x = x
+                    self.y = y
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Codable (brand, title, band, motion)
+
+extension SidebarStyle.Brand: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case logo, title, band, motion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        logo = try container.decodeIfPresent(Logo.self, forKey: .logo) ?? .mark
+        title = try container.decodeIfPresent(Title.self, forKey: .title)
+        band = try container.decodeIfPresent(Band.self, forKey: .band)
+        motion = try container.decodeIfPresent(LogoMotion.self, forKey: .motion)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(logo, forKey: .logo)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(band, forKey: .band)
+        try container.encodeIfPresent(motion, forKey: .motion)
+    }
+}
+
+extension SidebarStyle.Brand.Title: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case text, fontFamily, fontSize, weight, hidden, color
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
+        fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize)
+        weight = try container.decodeIfPresent(Weight.self, forKey: .weight)
+        hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+        color = try container.decodeIfPresent(String.self, forKey: .color).flatMap(NSColor.init(hex:))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(text, forKey: .text)
+        try container.encodeIfPresent(fontFamily, forKey: .fontFamily)
+        try container.encodeIfPresent(fontSize, forKey: .fontSize)
+        try container.encodeIfPresent(weight, forKey: .weight)
+        try container.encode(hidden, forKey: .hidden)
+        try container.encodeIfPresent(color?.hexString, forKey: .color)
+    }
+}
+
+extension SidebarStyle.Brand.Band: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case gradient, ink
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        gradient = try container.decode(SidebarStyle.Gradient.self, forKey: .gradient)
+        ink = try container.decodeIfPresent(String.self, forKey: .ink).flatMap(NSColor.init(hex:))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(gradient, forKey: .gradient)
+        try container.encodeIfPresent(ink?.hexString, forKey: .ink)
+    }
+}
+
+extension SidebarStyle.Brand.LogoMotion: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case hover, press, launch, particles, origin, working
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hover = try container.decodeIfPresent(Beat.self, forKey: .hover)
+        press = try container.decodeIfPresent(Beat.self, forKey: .press)
+        launch = try container.decodeIfPresent(Beat.self, forKey: .launch)
+        particles = try container.decodeIfPresent(ThemeParticles.self, forKey: .particles)
+        origin = try container.decodeIfPresent(Origin.self, forKey: .origin)
+        working = try container.decodeIfPresent(Bool.self, forKey: .working) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(hover, forKey: .hover)
+        try container.encodeIfPresent(press, forKey: .press)
+        try container.encodeIfPresent(launch, forKey: .launch)
+        try container.encodeIfPresent(particles, forKey: .particles)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encode(working, forKey: .working)
     }
 }
 

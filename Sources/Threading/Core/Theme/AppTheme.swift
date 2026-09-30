@@ -7,7 +7,7 @@ import AppKit
 /// App and terminal themes both use stable IDs. A *shipped library* cannot rely on display
 /// names: renaming a stock theme in some future release must not silently reset assignments.
 /// The slug is persistence identity; `name` is presentation and may change independently.
-public struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
+public struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible, Sendable {
     public let rawValue: String
 
     public init(rawValue: String) { self.rawValue = rawValue }
@@ -156,9 +156,14 @@ public struct AppTheme: Codable, Equatable {
         /// appearance, whether the window wears its own frame may not.
         public let chrome: WindowChromeStyle?
 
+        /// How a deliberate switch *into* this variant is carried — particles in its colours,
+        /// a wash, an optional shimmer. Variant-owned so its inks resolve against the variant
+        /// being arrived at. Absent means the switch repaints at once, as it always has.
+        public let transition: ThemeTransition?
+
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
-            case material, sidebar, chrome
+            case material, sidebar, chrome, transition
         }
 
         public init(
@@ -166,13 +171,15 @@ public struct AppTheme: Codable, Equatable {
             terminalPalette: TerminalTheme,
             material: Material,
             sidebar: SidebarStyle? = nil,
-            chrome: WindowChromeStyle? = nil
+            chrome: WindowChromeStyle? = nil,
+            transition: ThemeTransition? = nil
         ) {
             self.roles = roles
             self.terminalPalette = terminalPalette
             self.material = material
             self.sidebar = sidebar
             self.chrome = chrome
+            self.transition = transition
         }
 
         public init(from decoder: Decoder) throws {
@@ -189,6 +196,7 @@ public struct AppTheme: Codable, Equatable {
             terminalPalette = try container.decode(TerminalTheme.self, forKey: .terminalPalette)
             sidebar = try container.decodeIfPresent(SidebarStyle.self, forKey: .sidebar)
             chrome = try container.decodeIfPresent(WindowChromeStyle.self, forKey: .chrome)
+            transition = try container.decodeIfPresent(ThemeTransition.self, forKey: .transition)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -201,6 +209,7 @@ public struct AppTheme: Codable, Equatable {
             try container.encode(terminalPalette, forKey: .terminalPalette)
             try container.encodeIfPresent(sidebar, forKey: .sidebar)
             try container.encodeIfPresent(chrome, forKey: .chrome)
+            try container.encodeIfPresent(transition, forKey: .transition)
         }
 
         // MARK: - Rebuilding
@@ -225,7 +234,8 @@ public struct AppTheme: Codable, Equatable {
                 terminalPalette: terminalPalette ?? self.terminalPalette,
                 material: material ?? self.material,
                 sidebar: sidebar,
-                chrome: chrome
+                chrome: chrome,
+                transition: transition
             )
         }
 
@@ -238,7 +248,8 @@ public struct AppTheme: Codable, Equatable {
                 terminalPalette: terminalPalette,
                 material: material,
                 sidebar: sidebar,
-                chrome: chrome
+                chrome: chrome,
+                transition: transition
             )
         }
 
@@ -248,7 +259,19 @@ public struct AppTheme: Codable, Equatable {
                 terminalPalette: terminalPalette,
                 material: material,
                 sidebar: sidebar,
-                chrome: chrome
+                chrome: chrome,
+                transition: transition
+            )
+        }
+
+        public func replacingTransition(_ transition: ThemeTransition?) -> Variant {
+            Variant(
+                roles: roles,
+                terminalPalette: terminalPalette,
+                material: material,
+                sidebar: sidebar,
+                chrome: chrome,
+                transition: transition
             )
         }
     }

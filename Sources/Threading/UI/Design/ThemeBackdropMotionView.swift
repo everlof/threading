@@ -4,12 +4,13 @@ import ThreadingRemoteKit
 /// A non-drawing lifecycle observer for a backdrop layer. A zero-size child gets AppKit's
 /// attach/detach and ancestor-hide callbacks without moving or reparenting the real content.
 /// Only an authored moving gradient installs one; static themes keep their existing view tree.
-final class ThemeBackdropMotionView: NSView, ThemedComponent {
+///
+/// Whether a drift may move at all is `ThemeParticleHold`'s answer, the same one every theme
+/// particle obeys — Reduce Motion, the Theme animations setting, Low Power Mode and a still
+/// render — so one switch in Settings stills the whole theme rather than only its particles.
+final class ThemeBackdropMotionView: NSView, ThemedComponent, ThemeParticleHolding {
     private let animator: ThemeGradientAnimator
-    var permitsMotion: () -> Bool = {
-        !Design.Motion.reducesMotion
-            && !ProcessInfo.processInfo.isLowPowerModeEnabled
-    }
+    var permitsMotion: () -> Bool = { ThemeParticleHold.motionAllowed }
     var windowIsVisible: (NSWindow) -> Bool = {
         $0.occlusionState.contains(.visible) && !$0.isMiniaturized
     }
@@ -22,6 +23,7 @@ final class ThemeBackdropMotionView: NSView, ThemedComponent {
             self, selector: #selector(refreshMotion),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil
         )
+        ThemeParticleHold.shared.register(self)
     }
 
     @available(*, unavailable)
@@ -63,6 +65,10 @@ final class ThemeBackdropMotionView: NSView, ThemedComponent {
 
     @objc nonisolated private func powerStateChanged() {
         Task { @MainActor [weak self] in self?.refreshMotion() }
+    }
+
+    func refreshParticleMotion() {
+        refreshMotion()
     }
 
     func stop() {

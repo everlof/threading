@@ -26,6 +26,12 @@ saw the betas.
   control the selected device through the bounded diagnostics path.
 - Theme backdrop motion and gradient controls now share the same design-system vocabulary on Mac
   and iPhone.
+- **Themes that move.** A theme can fill the sidebar and window with drifting particles — fizz,
+  snow, sparkle, confetti, embers — give its logo gestures and a fizz of its own, paint the
+  sidebar header as a band with its own title colour, bring its own fonts, and arrive with a
+  particle transition when you switch to it. Ask an agent to design one; it can preview the
+  result before applying it. Turn it all off with **Theme animations** in Themes settings;
+  Reduce Motion and Low Power Mode hold every theme still.
 
 ### Changed
 

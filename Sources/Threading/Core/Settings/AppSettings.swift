@@ -265,6 +265,25 @@ final class AppSettings {
         return AppSettingDefinitions.harmonizesTerminalBackgrounds.read(from: .standard) ?? true
     }
 
+    /// Whether the motion a theme defines plays: its moving backgrounds, its logo's gestures
+    /// and particles, and the transition it arrives with.
+    ///
+    /// On by default — a theme's motion is part of what the user picked — and it is the user's
+    /// own off switch, independent of Reduce Motion, which turns all of it off regardless. Off
+    /// stills an ambient field into a scatter rather than removing it, so the theme keeps its
+    /// look.
+    var playsThemeMotion: Bool {
+        get { Self.playsThemeMotion }
+        set {
+            AppSettingDefinitions.playsThemeMotion.write(newValue, to: defaults)
+        }
+    }
+
+    nonisolated static var playsThemeMotion: Bool {
+        _ = registerStandardDefaults
+        return AppSettingDefinitions.playsThemeMotion.read(from: .standard) ?? true
+    }
+
     /// Whether a session that wants the user posts a macOS notification — blocked on an
     /// approval, finished off screen, or finished while the app was in the background.
     ///

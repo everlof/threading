@@ -36,8 +36,8 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// Weave is the compact treatment: its dots stay on the actual shield and thread paths,
     /// so the 24pt mark remains recognisable while the whole row is under the pointer.
     private let mark = ThreadingMarkView(particleMotion: .weave)
-    /// A theme-supplied logo. Frameless and content-only — structural AppKit.
-    private let customLogo = NSImageView()
+    /// A theme-supplied logo — still, or moving and fizzing when the theme states motion.
+    private let customLogo = ThemeLogoView()
     private let wordmark = MorphingTitleLabel()
     private let workloadAnalyzer = AgentWorkloadAnalyzerView()
     private let stack = NSStackView()
@@ -55,9 +55,6 @@ final class SidebarBrandView: NSView, ThemedComponent {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-
-        customLogo.imageScaling = .scaleProportionallyUpOrDown
-        customLogo.translatesAutoresizingMaskIntoConstraints = false
 
         stack.orientation = .horizontal
         stack.alignment = .centerY
@@ -96,6 +93,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
         appEvents.observe(AgentIntensityDidChange.self) { [weak self] event in
             guard let self else { return }
             self.workloadIntensity = event.intensity
+            self.customLogo.setWorkingIntensity(Self.logoIntensity(event.intensity))
             self.updateAccessibility()
         }
     }
@@ -134,11 +132,13 @@ final class SidebarBrandView: NSView, ThemedComponent {
     override func mouseEntered(with event: NSEvent) {
         guard workloadAnalyzer.isHidden else { return }
         mark.setHovered(true)
+        customLogo.setHovered(true)
     }
 
     override func mouseExited(with event: NSEvent) {
         guard workloadAnalyzer.isHidden else { return }
         mark.setHovered(false)
+        customLogo.setHovered(false)
     }
 
     /// The press turns the mark and does nothing else. The brand is a signature, not a control:
@@ -146,7 +146,11 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// pressed is the whole of what was asked of it.
     override func mouseDown(with event: NSEvent) {
         guard workloadAnalyzer.isHidden else { return }
-        mark.playPress()
+        if customLogo.isHidden {
+            mark.playPress()
+        } else {
+            customLogo.playPress()
+        }
     }
 
     // MARK: - Public Methods
@@ -167,7 +171,11 @@ final class SidebarBrandView: NSView, ThemedComponent {
     func playLaunchAnimation() {
         guard workloadAnalyzer.isHidden, !Design.Motion.reducesMotion else { return }
 
-        mark.playDrawIn()
+        if customLogo.isHidden {
+            mark.playDrawIn()
+        } else {
+            customLogo.playLaunch()
+        }
 
         wordmark.alphaValue = 0
         let delay = Design.Motion.brandOutlineDraw * 0.4
@@ -193,7 +201,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
             mark.isHidden = true
             mark.setHovered(false)
             customLogo.isHidden = true
-            customLogo.image = nil
+            customLogo.configure(image: nil, motion: nil)
             wordmark.isHidden = true
             updateAccessibility()
             return
@@ -203,19 +211,32 @@ final class SidebarBrandView: NSView, ThemedComponent {
         case .mark:
             mark.isHidden = false
             customLogo.isHidden = true
-            customLogo.image = nil
+            customLogo.configure(image: nil, motion: nil)
         case .image(let image):
             mark.isHidden = true
             customLogo.isHidden = false
-            customLogo.image = image
+            customLogo.configure(image: image, motion: brand.motion)
+            customLogo.setWorkingIntensity(Self.logoIntensity(workloadIntensity))
         case .hidden:
             mark.isHidden = true
             customLogo.isHidden = true
-            customLogo.image = nil
+            customLogo.configure(image: nil, motion: nil)
         }
+        // The mark reads its ink per draw; a band arriving or leaving is a new answer.
+        mark.needsDisplay = true
 
         wordmark.isHidden = brand.title == nil
         wordmark.applyFont(brand.titleRole)
+        // A stated ink — the title's own colour, or the band's — is re-read on every draw
+        // through the provider, so a live switch lands without this row restating it.
+        if brand.titleColor != nil {
+            wordmark.setTextColor {
+                SidebarAppearance.brand(for: NSAppearance.currentDrawing()).titleColor
+                    ?? Design.Text.label
+            }
+        } else {
+            wordmark.setTextColor { Design.Text.label }
+        }
         if let title = brand.title, title != shownTitle {
             wordmark.setStringValue(title, animated: animated && shownTitle != nil)
         }
@@ -225,6 +246,12 @@ final class SidebarBrandView: NSView, ThemedComponent {
         setAccessibilityLabel(brand.title ?? AppInfo.name)
         setAccessibilityValue(nil)
         toolTip = nil
+    }
+
+    /// How busy the agents are as one 0…1 reading — the same envelope the workload analyzer
+    /// draws, read at the moment it was reported.
+    private static func logoIntensity(_ intensity: AgentIntensity) -> Double {
+        intensity.level(at: intensity.measuredAt)
     }
 
     private func updateAccessibility() {

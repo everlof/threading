@@ -363,7 +363,9 @@ undocumented question of what Claude Code does with an image returned from a too
 returns a standard MCP image block and caches the PNG. Capture is quiet by default: it leaves the
 live Browser tab selected, while `show: true` deliberately preserves a user-visible image tab.
 The agent seeing pixels and the user being navigated to evidence are separate actions. See
-[`agent-browser.md`](agent-browser.md).
+[`agent-browser.md`](agent-browser.md). `preview_app_theme` is the second, for the same reason:
+it draws a theme on a sample window so the agent that authored it can look at it, with invented
+rows in place of anything of the user's (see [`themes.md`](themes.md)).
 
 ## Command contract
 

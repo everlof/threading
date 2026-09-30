@@ -156,7 +156,7 @@ final class OnboardingAppearancePageViewController: NSViewController, Onboarding
             let item = NavigatorGridItemView(content: content)
             item.setAccessibilityTitle(theme.name)
             item.onActivate = {
-                AppThemeLibrary.apply(theme)
+                ThemeSwitch.apply(theme)
             }
             return (theme, item, swatch, selectionMark)
         }

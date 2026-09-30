@@ -332,7 +332,8 @@ The mark answers the pointer: it lifts while the pointer is anywhere over the br
 a click turns it one sixth of a turn — the mark has six strands, so it lands back on itself.
 Nothing is opened by the click; the brand names the window rather than pointing anywhere.
 Both are skipped under Reduce Motion. A theme can restyle the whole row — its own logo, its
-own wordmark, even a gradient or image behind the list — see [Themes](#themes). An extension
+own wordmark, a band of colour behind it, even a gradient, image or moving particles behind the
+list, and a logo that tilts, pops or fizzes — see [Themes](#themes). An extension
 can put a picture or a live, animated surface beneath the list as well, above the theme's own
 gradient and below every row; Threading keeps it at most 60% opaque, never faster than 30 frames
 a second, still while the window is hidden and under Reduce Motion, and nothing in it can be
@@ -5018,6 +5019,42 @@ change. A gradient that would swallow the sidebar's labels is refused the way an
 terminal palette is; image legibility is left to the author's eye. Duplicating a theme
 copies its sidebar images with it, so the copy survives the original's extension being
 disabled.
+
+#### Themes that move
+
+A theme can also **move**, and every part of it is optional:
+
+- **Ambient particles** — bubbles rising through the sidebar, snow falling past a pane, sparks
+  twinkling, confetti, drifting embers. They sit under the list and never over what you read,
+  and Threading keeps them faint (at most 60% strength).
+- **A logo that answers you** — a theme's own logo can tilt, wobble, bounce, spin, shake or
+  pop when you point at it, press it, or when the app first opens, and give off particles as it
+  does: a stream while you hover, a burst when you click, and — if the theme asks — a stream
+  that gets busier the more agents are working.
+- **A header band** — the top of the sidebar, behind the logo, the name and the **+**, can take
+  its own colour, with the name and buttons drawn in a colour chosen to read on it. It ends at
+  the header's line, so the rows below keep the sidebar's own background.
+- **An arrival** — when you switch *to* a theme, it can play its own transition: particles in
+  its colours cross the window, the old theme dims away, the new one appears under them, and an
+  optional shimmer of light sweeps across. It lasts at most a couple of seconds and never gets
+  in the way of a click. It plays when you pick a theme in Settings, onboarding or the Current
+  Theme page, or when an agent applies one — not when the app opens, and not when macOS switches
+  between light and dark.
+
+**Settings ▸ Themes ▸ Theme animations** turns all of it off. The theme keeps its look — the
+particles become a still scatter, the logo stays put, and switching themes is instant again.
+**Reduce Motion** (System Settings ▸ Accessibility ▸ Display) and **Low Power Mode** do the same
+whatever the setting says, and moving particles freeze whenever their window is minimised,
+hidden or covered.
+
+A custom theme can carry **its own font file** too, for a wordmark in a brand's script or prose
+in a period face. The font is available only inside Threading, travels with the theme when you
+duplicate it and is deleted with it.
+
+Ask an agent for any of this — "make the sidebar fizz", "have the logo pop when I click it",
+"snow when I switch to the Christmas copy" — and it builds it with the app-theme tools. It can
+also render a preview of a theme in both light and dark, drawn on sample rows rather than your
+own projects, so it can check its work before telling you it is done.
 
 #### Fonts
 

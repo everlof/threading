@@ -78,7 +78,8 @@ enum MCPRemoteSessionToolScope {
             return true
 
         case .listThemes, .setTheme, .createTheme, .listAppThemes, .getAppTheme, .setAppTheme,
-             .createAppTheme, .duplicateAppTheme, .updateAppTheme:
+             .createAppTheme, .duplicateAppTheme, .updateAppTheme, .previewAppTheme,
+             .addAppThemeFont:
             return true
 
         case .extensionListComponents, .extensionScaffoldProject, .extensionProposeInstall,

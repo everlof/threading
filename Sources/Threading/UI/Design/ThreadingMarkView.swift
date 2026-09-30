@@ -1289,6 +1289,12 @@ final class ThreadingMarkView: NSView, ThemedComponent {
                 ? (BrandInk.mono, BrandInk.mono, BrandInk.mono)
                 : (BrandInk.shield, BrandInk.thread, BrandInk.core)
         }
+        // On a band the theme stated behind the header, the mark wears the band's own ink —
+        // the accent was chosen against the sidebar's ground, and a red mark on a red band is
+        // no mark at all.
+        if let band = SidebarAppearance.brand(for: effectiveAppearance).band {
+            return (band.ink, band.ink, band.ink)
+        }
         // The Dock icon's rule, at sidebar scale: the theme's accent, floored legible against
         // the ground it actually sits on.
         let ink = Design.Surface.accent.legible(on: Design.Surface.background)

@@ -296,6 +296,8 @@ final class ProjectSidebarViewController: NSViewController {
     /// The plane an extension may dress through `sidebar.backdrop@1`, above the theme's
     /// ground and beneath everything else — see `applySidebarSurface`.
     private(set) var extensionBackdrop: SidebarExtensionBackdropView?
+    /// The theme's band behind the header, when it states one.
+    private(set) var brandBand: SidebarBrandBandView?
 
     /// Where the backdrop plane asks what has been published for it, and how it resolves a
     /// picture. Injected only by tests; the app reads the shared provider slot and the
@@ -891,7 +893,17 @@ private extension ProjectSidebarViewController {
         )
         view.addSubview(extensionPlane, positioned: .above, relativeTo: backdrop)
 
+        // The theme's header band sits over both grounds and under the header it colours,
+        // ending at the header's rule so the rows below keep the column's ground.
+        let band = SidebarBrandBandView()
+        view.addSubview(band, positioned: .above, relativeTo: extensionPlane)
+        band.onApply = { [weak self] shows in self?.applyHeaderGround(onBand: shows) }
+
         NSLayoutConstraint.activate([
+            band.topAnchor.constraint(equalTo: view.topAnchor),
+            band.bottomAnchor.constraint(equalTo: header.bottomAnchor),
+            band.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             backdrop.topAnchor.constraint(equalTo: view.topAnchor),
             backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -904,6 +916,16 @@ private extension ProjectSidebarViewController {
 
         themeBackdrop = backdrop
         extensionBackdrop = extensionPlane
+        brandBand = band
+    }
+
+    /// The header's controls read their ink from the band while the theme states one: the
+    /// chrome's label was measured against the column's ground, not against a band the theme
+    /// painted under it.
+    private func applyHeaderGround(onBand: Bool) {
+        let ground: InkSource? = onBand ? .brandBand : nil
+        addButton.hostGround = ground
+        arrangeButton.hostGround = ground
     }
 
 }

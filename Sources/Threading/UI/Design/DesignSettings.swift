@@ -2,7 +2,7 @@ import Foundation
 
 /// The user's preferences, as the design system sees them.
 ///
-/// `UI/Design/` reads exactly five values from the application's settings, and these are all of
+/// `UI/Design/` reads exactly six values from the application's settings, and these are all of
 /// them. Naming them here is what stops the design system reaching for a singleton it happens to
 /// be compiled beside: everything else in this directory already describes appearance without
 /// knowing what an application, a project or a session is.
@@ -18,6 +18,9 @@ public protocol DesignSettingsReading {
     var conversationFontFamily: String? { get }
     var promptReturnKey: PromptReturnKey { get }
     var chatNameMorphStyle: ChatNameMorphStyle { get }
+    /// Whether a theme's own motion — ambient particles, logo gestures, switch transitions —
+    /// plays. Reduce Motion overrides it; this is the user's separate choice.
+    var playsThemeMotion: Bool { get }
 }
 
 /// Where `UI/Design/` reads its preferences from.
@@ -54,4 +57,5 @@ public struct ApplicationDesignSettings: DesignSettingsReading {
     public var conversationFontFamily: String? { AppSettings.conversationFontFamily }
     public var promptReturnKey: PromptReturnKey { AppSettings.promptReturnKey }
     public var chatNameMorphStyle: ChatNameMorphStyle { AppSettings.shared.chatNameMorphStyle }
+    public var playsThemeMotion: Bool { AppSettings.playsThemeMotion }
 }

@@ -35,6 +35,8 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     private let gradientLayer = CAGradientLayer()
     private let imageLayer = CALayer()
     private var motionView: ThemeBackdropMotionView?
+    /// The theme's ambient particles over both — bubbles rising through the column.
+    private let particleField = ThemeParticleFieldLayer()
     private let appEvents = AppEventObservations()
 
     // MARK: - Initialization
@@ -56,6 +58,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         decor.layer?.addSublayer(gradientLayer)
         imageLayer.masksToBounds = true
         decor.layer?.addSublayer(imageLayer)
+        decor.layer?.addSublayer(particleField)
         addSubview(decor)
 
         for pane in [material, fill, decor] {
@@ -84,7 +87,17 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         super.layout()
         gradientLayer.frame = decor.bounds
         imageLayer.frame = decor.bounds
+        particleField.frame = decor.bounds
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // A field decides whether it moves from its window; a move is a new answer.
+        particleField.refresh()
+    }
+
+    /// The field, for a test asking which state it is in.
+    var particles: ThemeParticleFieldLayer { particleField }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -115,6 +128,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         decor.isHidden = background == nil
         applyGradient(background?.gradient)
         applyImage(background?.image)
+        particleField.apply(background?.particles, host: self)
     }
 
     private func applyGradient(_ gradient: SidebarAppearance.Background.Gradient?) {

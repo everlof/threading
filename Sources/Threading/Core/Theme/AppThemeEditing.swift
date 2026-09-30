@@ -103,6 +103,22 @@ public enum AppThemeEditing {
         }
     }
 
+    /// The same three-way statement for the transition block: a patch that recoloured one
+    /// role must not silently take away how the theme arrives.
+    public enum TransitionChange {
+        case inherit
+        case remove
+        case set(ThemeTransition)
+
+        public func applied(to source: ThemeTransition?) -> ThemeTransition? {
+            switch self {
+            case .inherit: return source
+            case .remove: return nil
+            case .set(let transition): return transition
+            }
+        }
+    }
+
     public static func makeVariant(
         named name: String,
         from base: AppTheme,
@@ -111,7 +127,8 @@ public enum AppThemeEditing {
         material: AppTheme.Material? = nil,
         terminalPalette: TerminalTheme? = nil,
         sidebar: SidebarChange = .inherit,
-        chrome: ChromeChange = .inherit
+        chrome: ChromeChange = .inherit,
+        transition: TransitionChange = .inherit
     ) -> AppTheme.Variant {
         let appearance = kind.appearance ?? NSAppearance.currentDrawing()
         let source = base.variant(kind)
@@ -133,7 +150,8 @@ public enum AppThemeEditing {
                 ?? base.terminalPalette).renamed(name),
             material: material ?? source?.material ?? base.material,
             sidebar: sidebar.applied(to: source?.sidebar),
-            chrome: chrome.applied(to: source?.chrome)
+            chrome: chrome.applied(to: source?.chrome),
+            transition: transition.applied(to: source?.transition)
         )
     }
 
@@ -596,6 +614,68 @@ public enum AppThemeEditing {
         if let chrome = variant.chrome {
             try validate(chrome, kind: kind, resolved: resolved, appearance: appearance)
         }
+
+        if let transition = variant.transition {
+            try validate(transition, kind: kind)
+        }
+    }
+
+    /// A transition's gates are bounds: its particles cross the window for at most
+    /// `transitionDurationRange` and its wash never quite replaces the chrome. Nothing here is
+    /// measured for contrast — the overlay passes the pointer through, is silent to
+    /// accessibility, and is gone before anything under it can be read or pressed.
+    nonisolated private static func validate(
+        _ transition: ThemeTransition,
+        kind: AppTheme.VariantKind
+    ) throws {
+        try validate(transition.particles, prefix: "transition.particles")
+        guard ThemeParticleLimits.transitionDurationRange.contains(transition.duration) else {
+            throw AppThemeEditingError.invalid(
+                "transition.duration must be between "
+                    + "\(ThemeParticleLimits.transitionDurationRange.lowerBound) and "
+                    + "\(ThemeParticleLimits.transitionDurationRange.upperBound) seconds."
+            )
+        }
+        guard (0...ThemeParticleLimits.maximumWashOpacity).contains(transition.washOpacity) else {
+            throw AppThemeEditingError.invalid(
+                "transition.wash_opacity must be between 0 and "
+                    + "\(ThemeParticleLimits.maximumWashOpacity)."
+            )
+        }
+    }
+
+    /// The bounds every particle block is held to, wherever it is stated.
+    nonisolated private static func validate(
+        _ particles: ThemeParticles,
+        prefix: String
+    ) throws {
+        guard particles.colors.count <= ThemeParticleLimits.maximumColors else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).colors takes at most \(ThemeParticleLimits.maximumColors) inks."
+            )
+        }
+        guard ThemeParticleLimits.densityRange.contains(particles.density) else {
+            throw AppThemeEditingError.invalid("\(prefix).density must be between 0 and 1.")
+        }
+        if let size = particles.size {
+            guard ThemeParticleLimits.sizeRange.contains(size) else {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).size must be between "
+                        + "\(Int(ThemeParticleLimits.sizeRange.lowerBound)) and "
+                        + "\(Int(ThemeParticleLimits.sizeRange.upperBound)) points."
+                )
+            }
+        }
+        guard ThemeParticleLimits.speedRange.contains(particles.speed) else {
+            throw AppThemeEditingError.invalid(
+                "\(prefix).speed must be between "
+                    + "\(ThemeParticleLimits.speedRange.lowerBound) and "
+                    + "\(ThemeParticleLimits.speedRange.upperBound)."
+            )
+        }
+        guard ThemeParticleLimits.opacityRange.contains(particles.opacity) else {
+            throw AppThemeEditingError.invalid("\(prefix).opacity must be between 0 and 1.")
+        }
     }
 
     /// The chrome block's own gates. The band gets the sidebar gradient's treatment — its ink
@@ -801,6 +881,80 @@ public enum AppThemeEditing {
                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw AppThemeEditingError.invalid("sidebar.brand.logo names no asset.")
             }
+            let label = resolved.resolved(.label, appearance: appearance)
+            let surface = resolved.resolved(.surface, appearance: appearance)
+            if let band = brand.band {
+                // A band is drawn still — it is the ground the header's controls are measured
+                // against — so a drift there would be accepted and never played.
+                guard band.gradient.drift == nil else {
+                    throw AppThemeEditingError.invalid("sidebar.band does not support gradient drift.")
+                }
+                // The band is the header's ground, and it carries the `+` that adds a project:
+                // held to the label floor against every stop, like the sidebar's own wash.
+                try validate(
+                    ThemeBackdrop(gradient: band.gradient),
+                    prefix: "sidebar.band",
+                    subject: "header ink on the band stop",
+                    kind: kind,
+                    label: band.ink ?? label,
+                    ground: surface
+                )
+            }
+            if let color = brand.title?.color {
+                // The wordmark sits on the band when there is one, and on the sidebar's own
+                // ground and wash otherwise — so that is what it is measured against.
+                if let band = brand.band {
+                    try validate(
+                        ThemeBackdrop(gradient: band.gradient),
+                        prefix: "sidebar.band",
+                        subject: "the title colour on the band stop",
+                        kind: kind,
+                        label: color,
+                        ground: surface
+                    )
+                } else {
+                    let ground = composite(surface, over: resolved.resolved(.ground, appearance: appearance))
+                    let ratio = ThemeContrast.ratio(composite(color, over: ground), ground)
+                    guard ratio >= ThemeContrast.minimumRatio else {
+                        throw AppThemeEditingError.invalid(
+                            "\(kind.rawValue) sidebar title colour \(color.hexString) on the "
+                                + "sidebar surface has \(formatted(ratio)):1 contrast; "
+                                + "at least \(Int(ThemeContrast.minimumRatio)):1 is required."
+                        )
+                    }
+                    if let wash = sidebar.background, wash.gradient != nil {
+                        try validate(
+                            ThemeBackdrop(gradient: wash.gradient),
+                            prefix: "sidebar",
+                            subject: "the title colour on the gradient stop",
+                            kind: kind,
+                            label: color,
+                            ground: surface
+                        )
+                    }
+                }
+            }
+            if let motion = brand.motion {
+                // The Threading mark is drawn live and already has gestures of its own; a
+                // theme's motion is for the image it supplied.
+                guard case .asset = brand.logo else {
+                    throw AppThemeEditingError.invalid(
+                        "sidebar.logo_motion moves the theme's own logo image — supply a logo "
+                            + "image, or remove_logo_motion. The Threading mark keeps its own "
+                            + "gestures."
+                    )
+                }
+                if let particles = motion.particles {
+                    try validate(particles, prefix: "sidebar.logo_motion.particles")
+                }
+                if let origin = motion.origin {
+                    guard (0...1).contains(origin.x), (0...1).contains(origin.y) else {
+                        throw AppThemeEditingError.invalid(
+                            "sidebar.logo_motion.origin x and y must be between 0 and 1."
+                        )
+                    }
+                }
+            }
             if let title = brand.title {
                 if brand.logo == .hidden, title.hidden {
                     throw AppThemeEditingError.invalid(
@@ -889,6 +1043,10 @@ public enum AppThemeEditing {
             guard !image.asset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw AppThemeEditingError.invalid("\(prefix).image names no asset.")
             }
+        }
+
+        if let particles = backdrop.particles {
+            try validate(particles, prefix: "\(prefix).particles")
         }
     }
 

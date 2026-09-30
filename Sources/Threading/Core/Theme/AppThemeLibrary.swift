@@ -361,7 +361,10 @@ enum AppThemeLibrary {
             return false
         }
         // The document owned files too: sidebar assets die with the theme that referenced
-        // them, or Application Support accumulates folders no document can reach.
+        // them, or Application Support accumulates folders no document can reach. Its fonts
+        // are unregistered first, while their files still exist to name — at most
+        // `ThemeFontStore.maximumFonts` of them.
+        ThemeFontStore.unregisterAll(for: theme.id)
         ThemeAssetStore.removeAll(for: theme.id)
         // The stored choice as well as what is on screen: in recovery the two differ, and Settings
         // deletes the theme its picker names. Leaving the choice pointing at nothing would let
@@ -401,6 +404,26 @@ enum AppThemeLibrary {
     /// `WindowChromeStyle` opts the main window into the app-drawn frame, which is a great deal
     /// of launch-time machinery and a plausible place to die. System is the one theme that needs
     /// no theme document, no asset store, no contributed package and no chrome takeover.
+    /// Registers the fonts custom themes carry (`ThemeFontStore`) before the first window.
+    ///
+    /// Only the theme about to be restored is registered here, synchronously: its wordmark or
+    /// prose may name one of its families, and the first window has to be built resolving it.
+    /// That is one folder of at most `ThemeFontStore.maximumFonts` files. Every other custom
+    /// theme's fonts register on a background task — nothing on screen names them yet.
+    static func prepareCustomFonts() {
+        let ids = custom.map(\.id)
+        guard !ids.isEmpty else { return }
+        let restoring = storedThemeID.flatMap { id in ids.first { $0 == id } }
+        if let restoring {
+            ThemeFontStore.registerFonts(for: [restoring])
+        }
+        let rest = ids.filter { $0 != restoring }
+        guard !rest.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            ThemeFontStore.registerFonts(for: rest)
+        }
+    }
+
     static func restore(_ mode: LaunchMode = .normal) {
         let restored: AppTheme
         switch mode {

@@ -694,6 +694,16 @@ enum MCPToolCatalog {
       for the full mid-nineties treatment. \
       Windows 98 and Mac OS 9 Platinum are worked examples of different button placement, \
       glyph and texture choices — read them with get_app_theme.
+
+      Themes can move. `particles` (fizz, snow, sparkle, confetti, embers) drift under \
+      the sidebar or the broad grounds; `sidebar.logo_motion` makes an image logo tilt, \
+      pop or fizz on hover, press, launch and while agents work; `sidebar.band` puts \
+      the header on its own colour with its own ink; a variant's `transition` plays \
+      when the user switches into the theme. The host bounds every particle budget and \
+      stills all of it under Reduce Motion and the user's Theme animations setting. \
+      preview_app_theme renders any theme, both variants, without touching the window — \
+      look at it before telling the user a theme is done. add_app_theme_font gives a \
+      custom theme a font file its title or material can then name by family.
       """
   )
 

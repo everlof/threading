@@ -52,12 +52,18 @@ public enum InkSource: Equatable {
     /// controls the band itself hosts sit on it (`WindowTitleBandView`).
     case titleBand
 
+    /// The band a theme lays behind the sidebar's header (`SidebarStyle.Brand.Band`) — a fourth
+    /// ground, authored as a gradient and one ink like the title band. Named by the sidebar
+    /// for the header's controls through `hostGround` while a band is stated.
+    case brandBand
+
     public var ink: Design.Ink {
         switch self {
         case .chrome: Design.Ink.chrome
         case .backdrop: WindowBackdrop.ink
         case .selection: Design.Ink.selection
         case .titleBand: WindowChromeAppearance.bandInk
+        case .brandBand: SidebarAppearance.bandInk
         case .primaryAction: Design.Ink.primaryAction
         }
     }
@@ -71,6 +77,7 @@ public enum InkSource: Equatable {
         case .backdrop: WindowBackdrop.color
         case .selection: Design.Surface.selectionFill
         case .titleBand: WindowChromeAppearance.bandGround
+        case .brandBand: SidebarAppearance.bandGround
         case .primaryAction: Design.Surface.primaryActionFace
         }
     }

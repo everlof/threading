@@ -317,6 +317,14 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func createAppTheme(_ arguments: CreateAppThemeArguments) -> MCPToolResult
   func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) -> MCPToolResult
   func updateAppTheme(_ arguments: UpdateAppThemeArguments) -> MCPToolResult
+  func previewAppTheme(
+    _ arguments: PreviewAppThemeArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func addAppThemeFont(
+    _ arguments: AddAppThemeFontArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func extensionListComponents() -> MCPToolResult
   func extensionScaffoldProject(_ arguments: ExtensionScaffoldProjectArguments) -> MCPToolResult
   func extensionProposeInstall(

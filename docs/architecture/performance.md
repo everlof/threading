@@ -5576,3 +5576,29 @@ animation. Reduce Motion and Low Power Mode retain a still gradient. Tests exerc
 dashboard collection at both cardinalities and require one backdrop layer, fewer than 40 mounted
 native cells and zero hosted row content. Device energy and frame-tail measurements remain a
 separate verification obligation; structural bounds alone do not establish battery cost.
+
+## Theme particles and arrivals (2026-09-30)
+
+A theme document can now ask for moving particles (`ThemeBackdrop.particles`, a logo's
+`motion`, a variant's `transition` — see [`themes.md`](themes.md)). The document is externally
+authored, so the scaling contract is stated at the placement, not trusted to the author:
+
+| Placement | Cardinality bound | Main-thread work | Per-frame work |
+|---|---|---|---|
+| Ambient field (sidebar, each broad ground) | ≤ 120 particles alive, whatever the density or region | one emitter configure per theme change, appearance flip or ≥25% height change — O(inks ≤ 4); a resize is two key-path writes | render server only |
+| Logo stream | ≤ 40 particles/s; one burst ≤ 48 | a birth-rate write on hover, press or an `AgentIntensityDidChange` | render server only |
+| Arrival | ≤ 700 alive, ≤ 2.4 s plus one lifetime tail | one overlay per visible main window, removed when its timeline ends | render server only; the synchronous `AppThemeLibrary.apply` is the same repaint a switch always cost, now hidden under the wash |
+
+Rates are derived from region and density and then clamped so `rate × lifetime` stays under the
+bound (`ThemeParticleBudget`); `ThemeMotionTests` sweeps every style at density 1 in a
+4,000 × 3,000-point region to hold it. Fields freeze in time (`speed` 0) while their window is
+miniaturized, occluded or hidden, and still entirely under Reduce Motion, the Theme animations
+setting and Low Power Mode, so a glass of bubbles in a background window costs the compositor
+nothing.
+
+**Not yet measured.** The render-server cost of a live field on an idle, visible window — the
+number that would decide whether the ambient default density should be lower — was not taken:
+the machine this landed on was running at a load average near 600 from unrelated builds, which
+makes any frame or energy figure meaningless. The next person to profile should run
+`scripts/profile_threading.sh full` with a fizzing custom theme applied and record the
+compositor's share beside the idle baseline here.

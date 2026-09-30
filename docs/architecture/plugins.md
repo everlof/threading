@@ -188,7 +188,7 @@ compiled into the app already, and the two never exchange a component — only a
 there is nothing to share and a self-contained bundle is the simpler artifact.
 
 `Seam/HostSeam.swift` supplies the handful of things the application owns because they read stores
-a plugin has no business touching: `AppThemePalette`, the five `DesignSettings` values,
+a plugin has no business touching: `AppThemePalette`, the six `DesignSettings` values,
 `AppThemeLibrary`, `ThemeAssetStore` and `ThemeManager`. `PaneHeaderDefaults` is *stated* rather
 than copied — both members are expressions over types the kit already has, so two numbers cannot
 drift apart.

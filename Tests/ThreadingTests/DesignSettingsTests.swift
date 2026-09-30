@@ -101,4 +101,5 @@ struct StubDesignSettings: DesignSettingsReading {
     var conversationFontFamily: String?
     var promptReturnKey: PromptReturnKey = .matchesComposer
     var chatNameMorphStyle: ChatNameMorphStyle = MotionPreferencesDefaults.chatNameMorphStyle
+    var playsThemeMotion = true
 }

@@ -7982,6 +7982,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "SeparatorView",
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
+                "SidebarBrandBandView",
                 "SidebarBrandView",
                 "SidebarEdgeRevealCoordinator",
                 "SimulatorRecordingBadge",
@@ -7996,8 +7997,10 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "SubmissionStatusView",
                 "TerminalStatusBanner",
                 "ThreadingMarkView",
+                "ThemeLogoView",
                 "ThemeSwatchImage",
                 "ThemeSwatchView",
+                "ThemeTransitionOverlayView",
                 "ThemedActionPopoverViewController",
                 "ThemedAlert",
                 "ThemedBarSparklineView",
@@ -8097,7 +8100,19 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
         // This timestamp accumulator is a model, not a view or interactive design component.
         // Its output is exercised by SimulatorTouchOverlayTests.
-        let nonvisualModels: Set<String> = ["SimulatorTouchOverlayModel"]
+        //
+        // The theme-motion owners draw nothing themselves: the hold decides whether any theme
+        // particle or drift moves (ThemeMotionTests), the presenter plays the transition overlay
+        // — which has its own story — over the main window only, and the gradient animator and
+        // its zero-size lifecycle observer drive the drift SidebarBackdropView's story shows
+        // under a drifting theme (ThemeGradientMotionTests).
+        let nonvisualModels: Set<String> = [
+            "SimulatorTouchOverlayModel",
+            "ThemeParticleHold",
+            "ThemeTransitionPresenter",
+            "ThemeGradientAnimator",
+            "ThemeBackdropMotionView"
+        ]
         let missing = declaredComponents.subtracting(nonvisualModels)
             .subtracting(ComponentGalleryViewController.componentNames)
 

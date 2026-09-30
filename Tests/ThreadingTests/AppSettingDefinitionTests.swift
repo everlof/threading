@@ -218,6 +218,7 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "harmonizesTerminalBackgrounds",
                 valueType: .boolean
             ),
+            .playsThemeMotion: .init(key: "playsThemeMotion", valueType: .boolean),
             .convertsDroppedImages: .init(key: "convertsDroppedImages", valueType: .boolean),
             .copiesTerminalSelection: .init(key: "copiesTerminalSelection", valueType: .boolean),
             .notifiesOnAttention: .init(key: "notifiesOnAttention", valueType: .boolean),
@@ -593,7 +594,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "When writing a prompt, press Return to", "Reset Shortcuts"
         ])
         XCTAssertEqual(actual["themes"], [
-            "App theme", "Classic skins", "Text size", "App font", "Conversation font"
+            "App theme", "Classic skins", "Theme animations", "Text size", "App font",
+            "Conversation font"
         ])
         XCTAssertEqual(actual["profiles"], [
             "Font", "Cursor style", "Blinking cursor", "Keep backgrounds in tune with the theme",

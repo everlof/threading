@@ -50,7 +50,7 @@ extension AgentToolCoordinator {
         guard let theme = appTheme(referencedBy: arguments.themeID) else {
             return missingAppTheme(arguments.themeID)
         }
-        AppThemeLibrary.apply(theme)
+        ThemeSwitch.apply(theme)
         return .success("Applied \(theme.name) (\(theme.id.rawValue)) app-wide.")
     }
 
@@ -132,7 +132,7 @@ extension AgentToolCoordinator {
             )
             try AppThemeLibrary.create(theme)
             if arguments.apply ?? true {
-                AppThemeLibrary.apply(theme)
+                ThemeSwitch.apply(theme)
                 return .success(
                     "Created and applied \(theme.name) (\(theme.id.rawValue))."
                 )
@@ -144,6 +144,20 @@ extension AgentToolCoordinator {
             ThemeAssetStore.removeAll(for: newID)
             return .failure(error.localizedDescription)
         }
+    }
+
+    func previewAppTheme(
+        _ arguments: PreviewAppThemeArguments,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        AppThemePreviewService.preview(arguments, completion: completion)
+    }
+
+    func addAppThemeFont(
+        _ arguments: AddAppThemeFontArguments,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        Task { @MainActor in completion(await AppThemeFontService.add(arguments)) }
     }
 
     func duplicateAppTheme(_ arguments: DuplicateAppThemeArguments) -> MCPToolResult {
@@ -283,7 +297,7 @@ extension AgentToolCoordinator {
             let wasActive = AppThemeLibrary.current.id == source.id
             try AppThemeLibrary.update(updated)
             if arguments.apply == true && !wasActive {
-                AppThemeLibrary.apply(updated)
+                ThemeSwitch.apply(updated)
             }
 
             let state = (wasActive || arguments.apply == true)
@@ -417,13 +431,28 @@ extension AgentToolCoordinator {
         )
         let baseTerminal = source?.terminalPalette ?? base.terminalPalette
         let terminal = try appTerminalPalette(terminalPatch, base: baseTerminal)
-        let sidebar = try appThemeSidebar(
+        let sidebar = try AppThemeToolParsing.sidebar(
             patch?.sidebar,
             base: source?.sidebar,
             themeID: themeID,
             kind: kind
         )
         let chrome = try appThemeChrome(patch?.chrome, base: source?.chrome)
+        let transition: AppThemeEditing.TransitionChange
+        if patch?.removeTransition == true {
+            guard patch?.transition == nil else {
+                throw AppThemeEditingError.invalid(
+                    "A variant cannot set transition and remove_transition in the same patch."
+                )
+            }
+            transition = .remove
+        } else if let transitionPatch = patch?.transition {
+            transition = .set(
+                try AppThemeToolParsing.transition(transitionPatch, base: source?.transition)
+            )
+        } else {
+            transition = .inherit
+        }
         return AppThemeEditing.makeVariant(
             named: name,
             from: base,
@@ -432,7 +461,8 @@ extension AgentToolCoordinator {
             material: material,
             terminalPalette: terminal,
             sidebar: sidebar,
-            chrome: chrome
+            chrome: chrome,
+            transition: transition
         )
     }
 
@@ -729,181 +759,6 @@ extension AgentToolCoordinator {
             color: color,
             spacing: spacing
         )
-    }
-
-    // MARK: Sidebar Parsing
-
-    /// Turns a sidebar patch into the change `makeVariant` applies. Image bytes are stored
-    /// under the theme's id as a side effect — the callers own cleanup on failure, which is
-    /// why create removes the fresh folder and update restores the slots it replaced.
-    private func appThemeSidebar(
-        _ patch: AppThemeSidebarArguments?,
-        base: SidebarStyle?,
-        themeID: AppThemeID,
-        kind: AppTheme.VariantKind
-    ) throws -> AppThemeEditing.SidebarChange {
-        guard let patch else { return .inherit }
-        if patch.remove == true {
-            let statesAnything = patch.gradient != nil || patch.image != nil
-                || patch.logo != nil || patch.title != nil || patch.navigatorWell != nil
-            guard !statesAnything else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar cannot set fields and remove in the same patch."
-                )
-            }
-            return .remove
-        }
-        guard patch.gradient == nil || patch.removeGradient != true else {
-            throw AppThemeEditingError.invalid(
-                "sidebar cannot set gradient and remove_gradient in the same patch."
-            )
-        }
-        guard patch.image == nil || patch.removeImage != true else {
-            throw AppThemeEditingError.invalid(
-                "sidebar cannot set image and remove_image in the same patch."
-            )
-        }
-        guard patch.title == nil || patch.removeTitle != true else {
-            throw AppThemeEditingError.invalid(
-                "sidebar cannot set title and remove_title in the same patch."
-            )
-        }
-        guard patch.navigatorWell == nil || patch.removeNavigatorWell != true else {
-            throw AppThemeEditingError.invalid(
-                "sidebar cannot set navigator_well and remove_navigator_well in the same patch."
-            )
-        }
-
-        var style = base ?? SidebarStyle()
-        var background = style.background ?? SidebarStyle.Background()
-
-        if patch.removeGradient == true {
-            background.gradient = nil
-        } else if let gradient = patch.gradient {
-            background.gradient = try AppThemeToolParsing.gradient(gradient)
-        }
-
-        if patch.removeImage == true {
-            background.image = nil
-        } else if let image = patch.image {
-            guard let source = image.source else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar.image needs a source: {path} or {base64}."
-                )
-            }
-            let data = try AppThemeToolParsing.imageBytes(source, describing: "sidebar.image.source")
-            guard let stored = ThemeAssetStore.store(
-                imageData: data,
-                for: themeID,
-                slot: .background,
-                variant: kind
-            ) else {
-                throw AppThemeEditingError.invalid(
-                    "sidebar.image.source is not a readable image (or exceeds "
-                        + "\(SidebarStyleLimits.maximumImageBytes / (1024 * 1024)) MB)."
-                )
-            }
-            let mode: SidebarStyle.ImageLayer.Mode
-            if let rawMode = cleaned(image.mode) {
-                guard let parsed = SidebarStyle.ImageLayer.Mode(rawValue: rawMode) else {
-                    throw AppThemeEditingError.invalid(
-                        "sidebar.image.mode must be \"tile\", \"fill\" or \"fit\"."
-                    )
-                }
-                mode = parsed
-            } else {
-                mode = .fill
-            }
-            background.image = SidebarStyle.ImageLayer(
-                asset: stored,
-                mode: mode,
-                opacity: image.opacity ?? 1
-            )
-        }
-
-        if patch.removeNavigatorWell == true {
-            style.navigatorWell = nil
-        } else if let wellPatch = patch.navigatorWell {
-            let fill: NSColor
-            if let rawFill = cleaned(wellPatch.fill) {
-                guard let parsed = NSColor(hex: rawFill) else {
-                    throw AppThemeEditingError.invalid(
-                        "sidebar.navigator_well.fill must be #RRGGBB or #RRGGBBAA."
-                    )
-                }
-                fill = parsed
-            } else if let existing = style.navigatorWell?.fill {
-                fill = existing
-            } else {
-                throw AppThemeEditingError.invalid(
-                    "A newly stated sidebar.navigator_well needs an opaque fill."
-                )
-            }
-
-            let bevel: SidebarStyle.NavigatorWell.Bevel
-            if let rawBevel = cleaned(wellPatch.bevel) {
-                guard let parsed = SidebarStyle.NavigatorWell.Bevel(rawValue: rawBevel) else {
-                    throw AppThemeEditingError.invalid(
-                        "sidebar.navigator_well.bevel must be \"sunken\", \"raised\" or \"none\"."
-                    )
-                }
-                bevel = parsed
-            } else {
-                bevel = style.navigatorWell?.bevel ?? .sunken
-            }
-            style.navigatorWell = SidebarStyle.NavigatorWell(fill: fill, bevel: bevel)
-        }
-
-        var brand = style.brand ?? SidebarStyle.Brand()
-        if let logo = patch.logo {
-            switch logo {
-            case .mark:
-                brand.logo = .mark
-            case .hidden:
-                brand.logo = .hidden
-            case .image(let source):
-                let data = try AppThemeToolParsing.imageBytes(source, describing: "sidebar.logo")
-                guard let stored = ThemeAssetStore.store(
-                    imageData: data,
-                    for: themeID,
-                    slot: .logo,
-                    variant: kind
-                ) else {
-                    throw AppThemeEditingError.invalid(
-                        "sidebar.logo is not a readable image."
-                    )
-                }
-                brand.logo = .asset(stored)
-            }
-        }
-
-        if patch.removeTitle == true {
-            brand.title = nil
-        } else if let title = patch.title {
-            let weight: SidebarStyle.Brand.Title.Weight?
-            if let rawWeight = cleaned(title.weight) {
-                guard let parsed = SidebarStyle.Brand.Title.Weight(rawValue: rawWeight) else {
-                    throw AppThemeEditingError.invalid(
-                        "title.weight must be \"regular\", \"medium\", \"semibold\" or \"bold\"."
-                    )
-                }
-                weight = parsed
-            } else {
-                weight = nil
-            }
-            let parsed = SidebarStyle.Brand.Title(
-                text: cleaned(title.text),
-                fontFamily: cleaned(title.fontFamily),
-                fontSize: title.fontSize,
-                weight: weight,
-                hidden: title.hidden ?? false
-            )
-            brand.title = parsed.isEmpty ? nil : parsed
-        }
-
-        style.background = background.isEmpty ? nil : background
-        style.brand = brand.isEmpty ? nil : brand
-        return .set(style)
     }
 
     // MARK: Backdrop Parsing
@@ -1606,10 +1461,13 @@ extension AgentToolCoordinator {
             "terminal_colors": terminalColorDocument(terminal)
         ]
         if let sidebar = variant?.sidebar {
-            document["sidebar"] = appThemeSidebarDocument(sidebar)
+            document["sidebar"] = AppThemeToolParsing.document(sidebar)
         }
         if let chrome = variant?.chrome {
             document["chrome"] = appThemeChromeDocument(chrome)
+        }
+        if let transition = variant?.transition {
+            document["transition"] = AppThemeToolParsing.document(transition)
         }
         return document
     }
@@ -1667,35 +1525,6 @@ extension AgentToolCoordinator {
         var document: [String: Any] = ["kind": texture.kind.rawValue]
         if let color = texture.color { document["color"] = color.hexString }
         if let spacing = texture.spacing { document["spacing"] = spacing }
-        return document
-    }
-
-    private func appThemeSidebarDocument(_ sidebar: SidebarStyle) -> [String: Any] {
-        var document: [String: Any] = [:]
-        if let background = sidebar.background {
-            document.merge(AppThemeToolParsing.document(background)) { _, new in new }
-        }
-        if let brand = sidebar.brand {
-            switch brand.logo {
-            case .mark: document["logo"] = "mark"
-            case .hidden: document["logo"] = "hidden"
-            case .asset(let name): document["logo"] = ["asset": name]
-            }
-            if let title = brand.title {
-                var titleDocument: [String: Any] = ["hidden": title.hidden]
-                if let text = title.text { titleDocument["text"] = text }
-                if let family = title.fontFamily { titleDocument["font_family"] = family }
-                if let size = title.fontSize { titleDocument["font_size"] = size }
-                if let weight = title.weight { titleDocument["weight"] = weight.rawValue }
-                document["title"] = titleDocument
-            }
-        }
-        if let well = sidebar.navigatorWell {
-            document["navigator_well"] = [
-                "fill": well.fill.hexString,
-                "bevel": well.bevel.rawValue
-            ]
-        }
         return document
     }
 

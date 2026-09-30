@@ -2086,7 +2086,9 @@ ThreadingRemoteKit. `ThemeGradientAnimator` is one shared source compiled by the
 ThreadingDesignKit. Two five-keyframe Core Animation tracks move the gradient's endpoints along
 its own axis without changing its colors, span, layout or hit area. CSS angles mirror between
 AppKit and UIKit. The platform lifecycle owners build no repeating animation while hidden,
-detached, in Reduce Motion or Low Power Mode. Ordinary theme/catalogue refreshes preserve the
+detached, in Reduce Motion or Low Power Mode — and, on the Mac, while the **Theme animations**
+setting is off: `ThemeBackdropMotionView` asks `ThemeParticleHold` rather than keeping its own
+list of reasons. Ordinary theme/catalogue refreshes preserve the
 animation when its recipe is unchanged. There is no display link, SwiftUI timeline, file access,
 network request or session traversal per frame.
 
@@ -2115,3 +2117,151 @@ transfer and themed interaction presets remain separate future work.
 path. The evidence catalogue includes the actual Mac sidebar/pane and iPhone dashboard in both
 appearances at rest and quarter-cycle. Evidence holds the compositor geometry at a fixed phase;
 normal builds use their local animation clock.
+
+## 2026-09-30 — a theme that moves
+
+Four limits were true at once for a theme that wanted to be a brand rather than a palette — the
+case that prompted it was a Coca-Cola theme authored entirely through the tools. The logo slot
+held a dead raster while the Threading mark beside it lifted, turned and stitched itself in; the
+wordmark could only be the variant's `label`, so a red header with white script was impossible in
+the light variant; a red cap authored as the top stops of the sidebar's gradient was placed as a
+fraction of the column's height, bled into the first rows of a tall window and turned every
+accent-coloured badge there red-on-red; and nothing a theme document could state moved — the
+only live surface was an extension's Metal shader. A switch between themes was an instant
+repaint with only the wordmark morphing. And the agent that authored the theme could not look at
+it: a screen capture needs Screen Recording, would carry the user's projects, and an adaptive
+theme only ever shows one of its two variants.
+
+What shipped is five pieces of vocabulary and one tool, all data the host interprets:
+
+| Stated in | What it is | Interpreter |
+|---|---|---|
+| `ThemeParticles` (shared) | style (`fizz`, `snow`, `sparkle`, `confetti`, `embers`), optional shape override, 1–4 `ThemeInk`s, density, size, speed, opacity | `ThemeParticleEmitter` (`CAEmitterLayer`), `ThemeParticleStill` |
+| `ThemeBackdrop.particles` | an ambient field in both backdrop homes — the sidebar's `background` and the material's `backdrop` | `ThemeParticleFieldLayer` in `SidebarBackdropView` and `ThemeBackdropDressingLayer` |
+| `SidebarStyle.Brand.motion` | hover/press/launch beats, particles, an origin in the logo's unit square, `working` | `ThemeLogoView` (replaces the plain `NSImageView`) |
+| `SidebarStyle.Brand.band` + `Title.color` | the header's own gradient and ink; the wordmark's own colour | `SidebarBrandBandView`, `InkSource.brandBand`, the wordmark's ink provider, `ThreadingMarkView`'s ink |
+| `AppTheme.Variant.transition` | particles, duration, wash, wash opacity, shimmer | `ThemeTransitionPresenter` + `ThemeTransitionOverlayView` |
+| custom theme font files | `font-<uuid>.ttf/otf/ttc` in the theme's asset folder | `ThemeFontStore`, `add_app_theme_font` |
+
+### One particle vocabulary, host-owned budgets
+
+`ThemeInk` is a role's wire name or `#RRGGBB(AA)`, so an adaptive theme's two variants can share
+one block and still get their own reds; the colour is resolved against the variant that states
+it. A style names a motion and a shape names artwork the host draws itself in white
+(`ThemeParticleArtwork`), so a document can never ship a shader or a raster emitter, and every
+ink is one `CAEmitterCell` tinting the same sprite.
+
+**The budgets are placement's, not the document's.** Every rate is derived from the region and
+the density and then clamped so `rate × lifetime` stays under `ThemeParticleBudget` — 120 alive
+for an ambient field, 40/s for a logo's stream, 48 for one burst, 700 for a transition. That is
+what makes an externally authored field a fixed cost: density 1 in a 4,000-point pane asks for
+the same ceiling as density 1 in a sidebar (`ThemeMotionTests` sweeps every style). Core
+Animation simulates and draws the particles in the render server; the main thread only states
+the emitter, which is O(inks) per theme change, appearance flip or resize. A resize moves the
+source and rescales the rate through key paths without restarting the field; only a height
+change past 25% re-derives lifetimes.
+
+Three things about `CAEmitterLayer` were measured in a probe window, not assumed:
+
+- **A `.line` source in `.outline` mode piles its particles at the edge they were born on.** A
+  one-point-tall `.rectangle` in `.volume` mode sends them across the region as authored, so
+  every "from below/above" source is the latter.
+- **A begin time in the past prewarms the field.** Set `lifetime` seconds back, a column is full
+  within the first frame; left at now, a glass of bubbles took nine seconds to fill after every
+  theme switch.
+- **Nothing offscreen draws an emitter's particles.** `cacheDisplay` and a `CARenderer` into a
+  Metal texture both returned the ground and not one sprite; only a captured on-screen window did.
+  Hence `ThemeParticleStill` — a deterministic, seeded frame drawn on the CPU — which is both what
+  a field *is* while motion is off and what every render and preview shows.
+
+### The hold
+
+`ThemeParticleHold` is the one owner of whether any of it moves. Motion is off — every field a
+still scatter, no gesture, no stream, no transition — under Reduce Motion, the user's
+**Theme animations** setting (`AppSettings.playsThemeMotion`, surfaced through `DesignSettings`
+as its sixth value so a plugin's panes follow it too), and Low Power Mode. With motion on, a field
+is *frozen in time* (`speed` 0 and a held `timeOffset`) while its window is miniaturized, fully
+occluded, hidden with the app, or its view hidden — the extension backdrop plane's visibility
+hold — and resumes exactly where it stood. Fields and logos register weakly and are re-asked on
+every occlusion, miniaturize, hide, power-state, accessibility and settings change, so no host
+remembers to. A gradient's `drift` is a member too, so one switch stills the whole theme rather
+than only its particles. A still is not a blank: under Reduce Motion the theme keeps its look the way a
+`backdropPattern` does. An ambient field's strength is held under
+`ThemeParticleLimits.ambientOpacityCeiling` (0.6) whatever the document says, the extension
+plane's legibility ceiling for the same reason — it moves under text.
+
+### The logo, the band and the wordmark
+
+`ThemeLogoView` answers the three moments the mark does with whichever `Beat` the theme names
+(`lift` is held while hovered; the rest are presentation-only keyframes that end where they
+began, so an interrupted beat never leaves the logo askew) and gives off its particles *behind*
+the image — fizz leaving a bottle's neck comes out of it rather than being painted over the glass
+— unclipped by the 24-point slot. `working` ties a stream to `AgentIntensity`, read at the moment
+it was reported: quiet at one agent, busier at five. Validation refuses motion beside the
+Threading mark, which is drawn live and keeps its own gestures.
+
+The band is its own view (`SidebarBrandBandView`) between the extension plane and the header,
+running from the column's top edge to the header's bottom rather than being a stop in the
+sidebar's gradient — that is what fixed the bleed and the red-on-red. It is a fourth ground:
+`InkSource.brandBand` answers the header's `+` and arrangement controls through `hostGround`
+while a band is stated, the wordmark takes the band's ink unless the title states its own
+colour, and the Threading mark wears the band's ink too. Validation holds the band's ink (or the
+label) and a stated title colour to the label's 3:1 floor against every stop; a title colour with
+no band is held against the sidebar's surface and wash.
+
+### Arrivals
+
+A transition is how a theme *arrives*, so `ThemeSwitch.apply` — the Settings and onboarding
+pickers, the Current Theme page, classic-skin import, and `set_app_theme`/`create_app_theme`/
+`update_app_theme` with `apply` — is the only door that plays one. A launch restore, an adaptive
+theme's light/dark flip, a contributed theme reloading, a duplicate (the same look under a new
+id) and a phone's remote pick all stay `AppThemeLibrary.apply`, an instant repaint.
+
+The swap cannot be animated — `AppThemeLibrary.apply` restates every frozen colour in every
+window synchronously — so the presenter hides it rather than tweening it: particles in the
+*incoming* variant's inks (resolved before the swap, for the appearance the theme will be worn
+in, which is the system's for an adaptive theme and not the app's current pin) cross the window,
+a wash rises toward the incoming ground (or the stated `wash`), the theme is applied at
+`Design.Motion.themeTransitionSwapFraction` (45%) when the wash is highest, and the wash lifts
+off the new chrome while the particles already in flight finish. All three run in the render
+server, so the main-thread repaint the swap costs does not stall them. Durations resolve through
+`Design.Motion.themeTransition(_:)`, zero under Reduce Motion, which the presenter reads as
+"apply at once".
+
+The overlay lives *inside* each main window's content root, not in a child window: the window
+server clips a window's content to its rounded frame and would not clip a child, so a
+full-window wash in a child window stood square past the host's curve — and the only way to read
+the curve's radius is a private key. It takes no clicks, claims no pointer, is not an
+accessibility element and removes itself when its timeline ends. One transition plays at a time:
+a second pick *finishes* the first — its theme applied if the swap had not happened, its overlays
+removed — and starts from there, so a burst of picks lands on the last one.
+
+### Previews and fonts
+
+`preview_app_theme` renders any theme — applied or not, one appearance or both stacked — on a
+sample window built from the real components (`SidebarBackdropView`, `SidebarBrandBandView`,
+`SidebarBrandView`, `PaneHeaderView`, a `ThemedSurfaceView` on the broad ground, a card, buttons,
+the paired terminal palette) around invented rows, and returns the PNG as an image block, the
+second tool after `browser_screenshot` to do so. The palette is swapped for one synchronous render
+and put back inside the same main-actor turn, so no display pass of the real window can land in
+between; motion is drawn as its still frame (`ThemeParticleHold.withStillFrames`) with a logo's
+plume stamped where a stream would be. It is how the agent that authored a theme checks it
+without Screen Recording and without seeing anything of the user's.
+
+A custom theme's fonts live in its asset folder beside its images, so duplicate copies them and
+delete removes them; the document never names a file, only a family, so a missing file degrades
+one rung like any uninstalled face. They are registered process-scoped like extension fonts. The
+restored theme's folder (at most four files) registers synchronously before the first window;
+every other custom theme's registers on a background task; `add_app_theme_font` reads, parses and
+writes on a detached task — the main-actor latency rule's shape — and repaints afterwards.
+
+### Tests
+
+`ThemeMotionTests` holds the wire forms and the older-document decode, `replacing` carrying the
+transition, every gate (particle bounds, band and title contrast, motion needing an image logo,
+origin bounds, transition duration and wash), the budget sweep across every style at density 1
+in a huge region, the emitter's cells, tint and axis signing, the still frame's determinism, the
+hold's four states, the logo's hover and working streams, the presenter's palette resolution, its
+plain-apply fallbacks and its finish-the-first rule, the tool loop through create, get, a merging
+update and removes, the logo schema's `["string", "object"]`, and a preview whose band pixel is
+where the band was drawn (`THREADING_RENDER_OUT` keeps `theme-motion-preview.png`).

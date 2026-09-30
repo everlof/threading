@@ -417,6 +417,18 @@
       "kind": "pointerClaim",
       "symbol": "NSCursor.arrow",
       "reason": "The same window-level claim, applied as events are dispatched to a covered window."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThemeTransitionOverlay.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "backgroundColor",
+      "reason": "The wash is one transition's colour, resolved from the incoming theme before the swap and discarded with the view when its timeline ends; there is no later theme change for it to outlive."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/ThemeParticleField.swift",
+      "kind": "frozenLayerColor",
+      "symbol": "backgroundColor",
+      "reason": "The still field is a tiled pattern image, which Core Animation only takes as a CGColor; refresh() restates it on every theme change, appearance flip and motion-setting change through ThemeParticleHold."
     }
   ]
 }

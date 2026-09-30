@@ -488,6 +488,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if plan.startsExtensions {
             ExtensionManager.shared.prepareAppearanceContributions()
         }
+        // A custom theme's own fonts, for the same reason and under the same recovery rule:
+        // the restore wears System in recovery, so nothing needs them.
+        if !plan.isRecovery {
+            AppThemeLibrary.prepareCustomFonts()
+        }
         AppThemeLibrary.restore(plan.mode)
         LaunchLedger.shared.record(.themeRestored, detail: [
             StartupCheckpointDefaults.themeField: plan.isRecovery

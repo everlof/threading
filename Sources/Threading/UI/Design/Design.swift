@@ -2113,6 +2113,37 @@ public enum Design {
         /// name still.
         public static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
 
+        /// One beat a theme's logo plays (`SidebarStyle.Brand.LogoMotion.Beat`). A spin is a whole
+        /// turn and needs longer to read as one; a shake is a shudder and must be over before
+        /// it becomes an alarm. Zero under Reduce Motion, though the logo never asks then.
+        public static func logoBeat(_ beat: SidebarStyle.Brand.LogoMotion.Beat) -> TimeInterval {
+            guard !reducesMotion else { return 0 }
+            switch beat {
+            case .shake: return 0.35
+            case .lift, .bounce, .tilt: return 0.5
+            case .pop: return 0.45
+            case .wobble, .spin: return 0.6
+            }
+        }
+
+        /// How long a logo's burst keeps giving off particles — short enough to read as one
+        /// puff rather than a stream.
+        public static var logoBurstWindow: TimeInterval { reducesMotion ? 0 : 0.12 }
+
+        /// A theme's arrival, as its document states it (`ThemeTransition.duration`), held to
+        /// the model's bounds. Zero under Reduce Motion, which the presenter reads as "apply at
+        /// once" rather than as a very fast transition.
+        public static func themeTransition(_ authored: Double) -> TimeInterval {
+            guard !reducesMotion else { return 0 }
+            let range = ThemeParticleLimits.transitionDurationRange
+            return min(max(authored, range.lowerBound), range.upperBound)
+        }
+
+        /// Where in a theme's arrival the theme is actually swapped: when the wash is at its
+        /// height and the particles are thickest, so the repaint is the least visible thing on
+        /// screen.
+        public static let themeTransitionSwapFraction: Double = 0.45
+
         // MARK: Curves
 
         /// The curve something travelling a card's distance *into* place moves on — the toast
@@ -2560,6 +2591,8 @@ public final class ThemeBackdropDressingLayer: CALayer {
     private let gradient = CAGradientLayer()
     private let picture = CALayer()
     private var motionView: ThemeBackdropMotionView?
+    /// The theme's ambient particles over the wash and picture — `ThemeBackdrop.particles`.
+    private let particleField = ThemeParticleFieldLayer()
 
     override init() {
         super.init()
@@ -2568,6 +2601,7 @@ public final class ThemeBackdropDressingLayer: CALayer {
         picture.masksToBounds = true
         addSublayer(gradient)
         addSublayer(picture)
+        addSublayer(particleField)
     }
 
     override init(layer: Any) {
@@ -2582,15 +2616,21 @@ public final class ThemeBackdropDressingLayer: CALayer {
         super.layoutSublayers()
         gradient.frame = bounds
         picture.frame = bounds
+        particleField.frame = bounds
     }
 
     /// Whether a gradient is showing — what a test can ask without reading pixels.
     public var showsGradient: Bool { !gradient.isHidden }
     /// Whether a picture is showing.
     public var showsPicture: Bool { !picture.isHidden }
+    /// Whether a particle field is showing, moving or still.
+    public var showsParticles: Bool { !particleField.isHidden }
+    /// The field itself, for a test asking which state it is in.
+    public var particles: ThemeParticleFieldLayer { particleField }
 
     @MainActor
     func apply(_ resolved: ThemeBackdropAppearance.Resolved, in owner: NSView) {
+        particleField.apply(resolved.particles, host: owner)
         picture.contentsScale = contentsScale
         if let stated = resolved.gradient {
             gradient.isHidden = false

@@ -326,7 +326,7 @@ final class CurrentThemeViewController: NSViewController {
     @objc private func themeChanged(_ sender: ThemedPopUp) {
         guard let raw = sender.selectedItem?.representedValue as? String,
               let theme = AppThemeLibrary.theme(withID: AppThemeID(raw)) else { return }
-        AppThemeLibrary.apply(theme)
+        ThemeSwitch.apply(theme)
     }
 
     @objc private func variantChanged(_ sender: ThemedPopUp) {

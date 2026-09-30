@@ -242,6 +242,12 @@ extension AgentCommand {
   static func updateAppTheme(_ value: UpdateAppThemeArguments) -> Self {
     builtIn(.updateAppTheme, value)
   }
+  static func previewAppTheme(_ value: PreviewAppThemeArguments) -> Self {
+    builtIn(.previewAppTheme, value)
+  }
+  static func addAppThemeFont(_ value: AddAppThemeFontArguments) -> Self {
+    builtIn(.addAppThemeFont, value)
+  }
   static func extensionListComponents(_ value: EmptyToolArguments) -> Self {
     builtIn(.extensionListComponents, value)
   }
