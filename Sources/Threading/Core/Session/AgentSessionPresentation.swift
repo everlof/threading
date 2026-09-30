@@ -8,16 +8,10 @@ extension AgentSession {
   /// yet. Never the agent or account, which the row's icon slot already identifies.
   @MainActor
   var displayTitle: String {
-    if let customTitle, !customTitle.isEmpty {
-      return customTitle
-    }
-
-    if AppSettings.usesAgentTitleInSidebar,
-      let agentTitle, !agentTitle.isEmpty
-    {
-      return agentTitle
-    }
-
-    return title.isEmpty ? AgentDefaults.untitledSessionName : title
+    AgentSessionRowPresentation(
+      session: self,
+      usesAgentTitle: AppSettings.usesAgentTitleInSidebar,
+      untitledTitle: AgentDefaults.untitledSessionName
+    ).title
   }
 }

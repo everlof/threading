@@ -853,6 +853,13 @@ the conversation. `SessionNaming` holds the rules; three names remain, resolved 
    composer has the prompt, or by the first `UserPromptSubmit` hook report for a prompt typed
    straight into the terminal. Empty until then; the display falls back to "New Session".
 
+`AgentSessionRowPresentation` carries typed session, provider and account identity and resolves
+that title precedence without settings or platform imports. Hosts supply the agent-title
+preference and unnamed-session wording. macOS `displayTitle` keeps its existing setting; the
+Linux preview follows agent titles by default, including in saved and newly admitted rows.
+Truncation, account decoration and accessibility geometry stay with each renderer. The value
+does not read a store, rename a session or synchronize a catalogue.
+
 The explicit rename is also the registry command `session.rename`, editable and bound to ⌘R by
 default. The Project menu routes it to the selected session. With no session selected, the command
 palette advances to a searchable session input and targets the chosen id directly; Close Session
