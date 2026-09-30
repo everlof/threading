@@ -71,6 +71,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private static let maximumReplayBytes = 4 * 1024 * 1024
     private static let maximumAttachColumns = 128
     private static let maximumAttachRows = 40
+    private static let pendingStops = DispatchGroup()
     struct TextRun: Sendable {
         let offset: Int32
         let characters: Int32
@@ -122,6 +123,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         let terminalID: TerminalID
         let title: String
         let terminalCount: Int
+        let directory: String
     }
     private var terminalCreation: TerminalCreation?
     private var terminalCreationPending = false
@@ -152,6 +154,24 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var codexDiscovery: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)?
     private var agentResume: (store: String, socket: String, shell: String, codex: String?,
                               claude: String?, sessionID: SessionID, width: Int, height: Int)?
+    private struct TerminalDirectoryTarget {
+        let store: String
+        let projectID: ProjectID
+        let terminalID: TerminalID
+        var persistedDirectory: String
+    }
+    // Worker-owned, one latest path and one coalescing timer per retained terminal (at most eight).
+    private var terminalDirectoryTarget: TerminalDirectoryTarget?
+    private var directoryTimer: DispatchSourceTimer?
+    private var processDirectoryIdentity: LinuxProcessDirectory.Identity?
+    private var lastObservedProcessDirectory: String?
+    private var initialProcessDirectoryPending = false
+    private var hasSampledProcessDirectory = false
+    private var pendingWorkingDirectory: String?
+    private var directoryWritesPaused = false
+    private var directoryFailureReported = false
+    private var directoryFailureCount = 0
+    private var directoryRetryAfter: UInt64 = 0
 
     func start(store: String, socket: String, directory: String, executable: String, arguments: [String]) {
         lock.lock(); terminalCreationPending = true; lock.unlock()
@@ -166,6 +186,9 @@ final class GraphicalTerminal: @unchecked Sendable {
                     terminalCreation = receipt
                     lock.unlock()
                     createdTerminalStore = store
+                    terminalDirectoryTarget = TerminalDirectoryTarget(store: store,
+                        projectID: receipt.projectID, terminalID: receipt.terminalID,
+                        persistedDirectory: receipt.directory)
                 }
                 identity = id
                 // Once send is attempted, failure cannot prove that the daemon did not spawn.
@@ -276,8 +299,10 @@ final class GraphicalTerminal: @unchecked Sendable {
                 guard executable.hasPrefix("/") else {
                     throw WindowFailure("shell executable must be an absolute path")
                 }
-                let plan = try Self.savedTerminalPlan(store: store, terminalID: terminalID,
-                                                      projectID: projectID)
+                let prepared = try Self.savedTerminalPlan(store: store, terminalID: terminalID,
+                                                          projectID: projectID)
+                let plan = prepared.plan
+                terminalDirectoryTarget = prepared.directoryTarget
                 let id = PTYHostSessionIdentity(.projectTerminal(plan.terminalID))
                 identity = id
                 let presence = Self.terminalPresence(socket: socket, id: plan.terminalID)
@@ -311,7 +336,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
     }
     private static func savedTerminalPlan(store: String, terminalID: String, projectID: String)
-        throws -> ProjectTerminalStartPlan {
+        throws -> (plan: ProjectTerminalStartPlan, directoryTarget: TerminalDirectoryTarget) {
         guard let id = TerminalID(uuidString: terminalID),
               let owner = ProjectID(uuidString: projectID) else {
             throw WindowFailure("invalid saved terminal identity")
@@ -335,8 +360,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         var isDirectory: ObjCBool = false
         let available = FileManager.default.fileExists(atPath: preferred.path,
                                                        isDirectory: &isDirectory) && isDirectory.boolValue
-        return ProjectTerminalStartPlan(terminal: terminal, project: project,
-                                        preferredDirectoryIsAvailable: available)
+        return (ProjectTerminalStartPlan(terminal: terminal, project: project,
+                                         preferredDirectoryIsAvailable: available),
+                TerminalDirectoryTarget(store: store, projectID: project.id, terminalID: terminal.id,
+                                        persistedDirectory: terminal.currentDirectory))
     }
     var terminalID: String? {
         lock.lock(); defer { lock.unlock() }
@@ -406,8 +433,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         worker.async { [self] in
             do {
                 attaching = true
-                let id = try Self.storedIdentity(store: store, savedID: savedID, kind: kind,
-                                                 projectID: projectID)
+                let stored = try Self.storedIdentity(store: store, savedID: savedID, kind: kind,
+                                                     projectID: projectID)
+                let id = stored.identity
+                terminalDirectoryTarget = stored.directoryTarget
                 identity = id
                 if kind == .agent, let uuid = UUID(uuidString: savedID) {
                     savedAgent = (store, SessionID(uuid))
@@ -444,7 +473,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
     }
     private static func storedIdentity(store: String, savedID: String, kind: SavedKind,
-                                       projectID: String? = nil) throws -> PTYHostSessionIdentity {
+                                       projectID: String? = nil)
+        throws -> (identity: PTYHostSessionIdentity, directoryTarget: TerminalDirectoryTarget?) {
         guard let uuid = UUID(uuidString: savedID) else {
             throw WindowFailure(kind == .agent ? "invalid session UUID" : "invalid terminal identity")
         }
@@ -460,29 +490,29 @@ final class GraphicalTerminal: @unchecked Sendable {
         switch kind {
         case .terminal:
             let id = TerminalID(uuid)
-            let isStored: Bool
+            let project: Project?
             if let projectID {
                 guard let parsed = ProjectID(uuidString: projectID) else {
                     throw WindowFailure("invalid project identity")
                 }
-                isStored = try database.projectRecord(id: parsed)?.terminals.contains(where: {
-                    $0.id == id
-                }) ?? false
+                project = try database.projectRecord(id: parsed)
             } else {
-                isStored = try database.projectRecords().contains(where: { record in
+                project = try database.projectRecords().first(where: { record in
                     record.project.terminals.contains(where: { $0.id == id })
-                })
+                })?.project
             }
-            guard isStored else {
+            guard let project, let terminal = project.terminals.first(where: { $0.id == id }) else {
                 throw WindowFailure("terminal is not in this store")
             }
-            return PTYHostSessionIdentity(.projectTerminal(id))
+            return (PTYHostSessionIdentity(.projectTerminal(id)),
+                    TerminalDirectoryTarget(store: store, projectID: project.id, terminalID: id,
+                                            persistedDirectory: terminal.currentDirectory))
         case .agent:
             let id = SessionID(uuid)
             guard try database.sessionRecord(id: id) != nil else {
                 throw WindowFailure("session is not in this store")
             }
-            return .agentSession(id)
+            return (.agentSession(id), nil)
         }
     }
     private func receiveOutput(_ data: Data) {
@@ -496,7 +526,139 @@ final class GraphicalTerminal: @unchecked Sendable {
                 lock.lock(); if !finished && !closed && failure == nil { running = true }; lock.unlock()
             }
         } else { emulator?.feed(data) }
+        if let directory = emulator?.takeWorkingDirectoryUpdate() {
+            initialProcessDirectoryPending = false
+            observeWorkingDirectory(directory)
+        }
         dirty = true
+    }
+    private func observeWorkingDirectory(_ path: String) {
+        guard directoryTimer != nil, !directoryWritesPaused,
+              let target = terminalDirectoryTarget,
+              path.hasPrefix("/"), path.utf8.count <= 4096, !path.utf8.contains(0) else { return }
+        // This is an O(1)-slot publication. Filesystem validation and persistence happen only
+        // on the timer (or the final close/exit flush), never once per output chunk.
+        pendingWorkingDirectory = path == target.persistedDirectory ? nil : path
+    }
+    private func startDirectoryTracking(pid: Int32, expectedStartTime: PTYHostProcessStartTime?) {
+        guard let target = terminalDirectoryTarget,
+              identity == PTYHostSessionIdentity(.projectTerminal(target.terminalID)) else { return }
+        lock.lock(); let active = !closed && failure == nil; lock.unlock()
+        guard active else { return }
+        directoryTimer?.cancel()
+        // Older attach replies without a process stamp still admit validated live OSC updates,
+        // but cannot authorize reading whichever process now happens to own the returned PID.
+        processDirectoryIdentity = expectedStartTime.flatMap {
+            LinuxProcessDirectory.identity(pid: pid, expectedStartTime: $0)
+        }
+        if processDirectoryIdentity == nil {
+            reportDirectoryFailure("root process identity unavailable; process directory sampling disabled")
+        }
+        let timer = DispatchSource.makeTimerSource(queue: worker)
+        directoryTimer = timer
+        let generation = connectionGeneration
+        timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.connectionGeneration == generation else { return }
+            self.lock.lock()
+            let active = !self.closed && self.failure == nil
+            let failed = self.failure != nil
+            self.lock.unlock()
+            if failed { self.stopDirectoryTracking(sample: false); return }
+            guard active, self.exitStatus == nil else { return }
+            self.sampleWorkingDirectory()
+            self.flushWorkingDirectory()
+        }
+        // Establish a baseline before any live OSC can supersede it, but defer observation to
+        // the timer: spawned can arrive before the forked child has entered its launch cwd.
+        lastObservedProcessDirectory = processDirectoryIdentity.flatMap { LinuxProcessDirectory.directory(for: $0) }
+        initialProcessDirectoryPending = true
+        hasSampledProcessDirectory = false
+        timer.resume()
+    }
+    private func sampleWorkingDirectory() {
+        guard let processDirectoryIdentity,
+              let path = LinuxProcessDirectory.directory(for: processDirectoryIdentity) else { return }
+        let changed = path != lastObservedProcessDirectory || initialProcessDirectoryPending
+        // A spawned PID can still be entering its launch cwd when the baseline was read. If
+        // live OSC arrived first, this first sample settles the baseline rather than treating
+        // that launch transition as newer evidence than the OSC directory.
+        let mayObserve = hasSampledProcessDirectory || initialProcessDirectoryPending
+        hasSampledProcessDirectory = true
+        initialProcessDirectoryPending = false
+        lastObservedProcessDirectory = path
+        guard changed, mayObserve else { return }
+        observeWorkingDirectory(path)
+    }
+    private func flushWorkingDirectory(final: Bool = false) {
+        guard !directoryWritesPaused, var target = terminalDirectoryTarget,
+              let pending = pendingWorkingDirectory,
+              final || DispatchTime.now().uptimeNanoseconds >= directoryRetryAfter else { return }
+        guard let folder = ProjectDirectory.existing(at: pending) else {
+            pendingWorkingDirectory = nil
+            return
+        }
+        let directory = folder.path
+        guard directory != target.persistedDirectory else {
+            pendingWorkingDirectory = nil
+            return
+        }
+        do {
+            let root = URL(fileURLWithPath: target.store, isDirectory: true)
+            let file = root.appendingPathComponent("threading.db")
+            guard FileManager.default.fileExists(atPath: file.path) else {
+                throw WindowFailure("terminal store disappeared")
+            }
+            let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+            guard fd >= 0 else { throw WindowFailure("cannot open terminal metadata lock") }
+            defer { Glibc.close(fd) }
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+                throw WindowFailure("terminal metadata store is busy")
+            }
+            // Metadata cannot hold input/output behind SQLite's ordinary five-second wait.
+            let database = try ProjectDatabase(url: file, busyTimeoutMilliseconds: 0)
+            defer { database.close() }
+            guard try database.updateTerminalDirectory(id: target.terminalID, in: target.projectID,
+                directory: directory, expectedCurrentDirectory: target.persistedDirectory) else {
+                directoryWritesPaused = true
+                pendingWorkingDirectory = nil
+                reportDirectoryFailure("terminal metadata changed or its record is unavailable")
+                directoryTimer?.cancel()
+                directoryTimer = nil
+                processDirectoryIdentity = nil
+                return
+            }
+            target.persistedDirectory = directory
+            terminalDirectoryTarget = target
+            pendingWorkingDirectory = nil
+            directoryFailureCount = 0
+            directoryRetryAfter = 0
+            directoryFailureReported = false
+            print("TERMINAL_DIRECTORY_SAVED \(target.terminalID)"); fflush(nil)
+        } catch {
+            // Keep only the latest path. A busy/read-only store never fails the PTY, and retries
+            // stay on this one coalescing timer with a bounded thirty-second backoff.
+            directoryFailureCount = min(directoryFailureCount + 1, 5)
+            let delay = UInt64(min(30, 1 << directoryFailureCount)) * 1_000_000_000
+            directoryRetryAfter = DispatchTime.now().uptimeNanoseconds + delay
+            reportDirectoryFailure(String(describing: error))
+        }
+    }
+    private func reportDirectoryFailure(_ reason: String) {
+        guard !directoryFailureReported, let target = terminalDirectoryTarget else { return }
+        directoryFailureReported = true
+        let bounded = String(reason.prefix(256)).replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        FileHandle.standardError.write(Data("TERMINAL_DIRECTORY_REFUSED \(target.terminalID) \(bounded)\n".utf8))
+    }
+    private func stopDirectoryTracking(sample: Bool) {
+        guard directoryTimer != nil else { return }
+        if sample { sampleWorkingDirectory() }
+        flushWorkingDirectory(final: true)
+        directoryTimer?.cancel()
+        directoryTimer = nil
+        processDirectoryIdentity = nil
+        pendingWorkingDirectory = nil
     }
     private static func createTerminal(store: String, directory: String, executable: String,
                                        admitted: (TerminalCreation) -> Void) throws -> PTYHostSessionIdentity {
@@ -527,7 +689,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         // The record already exists even if selecting it or spawning its child later fails.
         admitted(TerminalCreation(projectID: project.id, terminalID: terminal.id,
             title: String(terminal.displayTitle.unicodeScalars.prefix(256)),
-            terminalCount: project.terminals.count))
+            terminalCount: project.terminals.count, directory: terminal.currentDirectory))
         try database.saveSelectedTerminalID(terminal.id)
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
@@ -615,6 +777,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             replayRemaining = count
             lock.lock(); initialViewport = (lastWidth, lastHeight); running = count == 0; lock.unlock()
             agentResume = nil
+            startDirectoryTracking(pid: value.pid, expectedStartTime: value.startTime)
             dirty = true
         case .spawned(let value):
             guard !attaching, value.id == identity else { fail(WindowFailure("spawn identity mismatch")); return }
@@ -626,6 +789,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                 } catch { fail(error); return }
             }
             lock.lock(); running = true; lock.unlock(); dirty = true
+            startDirectoryTracking(pid: value.pid, expectedStartTime: value.startTime)
             if let discovery = codexDiscovery {
                 codexDiscovery = nil
                 Self.discoverCodexSession(discovery)
@@ -633,6 +797,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         case .exited(let value):
             guard value.id == identity else { fail(WindowFailure("exit identity mismatch")); return }
             guard !attaching || replayRemaining == 0 else { fail(WindowFailure("exit before completed replay")); return }
+            // Flush before publishing finished: a same-window explicit restart cannot overtake
+            // this incarnation's final metadata. An ended PID is never sampled again.
+            stopDirectoryTracking(sample: false)
             exitStatus = value.signalled ? 128 + value.status : value.status
             lock.lock(); running = false; spawnMayBeLive = false; finished = true; lock.unlock(); dirty = true
             if let savedAgent, let exitStatus {
@@ -840,7 +1007,13 @@ final class GraphicalTerminal: @unchecked Sendable {
         return (plan, project.folderPath)
     }
     private func fail(_ error: Error) {
-        lock.lock(); if !closed && failure == nil { failure = String(describing: error) }; lock.unlock()
+        lock.lock()
+        let firstFailure = !closed && failure == nil
+        if firstFailure { failure = String(describing: error) }
+        lock.unlock()
+        if firstFailure {
+            worker.async { [self] in stopDirectoryTracking(sample: false) }
+        }
     }
     private func clearTerminalSelection(id: TerminalID) {
         guard let store = createdTerminalStore else { return }
@@ -950,8 +1123,28 @@ final class GraphicalTerminal: @unchecked Sendable {
         lock.unlock()
     }
     func stop() {
-        lock.lock(); closed = true; running = false; frame = nil; lock.unlock()
-        worker.async { [self] in client?.close() }
+        lock.lock()
+        guard !closed else { lock.unlock(); return }
+        closed = true; running = false; frame = nil
+        Self.pendingStops.enter()
+        lock.unlock()
+        worker.async { [self] in
+            defer { Self.pendingStops.leave() }
+            stopDirectoryTracking(sample: true)
+            client?.close()
+        }
+    }
+    /// Shutdown awaits at most two seconds without occupying the UI executor. A refused write
+    /// or expired shutdown deadline leaves the last committed cwd and emits a bounded diagnostic.
+    static func waitForPendingStops() async {
+        let completed = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: pendingStops.wait(timeout: .now() + 2) == .success)
+            }
+        }
+        if !completed {
+            FileHandle.standardError.write(Data("TERMINAL_DIRECTORY_SHUTDOWN_TIMEOUT pending metadata may be unsaved\n".utf8))
+        }
     }
     func takeFrame() throws -> Frame? {
         lock.lock(); defer { lock.unlock() }

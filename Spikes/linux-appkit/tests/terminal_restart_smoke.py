@@ -80,8 +80,20 @@ def assert_record(count, cwd):
     assert entries[-1]['cwd'] == str(cwd), entries[-1]
     assert entries[-1]['arguments'] == shell_arguments, entries[-1]
     assert len({item['pid'] for item in entries}) == count, 'restart must create a fresh child'
+    if cwd == project:
+        def fallback_saved():
+            with sqlite3.connect(database_path) as database:
+                payload = database.execute('SELECT data FROM project WHERE id = ?', (project_id,)).fetchone()[0]
+                return json.loads(payload)['terminals'][0]['currentDirectory'] == str(project)
+        eventually(fallback_saved, 'live fallback directory persisted')
     with sqlite3.connect(database_path) as database:
-        assert database.execute('SELECT data FROM project WHERE id = ?', (project_id,)).fetchone()[0] == expected_payload
+        actual = database.execute('SELECT data FROM project WHERE id = ?', (project_id,)).fetchone()[0]
+        if cwd == project:
+            expected = json.loads(expected_payload)
+            expected['terminals'][0]['currentDirectory'] = str(project)
+            assert json.loads(actual) == expected, 'fallback changed metadata beyond live cwd'
+        else:
+            assert actual == expected_payload
         assert database.execute('SELECT COUNT(*) FROM project').fetchone()[0] == 1
         state = dict(database.execute('SELECT key, value FROM app_state'))
         assert state['selectedTerminalID'] == saved_id and 'selectedSessionID' not in state
@@ -187,7 +199,8 @@ try:
     preferred.rmdir()
 
     # An exited selected shell remains dormant at startup. Explicit activation falls back to
-    # its owning project when the recorded directory disappeared, without rewriting that record.
+    # its owning project when the recorded directory disappeared. Live cwd tracking then updates
+    # only that field; identity, creation, custom title and settings remain the saved record's.
     launch('fallback')
     window = projects()
     assert len(starts()) == 2
@@ -201,7 +214,7 @@ try:
     key('q')
     title(r'^Threading terminal - exited 0( \[(history cut|restored)\])?$')
     close_from_terminal()
-    print('PASS saved shell restart: same ID and record, fresh PID, stored cwd and missing-directory fallback, exact argv/grid, cached and uncached live attach, offline exit and attach-only startup', flush=True)
+    print('PASS saved shell restart: same ID/settings, fresh PID, stored cwd and persisted live fallback, exact argv/grid, cached and uncached live attach, offline exit and attach-only startup', flush=True)
 finally:
     if process is not None:
         if process.poll() is None:

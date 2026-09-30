@@ -91,6 +91,10 @@ check_saved_terminal_restart() {
     "$daemon" "$fixture/pty.sock" "$fixture"
   dbus-run-session -- python3 tests/terminal_catalogue_limits_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
     "$daemon" "$fixture/pty.sock" "$fixture"
+  python3 tests/terminal_directory_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/pty.sock" "$fixture"
+  python3 tests/terminal_directory_identity_smoke.py "$bin/WindowHarness" \
+    "$fixture/terminal-restart-store" "$fixture"
 }
 if [[ "$THREADING_LINUX_RESTART_ONLY" == 1 ]]; then
   check_saved_terminal_restart

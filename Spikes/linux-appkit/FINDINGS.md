@@ -2825,3 +2825,52 @@ and desktop-entry checks also passed, as did the ten local runner tests and synt
 The tested artifacts identify source revision `d518687a3` with `source_dirty=true`; source hashes
 were unchanged between compilation and final inspection. Live shell cwd persistence remains the
 next lifecycle gap.
+
+## 104. Live shell directories persist without transferring project ownership
+
+The previous installed Release package reproduced the missing persistence: ordinary bash changed
+directory, but its durable terminal record retained the launch directory. The runtime now keeps
+one latest path per retained shell (maximum eight), accepting validated local OSC 7 or sampling
+the root process once per second on its worker. Remote, relative, oversized and control-bearing
+OSC paths are rejected. SwiftTerm retains replay provenance across parser fragments, so an OSC
+sequence beginning in history cannot become a live observation by ending in a later feed.
+
+An attachment now carries the daemon's original optional process start time, including retained
+exited sessions. Linux verifies that incarnation before accepting a PID and checks its start
+ticks around each bounded `/proc/PID/cwd` read. Missing or mismatched start times disable process
+sampling while preserving live OSC reports. The initial sample settles the child launch baseline
+without overwriting a newer OSC observation.
+
+Persistence validates an existing local directory and updates only the exact terminal in its
+original project. A targeted transaction compares the last acknowledged directory, preserves
+settings, ordering, sibling terminals and sessions, and never recreates a deleted row. Idempotent
+acknowledgement avoids duplicate writes. Missing/stale records stop metadata tracking; busy
+storage keeps one latest value and retries with bounded backoff. SQLite uses a zero busy timeout
+for this worker. There is no per-output database work or window-actor file/process sampling.
+
+Exit flushes before restart eligibility is published. Window close queues a final sample/write,
+and app shutdown waits asynchronously for at most two seconds. Busy storage or a timeout can
+leave the last committed directory. A no-OSC `cd; exit` wholly between samples cannot be recovered
+after the PID disappears, and process fallback follows the root shell rather than arbitrary
+foreground descendants. This remains host-owned behavior in the diagnostic Linux frontend.
+
+The installed Release package passed ordinary bash with OSC 7 disabled: Unicode/spaced cwd,
+same-ID restart in that directory, continued tracking after same-PID reattachment, original
+project/settings preservation after entering another imported project, and deleted-directory
+fallback. Controlled peers passed missing/wrong incarnation stamps, unrelated-PID isolation,
+historical and split-replay OSC rejection, invalid live reports, and valid fragmented local OSC
+updates with process sampling disabled. All four new native screenshots were inspected.
+The full installed runtime lane also passed startup, provider PATH, live reinstall, saved-shell
+restart/refusal, catalogue limits and desktop launch. The Release client/emulator contracts
+passed, including a 2,000-report latest-value check. macOS passed 27 daemon tests and 66 database
+tests (one existing live-project import test skipped because no legacy document was present),
+79 protocol tests, and 134 parser tests. All 46 vendored files matched their originals.
+
+The first controlled-peer run omitted required pixel dimensions in its grid; correcting the
+fixture made the real attachment frame decodable without changing product code. The build
+container also waited for stdin EOF after its harness completed. Explicit shell exit now runs
+cleanup first; the eleventh runner test holds stdin open, checks exact daemon cleanup, and fails
+when that exit is removed. The completed build was released explicitly and the installed runtime
+lane rerun against the same binaries. The artifacts identify revision `489de13ec` with
+`source_dirty=true`; compiled source hashes remained unchanged. The shared attachment stamp was
+backported to local master as `b49e57dbc`, preserving unrelated work there.
