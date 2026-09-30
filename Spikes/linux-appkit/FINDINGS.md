@@ -2936,3 +2936,42 @@ original runtime identities intact. The unchanged fixture fails at that input as
 pre-fix package and passes on the final package, which also passes all three accessibility
 scenarios. The additional post-selection screenshot was inspected. The final `.deb` SHA-256 is
 `2d1e45b1d62a5d56de1dd8d6fb67e5e221c8dab8639fce8ae9d779a913a6c5cd`.
+
+## 106. Agent catalogue admission follows the committed row
+
+Fresh agents previously published a boolean after launch preparation. The navigator reconstructed
+an unnamed row from the request, addressed its project by an old array index, and incremented the
+displayed count. A folder-import snapshot could already contain that durable session; consuming
+the boolean afterward inserted it again and counted it twice.
+
+Creation now publishes one typed receipt immediately after the session transaction commits, while
+the store's host lock still owns the count/read/write sequence. It carries the actual saved row's
+presentation, project identity and committed full count. Reconciliation looks up that project by
+identity, preserves an existing snapshot row's presentation and order, and admits a missing row
+within the 512-value cap without moving the selected identity. Counts use the committed absolute
+value and the imported snapshot, rather than incrementing a possibly refreshed count. This is the
+preview's serialized append/import contract; it does not claim synchronization with external
+session deletion.
+
+A later spawn refusal does not undo the durable receipt. Failed-runtime cleanup checks both
+pending creation and untaken publication so a receipt arriving between the two checks cannot be
+discarded. The event loop continues bounded admission polling even when the visible terminal
+has failed. At most eight retained runtimes contribute receipts or commit-order metadata; an older
+receipt observed in a later turn stays behind already-published newer admissions from its project.
+No database read or unbounded archive walk occurs on the UI actor.
+
+The installed native fixture holds the real client's hello handshake while the system GTK
+folder chooser is open, releases creation, observes the post-commit spawn request, then supplies
+a definitive spawn refusal before the import snapshot returns. The pre-fix package reports
+514 agents for 513 durable records; the fixed package reports 513 and publishes one saved row.
+A second case inserts the receipt into an already-selected 512-row picker and preserves that
+selected UUID. A third adds 512 newer fixture records before import, proves the admission is
+outside the recent projection, and retains it without incrementing the authoritative 1,025 count.
+All original record payloads remain unchanged. All three installed cases passed, and their
+rendered native pickers were inspected.
+
+The full installed bundle lane, Release client/emulator contracts, eight existing agent/account
+and shell lifecycle scenarios, and eleven runner tests passed. Both changed compiled inputs
+matched their build-time hashes after validation. The artifact identifies `19634fb38` with
+`source_dirty=true`; its `.deb` SHA-256 is
+`1a7aacbb199f470d04a5a5d21a2351b1e16ae8cbbde9655fd8e8c0bed1feebce`.

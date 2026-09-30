@@ -110,6 +110,8 @@ if [[ "$THREADING_LINUX_STARTUP_ONLY" == 1 ]]; then
   exit 0
 fi
 if [[ "$THREADING_LINUX_AGENT_ONLY" == 1 ]]; then
+  dbus-run-session -- python3 tests/agent_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
   python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/native_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
@@ -382,6 +384,8 @@ python3 tests/agent_create_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daem
 python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/native_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/named_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
+dbus-run-session -- python3 tests/agent_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
 python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
 python3 tests/terminal_restore_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \

@@ -128,7 +128,13 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var terminalCreation: TerminalCreation?
     private var terminalCreationPending = false
     private var createdTerminalStore: String?
-    private var createdAgent = false
+    struct AgentCreation: Sendable {
+        let projectID: ProjectID
+        let row: AgentSessionRowPresentation
+        let sessionCount: Int
+    }
+    private var agentCreation: AgentCreation?
+    private var agentCreationPending = false
     private var spawnMayBeLive = false
     private var savedTerminalSpawnRefused = false
     private var finished = false
@@ -210,7 +216,9 @@ final class GraphicalTerminal: @unchecked Sendable {
     func startAgent(store: String, socket: String, directory: String, shell: String,
                     kind: AgentKind, executable: String, accountHandle: AccountHandle, id: SessionID,
                     width: Int, height: Int) {
+        lock.lock(); agentCreationPending = true; lock.unlock()
         worker.async { [self] in
+            defer { lock.lock(); agentCreationPending = false; lock.unlock() }
             do {
                 let columns = max(2, width / Self.cellWidth), rows = max(1, height / Self.cellHeight)
                 let link = try connect(socket: socket, columns: columns, rows: rows)
@@ -218,14 +226,16 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let plan = try Self.createAgent(store: store, directory: directory,
                                                 shell: shell, kind: kind, executable: executable,
                                                 accountHandle: accountHandle,
-                                                accountPath: accountPath, id: id)
+                                                accountPath: accountPath, id: id) { receipt in
+                    lock.lock(); agentCreation = receipt; lock.unlock()
+                }
                 let environment = Self.launchEnvironment()
                 let identity = PTYHostSessionIdentity.agentSession(id)
                 self.identity = identity
                 savedAgent = (store, id)
                 if kind == .codex { codexDiscovery = (store, directory, accountPath, id, Date()) }
                 lastWidth = width; lastHeight = height
-                lock.lock(); createdAgent = true; spawnMayBeLive = true; lock.unlock()
+                lock.lock(); spawnMayBeLive = true; lock.unlock()
                 try link.spawn(PTYHostSpawnRequest(id: identity,
                     channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
                     executable: plan.executable, arguments: plan.arguments,
@@ -695,7 +705,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     private static func createAgent(store: String, directory: String, shell: String,
                                     kind: AgentKind, executable: String, accountHandle: AccountHandle,
-                                    accountPath: String, id: SessionID) throws -> AgentLaunchPlan {
+                                    accountPath: String, id: SessionID,
+                                    admitted: (AgentCreation) -> Void) throws -> AgentLaunchPlan {
         guard shell.hasPrefix("/"), executable.hasPrefix("/") else {
             throw WindowFailure("shell and agent executable must be absolute paths")
         }
@@ -748,6 +759,12 @@ final class GraphicalTerminal: @unchecked Sendable {
         AgentLaunchRecording.apply(plan, to: &session, at: Date())
         try database.addSession(session, to: project.id, position: project.sessionCount,
                                 selectNewSession: true)
+        // The host lock serializes this count/read/commit with other Linux writers. Publish
+        // durable admission now even if process setup or the subsequent spawn is refused.
+        admitted(AgentCreation(projectID: project.id,
+            row: AgentSessionRowPresentation(session: session, usesAgentTitle: true,
+                                             untitledTitle: AgentDefaults.untitledSessionName),
+            sessionCount: project.sessionCount + 1))
         return plan
     }
     private func received(_ frame: PTYHostFrame) {
@@ -1160,9 +1177,14 @@ final class GraphicalTerminal: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return terminalCreationPending || terminalCreation != nil
     }
-    var hasCreatedAgent: Bool {
+    func takeAgentCreation() -> AgentCreation? {
         lock.lock(); defer { lock.unlock() }
-        return createdAgent
+        defer { agentCreation = nil }
+        return agentCreation
+    }
+    var hasPendingAgentCreation: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return agentCreationPending || agentCreation != nil
     }
     var canReplace: Bool {
         lock.lock(); defer { lock.unlock() }
