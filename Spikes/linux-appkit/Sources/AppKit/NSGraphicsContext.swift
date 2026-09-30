@@ -7,10 +7,9 @@ import Foundation
 /// That is a narrow enough contract to reproduce exactly, which matters more than it sounds:
 /// save/restore is what every themed component uses to keep its clip and its colours from
 /// leaking into its siblings, and getting it wrong would show up as a picture, not an error.
-@MainActor
 public final class NSGraphicsContext {
 
-    public enum CompositingOperation: Sendable { case sourceOver, copy, plusLighter }
+    public enum CompositingOperation: Sendable { case sourceOver, sourceIn, copy, plusLighter }
 
     private struct State {
         var fillColor: NSColor
@@ -27,7 +26,29 @@ public final class NSGraphicsContext {
 
     private var stack: [State]
 
-    public static var current: NSGraphicsContext?
+    /// A glyph usually touches four or fewer tiles. A transparency group must not allocate a
+    /// window-sized bitmap for each visible mark. The bound also refuses accidentally using this
+    /// narrow leaf for an unbounded offscreen surface.
+    private final class TransparencyLayer {
+        static let tileSide = 16
+        var tiles: [Int: Bitmap] = [:]
+        let savedDepth: Int
+        init(savedDepth: Int) { self.savedDepth = savedDepth }
+    }
+    private var layers: [TransparencyLayer] = []
+    public private(set) var peakTransparencyLayerPixelCount = 0
+    private var allocatedLayerPixels = 0
+    private static let maximumLayerPixels = 1_048_576
+
+    /// AppKit's current drawing context is thread-local, not a process-global UI value. This
+    /// keeps unchanged production image drawing callable from a bounded background renderer.
+    public static var current: NSGraphicsContext? {
+        get { Thread.current.threadDictionary["ThreadingShim.NSGraphicsContext.current"] as? NSGraphicsContext }
+        set {
+            if let newValue { Thread.current.threadDictionary["ThreadingShim.NSGraphicsContext.current"] = newValue }
+            else { Thread.current.threadDictionary.removeObject(forKey: "ThreadingShim.NSGraphicsContext.current") }
+        }
+    }
 
     public init(bitmap: Bitmap, scale: CGFloat = 2) {
         self.bitmap = bitmap
@@ -58,7 +79,11 @@ public final class NSGraphicsContext {
 
     public var compositingOperation: CompositingOperation {
         get { stack[stack.count - 1].compositingOperation }
-        set { stack[stack.count - 1].compositingOperation = newValue }
+        set {
+            precondition(newValue == .sourceOver || newValue == .sourceIn,
+                         "drawing supports only sourceOver and sourceIn")
+            stack[stack.count - 1].compositingOperation = newValue
+        }
     }
 
     public var shouldAntialias: Bool = true
@@ -102,8 +127,32 @@ public final class NSGraphicsContext {
     func fill(polygons: [[NSPoint]], evenOdd: Bool, color: NSColor) {
         var components = color.components
         components.3 *= alpha
+        let polygons = device(polygons)
+        if !layers.isEmpty || compositingOperation != .sourceOver {
+            let points = polygons.flatMap { $0 }
+            guard !points.isEmpty else { return }
+            precondition(points.allSatisfy { $0.x.isFinite && $0.y.isFinite }, "nonfinite image-layer geometry")
+            let left = Int(max(0, min(CGFloat(bitmap.width), points.map(\.x).min()!.rounded(.down))))
+            let right = Int(max(0, min(CGFloat(bitmap.width), points.map(\.x).max()!.rounded(.up))))
+            let top = Int(max(0, min(CGFloat(bitmap.height), points.map(\.y).min()!.rounded(.down))))
+            let bottom = Int(max(0, min(CGFloat(bitmap.height), points.map(\.y).max()!.rounded(.up))))
+            guard left < right, top < bottom else { return }
+            let width = right - left, height = bottom - top
+            precondition(width * height <= Self.maximumLayerPixels, "image-layer fill exceeds pixel bound")
+            // Reuse the real scan converter over only the primitive's visible bounds. In
+            // particular, a source-in icon tint never scans or allocates a full-window mask.
+            let local = polygons.map { $0.map { NSPoint(x: $0.x - CGFloat(left), y: $0.y - CGFloat(top)) } }
+            let mask = Rasterizer.mask(polygons: local, evenOdd: evenOdd, width: width, height: height)
+            for row in 0..<height {
+                for column in 0..<width where mask[row * width + column] > 0 {
+                    composite(x: left + column, y: top + row, color: components,
+                              coverage: mask[row * width + column])
+                }
+            }
+            return
+        }
         Rasterizer.fill(
-            polygons: device(polygons),
+            polygons: polygons,
             evenOdd: evenOdd,
             color: components,
             clip: stack[stack.count - 1].clip,
@@ -134,18 +183,80 @@ public final class NSGraphicsContext {
                 outline.append(contentsOf: joint.polygons())
             }
         }
-        var components = color.components
-        components.3 *= alpha
         // Each quad filled separately, so overlapping joins do not cancel under nonzero winding.
         for piece in outline {
-            Rasterizer.fill(
-                polygons: device([piece]),
-                evenOdd: false,
-                color: components,
-                clip: stack[stack.count - 1].clip,
-                into: bitmap
-            )
+            fill(polygons: [piece], evenOdd: false, color: color)
         }
+    }
+
+    func composite(x: Int, y: Int, color: (CGFloat, CGFloat, CGFloat, CGFloat), coverage: CGFloat) {
+        guard x >= 0, x < bitmap.width, y >= 0, y < bitmap.height else { return }
+        var coverage = coverage
+        if let clip = stack.last?.clip { coverage *= clip[y * bitmap.width + x] }
+        guard coverage > 0 else { return }
+        let destination: Bitmap
+        let localX: Int, localY: Int
+        if let layer = layers.last {
+            let side = TransparencyLayer.tileSide
+            let columns = (bitmap.width + side - 1) / side
+            let key = (y / side) * columns + x / side
+            if let tile = layer.tiles[key] { destination = tile }
+            else {
+                // Transparent source-over/source-in cannot create coverage in an empty tile.
+                guard color.3 > 0, compositingOperation != .sourceIn else { return }
+                precondition(allocatedLayerPixels <= Self.maximumLayerPixels - side * side,
+                             "transparency group exceeds the bounded image leaf")
+                destination = Bitmap(width: side, height: side)
+                layer.tiles[key] = destination
+                allocatedLayerPixels += side * side
+                peakTransparencyLayerPixelCount = max(peakTransparencyLayerPixelCount, allocatedLayerPixels)
+            }
+            localX = x % side; localY = y % side
+        } else {
+            destination = bitmap; localX = x; localY = y
+        }
+        destination.composite(x: localX, y: localY, color: color,
+                              coverage: coverage, operation: compositingOperation)
+    }
+
+    fileprivate func beginTransparencyLayer() {
+        precondition(layers.count < 8, "transparency nesting exceeds the bounded image leaf")
+        precondition(compositingOperation == .sourceOver,
+                     "transparency groups require sourceOver parent composition")
+        layers.append(TransparencyLayer(savedDepth: stack.count))
+        var local = stack[stack.count - 1]
+        // Group opacity and inherited clipping apply once, when the isolated result rejoins its
+        // parent. Inner draws can add their own opacity/clip without squaring the inherited ones.
+        local.alpha = 1
+        local.clip = nil
+        local.compositingOperation = .sourceOver
+        stack.append(local)
+    }
+
+    fileprivate func endTransparencyLayer() {
+        guard let layer = layers.popLast() else {
+            preconditionFailure("endTransparencyLayer without a matching begin")
+        }
+        precondition(stack.count == layer.savedDepth + 1,
+                     "unbalanced graphics state inside transparency layer")
+        stack.removeLast()
+        let side = TransparencyLayer.tileSide
+        let columns = (bitmap.width + side - 1) / side
+        for (key, tile) in layer.tiles {
+            let originX = key % columns * side, originY = key / columns * side
+            for y in 0..<min(side, bitmap.height - originY) {
+                for x in 0..<min(side, bitmap.width - originX) {
+                    let offset = (y * side + x) * 4
+                    let opacity = CGFloat(tile.pixels[offset + 3]) / 255
+                    guard opacity > 0 else { continue }
+                    composite(x: originX + x, y: originY + y,
+                        color: (CGFloat(tile.pixels[offset]) / 255,
+                                CGFloat(tile.pixels[offset + 1]) / 255,
+                                CGFloat(tile.pixels[offset + 2]) / 255, opacity * alpha), coverage: 1)
+                }
+            }
+        }
+        allocatedLayerPixels -= layer.tiles.count * side * side
     }
 
     func intersectClip(polygons: [[NSPoint]], evenOdd: Bool) {
@@ -180,17 +291,28 @@ extension NSGraphicsContext {
     public var cgContext: CGContextShim { CGContextShim(owner: self) }
 }
 
-@MainActor
 public struct CGContextShim {
     let owner: NSGraphicsContext
     public func setShouldAntialias(_ value: Bool) { owner.shouldAntialias = value }
     public func saveGState() { owner.saveGraphicsState() }
     public func restoreGState() { owner.restoreGraphicsState() }
+    public func beginTransparencyLayer(auxiliaryInfo: [String: Any]?) {
+        precondition(auxiliaryInfo == nil, "transparency auxiliary options are unsupported")
+        owner.beginTransparencyLayer()
+    }
+    public func endTransparencyLayer() { owner.endTransparencyLayer() }
 }
 
 extension NSRect {
     /// AppKit hangs `fill()` and `frame()` off the rect itself; `PlatinumBitmapFont` sets one
     /// pixel per lit bit that way.
-    @MainActor public func fill() { NSBezierPath(rect: self).fill() }
-    @MainActor public func frame() { NSBezierPath(rect: self).stroke() }
+    public func fill() { NSBezierPath(rect: self).fill() }
+    public func fill(using operation: NSGraphicsContext.CompositingOperation) {
+        guard let context = NSGraphicsContext.current else { return }
+        context.saveGraphicsState()
+        defer { context.restoreGraphicsState() }
+        context.compositingOperation = operation
+        fill()
+    }
+    public func frame() { NSBezierPath(rect: self).stroke() }
 }

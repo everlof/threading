@@ -10,6 +10,8 @@ if [[ ${ID:-} != ubuntu || ${VERSION_ID:-} != 24.04 || $(uname -m) != aarch64 ]]
 fi
 
 ./vendor-core.sh --verify
+./vendor.sh --verify
+./vendor-marks.sh --verify
 if [[ -n ${THREADING_LINUX_SOURCE_REVISION:-} || -n ${THREADING_LINUX_SOURCE_DIRTY:-} ]]; then
   revision=${THREADING_LINUX_SOURCE_REVISION:-}
   dirty=${THREADING_LINUX_SOURCE_DIRTY:-}
@@ -61,6 +63,7 @@ bundle=$staging/$name
 mkdir -p "$bundle/bin"
 install -m 0755 run-app.sh "$bundle/run-app.sh"
 install -m 0755 "$bin_dir/WindowHarness" "$bundle/bin/WindowHarness"
+cp -a "$bin_dir/LinuxAppKitSpike_WindowHarness.resources" "$bundle/bin/"
 install -m 0755 "$bin_dir/LinuxHost" "$bundle/bin/LinuxHost"
 install -m 0755 "$daemon_dir/threading-ptyd" "$bundle/bin/threading-ptyd"
 install -m 0644 BUNDLE_README.md "$bundle/README.md"

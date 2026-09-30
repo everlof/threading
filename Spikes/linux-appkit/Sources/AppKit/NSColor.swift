@@ -60,11 +60,10 @@ public final class NSColor: @unchecked Sendable, Equatable, Hashable {
 
     // MARK: - Current colours
 
-    // Annotated where real AppKit is: the colour itself is free-floating, but naming it as the
-    // current one touches the context, which belongs to the main actor.
-    @MainActor public func setFill() { NSGraphicsContext.current?.fillColor = self }
-    @MainActor public func setStroke() { NSGraphicsContext.current?.strokeColor = self }
-    @MainActor public func set() { setFill(); setStroke() }
+    // Drawing follows the calling thread's graphics context, as it does in AppKit.
+    public func setFill() { NSGraphicsContext.current?.fillColor = self }
+    public func setStroke() { NSGraphicsContext.current?.strokeColor = self }
+    public func set() { setFill(); setStroke() }
 
     // MARK: - Catalogue
 

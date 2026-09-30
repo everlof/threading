@@ -82,11 +82,13 @@ enum Specimen {
         let text: String
         let accent: NSColor
         let selected: Bool
+        let image: NSImage?
 
-        init(frame: NSRect, text: String, accent: NSColor, selected: Bool) {
+        init(frame: NSRect, text: String, accent: NSColor, selected: Bool, image: NSImage? = nil) {
             self.text = text
             self.accent = accent
             self.selected = selected
+            self.image = image
             super.init(frame: frame)
         }
 
@@ -98,8 +100,14 @@ enum Specimen {
                 accent.setFill()
                 NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
             }
-            (selected ? NSColor(white: 1, alpha: 0.9) : accent).setFill()
-            NSBezierPath(ovalIn: NSRect(x: 10, y: bounds.midY - 4, width: 8, height: 8)).fill()
+            if let image {
+                TemplateImageDrawing.draw(image,
+                    in: NSRect(x: 7.5, y: bounds.midY - 6.5, width: 13, height: 13),
+                    tint: selected ? NSColor(white: 1, alpha: 1) : NSColor(white: 0.15, alpha: 1))
+            } else {
+                (selected ? NSColor(white: 1, alpha: 0.9) : accent).setFill()
+                NSBezierPath(ovalIn: NSRect(x: 10, y: bounds.midY - 4, width: 8, height: 8)).fill()
+            }
             PlatinumBitmapFont.draw(
                 text,
                 penX: 26,

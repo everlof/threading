@@ -32,7 +32,8 @@ let package = Package(
         .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime",
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
-            .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))]),
+            .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))],
+            resources: [.copy("Resources/ProviderMarks")]),
         // Apple's Compression framework, reduced to the two symbols GzipWriter uses. See its header.
         .target(name: "Compression", dependencies: ["CZlib"]),
         // Real Threading persistence, vendored byte-identical. No AppKit anywhere near it.
@@ -65,6 +66,8 @@ let package = Package(
             dependencies: ["SQLite3", "OSLog"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        .executableTarget(name: "Harness", dependencies: ["AppKit", "CoreText"])
+        .executableTarget(name: "Harness", dependencies: ["AppKit", "CoreText"]),
+        .executableTarget(name: "ImageHarness", dependencies: ["AppKit",
+            .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))])
     ]
 )

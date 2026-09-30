@@ -188,25 +188,25 @@ public final class NSBezierPath {
 
     // MARK: - Painting
 
-    @MainActor public func fill() {
+    public func fill() {
         guard let context = NSGraphicsContext.current else { return }
         context.fill(polygons: polygons(), evenOdd: windingRule == .evenOdd, color: context.fillColor)
     }
 
-    @MainActor public func stroke() {
+    public func stroke() {
         guard let context = NSGraphicsContext.current else { return }
         context.stroke(polygons: polygons(), width: lineWidth, color: context.strokeColor)
     }
 
-    @MainActor public func addClip() {
+    public func addClip() {
         NSGraphicsContext.current?.intersectClip(polygons: polygons(), evenOdd: windingRule == .evenOdd)
     }
 
-    @MainActor public func setClip() { addClip() }
+    public func setClip() { addClip() }
 
-    @MainActor public static func fill(_ rect: NSRect) { NSBezierPath(rect: rect).fill() }
-    @MainActor public static func stroke(_ rect: NSRect) { NSBezierPath(rect: rect).stroke() }
-    @MainActor public static func clip(_ rect: NSRect) { NSBezierPath(rect: rect).addClip() }
+    public static func fill(_ rect: NSRect) { NSBezierPath(rect: rect).fill() }
+    public static func stroke(_ rect: NSRect) { NSBezierPath(rect: rect).stroke() }
+    public static func clip(_ rect: NSRect) { NSBezierPath(rect: rect).addClip() }
 }
 
-@MainActor public func NSRectFill(_ rect: NSRect) { NSBezierPath.fill(rect) }
+public func NSRectFill(_ rect: NSRect) { NSBezierPath.fill(rect) }
