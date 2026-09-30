@@ -17,6 +17,16 @@ native question journey exposed this when XCTest kept trying to scroll a visible
 into view. Keep descendant hits, then answer with the control within its visible bounds. Hidden
 and clipped content must not claim the pointer; disabled controls remain available to describe.
 
+`ThemedSurface` resolves the current theme, material and default radius at draw time. Its flat
+fill and border delegate to `SurfaceDrawing`, which also owns the fitted `Shape` geometry used
+by focus rings and welded plate portions. `ThemedSurface.Shape` remains a typealias, so existing
+controls keep the same API. Resolve the default radius **after** the half-border inset: fitting
+to the outer bounds first changes small bordered controls. The shared painter takes concrete
+values and reads no theme state; the Linux shim can compile that same source without importing
+the Mac control hierarchy. Hard and soft bevel selection and drawing remain in `ThemedSurface`.
+`ThreadingDesignKit` links both sources through its existing shared-source symlink boundary.
+This seam shares flat drawing, not control interaction or complete theme support.
+
 An edge-to-edge embedded plain `ThemedTableView` can opt its sole column into fitting its own
 bounds with `soleColumnFillsBoundsExactly`. AppKit's `sizeLastColumnToFit()` uses the containing
 view's width and can enlarge a table through its Auto Layout margins: a 600pt file table inset in
