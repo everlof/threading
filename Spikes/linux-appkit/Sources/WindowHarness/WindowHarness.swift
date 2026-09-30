@@ -156,11 +156,6 @@ struct WindowHarness {
         case saved(SavedRuntimeKey)
     }
 
-    private struct PendingAgent {
-        let projectIndex: Int
-        let row: AgentSessionRowPresentation
-    }
-
     private static func savedAgentTitle(_ title: String, kind: AgentKind,
                                         accountHandle: AccountHandle) -> String {
         // The specimen has no provider icon. Keep that identity as decoration before the
@@ -845,36 +840,57 @@ struct WindowHarness {
 
     @MainActor private static func reconcilePendingAgents(
         projects: inout [ProjectSnapshot],
+        projectIndexes: [String: Int],
         runtimes: inout [SavedRuntimeKey: GraphicalTerminal],
-        pending: inout [String: PendingAgent],
+        pending: inout [String: ProjectID],
+        publishedCounts: inout [String: Int],
         retainedProjects: inout Set<String>,
         preserving selection: (projectID: String, agentID: String)? = nil
     ) -> Bool {
         var changed = false
-        for (id, launch) in Array(pending) {
+        var admitted: [GraphicalTerminal.AgentCreation] = []
+        publishedCounts = publishedCounts.filter { runtimes[.agent($0.key)] != nil }
+        // At most eight runtime receipts; no store reads or archive walk on the UI actor.
+        for id in Array(pending.keys) {
             let key = SavedRuntimeKey.agent(id)
             guard let runtime = runtimes[key] else { pending.removeValue(forKey: id); continue }
-            if runtime.hasCreatedAgent {
-                projects[launch.projectIndex].sessions += 1
-                projects[launch.projectIndex].recentAgents.insert(
-                    savedAgent(launch.row),
-                    at: 0)
-                if projects[launch.projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
-                    let index = launch.projectIndex
-                    let last = projects[index].recentAgents.count - 1
-                    let preservesLast = selection?.projectID == projects[index].id
-                        && selection?.agentID == projects[index].recentAgents[last].id
-                    projects[index].recentAgents.remove(at: preservesLast ? last - 1 : last)
-                }
-                retainedProjects.insert(projects[launch.projectIndex].id)
+            if let receipt = runtime.takeAgentCreation() {
+                admitted.append(receipt)
                 pending.removeValue(forKey: id)
-                changed = true
-            } else if runtime.canReplace {
+            } else if runtime.canReplace, !runtime.hasPendingAgentCreation {
+                // A receipt can arrive between the take and the failure check. Never discard
+                // a committed row just because its later spawn failed.
                 runtime.stop()
                 runtimes.removeValue(forKey: key)
                 pending.removeValue(forKey: id)
                 changed = true
             }
+        }
+        // Keep commit order across batches too: a worker can publish just after this iteration
+        // inspected it, while a newer admission is already consumed from a different runtime.
+        for receipt in admitted.sorted(by: { $0.sessionCount < $1.sessionCount }) {
+            guard let index = projectIndexes[receipt.projectID.uuidString],
+                  projects.indices.contains(index),
+                  projects[index].id == receipt.projectID.uuidString else { continue }
+            let id = receipt.row.id.uuidString
+            publishedCounts[id] = receipt.sessionCount
+            if !projects[index].recentAgents.contains(where: { $0.id == id }) {
+                let newer = projects[index].recentAgents.lastIndex {
+                    (publishedCounts[$0.id] ?? 0) > receipt.sessionCount
+                }
+                projects[index].recentAgents.insert(savedAgent(receipt.row), at: newer.map { $0 + 1 } ?? 0)
+                if projects[index].recentAgents.count > maximumSelectableAgentsPerProject {
+                    let last = projects[index].recentAgents.count - 1
+                    let preservesLast = selection?.projectID == projects[index].id
+                        && selection?.agentID == projects[index].recentAgents[last].id
+                    projects[index].recentAgents.remove(at: preservesLast ? last - 1 : last)
+                }
+            }
+            // Import may already include this admission, even outside its recent-row window.
+            // Keep its newer row presentation/order and never count the same commit twice.
+            projects[index].sessions = max(projects[index].sessions, receipt.sessionCount)
+            retainedProjects.insert(receipt.projectID.uuidString)
+            changed = true
         }
         return changed
     }
@@ -941,7 +957,9 @@ struct WindowHarness {
         defer { tw_close(window) }
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
-        var pendingAgentProjects: [String: PendingAgent] = [:]
+        var pendingAgentProjects: [String: ProjectID] = [:]
+        // At most one commit count per retained agent runtime, within the shared eight-slot cap.
+        var publishedAgentCounts: [String: Int] = [:]
         var restoredProjectIDs: Set<String> = []
         // A fresh project shell keeps one owner even when selected through its saved row.
         // These lookups never add aliases, so the sum of cache counts stays the eight-slot bound.
@@ -1125,8 +1143,10 @@ struct WindowHarness {
                     selection = (projects[picker.projectIndex].id,
                                  projects[picker.projectIndex].recentAgents[savedSelected].id)
                 } else { selection = nil }
-                if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
+                if reconcilePendingAgents(projects: &projects, projectIndexes: projectIndexes,
+                                          runtimes: &restoredRuntimes,
                                           pending: &pendingAgentProjects,
+                                          publishedCounts: &publishedAgentCounts,
                                           retainedProjects: &restoredProjectIDs, preserving: selection) {
                     if let selection, let project = projectIndexes[selection.projectID],
                        let row = projects[project].recentAgents.firstIndex(where: { $0.id == selection.agentID }) {
@@ -1397,6 +1417,7 @@ struct WindowHarness {
                 // A creation can finish after the user returned from its starting terminal.
                 // Poll only while one of at most eight runtimes owes an admission publication.
                 let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
+                    || restoredRuntimes.values.contains { $0.hasPendingAgentCreation }
                 let timed = awaitingCreation || activePane?.needsPolling == true
                 let received = timed ? tw_next_timeout(window, &event, 33) : tw_next(window, &event)
                 if timed, received == 0 { continue }
@@ -1593,13 +1614,14 @@ struct WindowHarness {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
                 }
+                guard let projectID = ProjectID(uuidString: projects[selected].id) else {
+                    throw WindowFailure("invalid project identity")
+                }
                 let id = SessionID()
                 let savedID = String(describing: id)
                 let session = GraphicalTerminal()
                 restoredRuntimes[.agent(savedID)] = session
-                pendingAgentProjects[savedID] = PendingAgent(projectIndex: selected,
-                    row: .unnamed(id: id, kind: kind, accountHandle: accountHandle,
-                                  untitledTitle: AgentDefaults.untitledSessionName))
+                pendingAgentProjects[savedID] = projectID
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
                                    shell: launch[2], kind: kind, executable: executable,
                                    accountHandle: accountHandle, id: id,
@@ -1639,12 +1661,14 @@ struct WindowHarness {
                     savedPicker = nil
                     dirty = true
                 } else if launch != nil, !projects.isEmpty {
-                    if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
+                    if reconcilePendingAgents(projects: &projects, projectIndexes: projectIndexes,
+                                              runtimes: &restoredRuntimes,
                                               pending: &pendingAgentProjects,
+                                              publishedCounts: &publishedAgentCounts,
                                               retainedProjects: &restoredProjectIDs) { dirty = true }
                     guard !projects[selected].recentAgents.isEmpty else {
                         let pending = pendingAgentProjects.values.contains {
-                            $0.projectIndex == selected
+                            $0.uuidString == projects[selected].id
                         }
                         tw_title(window, pending ? "Threading experiment - agent starting"
                                                  : "Threading experiment - no saved agents")

@@ -596,7 +596,10 @@ account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NA
 `./window-smoke.sh` runs the complete Xvfb suite.
 
 The project catalogue is an initial snapshot plus this window's newly created terminal counts
-and agent sessions; external store changes are not live-synchronized. Closing the window
+and agent sessions. Fresh agents publish their committed row and full project count once, so a
+folder-import refresh cannot count the same admission twice, including outside the recent
+512-row window. A later spawn refusal retains the saved row, and insertion preserves the
+currently selected session identity. External store changes are not live-synchronized. Closing the window
 disconnects its clients; the daemon continues to own children that are still running.
 
 A terminal launch or transport failure in `--app` stays on an unavailable view with its cause.
