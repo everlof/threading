@@ -174,11 +174,13 @@ final class ProjectDatabase {
 
     init(
         url: URL,
+        busyTimeoutMilliseconds: Int32 = SQLiteDefaults.busyTimeoutMilliseconds,
         transactionCommitPreflight: (() throws -> Void)? = nil
     ) throws {
         database = try SQLiteDatabase(
             path: url.path,
             maximumSchemaVersion: ProjectDatabaseSchema.version,
+            busyTimeoutMilliseconds: busyTimeoutMilliseconds,
             transactionCommitPreflight: transactionCommitPreflight
         )
         try migrate()
@@ -493,6 +495,31 @@ final class ProjectDatabase {
     /// because one disclosure triangle moved made the gesture scale with the complete sidebar.
     func saveProject(_ project: Project, position: Int) throws {
         try upsert(project, position: position)
+    }
+
+    /// Updates one embedded terminal from the current project payload, never a cached project.
+    /// A true result acknowledges the desired directory, including an idempotent retry. Missing
+    /// destinations and a different directory written since the caller's last observation refuse
+    /// with false. The indexed read and update share a write transaction, so deletion cannot
+    /// resurrect a row and concurrent settings or sibling-terminal edits remain intact.
+    func updateTerminalDirectory(id: TerminalID, in projectID: ProjectID, directory: String,
+                                 expectedCurrentDirectory: String) throws -> Bool {
+        try database.transaction {
+            guard var project = try projectRecord(id: projectID),
+                  let index = project.terminals.firstIndex(where: { $0.id == id }) else {
+                return false
+            }
+            let current = project.terminals[index].currentDirectory
+            if current == directory { return true }
+            guard current == expectedCurrentDirectory else { return false }
+            project.terminals[index].currentDirectory = directory
+            // Only the payload changes: position, indexed identity and all session rows stay put.
+            try database.prepare("UPDATE project SET data = ? WHERE id = ?")
+                .bind(1, try Self.encodeValidated(project))
+                .bind(2, projectID.uuidString)
+                .run()
+            return true
+        }
     }
 
     /// Inserts one project row and advances graph membership without reconciling standing rows.

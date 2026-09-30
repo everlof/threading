@@ -86,6 +86,7 @@ final class SQLiteDatabase {
     init(
         path: String,
         maximumSchemaVersion: Int? = nil,
+        busyTimeoutMilliseconds: Int32 = SQLiteDefaults.busyTimeoutMilliseconds,
         transactionCommitPreflight: (() throws -> Void)? = nil
     ) throws {
         self.transactionCommitPreflight = transactionCommitPreflight
@@ -125,11 +126,11 @@ final class SQLiteDatabase {
         }
 
         // Ordered deliberately: WAL first so everything after it is journalled the new way.
-        // `busy_timeout` is what turns "another writer has it" from an error into a wait —
-        // the whole point of coming here.
+        // Ordinary store owners wait for a writer. Latency-sensitive metadata workers can use
+        // zero to receive SQLITE_BUSY immediately and retry their latest value later.
         do {
             try execute("PRAGMA journal_mode = WAL")
-            try execute("PRAGMA busy_timeout = \(SQLiteDefaults.busyTimeoutMilliseconds)")
+            try execute("PRAGMA busy_timeout = \(max(0, busyTimeoutMilliseconds))")
             try execute("PRAGMA foreign_keys = ON")
             try execute("PRAGMA synchronous = NORMAL")
         } catch {
@@ -433,7 +434,7 @@ final class SQLiteDatabase {
 enum SQLiteDefaults {
     /// How long a write waits for another writer before giving up. Long enough to cover a
     /// checkpoint, short enough that a wedged process cannot hang the UI.
-    static let busyTimeoutMilliseconds = 5_000
+    static let busyTimeoutMilliseconds: Int32 = 5_000
 
     static let databaseName = "threading.db"
 
