@@ -37,6 +37,9 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/out/threading-linux-preview-ubuntu24.04-arm64.deb:/preview.deb:ro" \
   -v "$PWD/tests/app_startup_smoke.py:/test.py:ro" \
   -v "$PWD/tests/live_reinstall_smoke.py:/live-reinstall-test.py:ro" \
+  -v "$PWD/tests/terminal_restart_smoke.py:/terminal_restart_smoke.py:ro" \
+  -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \
+  -v "$PWD/tests/saved_terminal_refusal_smoke.py:/saved_terminal_refusal_smoke.py:ro" \
   -v "$PWD/tests/bundle_runtime_smoke.sh:/runner.sh:ro" \
   -v "$PWD/tests/desktop_entry_smoke.sh:/desktop-test.sh:ro" \
   -v "$PWD/tests/provider_path_smoke.sh:/provider-path-test.sh:ro" \

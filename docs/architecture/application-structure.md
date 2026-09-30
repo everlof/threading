@@ -134,8 +134,15 @@ The experimental Linux `WindowHarness --app` connects its project snapshot to th
 `GraphicalTerminal`. Fresh runtimes are keyed by project and attached runtimes by typed persisted
 agent or terminal identity, with an eight-entry combined ceiling. The native window switches
 between projects, the selected project's saved-agent or saved-terminal list, and the visible
-terminal. Left from a project opens agents; Right opens terminals. Navigation does not create a
-new child or detach an existing one. The snapshot keeps at most 512 identities of each
+terminal. Left from a project opens agents; Right opens terminals. Opening a picker does not
+create a child or detach an existing one. Explicit saved-terminal activation reads its exact
+owning project on a worker and uses `ProjectTerminalStartPlan` for the stored-directory fallback.
+A bounded daemon survey attaches a live child or permits one plain same-ID spawn after confirmed
+absence/exit; it never requests replacement. A definitive spawn refusal permits a later explicit
+re-survey, while a lost reply keeps ownership uncertain. Startup restoration remains attach-only.
+The selected identity, ownership evidence and launch admission stay host-owned even if the row's
+presentation becomes customizable. Linux does not yet persist live cwd updates.
+The snapshot keeps at most 512 identities of each
 kind per project and the UI mounts only viewport rows. Only the visible terminal requests
 rendered frames; store work and terminal processing stay on workers. This remains a host-only diagnostic frontend,
 not the shipping Mac sidebar or a public extension surface.

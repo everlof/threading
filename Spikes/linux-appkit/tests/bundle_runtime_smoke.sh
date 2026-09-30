@@ -34,11 +34,13 @@ fixture=$(mktemp -d /tmp/threading-bundle.XXXXXXXX)
 installed_fixture=''
 upgrade_fixture=''
 upgrade_runner=''
+restart_fixture=''
 cleanup() {
   if [[ -n $upgrade_runner ]]; then kill "$upgrade_runner" 2>/dev/null || true; fi
   rm -rf -- "$fixture"
   if [[ -n $installed_fixture ]]; then rm -rf -- "$installed_fixture"; fi
   if [[ -n $upgrade_fixture ]]; then rm -rf -- "$upgrade_fixture"; fi
+  if [[ -n $restart_fixture ]]; then rm -rf -- "$restart_fixture"; fi
 }
 trap cleanup EXIT
 mkdir -p /evidence/out
@@ -93,5 +95,32 @@ test "$before" = "$after"
 touch "$upgrade_fixture/reinstalled"
 wait "$upgrade_runner"
 upgrade_runner=''
+restart_fixture=$(mktemp -d /tmp/threading-restart.XXXXXXXX)
+chown threading-preview-test:threading-preview-test "$restart_fixture"
+mkdir -p /evidence/restart-out
+chmod 0777 /evidence/restart-out
+rm /tmp/out
+ln -s /evidence/restart-out /tmp/out
+runuser -u threading-preview-test -- xvfb-run -a bash -s -- "$installed/bin" "$restart_fixture" <<'RESTART'
+set -euo pipefail
+bin=$1
+fixture=$2
+"$bin/threading-ptyd" --socket "$fixture/pty.sock" --state "$fixture/daemon" >"$fixture/daemon.log" 2>&1 &
+daemon_pid=$!
+trap 'kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_pid" 2>/dev/null || true' EXIT
+ready=0
+for ((attempt=0; attempt<100; attempt++)); do
+  if "$bin/threading-ptyd" sessions --json --socket "$fixture/pty.sock" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  kill -0 "$daemon_pid" || { cat "$fixture/daemon.log"; exit 1; }
+  sleep .1
+done
+[[ $ready == 1 ]] || { cat "$fixture/daemon.log"; exit 1; }
+python3 /terminal_restart_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+python3 /saved_terminal_refusal_smoke.py "$bin/WindowHarness" "$fixture/terminal-restart-store" "$fixture"
+RESTART
 runuser -u threading-preview-test -- xvfb-run -a dbus-run-session -- bash /desktop-test.sh
-echo 'PASS installed package, live-child reinstall, desktop entry and non-root native window'
+echo 'PASS installed package, live-child reinstall, saved-terminal restart, desktop entry and non-root native window'

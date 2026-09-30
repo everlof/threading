@@ -50,12 +50,13 @@ project-graph slice and runs the on-disk contracts below:
 | Fresh-session capabilities, defaults and handoff admission | 1 | 41 |
 | Shared session row identity, title precedence and host presentation boundaries | 1 | 99 |
 | Shared terminal launch recording | 1 | 72 |
+| Shared saved-terminal start directory and typed ownership | 1 | 102 |
 | Bounded project navigation, selected identity and partial-read write fence | 1 | 74 |
 | Shared Unix connector modes, descriptor inheritance and path refusals | 1 | 43 |
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 45 production files are byte-identical to their sources. Fresh-session record assembly,
+The 46 production files are byte-identical to their sources. Fresh-session record assembly,
 terminal launch recording, launch values, account command routing, bounded Codex rollout checks
 and Claude transcript paths are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
@@ -119,7 +120,12 @@ still attempts attach and surfaces its failure. Startup never spawns a child. A 
 older than the recent window is fetched by identity; a selected terminal older than the recent
 window is found in its owning project payload. Both appear within their 512-row picker limits.
 Otherwise the project list opens without starting a child. Enter opens a shell; the saved-agent
-and saved-terminal pickers can reattach other runtimes. It keeps data under
+and saved-terminal pickers can reattach other runtimes. Explicitly opening an exited or absent
+saved terminal starts a fresh shell under that same terminal identity, using its stored directory
+when available or its owning project as fallback. The saved name, settings and creation date stay
+unchanged. A failed ownership query does not authorize a start, and a lost spawn reply does not
+authorize a retry. A definitive refusal permits another explicit activation and fresh survey.
+It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
 `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
 private to the user. If `codex` or `claude` resolves to an absolute executable, the window also
@@ -127,6 +133,11 @@ offers its managed agent action. Set `THREADING_LINUX_CODEX=` or `THREADING_LINU
 that provider, or set either to an absolute executable to choose a particular CLI. Clear both for
 terminal-only mode. Closing the window leaves running children with
 the daemon; running the command again opens the same stored projects and can reattach them.
+
+`THREADING_LINUX_RESTART_ONLY=1 ./window-smoke.sh` checks explicit saved-shell restart with the
+same record and a new PID, live reuse, stored-directory fallback, exact argv/initial grid and
+attach-only startup. Controlled peers cover definitive refusal, lost spawn replies and unavailable
+ownership. The installed Release package runs these same fixtures in `./bundle-smoke.sh`.
 In a Codex-enabled project list, Ctrl+Shift+I opens the native login chooser; Up/Down and Enter
 select the login used by the next Ctrl+Shift+A launch. It lists the standard home and up to 31
 marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window opens. An explicit
@@ -362,7 +373,8 @@ window evidence. The native terminal mode below consumes these snapshots and for
 The emulator can parse historical feeds with query replies suppressed. The real-daemon harness
 reconnects it using the additive `attached.replayByteCount` boundary and verifies that replay does
 not answer an old cursor query again. The graphical `--attach` mode below uses the same boundary
-and labels cut history. The project browser's saved-terminal picker uses that attachment path too.
+and labels cut history. The project browser's saved-terminal picker uses that attachment path
+for a live child; explicit activation can start an exited or absent saved shell again.
 
 SwiftTerm's transitive Linux dependencies are recorded in this spike's `Package.resolved`.
 The host smoke also exercises its build-info generator against disposable unavailable, clean,
@@ -471,7 +483,8 @@ Select a project with Up/Down or a click, then press Enter to open its shell. Ct
 opens the folder dialog from projects and returns to projects from a terminal. Enter revisits
 that project's existing terminal, including its child and
 emulator state. Right opens the selected project's saved terminals, newest first. Up/Down or a
-click selects one and Enter attaches it; Left or Escape returns to projects. A star marks a
+click selects one and Enter opens it, attaching a live child or starting the same saved terminal
+again after confirmed exit/absence; Left or Escape returns to projects. A star marks a
 runtime retained by this window. Left from projects opens saved agent sessions, also newest
 first; Enter attaches the selected agent through its own persisted identity. Both pickers retain
 their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window,

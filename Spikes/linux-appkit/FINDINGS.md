@@ -2752,3 +2752,41 @@ treating its comparison with the earlier 12,512 ms as a stable launch-speedup me
 The raster oracle now stores each run's frames in a fresh directory. A repeated comparison
 passed; a deliberate missing-mask probe on the reused output path correctly failed while
 retaining the previous successful report, so stale artifacts cannot satisfy a missing output.
+
+## 102. Explicit activation can restart the same saved shell
+
+Opening a saved terminal used to attach even when its child had exited or disappeared, leaving
+that destination unusable. Explicit activation now validates the exact terminal in its owning
+project, surveys the daemon, attaches a live child or attempts one plain spawn with the same
+typed identity. Startup restoration remains attach-only. A definitive refusal permits another
+explicit activation and fresh survey; a lost spawn reply retains uncertain ownership and cannot
+trigger another attempt. This path never asks the daemon to replace a child or writes a new
+terminal record. It keeps the eight-runtime ceiling and performs selected-project reads,
+directory checks and the bounded daemon survey on a worker.
+
+`ProjectTerminalStartPlan` shares the recorded-directory fallback with macOS. Hosts provide
+directory availability and retain their own shell executable, arguments, initial-command and
+admission policies. The pure value carries terminal and owning-project identity, chooses the
+recorded directory when available and otherwise uses the owning project's folder. Linux still
+does not persist live cwd changes. This remains a host-owned action in the experimental navigator;
+presentation cannot grant process-replacement authority.
+
+The shared Linux core contracts and all three new macOS policy tests passed. The real native
+fixture preserved record bytes, custom title, creation date, selected identity and exact argv;
+explicit restart produced a new PID, duplicate live activation and normal relaunch retained the
+existing PID, and a removed directory fell back to the owning project. It checked the initial
+96×27 grid and attach-only startup after exit. Controlled peers verified explicit retry after
+`alreadyExists`, no retry after a lost spawn reply, and no spawn after failed/missing ownership
+surveys. Both native directory screenshots were inspected. The first run's exited-title assertion
+omitted the existing history-restoration suffix; correcting that assertion changed no deadline
+or product behavior. The focused lane is `THREADING_LINUX_RESTART_ONLY=1 ./window-smoke.sh`.
+The Swift-free installed Release package passed the same restart/refusal fixtures, alongside
+archive startup, non-root installation, desktop launch and live reinstall. A focused installed
+follow-up also proved uncached explicit activation attaches the already-running child, and an
+offline child exit stays dormant until explicit activation. Installed directory screenshots
+were inspected. The artifacts identify source revision `3417b0ec2` with `source_dirty=true`.
+
+One catalogue gap remains: project shells created in the current window update the displayed
+count but do not enter its saved-terminal picker until a snapshot reload. Publishing their
+durable creation receipts and reusing the same runtime owner is the next slice; inserting rows
+alone would create duplicate runtime wrappers for the same child.
