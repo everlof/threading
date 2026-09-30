@@ -19,7 +19,7 @@ struct ProjectSnapshot: Sendable {
     let name: String
     let path: String
     var sessions: Int
-    let terminalCount: Int
+    var terminalCount: Int
     var recentAgents: [SavedRuntime]
     var recentTerminals: [SavedRuntime]
 }
@@ -150,6 +150,10 @@ struct WindowHarness {
     private enum SavedRuntimeKey: Hashable {
         case agent(String)
         case terminal(String)
+    }
+    private enum RuntimeOwner {
+        case project(String)
+        case saved(SavedRuntimeKey)
     }
 
     private struct PendingAgent {
@@ -858,6 +862,35 @@ struct WindowHarness {
         return changed
     }
 
+    /// At most eight creation receipts, with at most 512 value rows in each affected picker.
+    /// A persisted count is authoritative even when selection or process admission then failed.
+    @MainActor private static func reconcileCreatedTerminals(
+        projects: inout [ProjectSnapshot], projectIndexes: [String: Int],
+        runtimes: [String: GraphicalTerminal],
+        preserving selection: (projectID: String, terminalID: String)?
+    ) -> Bool {
+        var changed = false
+        for runtime in runtimes.values {
+            guard let receipt = runtime.takeTerminalCreation(),
+                  let index = projectIndexes[receipt.projectID.uuidString],
+                  projects.indices.contains(index),
+                  projects[index].id == receipt.projectID.uuidString else { continue }
+            let id = receipt.terminalID.uuidString
+            projects[index].recentTerminals.removeAll { $0.id == id }
+            projects[index].recentTerminals.insert(.init(id: id, title: receipt.title), at: 0)
+            if projects[index].recentTerminals.count > maximumSelectableTerminalsPerProject {
+                let last = projects[index].recentTerminals.count - 1
+                let preservesLast = selection?.projectID == projects[index].id
+                    && selection?.terminalID == projects[index].recentTerminals[last].id
+                projects[index].recentTerminals.remove(at: preservesLast ? last - 1 : last)
+            }
+            // A concurrent folder-import snapshot may already include this exact admission.
+            projects[index].terminalCount = max(projects[index].terminalCount, receipt.terminalCount)
+            changed = true
+        }
+        return changed
+    }
+
     @MainActor static func show(_ snapshot: WindowSnapshot, launch: [String]? = nil,
                                 agentExecutable: String? = nil,
                                 claudeExecutable: String? = nil,
@@ -883,6 +916,7 @@ struct WindowHarness {
         var claudeAccount = AccountHandle(storedName:
             ProcessInfo.processInfo.environment["THREADING_LINUX_CLAUDE_ACCOUNT"])
         var projects = snapshot.projects
+        var projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
         guard let window = tw_open("Threading Linux window experiment", 800, 480) else {
             throw WindowFailure(String(cString: tw_error()))
         }
@@ -892,7 +926,26 @@ struct WindowHarness {
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
         var pendingAgentProjects: [String: PendingAgent] = [:]
         var restoredProjectIDs: Set<String> = []
-        var previousTerminalCounts: [String: Int] = [:]
+        // A fresh project shell keeps one owner even when selected through its saved row.
+        // These lookups never add aliases, so the sum of cache counts stays the eight-slot bound.
+        func owner(of key: SavedRuntimeKey, projectID: String) -> RuntimeOwner {
+            if case .terminal(let id) = key, terminals[projectID]?.terminalID == id {
+                return .project(projectID)
+            }
+            return .saved(key)
+        }
+        func retainedRuntime(for owner: RuntimeOwner) -> GraphicalTerminal? {
+            switch owner {
+            case .project(let id): return terminals[id]
+            case .saved(let key): return restoredRuntimes[key]
+            }
+        }
+        func retain(_ runtime: GraphicalTerminal, for owner: RuntimeOwner) {
+            switch owner {
+            case .project(let id): terminals[id] = runtime
+            case .saved(let key): restoredRuntimes[key] = runtime
+            }
+        }
         defer {
             for terminal in terminals.values { terminal.stop() }
             for terminal in restoredRuntimes.values { terminal.stop() }
@@ -906,6 +959,25 @@ struct WindowHarness {
         var pendingFolderImport: FolderImportGate?
         defer { pendingFolderImport?.cancel() }
         var dirty = true
+        func reconcileTerminals() -> Bool {
+            let selection: (projectID: String, terminalID: String)?
+            if let picker = savedPicker, !picker.isAgent,
+               projects.indices.contains(picker.projectIndex),
+               projects[picker.projectIndex].recentTerminals.indices.contains(savedSelected) {
+                selection = (projects[picker.projectIndex].id,
+                             projects[picker.projectIndex].recentTerminals[savedSelected].id)
+            } else { selection = nil }
+            let changed = reconcileCreatedTerminals(projects: &projects, projectIndexes: projectIndexes,
+                                                    runtimes: terminals, preserving: selection)
+            // Prepending changes positions, never the selected destination. The selected row
+            // keeps a slot even at the 512 cap, including while its durable selection is pending.
+            if changed, let selection, let index = projectIndexes[selection.projectID],
+               projects.indices.contains(index), projects[index].id == selection.projectID,
+               let row = projects[index].recentTerminals.firstIndex(where: { $0.id == selection.terminalID }) {
+                savedSelected = row
+            }
+            return changed
+        }
         func updateSurface(_ event: TWEvent) throws {
             let nextWidth = max(320, min(1280, Int(event.width)))
             let nextHeight = max(180, min(900, Int(event.height)))
@@ -957,6 +1029,7 @@ struct WindowHarness {
                 switch result {
                 case .success(let imported?):
                     projects = imported.projects
+                    projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
                     selected = imported.selectedProjectIndex
                     first = 0
                     dirty = true
@@ -969,6 +1042,10 @@ struct WindowHarness {
                 }
             }
             let pickerAccounts = accountPicker == .claude ? claudeAccounts : codexAccounts
+            // Consume after import installs its snapshot, and after a pending selection has
+            // replayed its committed action. Neither operation may observe shifted row indices.
+            if pendingFolderImport == nil, pendingSelection == nil,
+               reconcileTerminals() { dirty = true }
             if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
                                       pending: &pendingAgentProjects,
                                       retainedProjects: &restoredProjectIDs) { dirty = true }
@@ -1023,7 +1100,8 @@ struct WindowHarness {
                         let display = String(runtime.title.unicodeScalars.prefix(68))
                         let identity = String(runtime.id.prefix(8))
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
-                        let text = "\(display) [\(identity)]\(restoredRuntimes[key] == nil ? "" : " *")"
+                        let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
+                        let text = "\(display) [\(identity)]\(retained ? " *" : "")"
                         addNavigatorRow(text, index: index - savedFirst, width: width,
                                         height: height, accent: accent,
                                         selected: index == savedSelected,
@@ -1067,10 +1145,8 @@ struct WindowHarness {
                             let project = projects[index]
                             let display = String(project.name.unicodeScalars.prefix(80))
                             let opened = terminals[project.id]
-                            let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
-                                + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
                             let retained = opened != nil || restoredProjectIDs.contains(project.id)
-                            let text = "\(display) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " *" : "")"
+                            let text = "\(display) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " *" : "")"
                             addNavigatorRow(text, index: index - first, width: width,
                                             height: height, accent: accent,
                                             selected: index == selected,
@@ -1137,7 +1213,8 @@ struct WindowHarness {
                     for index in savedFirst..<end {
                         let runtime = saved[index]
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
-                        let label = "\(boundedAccessibilityLabel(runtime.title)) [\(String(runtime.id.prefix(8)))]\(restoredRuntimes[key] == nil ? "" : " retained")"
+                        let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
+                        let label = "\(boundedAccessibilityLabel(runtime.title)) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
                         try publishAccessibleRow(window, id: runtime.id, label: label,
                                                  selected: index == savedSelected,
                                                  visibleIndex: index - savedFirst, width: width, height: height)
@@ -1163,10 +1240,8 @@ struct WindowHarness {
                         for index in first..<end {
                             let project = projects[index]
                             let opened = terminals[project.id]
-                            let terminalCount = project.terminalCount + (previousTerminalCounts[project.id] ?? 0)
-                                + ((opened?.hasCreatedTerminal ?? false) ? 1 : 0)
                             let retained = opened != nil || restoredProjectIDs.contains(project.id)
-                            let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(terminalCount) terminals]\(retained ? " retained" : "")"
+                            let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " retained" : "")"
                             try publishAccessibleRow(window, id: project.id, label: label,
                                                      selected: index == selected,
                                                      visibleIndex: index - first, width: width, height: height)
@@ -1221,7 +1296,12 @@ struct WindowHarness {
                 }
                 continue
             } else {
-                guard tw_next(window, &event) == 1 else {
+                // A creation can finish after the user returned from its starting terminal.
+                // Poll only while one of at most eight runtimes owes an admission publication.
+                let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
+                let received = awaitingCreation ? tw_next_timeout(window, &event, 33) : tw_next(window, &event)
+                if awaitingCreation, received == 0 { continue }
+                guard received == 1 else {
                     throw WindowFailure(String(cString: tw_error()))
                 }
             }
@@ -1291,7 +1371,8 @@ struct WindowHarness {
                     let session: GraphicalTerminal
                     let mayResume = savedPicker.isAgent && (agentExecutable != nil || claudeExecutable != nil)
                     let mayStartAgain = mayResume || !savedPicker.isAgent
-                    let existing = restoredRuntimes[key]
+                    let runtimeOwner = owner(of: key, projectID: project.id)
+                    let existing = retainedRuntime(for: runtimeOwner)
                     let reuses = existing.map {
                         !(mayStartAgain && $0.canReplace)
                             && !(!savedPicker.isAgent && $0.canReopenSavedTerminal)
@@ -1310,9 +1391,9 @@ struct WindowHarness {
                     }
                     if reuses, let existing { session = existing }
                     else {
-                        if let existing = restoredRuntimes.removeValue(forKey: key) { existing.stop() }
+                        existing?.stop()
                         session = GraphicalTerminal()
-                        restoredRuntimes[key] = session
+                        retain(session, for: runtimeOwner)
                         restoredProjectIDs.insert(project.id)
                         if savedPicker.isAgent {
                             if mayResume {
@@ -1373,6 +1454,9 @@ struct WindowHarness {
                     tw_title(window, "Threading experiment - terminal may still be running")
                     break
                 }
+                // A failed creation can have persisted just after this loop's reconciliation.
+                // Its row must survive discarding the finished surface for an explicit new shell.
+                if reconcileTerminals() { dirty = true }
                 guard terminals.count + restoredRuntimes.count
                         - (terminals[project.id] == nil ? 0 : 1) < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
@@ -1384,7 +1468,6 @@ struct WindowHarness {
                     break
                 }
                 if let existing = terminals[project.id] {
-                    if existing.hasCreatedTerminal { previousTerminalCounts[project.id, default: 0] += 1 }
                     existing.stop()
                     terminals.removeValue(forKey: project.id)
                 }

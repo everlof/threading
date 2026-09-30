@@ -2786,7 +2786,42 @@ follow-up also proved uncached explicit activation attaches the already-running 
 offline child exit stays dormant until explicit activation. Installed directory screenshots
 were inspected. The artifacts identify source revision `3417b0ec2` with `source_dirty=true`.
 
-One catalogue gap remains: project shells created in the current window update the displayed
-count but do not enter its saved-terminal picker until a snapshot reload. Publishing their
-durable creation receipts and reusing the same runtime owner is the next slice; inserting rows
-alone would create duplicate runtime wrappers for the same child.
+The fresh-shell catalogue gap identified here is addressed in the next finding.
+
+## 103. A fresh shell joins the saved picker through its existing runtime owner
+
+Project shells previously updated the displayed count but stayed outside the saved-terminal
+picker until a snapshot reload. A worker now publishes one receipt immediately after durable
+record creation, even if the following selection or spawn fails. The navigator upserts that exact
+identity into its capped recent rows and records the persisted count. Folder-import snapshots
+settle before receipt consumption, avoiding stale refreshes and duplicate count increments.
+
+The project and saved-row routes resolve one runtime owner by exact terminal identity. Explicit
+restart replaces the same owner slot, so returning through the project reaches the restarted
+child. Lost spawn replies still prohibit a replacement. This remains host-owned navigation in
+the diagnostic frontend; no public extension authority or new drawing surface is introduced.
+Review caught a pending-selection race: prepending a receipt could shift the row before its
+committed Enter action replayed. Receipt consumption now waits for that replay, and ordinary
+insertion preserves selected identity even at the 512-row cap.
+
+The scaling contract is one normal admission and at most eight outstanding runtime receipts,
+with at most 512 value rows per affected picker and only viewport rows rendered. Idle navigation
+does not poll. A pending creation uses the existing 33 ms event wait until publication settles;
+all store writes remain on the runtime worker. Project ownership is looked up through an index
+built only when the initial or imported snapshot arrives.
+
+The new native regression failed against the previous installed Release package at the missing
+saved picker after creating the first shell, confirming the reported defect. The delayed-receipt
+selection interleaving is reviewed but has no deterministic native race fixture yet.
+
+The updated Swift-free installed Release package passed `bundle-smoke.sh` under non-root X11.
+The new fixtures proved immediate AT-SPI row admission, unchanged persisted records, same live
+PID through both routes, and a new PID under the same ID after exit. A 513-record fixture kept
+the picker at 512 values and eight mounted rows. Eight real retained shells stayed usable through
+saved selection; the ninth was refused without a new row or child. A real GTK folder import
+refreshed the snapshot without changing the stored bytes or doubling counts. All four new
+screenshots were inspected. Existing startup, provider PATH, live reinstall, saved restart/refusal
+and desktop-entry checks also passed, as did the ten local runner tests and syntax checks.
+The tested artifacts identify source revision `d518687a3` with `source_dirty=true`; source hashes
+were unchanged between compilation and final inspection. Live shell cwd persistence remains the
+next lifecycle gap.

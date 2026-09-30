@@ -142,6 +142,14 @@ absence/exit; it never requests replacement. A definitive spawn refusal permits 
 re-survey, while a lost reply keeps ownership uncertain. Startup restoration remains attach-only.
 The selected identity, ownership evidence and launch admission stay host-owned even if the row's
 presentation becomes customizable. Linux does not yet persist live cwd updates.
+Fresh shells publish one durable creation receipt after their project-row write, including when
+later selection or spawn admission fails. The navigator consumes at most eight pending receipts,
+upserts only the affected capped picker, and uses persisted counts instead of adding cache flags.
+Folder-import snapshots settle before receipt consumption. Saved-row activation resolves an exact
+terminal ID in the project cache before consulting the saved-runtime cache; replacement stays in
+that owner slot, so both routes share the restarted child without duplicate watchers or slots.
+Pending durable selection freezes receipt insertion through action replay. Other receipt updates
+preserve the selected terminal identity, including retaining its slot at the recent-row cap.
 The snapshot keeps at most 512 identities of each
 kind per project and the UI mounts only viewport rows. Only the visible terminal requests
 rendered frames; store work and terminal processing stay on workers. This remains a host-only diagnostic frontend,

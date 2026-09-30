@@ -116,8 +116,15 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var failure: String?
     private var running = false
     private var closed = false
-    private var createdTerminal = false
-    private var createdTerminalID: TerminalID?
+    private var terminalRecordID: TerminalID?
+    struct TerminalCreation: Sendable {
+        let projectID: ProjectID
+        let terminalID: TerminalID
+        let title: String
+        let terminalCount: Int
+    }
+    private var terminalCreation: TerminalCreation?
+    private var terminalCreationPending = false
     private var createdTerminalStore: String?
     private var createdAgent = false
     private var spawnMayBeLive = false
@@ -147,22 +154,27 @@ final class GraphicalTerminal: @unchecked Sendable {
                               claude: String?, sessionID: SessionID, width: Int, height: Int)?
 
     func start(store: String, socket: String, directory: String, executable: String, arguments: [String]) {
+        lock.lock(); terminalCreationPending = true; lock.unlock()
         worker.async { [self] in
+            defer { lock.lock(); terminalCreationPending = false; lock.unlock() }
             do {
                 let link = try connect(socket: socket)
-                let id = try Self.createTerminal(store: store, directory: directory, executable: executable)
-                identity = id
-                if case .projectTerminal(let terminalID) = id.identity {
-                    lock.lock(); createdTerminal = true; createdTerminalID = terminalID; lock.unlock()
+                let id = try Self.createTerminal(store: store, directory: directory, executable: executable) {
+                    receipt in
+                    lock.lock()
+                    terminalRecordID = receipt.terminalID
+                    terminalCreation = receipt
+                    lock.unlock()
                     createdTerminalStore = store
                 }
+                identity = id
                 // Once send is attempted, failure cannot prove that the daemon did not spawn.
                 lock.lock(); spawnMayBeLive = true; lock.unlock()
                 try link.spawn(PTYHostSpawnRequest(id: id, channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24)),
                     executable: executable, arguments: arguments,
                     environment: Self.launchEnvironment(), cwd: directory))
             } catch {
-                if let terminalID = createdTerminalID {
+                if let terminalID = terminalRecordID {
                     switch Self.terminalPresence(socket: socket, id: terminalID) {
                     case .absent, .exited: clearTerminalSelection(id: terminalID)
                     case .running, .unavailable: break
@@ -256,6 +268,9 @@ final class GraphicalTerminal: @unchecked Sendable {
     /// terminal lookup is linear in that project's embedded terminal records, not its agents.
     func openTerminal(store: String, socket: String, terminalID: String, projectID: String,
                       executable: String, arguments: [String], width: Int, height: Int) {
+        // The project cache keeps this same saved destination while its worker validates the
+        // record. Publishing its identity here does not publish a new durable creation.
+        lock.lock(); terminalRecordID = TerminalID(uuidString: terminalID); lock.unlock()
         worker.async { [self] in
             do {
                 guard executable.hasPrefix("/") else {
@@ -325,7 +340,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     var terminalID: String? {
         lock.lock(); defer { lock.unlock() }
-        return createdTerminalID?.uuidString
+        return terminalRecordID?.uuidString
     }
     func attachAgent(store: String, socket: String, sessionID: String) {
         attach(store: store, socket: socket, savedID: sessionID, kind: .agent)
@@ -483,7 +498,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         } else { emulator?.feed(data) }
         dirty = true
     }
-    private static func createTerminal(store: String, directory: String, executable: String) throws -> PTYHostSessionIdentity {
+    private static func createTerminal(store: String, directory: String, executable: String,
+                                       admitted: (TerminalCreation) -> Void) throws -> PTYHostSessionIdentity {
         guard let folder = ProjectDirectory.existing(at: directory) else {
             throw WindowFailure("project directory does not exist")
         }
@@ -508,6 +524,10 @@ final class GraphicalTerminal: @unchecked Sendable {
         } else {
             try database.saveProject(project, position: position)
         }
+        // The record already exists even if selecting it or spawning its child later fails.
+        admitted(TerminalCreation(projectID: project.id, terminalID: terminal.id,
+            title: String(terminal.displayTitle.unicodeScalars.prefix(256)),
+            terminalCount: project.terminals.count))
         try database.saveSelectedTerminalID(terminal.id)
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
@@ -632,7 +652,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             pendingResumeRecording = nil
             if value.reason != .alreadyExists {
                 lock.lock(); spawnMayBeLive = false; lock.unlock()
-                if let terminalID = createdTerminalID { clearTerminalSelection(id: terminalID) }
+                if let terminalID = terminalRecordID { clearTerminalSelection(id: terminalID) }
             }
             fail(WindowFailure("spawn refused: \(value.reason)"))
         case .error(let value) where value.code == .sessionExited && value.detail == "input":
@@ -938,9 +958,14 @@ final class GraphicalTerminal: @unchecked Sendable {
         if let failure { throw WindowFailure(failure) }
         let value = frame; frame = nil; return value
     }
-    var hasCreatedTerminal: Bool {
+    func takeTerminalCreation() -> TerminalCreation? {
         lock.lock(); defer { lock.unlock() }
-        return createdTerminal
+        defer { terminalCreation = nil }
+        return terminalCreation
+    }
+    var hasPendingTerminalCreation: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return terminalCreationPending || terminalCreation != nil
     }
     var hasCreatedAgent: Bool {
         lock.lock(); defer { lock.unlock() }

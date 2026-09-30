@@ -5,7 +5,7 @@ export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
 apt-get install -y -qq /preview.deb >/dev/null
 apt-get install -y -qq xvfb xauth xdotool xclip imagemagick python3 \
-  desktop-file-utils libgtk-3-bin dbus-x11 >/dev/null
+  desktop-file-utils libgtk-3-bin dbus-x11 python3-gi gir1.2-atspi-2.0 >/dev/null
 
 if command -v swift >/dev/null; then
   echo 'bundle smoke: runtime unexpectedly has Swift' >&2
@@ -121,6 +121,10 @@ done
 python3 /terminal_restart_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 python3 /saved_terminal_refusal_smoke.py "$bin/WindowHarness" "$fixture/terminal-restart-store" "$fixture"
+dbus-run-session -- python3 /terminal_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+dbus-run-session -- python3 /terminal_catalogue_limits_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 RESTART
 runuser -u threading-preview-test -- xvfb-run -a dbus-run-session -- bash /desktop-test.sh
 echo 'PASS installed package, live-child reinstall, saved-terminal restart, desktop entry and non-root native window'

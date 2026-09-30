@@ -125,6 +125,8 @@ saved terminal starts a fresh shell under that same terminal identity, using its
 when available or its owning project as fallback. The saved name, settings and creation date stay
 unchanged. A failed ownership query does not authorize a start, and a lost spawn reply does not
 authorize a retry. A definitive refusal permits another explicit activation and fresh survey.
+Newly created shells enter the saved-terminal picker as soon as their record is saved. Project
+and saved-row navigation share one retained runtime, including after a same-ID restart.
 It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
 `${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/threading-linux-spike`; the directories are
@@ -138,6 +140,9 @@ the daemon; running the command again opens the same stored projects and can rea
 same record and a new PID, live reuse, stored-directory fallback, exact argv/initial grid and
 attach-only startup. Controlled peers cover definitive refusal, lost spawn replies and unavailable
 ownership. The installed Release package runs these same fixtures in `./bundle-smoke.sh`.
+Native AT-SPI coverage also checks immediate saved-row admission and project/saved-picker runtime
+reuse without duplicate records or terminal counts, the 512-row/eight-runtime limits, and counts
+after folder import.
 In a Codex-enabled project list, Ctrl+Shift+I opens the native login chooser; Up/Down and Enter
 select the login used by the next Ctrl+Shift+A launch. It lists the standard home and up to 31
 marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window opens. An explicit
