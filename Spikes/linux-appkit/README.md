@@ -56,7 +56,7 @@ project-graph slice and runs the on-disk contracts below:
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 46 production files are byte-identical to their sources. Fresh-session record assembly,
+The 47 production files are byte-identical to their sources. Fresh-session record assembly,
 terminal launch recording, launch values, account command routing, bounded Codex rollout checks
 and Claude transcript paths are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
@@ -660,3 +660,13 @@ account routing, focus and accessibility. It introduces no Linux extension API a
 port the production themed menu, command search or shortcut editor. Only visible rows mount,
 and refreshing the nine descriptors performs no file or process work. The installed
 `tests/actions_smoke.py` exercises the real button, command admission and terminal lifecycle.
+
+
+### Shared surface painting
+
+The native navigator's selected rows and Actions button use the production `SurfaceDrawing`
+leaf, copied unchanged by `vendor.sh`. Mac `ThemedSurface` delegates its flat fill/border path to
+that same source and keeps its existing `Shape` API. Fitted radii, concentric inset/outset and
+welded plate portions therefore have one implementation. Mac theme resolution and hard/soft
+bevels remain in the Mac wrapper; the preview still supplies its diagnostic colors and spacing.
+This shares a drawing component, not the full production controls or theme environment.

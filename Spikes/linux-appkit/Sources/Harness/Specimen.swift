@@ -1,9 +1,9 @@
 import AppKit
 import Foundation
 
-/// The spike's actual claim, drawn: `PlatinumBitmapFont.swift` is vendored byte-identical from
-/// `Sources/Threading/UI/Design/`, and these are its glyphs, rasterized on Linux by a module we
-/// simply named `AppKit`. Nothing in the file was touched — `./vendor.sh --verify` proves it.
+/// Diagnostic assembly using production drawing leaves vendored byte-identically from
+/// `Sources/Threading/UI/Design/`. The shim supplies AppKit geometry and raster operations;
+/// `./vendor.sh --verify` proves the shared painters have not been adapted for Linux.
 @MainActor
 enum Specimen {
 
@@ -79,6 +79,7 @@ enum Specimen {
     }
 
     final class Row: NSView {
+        private static let selectionRadius: CGFloat = 5
         let text: String
         let accent: NSColor
         let selected: Bool
@@ -99,8 +100,8 @@ enum Specimen {
         override func draw(_ dirtyRect: NSRect) {
             NSBezierPath(rect: bounds).addClip()
             if selected {
-                accent.setFill()
-                NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+                SurfaceDrawing.draw(bounds, fill: accent,
+                                    radius: Self.selectionRadius, borderWidth: 0)
             }
             if let image {
                 TemplateImageDrawing.draw(image,
