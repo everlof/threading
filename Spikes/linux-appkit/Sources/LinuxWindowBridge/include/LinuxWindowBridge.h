@@ -11,6 +11,8 @@ typedef struct TWWindow TWWindow;
 // (kind 6) with action=1 is the subsequent commit; ordinary text uses action=0.
 // Kind 24 changes workspace focus: action=1 sidebar, action=0 terminal. Pointer presses also
 // focus their destination but retain kind 2/15. Sidebar click coordinates remain window pixels.
+// Kind25 toggles the Actions picker; action is prior pane (0 terminal,1 sidebar).
+// Kind26 redraws the Actions button; action is 0 normal,1 hover,2 pressed.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -29,6 +31,9 @@ void tw_workspace_focus(TWWindow *, int sidebarFocused);
 int tw_workspace_reset_terminal(TWWindow *);
 // Replace one bounded pane texture, then compose both. The pixels use pane-local coordinates.
 int tw_present_pane(TWWindow *, const uint8_t *rgba, int width, int height, int sidebar);
+// App-only header button. Height0 hides; disabled buttons remain visible but cannot activate.
+void tw_actions_button(TWWindow *, const char *label, int enabled,
+                       int x, int y, int width, int height);
 void tw_title(TWWindow *, const char *);
 int tw_resize(TWWindow *, int width, int height);
 void tw_close(TWWindow *);
@@ -49,6 +54,9 @@ void tw_accessibility_begin_list(TWWindow *, const char *name, int first, int to
                                  int x, int y, int width, int height);
 int tw_accessibility_add_row(TWWindow *, const char *id, const char *name, int selected,
                              int x, int y, int width, int height);
+// Disabled command rows remain selectable, but expose no open action or enabled state.
+int tw_accessibility_add_action_row(TWWindow *, const char *id, const char *name, int selected,
+                                    int enabled, int x, int y, int width, int height);
 void tw_accessibility_end_list(TWWindow *);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
 // SDL window focus is the source of truth; the bridge focuses the mounted selected row or terminal.

@@ -95,6 +95,7 @@ if CommandLine.arguments.contains("--navigation-stress") {
 }
 
 do {
+    try runHostCommandContracts()
     try runHandshakeContracts()
     try runBindingContracts()
     try runSocketContracts()

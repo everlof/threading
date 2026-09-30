@@ -28,8 +28,10 @@ apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev >/dev/null
 ./package-app.sh
 # Exercise the same Release emulator/client modules before leaving the build container.
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product CoreSliceHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PortablePTYClientHarness
 contract_bin=$(swift build -c release --show-bin-path)
+timeout 120 "$contract_bin/CoreSliceHarness"
 contract_fixture=$(mktemp -d /tmp/threading-contracts.XXXXXXXX)
 out/threading-linux-preview-ubuntu24.04-arm64/bin/threading-ptyd \
   --socket "$contract_fixture/pty.sock" --state "$contract_fixture/daemon" >"$contract_fixture/daemon.log" 2>&1 &
@@ -61,6 +63,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/workspace_smoke.py:/workspace_smoke.py:ro" \
   -v "$PWD/tests/agent_catalogue_smoke.py:/agent_catalogue_smoke.py:ro" \
   -v "$PWD/tests/provider_marks_smoke.py:/provider_marks_smoke.py:ro" \
+  -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
   -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \
   -v "$PWD/tests/saved_terminal_refusal_smoke.py:/saved_terminal_refusal_smoke.py:ro" \
   -v "$PWD/tests/bundle_runtime_smoke.sh:/runner.sh:ro" \

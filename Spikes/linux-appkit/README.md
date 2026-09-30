@@ -646,3 +646,17 @@ The current native window supports attached grids up to 128 columns by 40 rows; 
 grids are refused rather than resized implicitly. The integrated picker exposes the same attach
 path from a project's saved identities. Automatic restoration, exact graphical detach seeds and
 full scrollback reconstruction remain unfinished.
+
+### Project actions
+
+The header's Actions button and Ctrl+Shift+Space open nine bounded command values through the
+production `HostCommandPlane`. The same existing host operations serve keyboard, pointer and
+AT-SPI invocation; disabled rows keep their reason and refuse execution. Escape restores the
+previous pane and picker. Menu interactions do not become terminal input.
+
+This contextual command surface remains host-owned diagnostic UI, using the existing specimen
+rows and native shaped text. Threading owns project identity, availability, launch, persistence,
+account routing, focus and accessibility. It introduces no Linux extension API and does not yet
+port the production themed menu, command search or shortcut editor. Only visible rows mount,
+and refreshing the nine descriptors performs no file or process work. The installed
+`tests/actions_smoke.py` exercises the real button, command admission and terminal lifecycle.

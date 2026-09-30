@@ -67,3 +67,10 @@ Alt+F4 closes the window while running children remain with the daemon.
 Saved Claude and Codex sessions show their provider marks beside the title. If artwork is
 unavailable, the row shows the provider name instead. Accessible labels retain the provider,
 account and session identity. Custom account badges and themes are not available in this preview.
+
+The sidebar's **Actions** button opens the supported commands for the selected project: open or
+replace a shell, create Claude/Codex sessions, choose their accounts, browse saved runtimes and
+add a project folder. Ctrl+Shift+Space opens it from either pane. Arrow keys select an action,
+Enter invokes it, and Escape or Close returns to the previous pane. Unavailable commands remain
+visible with a reason; opening the picker never launches a child. Availability and the selected
+project are checked again when an action runs.

@@ -163,7 +163,7 @@ exit 23''')
         self.command("swift", '''if [[ "$*" == "build -c release --show-bin-path" ]]; then
     printf '%s\\n' "$RUNNER_CONTRACT_BIN"
 fi''')
-        self.command("timeout", '[[ "$1" == 30 ]] || exit 91; shift; exec "$@"')
+        self.command("timeout", '[[ "$1" == 30 || "$1" == 120 ]] || exit 91; shift; exec "$@"')
         self.write(self.spike / "package-app.sh", 'touch "$RUNNER_FIXTURE_ROOT/packaged"')
 
         daemon = artifact_bin / "threading-ptyd"
@@ -197,6 +197,7 @@ while True:
         connection.sendall(str(os.getpid()).encode())
 ''')
         daemon.chmod(0o755)
+        self.write(contract_bin / "CoreSliceHarness", "exit 0")
         harness = contract_bin / "PortablePTYClientHarness"
         harness.write_text(f"#!{sys.executable}\n" + '''import json
 import os

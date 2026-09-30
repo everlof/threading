@@ -97,7 +97,8 @@ def panes():
     children = [frame.get_child_at_index(i) for i in range(frame.get_child_count())]
     listed = next(item for item in children if item.get_role_name() == 'list')
     terminal = next(item for item in children if item.get_role_name() == 'terminal')
-    assert len(children) == 2
+    assert [item.get_role_name() for item in children] == ['list', 'terminal', 'push button']
+    assert children[2].get_accessible_id() == 'linux.actions'
     assert terminal.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x == 320
     assert terminal.get_state_set().contains(Atspi.StateType.SHOWING)
     return listed, terminal

@@ -54,3 +54,4 @@ Sources/Threading/Core/Session/AgentSessionRowPresentation.swift
 Sources/Threading/Core/Session/ProjectTerminalStartPlan.swift
 Sources/Threading/Core/Agent/AgentEnvironment.swift
 Sources/Threading/Core/Constants/EnvironmentKeys.swift
+Sources/Threading/Core/Control/HostCommandContract.swift

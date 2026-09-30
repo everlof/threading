@@ -217,7 +217,8 @@ with log_path.open('w+') as log:
         terminal = eventually(lambda: content(app, 'terminal'), 'terminal accessible after row action')
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
-        assert frame.get_child_count() == 2
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button']
+        assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
         assert content(app).get_role_name() == 'list'
         assert listed.get_state_set().contains(Atspi.StateType.SHOWING)
         assert terminal.get_state_set().contains(Atspi.StateType.SHOWING)
@@ -310,7 +311,8 @@ with log_path.open('w+') as log:
                    (320, 0, 960, 600) else None, 'resized terminal component')
         assert rect(frame_component) == (0, 0, 1280, 600)
         assert rect(list_component) == (0, 52, 320, 548)
-        assert frame.get_child_count() == 2
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button']
+        assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
         resized_text = screen_text()
         assert 'UPDATED VISIBLE' in resized_text
         subprocess.run(['import', '-window', window_id,
@@ -346,7 +348,8 @@ with log_path.open('w+') as log:
                    .get_state_set().contains(Atspi.StateType.FOCUSED)
                    and not terminal.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'sidebar focus while terminal remains mounted')
-        assert frame.get_child_count() == 2
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'terminal', 'push button']
+        assert frame.get_child_at_index(2).get_accessible_id() == 'linux.actions'
         assert content(app, 'terminal').get_state_set().contains(Atspi.StateType.SHOWING)
         assert rect(terminal_component) == (320, 0, 960, 600)
         assert screen_text() == resized_text

@@ -83,12 +83,14 @@ enum Specimen {
         let accent: NSColor
         let selected: Bool
         let image: NSImage?
+        let showsMark: Bool
 
-        init(frame: NSRect, text: String, accent: NSColor, selected: Bool, image: NSImage? = nil) {
+        init(frame: NSRect, text: String, accent: NSColor, selected: Bool, image: NSImage? = nil, showsMark: Bool = true) {
             self.text = text
             self.accent = accent
             self.selected = selected
             self.image = image
+            self.showsMark = showsMark
             super.init(frame: frame)
         }
 
@@ -104,7 +106,7 @@ enum Specimen {
                 TemplateImageDrawing.draw(image,
                     in: NSRect(x: 7.5, y: bounds.midY - 6.5, width: 13, height: 13),
                     tint: selected ? NSColor(white: 1, alpha: 1) : NSColor(white: 0.15, alpha: 1))
-            } else {
+            } else if showsMark {
                 (selected ? NSColor(white: 1, alpha: 0.9) : accent).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 10, y: bounds.midY - 4, width: 8, height: 8)).fill()
             }
