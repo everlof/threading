@@ -56,8 +56,8 @@ struct WindowHarness {
     private static let navigatorRowHeight: CGFloat = 22
     private static let navigatorRowStride: CGFloat = 24
     #if os(Linux)
-    private static let terminalCellWidth = Int(TW_TERMINAL_CELL_WIDTH)
-    private static let terminalCellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
+    static let terminalCellWidth = Int(TW_TERMINAL_CELL_WIDTH)
+    static let terminalCellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
     #endif
 
     @MainActor private static func navigatorRowRect(_ index: Int, width: Int, height: Int) -> NSRect {
@@ -819,7 +819,8 @@ struct WindowHarness {
     }
 
     @MainActor static func showTerminalFailure(_ message: String, window: OpaquePointer,
-                                              width: Int, height: Int) throws {
+                                              width: Int, height: Int, workspace: Bool = false,
+                                              focused: Bool = true) throws {
         let accessible = "Terminal unavailable: \(boundedAccessibilityLabel(message))"
         accessible.withCString { tw_accessibility_show_terminal(window, $0) }
         tw_accessibility_terminal_text(window, nil, 0, -1, nil, 0)
@@ -834,10 +835,11 @@ struct WindowHarness {
         root.render(in: context)
         NSGraphicsContext.current = nil
         let result = bitmap.pixels.withUnsafeBufferPointer {
-            tw_present(window, $0.baseAddress, Int32(width), Int32(height))
+            workspace ? tw_present_pane(window, $0.baseAddress, Int32(width), Int32(height), 0)
+                : tw_present(window, $0.baseAddress, Int32(width), Int32(height))
         }
         guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
-        tw_title(window, "Threading terminal - unavailable")
+        if focused { tw_title(window, "Threading terminal - unavailable") }
         print("FAILURE_FRAME \(width)x\(height)"); fflush(nil)
     }
 
@@ -845,7 +847,8 @@ struct WindowHarness {
         projects: inout [ProjectSnapshot],
         runtimes: inout [SavedRuntimeKey: GraphicalTerminal],
         pending: inout [String: PendingAgent],
-        retainedProjects: inout Set<String>
+        retainedProjects: inout Set<String>,
+        preserving selection: (projectID: String, agentID: String)? = nil
     ) -> Bool {
         var changed = false
         for (id, launch) in Array(pending) {
@@ -857,7 +860,11 @@ struct WindowHarness {
                     savedAgent(launch.row),
                     at: 0)
                 if projects[launch.projectIndex].recentAgents.count > maximumSelectableAgentsPerProject {
-                    projects[launch.projectIndex].recentAgents.removeLast()
+                    let index = launch.projectIndex
+                    let last = projects[index].recentAgents.count - 1
+                    let preservesLast = selection?.projectID == projects[index].id
+                        && selection?.agentID == projects[index].recentAgents[last].id
+                    projects[index].recentAgents.remove(at: preservesLast ? last - 1 : last)
                 }
                 retainedProjects.insert(projects[launch.projectIndex].id)
                 pending.removeValue(forKey: id)
@@ -969,6 +976,54 @@ struct WindowHarness {
         var pendingFolderImport: FolderImportGate?
         defer { pendingFolderImport?.cancel() }
         var dirty = true
+        let sidebarWidth = 320
+        var activePane: WorkspaceTerminalPane?
+        var sidebarFocused = true
+        var navigatorTitle = "Threading Linux window experiment"
+        var navigatorWidth: Int { activePane == nil ? width : sidebarWidth }
+        var terminalWidth: Int { activePane == nil ? width : width - sidebarWidth }
+        func setNavigatorTitle(_ title: String) {
+            navigatorTitle = title
+            if sidebarFocused { tw_title(window, title) }
+        }
+        func focusSidebar(_ focus: Bool) {
+            guard let activePane else { return }
+            let changed = sidebarFocused != focus
+            sidebarFocused = focus
+            tw_workspace_focus(window, focus ? 1 : 0)
+            guard changed else { return }
+            activePane.focus(!focus, window: window)
+            if focus { tw_title(window, navigatorTitle) }
+            dirty = true
+        }
+        func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if event.kind == 2 { focusSidebar(true) }
+            if event.kind == 15 && event.action == 1 { focusSidebar(false) }
+            guard [6, 7, 14, 15, 16, 17, 18, 19].contains(event.kind) else { return false }
+            activePane?.handle(event, window: window)
+            return true
+        }
+        func activate(_ session: GraphicalTerminal) throws {
+            activePane?.focus(false, window: window)
+            if activePane == nil {
+                width += sidebarWidth
+            }
+            activePane = WorkspaceTerminalPane(session)
+            sidebarFocused = false
+            tw_terminal_mode(window)
+            tw_project_navigation(window, 1)
+            tw_workspace_mode(window, Int32(sidebarWidth), 0)
+            guard tw_workspace_reset_terminal(window) == 0 else {
+                throw WindowFailure(String(cString: tw_error()))
+            }
+            guard tw_resize(window, Int32(width), Int32(height)) == 0 else {
+                throw WindowFailure(String(cString: tw_error()))
+            }
+            tw_accessibility_show_terminal(window, "Terminal starting")
+            tw_accessibility_terminal_text(window, nil, 0, -1, nil, 0)
+            tw_title(window, "Threading terminal - starting")
+            dirty = true
+        }
         func reconcileTerminals() -> Bool {
             let selection: (projectID: String, terminalID: String)?
             if let picker = savedPicker, !picker.isAgent,
@@ -989,7 +1044,8 @@ struct WindowHarness {
             return changed
         }
         func updateSurface(_ event: TWEvent) throws {
-            let nextWidth = max(320, min(1280, Int(event.width)))
+            let nextWidth = max(activePane == nil ? 320 : 640,
+                                min(activePane == nil ? 1280 : 1600, Int(event.width)))
             let nextHeight = max(180, min(900, Int(event.height)))
             if nextWidth == width, nextHeight == height {
                 // Exposure invalidates the native drawable, not the unchanged row models.
@@ -1014,10 +1070,7 @@ struct WindowHarness {
             savedPicker = .agents(selected)
             savedSelected = row
             session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
-            guard let size = try runTerminal(session, window: window, width: width, height: height,
-                                             allowsProjects: true) else { return }
-            width = size.0; height = size.1
-            tw_project_mode(window)
+            try activate(session)
         } else if let id = snapshot.restoreTerminalID, let launch,
                   projects.indices.contains(selected),
                   let row = projects[selected].recentTerminals.firstIndex(where: { $0.id == id }) {
@@ -1028,12 +1081,21 @@ struct WindowHarness {
             savedSelected = row
             session.attach(store: launch[0], socket: launch[1], terminalID: id,
                            projectID: projects[selected].id)
-            guard let size = try runTerminal(session, window: window, width: width, height: height,
-                                             allowsProjects: true) else { return }
-            width = size.0; height = size.1
-            tw_project_mode(window)
+            try activate(session)
         }
         while true {
+            if let activePane {
+                if let adopted = activePane.session.takeInitialViewport() {
+                    width = adopted.0 + sidebarWidth
+                    height = adopted.1
+                    guard tw_resize(window, Int32(width), Int32(height)) == 0 else {
+                        throw WindowFailure(String(cString: tw_error()))
+                    }
+                    dirty = true
+                }
+                try activePane.refresh(window: window, width: terminalWidth, height: height,
+                                       originX: sidebarWidth, focused: !sidebarFocused)
+            }
             if let gate = pendingFolderImport, let result = gate.take() {
                 pendingFolderImport = nil
                 switch result {
@@ -1056,9 +1118,23 @@ struct WindowHarness {
             // replayed its committed action. Neither operation may observe shifted row indices.
             if pendingFolderImport == nil, pendingSelection == nil,
                reconcileTerminals() { dirty = true }
-            if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
-                                      pending: &pendingAgentProjects,
-                                      retainedProjects: &restoredProjectIDs) { dirty = true }
+            if pendingFolderImport == nil, pendingSelection == nil {
+                let selection: (projectID: String, agentID: String)?
+                if let picker = savedPicker, picker.isAgent,
+                   projects[picker.projectIndex].recentAgents.indices.contains(savedSelected) {
+                    selection = (projects[picker.projectIndex].id,
+                                 projects[picker.projectIndex].recentAgents[savedSelected].id)
+                } else { selection = nil }
+                if reconcilePendingAgents(projects: &projects, runtimes: &restoredRuntimes,
+                                          pending: &pendingAgentProjects,
+                                          retainedProjects: &restoredProjectIDs, preserving: selection) {
+                    if let selection, let project = projectIndexes[selection.projectID],
+                       let row = projects[project].recentAgents.firstIndex(where: { $0.id == selection.agentID }) {
+                        savedSelected = row
+                    }
+                    dirty = true
+                }
+            }
             let count = max(1, (height / 2 - 32) / Int(navigatorRowStride))
             if accountPicker != nil {
                 accountSelected = max(0, min(pickerAccounts.count - 1, accountSelected))
@@ -1076,6 +1152,7 @@ struct WindowHarness {
                 if selected >= first + count { first = selected - count + 1 }
             }
             if dirty {
+                let width = navigatorWidth
                 trace(traceFirstFrame ? "first-frame.begin" : "frame.begin")
                 // At most viewport/count row objects, even for a large persisted catalogue.
                 let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
@@ -1164,6 +1241,11 @@ struct WindowHarness {
                         }
                     }
                 }
+                if activePane != nil {
+                    let section = accountPicker.map { $0 == .claude ? "Claude login" : "Codex login" }
+                        ?? savedPicker.map { $0.isAgent ? "Agents" : "Terminals" } ?? "Projects"
+                    root.title = section + (sidebarFocused ? " - Tab: terminal" : " - Ctrl+Shift+P")
+                }
                 let title = root.title
                 root.title = ""
                 textRows.append(NavigatorTextRow(text: readableNavigatorText(title), x: 0, y: 0,
@@ -1185,7 +1267,8 @@ struct WindowHarness {
                 print("NAVIGATOR_TEXT mounted=\(textRows.count) drawMs=\(textMilliseconds)")
                 trace("present.begin")
                 let result = bitmap.pixels.withUnsafeBufferPointer {
-                    tw_present(window, $0.baseAddress, Int32(width), Int32(height))
+                    activePane == nil ? tw_present(window, $0.baseAddress, Int32(width), Int32(height))
+                        : tw_present_pane(window, $0.baseAddress, Int32(width), Int32(height), 1)
                 }
                 trace("present.end")
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
@@ -1207,7 +1290,7 @@ struct WindowHarness {
                                                  width: width, height: height)
                     }
                     tw_accessibility_end_list(window)
-                    tw_title(window, "Threading \(provider) accounts - \(projects[selected].path)")
+                    setNavigatorTitle("Threading \(provider) accounts - \(projects[selected].path)")
                     print("ACCOUNT_PICKER_FRAME \(width)x\(height) provider=\(provider.lowercased()) mounted=\(end - accountFirst) selected=\(pickerAccounts[accountSelected].name) total=\(pickerAccounts.count)")
                 } else if let savedPicker {
                     let project = projects[savedPicker.projectIndex]
@@ -1230,7 +1313,7 @@ struct WindowHarness {
                                                  visibleIndex: index - savedFirst, width: width, height: height)
                     }
                     tw_accessibility_end_list(window)
-                    tw_title(window, "Threading \(savedPicker.isAgent ? "agents" : "terminals") - \(project.path)")
+                    setNavigatorTitle("Threading \(savedPicker.isAgent ? "agents" : "terminals") - \(project.path)")
                     let selectedID = saved.isEmpty ? "none" : saved[savedSelected].id
                     let capped = total > saved.count ? 1 : 0
                     let label = savedPicker.isAgent ? "AGENT_PICKER_FRAME" : "TERMINAL_PICKER_FRAME"
@@ -1259,7 +1342,7 @@ struct WindowHarness {
                     }
                     tw_accessibility_end_list(window)
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
-                    tw_title(window, title)
+                    setNavigatorTitle(title)
                     print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id)")
                 }
                 trace("accessibility-title.end")
@@ -1294,6 +1377,9 @@ struct WindowHarness {
                         if event.kind == 1 {
                             try updateSurface(event)
                         }
+                        if event.kind == 24 { focusSidebar(event.action == 1) }
+                        // Persistence freezes navigation decisions, not the visible child's input.
+                        _ = routeTerminalInput(event)
                     }
                     continue
                 }
@@ -1303,19 +1389,32 @@ struct WindowHarness {
                     if event.kind == 1 {
                         try updateSurface(event)
                     }
+                    if event.kind == 24 { focusSidebar(event.action == 1) }
+                    _ = routeTerminalInput(event)
                 }
                 continue
             } else {
                 // A creation can finish after the user returned from its starting terminal.
                 // Poll only while one of at most eight runtimes owes an admission publication.
                 let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
-                let received = awaitingCreation ? tw_next_timeout(window, &event, 33) : tw_next(window, &event)
-                if awaitingCreation, received == 0 { continue }
+                let timed = awaitingCreation || activePane?.needsPolling == true
+                let received = timed ? tw_next_timeout(window, &event, 33) : tw_next(window, &event)
+                if timed, received == 0 { continue }
                 guard received == 1 else {
                     throw WindowFailure(String(cString: tw_error()))
                 }
             }
             trace("event kind=\(event.kind) action=\(event.action)")
+            if event.kind == 24 {
+                // The same command first focuses navigation, then opens its folder action.
+                // Preserve import access after a terminal occupies the adjacent pane.
+                if event.action == 1, sidebarFocused, accountPicker == nil,
+                   savedPicker == nil, let launch {
+                    pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                } else { focusSidebar(event.action == 1) }
+                continue
+            }
+            if routeTerminalInput(event) { continue }
             switch event.kind {
             case 5: return
             case 12:
@@ -1325,7 +1424,8 @@ struct WindowHarness {
                 } else if savedPicker != nil {
                     savedPicker = nil
                     dirty = true
-                } else { return }
+                } else if activePane != nil { focusSidebar(false) }
+                else { return }
             case 1:
                 try updateSurface(event)
             case 2:
@@ -1339,7 +1439,7 @@ struct WindowHarness {
                 } else { listCount = projects.isEmpty && launch != nil ? 1 : projects.count }
                 let visibleCount = max(0, min(listCount - listFirst, count))
                 if let mounted = (0..<visibleCount).first(where: { index in
-                    let row = navigatorRowPixels(index, width: width, height: height)
+                    let row = navigatorRowPixels(index, width: navigatorWidth, height: height)
                     return event.x >= row.x && event.x < row.x + row.width
                         && event.y >= row.y && event.y < row.y + row.height
                 }) {
@@ -1409,20 +1509,17 @@ struct WindowHarness {
                             if mayResume {
                                 session.openAgent(store: launch[0], socket: launch[1], sessionID: runtime.id,
                                     shell: launch[2], codex: agentExecutable, claude: claudeExecutable,
-                                    width: width, height: height)
+                                    width: terminalWidth, height: height)
                             } else {
                                 session.attachAgent(store: launch[0], socket: launch[1], sessionID: runtime.id)
                             }
                         } else {
                             session.openTerminal(store: launch[0], socket: launch[1], terminalID: runtime.id,
                                 projectID: project.id, executable: launch[2],
-                                arguments: Array(launch.dropFirst(3)), width: width, height: height)
+                                arguments: Array(launch.dropFirst(3)), width: terminalWidth, height: height)
                         }
                     }
-                    guard let size = try runTerminal(session, window: window, width: width, height: height,
-                                                     allowsProjects: true) else { return }
-                    width = size.0; height = size.1
-                    tw_project_mode(window)
+                    try activate(session)
                     dirty = true
                     break
                 }
@@ -1452,10 +1549,7 @@ struct WindowHarness {
                     session.start(store: launch[0], socket: launch[1], directory: project.path,
                                   executable: launch[2], arguments: Array(launch.dropFirst(3)))
                 }
-                guard let size = try runTerminal(session, window: window, width: width, height: height,
-                                                 allowsProjects: true) else { return }
-                width = size.0; height = size.1
-                tw_project_mode(window)
+                try activate(session)
                 dirty = true
             case 9:
                 guard accountPicker == nil, savedPicker == nil, let launch, !projects.isEmpty else { break }
@@ -1485,10 +1579,7 @@ struct WindowHarness {
                 terminals[project.id] = session
                 session.start(store: launch[0], socket: launch[1], directory: project.path,
                               executable: launch[2], arguments: Array(launch.dropFirst(3)))
-                guard let size = try runTerminal(session, window: window, width: width, height: height,
-                                                 allowsProjects: true) else { return }
-                width = size.0; height = size.1
-                tw_project_mode(window)
+                try activate(session)
                 dirty = true
             case 23:
                 guard accountPicker == nil, savedPicker == nil, let launch else { break }
@@ -1512,11 +1603,8 @@ struct WindowHarness {
                 session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
                                    shell: launch[2], kind: kind, executable: executable,
                                    accountHandle: accountHandle, id: id,
-                                   width: width, height: height)
-                guard let size = try runTerminal(session, window: window, width: width, height: height,
-                                                 allowsProjects: true) else { return }
-                width = size.0; height = size.1
-                tw_project_mode(window)
+                                   width: terminalWidth, height: height)
+                try activate(session)
                 dirty = true
             case 3, 4:
                 if accountPicker != nil {

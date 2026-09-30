@@ -270,7 +270,7 @@ with log_path.open('w+') as log:
         assert_children(8)
         subprocess.run(['import', '-window', window, 'out/terminal-catalogue-eight-limit.png'],
                        check=True, timeout=5)
-        key('Escape')
+        key('alt+F4')
         assert process.wait(timeout=5) == 0
         print('PASS immediate 512-row picker cap, new row first, 8 mounted rows; 8 shared runtime slots; '
               'same saved owner usable at capacity; ninth refused; folder refresh preserves exact counts', flush=True)

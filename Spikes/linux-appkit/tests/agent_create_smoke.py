@@ -166,7 +166,7 @@ with log_path.open('w+') as log:
         key(window, 'Left')
         title(process, 'Threading agents - ' + str(project), log_path)
         deadline = time.monotonic() + 5
-        while f'AGENT_PICKER_FRAME 800x480 mounted=1 selected={saved_id} total=1 capped=0' not in log_path.read_text():
+        while f'AGENT_PICKER_FRAME 320x480 mounted=1 selected={saved_id} total=1 capped=0' not in log_path.read_text():
             assert time.monotonic() < deadline, log_path.read_text()
             time.sleep(.05)
         subprocess.run(['import', '-window', window, 'out/agent-create-picker.png'], check=True, timeout=5)
@@ -182,7 +182,7 @@ with log_path.open('w+') as log:
         title(process, 'Threading agents - ' + str(project), log_path)
         key(window, 'Escape')
         title(process, 'Threading experiment - ' + str(project), log_path)
-        key(window, 'Escape')
+        key(window, 'alt+F4')
         assert process.wait(timeout=5) == 0
     except BaseException:
         log.flush()
@@ -219,7 +219,7 @@ with (root / 'agent-wrong-home.log').open('w+') as log:
         title(process, 'Threading agents - ' + str(project), root / 'agent-wrong-home.log')
         key(window, 'Escape')
         title(process, 'Threading experiment - ' + str(project), root / 'agent-wrong-home.log')
-        key(window, 'Escape')
+        key(window, 'alt+F4')
         assert process.wait(timeout=5) == 0
     except BaseException:
         log.flush()
@@ -266,7 +266,7 @@ with (root / 'agent-resume-window.log').open('w+') as log:
         title(process, 'Threading agents - ' + str(project), root / 'agent-resume-window.log')
         key(window, 'Escape')
         title(process, 'Threading experiment - ' + str(project), root / 'agent-resume-window.log')
-        key(window, 'Escape')
+        key(window, 'alt+F4')
         assert process.wait(timeout=5) == 0
     except BaseException:
         log.flush()
@@ -301,7 +301,7 @@ with (root / 'agent-broken-rollout.log').open('w+') as log:
         title(process, 'Threading agents - ' + str(project), root / 'agent-broken-rollout.log')
         key(window, 'Escape')
         title(process, 'Threading experiment - ' + str(project), root / 'agent-broken-rollout.log')
-        key(window, 'Escape')
+        key(window, 'alt+F4')
         assert process.wait(timeout=5) == 0
     except BaseException:
         log.flush()
@@ -326,7 +326,7 @@ with log_path.open('w+') as log:
             title(process, 'Threading terminal - unavailable', log_path)
         key(window, 'ctrl+shift+p')
         title(process, 'Threading experiment - ' + str(project), log_path)
-        key(window, 'Escape')
+        key(window, 'alt+F4')
         assert process.wait(timeout=5) == 0
     except BaseException:
         log.flush()

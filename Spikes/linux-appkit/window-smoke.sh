@@ -83,6 +83,8 @@ IME
   exit 0
 fi
 check_saved_terminal_restart() {
+  dbus-run-session -- python3 tests/workspace_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/terminal_restart_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
     "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/saved_terminal_refusal_smoke.py "$bin/WindowHarness" \

@@ -155,7 +155,7 @@ with log_path.open('w+') as log:
                        check=True, timeout=5)
         key('Escape')
         await_title('Threading experiment - ' + str(project))
-        key('Escape')
+        key('alt+F4')
         assert process.wait(timeout=5) == 0
     finally:
         if process.poll() is None:

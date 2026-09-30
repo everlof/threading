@@ -57,3 +57,9 @@ A shell without OSC 7 that changes directory and exits between samples may retai
 directory. Busy storage can also leave the last saved directory; the shell keeps running.
 Shells created in this window appear in the saved-terminal picker immediately. Opening the same
 shell from its project or saved row reuses its retained runtime.
+
+The project navigator remains beside the terminal. Ctrl+Shift+P focuses it, and Tab returns to
+the terminal; clicking a pane focuses it too. Up/Down and Enter select/open a project or saved
+runtime without sending those keys to the shell. From the focused project list, Ctrl+Shift+P
+opens the folder chooser. Escape backs out of a picker or returns focus to the terminal.
+Alt+F4 closes the window while running children remain with the daemon.

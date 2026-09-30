@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -196,7 +197,7 @@ with log_path.open('w+') as log:
                 await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
                 await_title(process, 'Threading experiment - ' + str(project), app_log_path)
-                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
                 assert process.wait(timeout=5) == 0
             except BaseException:
                 app_log.flush()
@@ -252,7 +253,7 @@ with log_path.open('w+') as log:
                                check=True, timeout=5)
                 assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
                 await_title(process, 'Threading experiment - ' + str(project), root / 'agent-reopened.log')
-                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
                 assert process.wait(timeout=5) == 0
             except BaseException:
                 reopened_log.flush()
@@ -273,7 +274,7 @@ with log_path.open('w+') as log:
                                      root / 'agent-exited-reopen.log')
                 assert selected_session() == agents[-1]
                 assert json.loads(marker.read_text()) == original
-                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
                 assert process.wait(timeout=5) == 0
             finally:
                 if process.poll() is None:
@@ -286,14 +287,14 @@ with log_path.open('w+') as log:
                 window = await_title(process, 'Threading experiment - ' + str(other_project),
                                      root / 'agent-other-project.log')
                 assert selected_session() == agents[-1], 'project targeting changed agent selection'
-                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
                 assert process.wait(timeout=5) == 0
             finally:
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=3)
-        # A shell takes selection away from the prior agent, so the next targeted launch opens
-        # the project instead of restoring a conversation that is no longer selected.
+        # A shell takes selection away from the prior agent. The next targeted launch must
+        # attach that selected shell, retaining its typed identity and original process.
         with (root / 'agent-to-shell.log').open('w+') as shell_log:
             process = subprocess.Popen([binary, '--app', store, endpoint, '/bin/sh'],
                                        stdout=shell_log, stderr=shell_log)
@@ -306,10 +307,24 @@ with log_path.open('w+') as log:
                 while selected_session() is not None:
                     assert time.monotonic() < deadline, 'shell did not clear selected agent'
                     time.sleep(.05)
+                shell_pid_marker = root / 'selected-shell-pid'
+                command = "printf '%s\\n' \"$$\" > " + shlex.quote(str(shell_pid_marker))
+                assert xdo('windowfocus', window, 'type', '--clearmodifiers', command).returncode == 0
+                assert xdo('key', 'Return').returncode == 0
+                deadline = time.monotonic() + 5
+                while not shell_pid_marker.exists() or not shell_pid_marker.read_text().strip():
+                    assert time.monotonic() < deadline, 'selected shell did not publish its PID'
+                    time.sleep(.05)
+                shell_pid = int(shell_pid_marker.read_text())
+                with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+                    shell_id = database.execute(
+                        "SELECT value FROM app_state WHERE key='selectedTerminalID'").fetchone()[0]
+                assert shell_id and selected_session() is None
+                shell_listing = listing()
                 assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
                 await_title(process, 'Threading experiment - ' + str(project),
                             root / 'agent-to-shell.log')
-                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
                 assert process.wait(timeout=5) == 0
             finally:
                 if process.poll() is None:
@@ -319,9 +334,26 @@ with log_path.open('w+') as log:
             process = subprocess.Popen([binary, '--app-project', store, endpoint, '/bin/sh', str(project)],
                                        stdout=cleared_log, stderr=cleared_log)
             try:
-                window = await_title(process, 'Threading experiment - ' + str(project),
+                window = await_title(process, 'Threading terminal - running [history cut]',
                                      root / 'agent-cleared-reopen.log')
-                assert xdo('windowfocus', window, 'key', 'Escape').returncode == 0
+                assert selected_session() is None, 'shell restoration restored the old agent selection'
+                with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
+                    assert database.execute(
+                        "SELECT value FROM app_state WHERE key='selectedTerminalID'").fetchone()[0] == shell_id
+                assert listing() == shell_listing, 'shell restoration duplicated or changed saved rows'
+                os.kill(shell_pid, 0)
+                command = "printf '\\033]0;SHELL REATTACHED PID %s\\007' \"$$\""
+                assert xdo('windowfocus', window, 'type', '--clearmodifiers', command).returncode == 0
+                assert xdo('key', 'Return').returncode == 0
+                await_title(process, f'Threading terminal - SHELL REATTACHED PID {shell_pid} [history cut]',
+                            root / 'agent-cleared-reopen.log')
+                assert xdo('key', 'ctrl+shift+p').returncode == 0
+                await_title(process, 'Threading terminals - ' + str(project),
+                            root / 'agent-cleared-reopen.log')
+                assert xdo('key', 'Escape').returncode == 0
+                await_title(process, 'Threading experiment - ' + str(project),
+                            root / 'agent-cleared-reopen.log')
+                assert xdo('windowfocus', window, 'key', 'alt+F4').returncode == 0
                 assert process.wait(timeout=5) == 0
             finally:
                 if process.poll() is None:

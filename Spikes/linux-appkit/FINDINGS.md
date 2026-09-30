@@ -2874,3 +2874,65 @@ when that exit is removed. The completed build was released explicitly and the i
 lane rerun against the same binaries. The artifacts identify revision `489de13ec` with
 `source_dirty=true`; compiled source hashes remained unchanged. The shared attachment stamp was
 backported to local master as `b49e57dbc`, preserving unrelated work there.
+
+## 105. Navigation and the active terminal share one workspace
+
+The app previously replaced its navigator with a bare terminal and entered a nested event loop.
+The workspace now keeps a fixed 320-pixel navigator beside the selected terminal, servicing both
+from one loop. Existing project, saved-runtime and account routes keep their original runtime
+owners, selection transaction, eight-runtime ceiling and 512-value picker bound. Only viewport
+rows are mounted. The shim's existing specimen controls still draw navigation; this is progress
+on native workspace structure, not production theme or extension-renderer parity.
+
+SDL retains independent pane textures. Terminal output uploads its own frame without rebuilding
+the sidebar; resize redraws bounded visible content and never stretches retained terminal cells.
+The combined width ceiling grows to 1600 while the terminal's 1280-pixel/128-column limit stays
+intact. Attachments adopt their existing grid with navigation added outside it. Pointer input,
+IME cursor placement and accessible text geometry use the same terminal origin. AT-SPI exposes
+both direct frame children and follows actual pane focus rather than hiding the inactive pane.
+
+Ctrl+Shift+P focuses navigation, and from the focused project list opens the folder chooser.
+Tab returns to the terminal; Escape dismisses one picker layer or returns from Projects to the
+terminal. The terminal's own Tab/Escape bytes remain ordinary input. Navigation-owned key releases
+stay suppressed after an activation changes panes, and composition is canceled when focus moves.
+This remains a host-owned experimental navigator: Threading retains selection, persistence,
+launch authority, input routing and bounded rendering. No Linux-specific extension API is added.
+
+The installed Release workspace fixture keeps twelve projects in an isolated store and drives
+real daemon PTYs through native input and AT-SPI. It verifies simultaneous visible siblings,
+exact child reuse across projects, bounded mounted rows, unchanged navigator render counts during
+terminal output, Unicode clipboard input, offset character extents and selection, and the child's
+actual resized grid. A mouse press held across a session switch is completed on its original
+child; the next child receives no orphan motion or release. Unsupported sidebar buttons leave
+focus unchanged, proven by subsequent input reaching the same child. Six native screenshots were
+inspected, including both focus states, resized panes, text selection and the held-button switch.
+
+Final review caught native-only focus changes on unsupported sidebar buttons and invalid
+accessibility selections. Focus now changes only with an event the workspace owner receives.
+Selection writes and folder import freeze navigation decisions while their workers are pending;
+they continue to route input to the visible terminal. The initial combined loop kept drawing
+that terminal but discarded its input during these waits, so focus, rendering and input now use
+the same route on both ordinary and pending turns.
+An AT-SPI selection of an already-selected row remains an idempotent success; the row's explicit
+select action transfers focus. Existing fixtures use Alt+F4 for window closure while retaining
+Escape assertions for picker dismissal.
+
+The final installed package passed startup/import, provider PATH, live-child reinstall, workspace
+input, saved-shell restart/refusal, catalogue limits, live/replayed working directories and desktop
+launch. The separate installed accessibility lane passed the existing list/selection/viewport
+contracts plus simultaneous pane geometry and focus. Release client/emulator contracts and all
+eleven runner tests passed. Artifacts identify revision `722b7f4fc` with `source_dirty=true`;
+the six changed compiled source files matched their recorded build-time hashes after validation.
+Eight further installed scenarios passed agent attachment/creation, named Codex and Claude
+accounts, Claude lifecycle, retry refusal, selected-terminal restoration and project navigation.
+The older agent fixture expected a project list after clearing agent selection by opening a
+shell. It now verifies restoration of that selected shell's exact durable ID and live PID,
+unchanged saved rows and a still-cleared agent selection.
+
+The storage-contention regression holds a SQLite write transaction, confirms the selection
+worker owns the host lock, focuses the still-visible old terminal and requires its exact input
+byte before releasing either lock. It then verifies the requested destination opens with both
+original runtime identities intact. The unchanged fixture fails at that input assertion on the
+pre-fix package and passes on the final package, which also passes all three accessibility
+scenarios. The additional post-selection screenshot was inspected. The final `.deb` SHA-256 is
+`2d1e45b1d62a5d56de1dd8d6fb67e5e221c8dab8639fce8ae9d779a913a6c5cd`.

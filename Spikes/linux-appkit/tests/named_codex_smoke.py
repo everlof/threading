@@ -103,7 +103,7 @@ def visit(log_name, action):
         try:
             window = title(process, 'Threading experiment - ' + str(project), log)
             action(process, window, log)
-            key(window, 'Escape')
+            key(window, 'alt+F4')
             assert process.wait(timeout=5) == 0
         except BaseException:
             output.flush()
