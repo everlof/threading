@@ -3018,3 +3018,56 @@ matched their recorded build-time hashes afterward. The nonshipping lab separate
 explicit SwiftPM source link and conversion of `CGFloat` report values to `Double` for Linux
 Foundation JSON serialization. The final `.deb` SHA-256 is
 `31398cd761132f6c8e80f8741b97e130687027529586361ebfede61a61f3bbd4`.
+
+## 108. Contextual Actions reuse production command admission
+
+The diagnostic navigator now exposes its supported operations through an Actions button and
+Ctrl+Shift+Space. Nine command values cover folder import, shell open/create, Codex/Claude
+creation and account choice, and saved agent/terminal catalogues. Only the visible rows are
+mounted. Disabled commands stay discoverable with an accessibility reason and no open action;
+keyboard invocation receives the current refusal. Closing the picker restores the previous
+catalogue and input focus.
+
+`HostCommandContract.swift` compiles byte-identically on Linux after moving the unchanged
+`AppCommand.hostDescriptor` projection beside its AppKit adapter. The picker captures a typed
+project ID and rechecks both that identity and current availability through `HostCommandPlane`
+before dispatching to the existing runtime handlers. The same admission path guards project
+shortcuts. This is deliberately host-owned diagnostic presentation: identity, availability,
+persistence, account routing, launch, focus, input and accessibility remain Threading's
+responsibility. It does not introduce an extension component or claim themed Mac menu parity.
+
+Button press/release, cancellation and accessibility activation share one bridge action. Review
+found two ownership edges: shortcut release before the first terminal existed could leave text
+suppressed, and returning focus to navigation after an outside dismissal could leave Swift
+waiting for a mouse release that the native bridge had already cancelled. Key suppression now
+covers the initial Actions surface, and navigation focus clears both sides of gesture ownership.
+The installed fixture enables actual terminal mouse reporting and records child input, so leaked
+UI events or a missing later release cannot pass merely because the child ignored mouse events.
+
+The first native capture also exposed an ellipsized Actions label. The button now has room for
+the complete label and both text insets; the fixture independently measures the installed font
+width and checks the published rectangle. ATK's remote `DoAction` reply acknowledges receipt
+before calling the local action callback, so its boolean cannot prove refusal. Disabled-action
+checks instead use a synchronous D-Bus barrier followed by no native enqueue, no selection
+change and unchanged durable identities. Separate old-package runs reproduced both input
+failures; their logs and recorded bytes are under `out/actions-{keyboard,mouse}-before.log` and
+`out/actions-regression-before.json`.
+
+Validation passed for the 47-file vendor identity check, Release core/command and PTY-client
+contracts, eleven runner tests, and the complete installed-package suite. The new fixture checks
+real header gestures, keyboard and AT-SPI activation, bounded rows and disabled admission,
+native folder chooser cancellation, both focus-return paths with actual mouse bytes, exact shell
+UUID/PID reuse, and both provider routes with isolated named-account PTY stand-ins. Native
+normal/pressed, empty/disabled, live-menu and provider-route screenshots were inspected in
+`out/bundle-smoke/restart-out/actions-*.png`. Actual provider services and complete themed-menu
+parity remain outside this diagnostic slice.
+
+The unchanged command adapter projection passed the six focused ordinary Mac test classes on
+both the Linux baseline and exact master candidate: 64 tests, one skipped because no extension
+was installed, zero failures. The three-file shared extraction landed on master as `22e4c7b98`,
+with unrelated working edits preserved. The tested Ubuntu arm64 package records `2de566a24`
+with `source_dirty=true`; its SHA-256 is
+`6f6b5326dcbbc5b8b3676cc14e048ee910d5aaf9d55c8d5c7a6ef46c51ba4667`.
+The existing detailed AT-SPI suite also passed against that installed binary, covering bounded
+navigation, simultaneous panes, native/text geometry and independent focus. All 129 recorded
+spike compilation inputs retained their build-time hashes after verification.

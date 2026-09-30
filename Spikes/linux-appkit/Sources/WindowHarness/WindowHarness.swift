@@ -991,6 +991,24 @@ struct WindowHarness {
         var accountSelected = 0, accountFirst = 0
         var pendingSelection: PendingSelection?
         var pendingFolderImport: FolderImportGate?
+        var actions: NavigatorActions.Presentation?
+        var actionsButtonState: Int32 = 0
+        var actionsEnabled = true
+        var dismissedActionGesture: Int32?
+        func actionState() -> NavigatorActions.State {
+            let project = projects.indices.contains(selected) ? projects[selected] : nil
+            let shell = project.flatMap { terminals[$0.id] }
+            let runtimeCount = terminals.count + restoredRuntimes.count
+            return .init(projectID: project.flatMap { ProjectID(uuidString: $0.id) },
+                canOpenShell: shell != nil || runtimeCount < maximumOpenRuntimes,
+                canCreateShell: (shell == nil || shell!.canReplace)
+                    && runtimeCount - (shell == nil ? 0 : 1) < maximumOpenRuntimes,
+                shellMayBeRunning: shell != nil && shell?.canReplace != true,
+                canCreateAgent: runtimeCount < maximumOpenRuntimes,
+                hasCodex: agentExecutable != nil, hasClaude: claudeExecutable != nil,
+                hasAgents: project?.recentAgents.isEmpty == false,
+                hasTerminals: project?.recentTerminals.isEmpty == false)
+        }
         defer { pendingFolderImport?.cancel() }
         var dirty = true
         let sidebarWidth = 320
@@ -1005,12 +1023,22 @@ struct WindowHarness {
         }
         func focusSidebar(_ focus: Bool) {
             guard let activePane else { return }
+            // Native sidebar focus cancels terminal gestures, including their queued release.
+            // Mirror that cancellation even if a native press moved focus before Swift saw it.
+            if focus { dismissedActionGesture = nil }
             let changed = sidebarFocused != focus
             sidebarFocused = focus
             tw_workspace_focus(window, focus ? 1 : 0)
             guard changed else { return }
             activePane.focus(!focus, window: window)
             if focus { tw_title(window, navigatorTitle) }
+            dirty = true
+        }
+        func dismissActions() {
+            guard let presentation = actions else { return }
+            actions = nil
+            actionsButtonState = 0
+            focusSidebar(presentation.returnToSidebar)
             dirty = true
         }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
@@ -1154,8 +1182,21 @@ struct WindowHarness {
                     dirty = true
                 }
             }
+            let enabled = pendingFolderImport == nil && pendingSelection == nil
+            if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
+            if launch != nil {
+                tw_actions_button(window, actions == nil ? "Actions" : "Close actions", enabled ? 1 : 0,
+                                  Int32(navigatorWidth - 112), 8, 100, 36)
+            }
             let count = max(1, (height / 2 - 32) / Int(navigatorRowStride))
-            if accountPicker != nil {
+            if var menu = actions {
+                let commands = NavigatorActions.commands(actionState())
+                if menu.commands != commands { menu.commands = commands; dirty = true }
+                menu.selected = max(0, min(menu.commands.count - 1, menu.selected))
+                if menu.selected < menu.first { menu.first = menu.selected }
+                if menu.selected >= menu.first + count { menu.first = menu.selected - count + 1 }
+                actions = menu
+            } else if accountPicker != nil {
                 accountSelected = max(0, min(pickerAccounts.count - 1, accountSelected))
                 if accountSelected < accountFirst { accountFirst = accountSelected }
                 if accountSelected >= accountFirst + count { accountFirst = accountSelected - count + 1 }
@@ -1179,7 +1220,17 @@ struct WindowHarness {
                 var textRows: [NavigatorTextRow] = []
                 textRows.reserveCapacity(min(count, 32))
                 let end: Int
-                if let accountPicker {
+                if let menu = actions {
+                    root.title = "Actions"
+                    end = min(menu.commands.count, menu.first + count)
+                    for index in menu.first..<end {
+                        let command = menu.commands[index]
+                        let text = command.title + (command.availability.isAvailable ? "" : " (unavailable)")
+                        addNavigatorRow(text, index: index - menu.first, width: width,
+                            height: height, accent: accent, selected: index == menu.selected,
+                            root: root, textRows: &textRows)
+                    }
+                } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
                     root.title = "\(provider) login - Enter: choose; Esc: back"
@@ -1264,7 +1315,7 @@ struct WindowHarness {
                         }
                     }
                 }
-                if activePane != nil {
+                if activePane != nil, actions == nil {
                     let section = accountPicker.map { $0 == .claude ? "Claude login" : "Codex login" }
                         ?? savedPicker.map { $0.isAgent ? "Agents" : "Terminals" } ?? "Projects"
                     root.title = section + (sidebarFocused ? " - Tab: terminal" : " - Ctrl+Shift+P")
@@ -1272,9 +1323,18 @@ struct WindowHarness {
                 let title = root.title
                 root.title = ""
                 textRows.append(NavigatorTextRow(text: readableNavigatorText(title), x: 0, y: 0,
-                                                 width: Int32(width),
+                                                 width: Int32(width - (launch == nil ? 0 : 118)),
                                                  height: Int32(Specimen.Window.titleHeight * 2),
                                                  inset: 24, selected: false))
+                if launch != nil {
+                    let shade: CGFloat = !actionsEnabled ? 0.52 : actionsButtonState == 2 ? 0.25
+                        : actionsButtonState == 1 || actions != nil ? 0.34 : 0.42
+                    root.addSubview(Specimen.Row(
+                        frame: NSRect(x: CGFloat(width - 112) / 2, y: CGFloat(height) / 2 - 22, width: 50, height: 18),
+                        text: "", accent: NSColor(white: shade, alpha: 1), selected: true, showsMark: false))
+                    textRows.append(NavigatorTextRow(text: actions == nil ? "Actions" : "Close",
+                        x: Int32(width - 112), y: 8, width: 100, height: 36, inset: 12, selected: true))
+                }
                 trace("raster.begin")
                 let bitmap = Bitmap(width: width, height: height, background: (0.87, 0.87, 0.87, 1))
                 let context = NSGraphicsContext(bitmap: bitmap, scale: 2)
@@ -1296,7 +1356,27 @@ struct WindowHarness {
                 trace("present.end")
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
                 trace("accessibility-title.begin")
-                if let accountPicker {
+                if let menu = actions {
+                    let listY = Int32(Specimen.Window.titleHeight * 2)
+                    tw_accessibility_begin_list(window, "Project actions", Int32(menu.first),
+                        Int32(menu.commands.count), 1, 0, listY, Int32(width), Int32(height) - listY)
+                    for index in menu.first..<end {
+                        let command = menu.commands[index]
+                        let label = command.title + (command.availability.disabledReason.map { ". " + $0 } ?? "")
+                        let bounds = navigatorRowPixels(index - menu.first, width: width, height: height)
+                        let result = command.id.withCString { identifier in
+                            label.withCString { name in
+                                tw_accessibility_add_action_row(window, identifier, name,
+                                    index == menu.selected ? 1 : 0, command.availability.isAvailable ? 1 : 0,
+                                    bounds.x, bounds.y, bounds.width, bounds.height)
+                            }
+                        }
+                        guard result == 0 else { throw WindowFailure("native action row exceeds its bound") }
+                    }
+                    tw_accessibility_end_list(window)
+                    setNavigatorTitle("Threading actions - " + (projects.indices.contains(selected) ? projects[selected].path : "No project"))
+                    print("ACTIONS_FRAME mounted=\(end - menu.first) selected=\(menu.commands[menu.selected].id) total=\(menu.commands.count)")
+                } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
                     let listY = Int32(Specimen.Window.titleHeight * 2)
@@ -1433,6 +1513,81 @@ struct WindowHarness {
                 }
             }
             trace("event kind=\(event.kind) action=\(event.action)")
+            if let button = dismissedActionGesture {
+                if event.kind == 17 { continue }
+                if event.kind == 15, event.key == button, event.action == 3 {
+                    dismissedActionGesture = nil
+                    continue
+                }
+            }
+            if event.kind == 26 {
+                if actionsButtonState != event.action { actionsButtonState = event.action; dirty = true }
+                continue
+            }
+            if event.kind == 25, launch != nil {
+                if actions != nil { dismissActions() }
+                else {
+                    let state = actionState()
+                    actions = .init(projectID: state.projectID, returnToSidebar: event.action == 1,
+                                    commands: NavigatorActions.commands(state))
+                    focusSidebar(true)
+                    dirty = true
+                }
+                continue
+            }
+            if var menu = actions {
+                switch event.kind {
+                case 5: return
+                case 1: try updateSurface(event); continue
+                case 12, 11, 24:
+                    dismissActions(); continue
+                case 3, 4:
+                    menu.selected = max(0, min(menu.commands.count - 1, menu.selected + (event.kind == 3 ? -1 : 1)))
+                    actions = menu; dirty = true; continue
+                case 2:
+                    let end = min(menu.commands.count, menu.first + count)
+                    if let mounted = (0..<(end - menu.first)).first(where: { index in
+                        let row = navigatorRowPixels(index, width: navigatorWidth, height: height)
+                        return event.x >= row.x && event.x < row.x + row.width
+                            && event.y >= row.y && event.y < row.y + row.height
+                    }) {
+                        menu.selected = menu.first + mounted
+                        actions = menu; dirty = true
+                        if event.action == 1 { continue }
+                    } else { dismissActions(); continue }
+                case 8: break
+                case 15:
+                    if event.action == 1 { dismissedActionGesture = event.key; dismissActions() }
+                    continue
+                default: continue
+                }
+                guard let command = NavigatorActions.Command(rawValue: menu.commands[menu.selected].id) else { continue }
+                switch NavigatorActions.invoke(command, projectID: menu.projectID, state: actionState) {
+                case .refused(_, let reason):
+                    tw_title(window, "Threading actions - " + reason)
+                    print("ACTION_REFUSED \(command.rawValue) \(reason)"); fflush(nil)
+                    continue
+                case .invoked:
+                    dismissActions()
+                    accountPicker = nil; savedPicker = nil
+                    focusSidebar(true)
+                    event = TWEvent(); event.kind = command.eventKind
+                }
+            }
+            // Shortcut and menu entry points share the production availability gate before the
+            // existing operation below owns persistence, exact identity and process launch.
+            if !selectionWasCommitted, accountPicker == nil, savedPicker == nil,
+               let command = (event.kind == 8 && projects.isEmpty ? NavigatorActions.Command.addProject
+                    : NavigatorActions.Command.allCases.first(where: { $0.eventKind == event.kind })),
+               launch != nil {
+                switch NavigatorActions.invoke(command, projectID: actionState().projectID, state: actionState) {
+                case .invoked: break
+                case .refused(_, let reason):
+                    tw_title(window, "Threading experiment - " + reason)
+                    print("ACTION_REFUSED \(command.rawValue) \(reason)"); fflush(nil)
+                    continue
+                }
+            }
             if event.kind == 24 {
                 // The same command first focuses navigation, then opens its folder action.
                 // Preserve import access after a terminal occupies the adjacent pane.

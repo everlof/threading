@@ -15,6 +15,8 @@ struct TWWindow {
     int sidebarTextureWidth, sidebarTextureHeight, terminalTextureWidth, terminalTextureHeight;
     int sidebarWidth, sidebarFocused;
     uint32_t terminalButtons;
+    SDL_Rect actionsBounds;
+    int actionsVisible, actionsEnabled, actionsTracking, actionsState;
     int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate;
     int composing;
     uint8_t suppressedKeyups[SDL_NUM_SCANCODES];
@@ -156,6 +158,32 @@ int tw_present_pane(TWWindow *w, const uint8_t *rgba, int width, int height, int
     if (!*texture || SDL_UpdateTexture(*texture, NULL, rgba, width * 4) != 0) return -1;
     return tw_repaint(w);
 }
+void tw_actions_button(TWWindow *w, const char *label, int enabled,
+                       int x, int y, int width, int height) {
+    if (!w) return;
+    int windowWidth, windowHeight;
+    SDL_GetWindowSize(w->window, &windowWidth, &windowHeight);
+    const int available = w->sidebarWidth ? w->sidebarWidth : windowWidth;
+    if (height < 0 || (height > 0 && (x < 0 || y < 0 || width <= 0
+        || x >= available || width > available - x || y >= windowHeight || height > windowHeight - y))) return;
+    w->actionsVisible = height > 0;
+    w->actionsEnabled = enabled != 0;
+    w->actionsBounds = (SDL_Rect){x, y, width, height};
+    if (!w->actionsVisible || !w->actionsEnabled) w->actionsState = 0;
+    tw_accessibility_actions_button(w, label, enabled, x, y, width, height);
+}
+static int actions_contains(TWWindow *w, int x, int y) {
+    const SDL_Point point = {x, y};
+    return w->actionsVisible && SDL_PointInRect(&point, &w->actionsBounds);
+}
+static void actions_activate(TWWindow *w, TWEvent *out) {
+    if (w->actionsTracking) SDL_CaptureMouse(SDL_FALSE);
+    w->actionsTracking = 0;
+    out->kind = 25;
+    out->action = w->terminal ? 0 : 1;
+    if (w->sidebarWidth) tw_workspace_focus(w, 1);
+    w->actionsState = 0;
+}
 int tw_workspace_sidebar_width(TWWindow *w) { return w ? w->sidebarWidth : 0; }
 int tw_workspace_sidebar_focused(TWWindow *w) { return w && w->sidebarWidth && w->sidebarFocused; }
 int tw_workspace_reset_terminal(TWWindow *w) {
@@ -281,7 +309,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         SDL_GetWindowSize(w->window, &out->width, &out->height);
         // Navigation-owned key releases remain navigation-owned even when their press opened
         // a terminal or moved focus. Never send the other pane a lone Enter/arrow/Tab release.
-        if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
+        if ((w->sidebarWidth || w->actionsVisible) && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
             e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES) {
             if (e.type == SDL_KEYUP && w->suppressedKeyups[e.key.keysym.scancode]) {
                 w->suppressedKeyups[e.key.keysym.scancode] = 0;
@@ -291,7 +319,37 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (!w->terminal && e.type == SDL_KEYDOWN)
                 w->suppressedKeyups[e.key.keysym.scancode] = 1;
         }
-        if (e.type == SDL_QUIT) out->kind = 5;
+        // Header gestures are button-owned through release, including a release outside its
+        // bounds. They must never become terminal mouse input or a project-row click.
+        if (w->actionsTracking && e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
+            const int activate = w->actionsEnabled && actions_contains(w, e.button.x, e.button.y);
+            w->actionsTracking = 0;
+            SDL_CaptureMouse(SDL_FALSE);
+            if (activate) actions_activate(w, out);
+            else { w->actionsState = 0; out->kind = 26; out->action = 0; }
+        } else if (!w->terminalButtons && w->actionsVisible &&
+                   (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) &&
+                   actions_contains(w, e.button.x, e.button.y)) {
+            if (e.button.button != SDL_BUTTON_LEFT || e.type != SDL_MOUSEBUTTONDOWN || !w->actionsEnabled) continue;
+            w->actionsTracking = 1; w->actionsState = 2;
+            SDL_CaptureMouse(SDL_TRUE);
+            out->kind = 26; out->action = 2;
+        } else if (!w->terminalButtons && w->actionsVisible && e.type == SDL_MOUSEMOTION &&
+                   (actions_contains(w, e.motion.x, e.motion.y) || w->actionsState || w->actionsTracking)) {
+            const int state = w->actionsEnabled && actions_contains(w, e.motion.x, e.motion.y)
+                ? (w->actionsTracking ? 2 : 1) : 0;
+            if (state == w->actionsState) continue;
+            w->actionsState = state; out->kind = 26; out->action = state;
+        } else if (w->actionsVisible && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
+                   e.key.keysym.sym == SDLK_SPACE && (e.key.keysym.mod & KMOD_CTRL) &&
+                   (e.key.keysym.mod & KMOD_SHIFT)) {
+            if (e.type != SDL_KEYDOWN || e.key.repeat) continue;
+            w->suppressActivation = SDLK_SPACE;
+            if (e.key.keysym.scancode >= 0 && e.key.keysym.scancode < SDL_NUM_SCANCODES)
+                w->suppressedKeyups[e.key.keysym.scancode] = 1;
+            if (!w->actionsEnabled) continue;
+            actions_activate(w, out);
+        } else if (e.type == SDL_QUIT) out->kind = 5;
         else if (e.type == tw_accessibility_event_type()) {
             const int current = tw_accessibility_event_is_current((uint32_t)(uintptr_t)e.user.data2);
             tw_navigation_trace_dequeue(&e, current);
@@ -301,13 +359,24 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (w->sidebarWidth) tw_workspace_focus(w, 1);
                 out->kind = 2;
                 out->action = 1; // Accessibility selection precedes a separate open action.
-            } else if (e.user.code == 2) out->kind = 8;
+            } else if (e.user.code == 2) {
+                if (!tw_accessibility_row_can_open((int)(intptr_t)e.user.data1)) continue;
+                out->kind = 8;
+            } else if (e.user.code == 3 && w->actionsVisible && w->actionsEnabled) actions_activate(w, out);
         }
         else if (e.type == SDL_WINDOWEVENT) {
             if (e.window.event == SDL_WINDOWEVENT_CLOSE) out->kind = 5;
             else if (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) out->kind = 1;
-            else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+            else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED || e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                 tw_accessibility_window_focus(w, e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
+                if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && (w->actionsTracking || w->actionsState)) {
+                    w->actionsTracking = 0; w->actionsState = 0;
+                    SDL_CaptureMouse(SDL_FALSE);
+                    out->kind = 26; out->action = 0;
+                }
+            } else if (e.window.event == SDL_WINDOWEVENT_LEAVE && w->actionsState) {
+                w->actionsState = 0; out->kind = 26; out->action = 0;
+            }
         } else if (w->sidebarWidth && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
                    ((e.key.keysym.sym == SDLK_p && (e.key.keysym.mod & KMOD_CTRL) &&
                      (e.key.keysym.mod & KMOD_SHIFT)) ||

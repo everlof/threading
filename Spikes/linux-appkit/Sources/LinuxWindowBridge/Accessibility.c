@@ -17,7 +17,7 @@ typedef struct {
     GPtrArray *children;
     char *id;
     AtkRectangle bounds;
-    int row, selected, canOpen, retired;
+    int row, selected, canOpen, retired, enabled;
 } AccessibleNode;
 typedef struct { AtkObjectClass parent; } AccessibleNodeClass;
 
@@ -49,7 +49,8 @@ static void text_interface_init(AtkTextIface *iface);
 G_DEFINE_TYPE_WITH_CODE(TerminalNode, terminal_node, component_node_get_type(),
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, text_interface_init))
 
-static AccessibleNode *app, *frame, *list;
+static AccessibleNode *app, *frame, *list, *actionsButton;
+static int actionsVisible;
 static TerminalNode *terminal;
 static AccessibleNode *activeList;
 static AccessibleNode *focused;
@@ -75,7 +76,7 @@ static struct {
     char title[128];
     int first, total, count, canOpen;
     AtkRectangle bounds;
-    struct { char id[MAX_ROW_ID], name[MAX_ROW_NAME]; int selected; AtkRectangle bounds; } rows[MAX_VISIBLE_ROWS];
+    struct { char id[MAX_ROW_ID], name[MAX_ROW_NAME]; int selected, enabled; AtkRectangle bounds; } rows[MAX_VISIBLE_ROWS];
 } pending;
 
 static gint node_child_count(AtkObject *object) {
@@ -109,9 +110,11 @@ static AtkStateSet *node_state(AtkObject *object) {
         atk_state_set_add_state(states, ATK_STATE_DEFUNCT);
         return states;
     }
-    atk_state_set_add_state(states, ATK_STATE_ENABLED);
-    atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
-    if (node == list || node == (AccessibleNode *)terminal || node->row >= 0) {
+    if (node->enabled) {
+        atk_state_set_add_state(states, ATK_STATE_ENABLED);
+        atk_state_set_add_state(states, ATK_STATE_SENSITIVE);
+    }
+    if (node == list || node == (AccessibleNode *)terminal || node == actionsButton || node->row >= 0) {
         atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
         if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
     }
@@ -144,6 +147,7 @@ static void accessible_node_class_init(AccessibleNodeClass *klass) {
 static void accessible_node_init(AccessibleNode *node) {
     node->children = g_ptr_array_new_with_free_func(g_object_unref);
     node->row = -1;
+    node->enabled = 1;
 }
 static AccessibleNode *new_node(AtkRole role, const char *name) {
     AccessibleNode *node = g_object_new(accessible_node_get_type(), NULL);
@@ -209,30 +213,24 @@ static void refresh_focus(void) {
 }
 static void show_content(AccessibleNode *content) {
     if (!frame) return;
-    if (tw_workspace_sidebar_width(hostWindow)) {
-        if (frame->children->len != 2 || g_ptr_array_index(frame->children, 0) != list ||
-            g_ptr_array_index(frame->children, 1) != (AccessibleNode *)terminal) {
-            set_focused(NULL);
-            clear_children(frame);
-            add_child(frame, list);
-            add_child(frame, (AccessibleNode *)terminal);
-            generation++;
-        }
-        activeList = list;
-        refresh_focus();
-        return;
+    const int workspace = tw_workspace_sidebar_width(hostWindow) != 0;
+    const guint count = (workspace ? 2 : 1) + actionsVisible;
+    int same = frame->children->len == count
+        && g_ptr_array_index(frame->children, 0) == (workspace ? list : content);
+    if (same && workspace) same = g_ptr_array_index(frame->children, 1) == (AccessibleNode *)terminal;
+    if (same && actionsVisible) same = g_ptr_array_index(frame->children, count - 1) == actionsButton;
+    if (!same) {
+        set_focused(NULL);
+        clear_children(frame);
+        add_child(frame, workspace ? list : content);
+        if (workspace) add_child(frame, (AccessibleNode *)terminal);
+        if (actionsVisible) add_child(frame, actionsButton);
+        generation++;
     }
-    if (frame->children->len == 1 && g_ptr_array_index(frame->children, 0) == content) {
-        refresh_focus();
-        return;
-    }
-    set_focused(NULL);
-    clear_children(frame);
-    add_child(frame, content);
-    activeList = content == list ? list : NULL;
-    generation++;
+    activeList = workspace || content == list ? list : NULL;
     refresh_focus();
 }
+
 void tw_accessibility_workspace_changed(TWWindow *window) {
     if (!bridgeReady || window != hostWindow) return;
     show_content(tw_workspace_sidebar_width(window) && !tw_workspace_sidebar_focused(window)
@@ -244,15 +242,27 @@ static const gchar *get_toolkit_version(void) { return "0"; }
 
 static gint action_count(AtkAction *action) {
     AccessibleNode *node = (AccessibleNode *)action;
-    return node->row < 0 ? 0 : (node->canOpen ? 2 : 1);
+    if (node == actionsButton) return actionsVisible && node->enabled ? 1 : 0;
+    return node->row < 0 ? 0 : (node->canOpen && node->enabled ? 2 : 1);
 }
 static const gchar *action_name(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == actionsButton) return index == 0 && action_count(action) ? "press" : NULL;
     if (node->row < 0) return NULL;
-    return index == 0 ? "select" : (index == 1 && node->canOpen ? "open" : NULL);
+    return index == 0 ? "select" : (index == 1 && node->canOpen && node->enabled ? "open" : NULL);
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node == actionsButton) {
+        if (index != 0 || !actionsVisible || !node->enabled || !node_mounted(ATK_OBJECT(node))
+            || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType; event.user.code = 3;
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (!activeList || node->row < 0 || (guint)node->row >= activeList->children->len
         || g_ptr_array_index(activeList->children, (guint)node->row) != node
         || index < 0 || index >= action_count(action) || eventType == UINT32_MAX) return FALSE;
@@ -342,6 +352,9 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
     } else if (object == ATK_OBJECT(terminal)) {
         *x = tw_workspace_sidebar_width(hostWindow); *y = 0;
         *width = windowWidth > *x ? windowWidth - *x : 0; *height = windowHeight;
+    } else if (object == ATK_OBJECT(actionsButton)) {
+        *x = node->bounds.x; *y = node->bounds.y;
+        *width = node->bounds.width; *height = node->bounds.height;
     } else if (object == ATK_OBJECT(list)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
@@ -615,6 +628,10 @@ void tw_accessibility_open(TWWindow *window) {
     list = g_object_new(list_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(list), ATK_ROLE_LIST);
     atk_object_set_name(ATK_OBJECT(list), "Projects");
+    actionsButton = new_component(ATK_ROLE_PUSH_BUTTON, "Actions");
+    actionsButton->id = g_strdup("linux.actions");
+    atk_object_set_accessible_id(ATK_OBJECT(actionsButton), actionsButton->id);
+    actionsVisible = 0;
     terminal = g_object_new(terminal_node_get_type(), NULL);
     atk_object_set_role(ATK_OBJECT(terminal), ATK_ROLE_TERMINAL);
     atk_object_set_name(ATK_OBJECT(terminal), "Terminal");
@@ -645,6 +662,8 @@ void tw_accessibility_close(void) {
     g_clear_object(&frame);
     g_clear_object(&list);
     g_clear_object(&terminal);
+    g_clear_object(&actionsButton);
+    actionsVisible = 0;
     hostWindow = NULL;
     generation++;
 }
@@ -666,6 +685,27 @@ int tw_accessibility_row_center(int row, int *x, int *y) {
     *x = node->bounds.x + node->bounds.width / 2;
     *y = node->bounds.y + node->bounds.height / 2;
     return 1;
+}
+int tw_accessibility_row_can_open(int row) {
+    if (!bridgeReady || !activeList || row < 0 || (guint)row >= activeList->children->len) return 0;
+    AccessibleNode *node = g_ptr_array_index(activeList->children, (guint)row);
+    return !node->retired && node->enabled && node->canOpen;
+}
+void tw_accessibility_actions_button(TWWindow *window, const char *label, int enabled,
+                                     int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow) return;
+    const int visible = height > 0;
+    if (actionsVisible != visible || actionsButton->enabled != (enabled != 0)) generation++;
+    actionsVisible = visible;
+    if (label && strnlen(label, 64) < 64 && g_utf8_validate(label, -1, NULL))
+        set_name_if_changed(actionsButton, label);
+    if (actionsButton->enabled != (enabled != 0)) {
+        actionsButton->enabled = enabled != 0;
+        atk_object_notify_state_change(ATK_OBJECT(actionsButton), ATK_STATE_ENABLED, actionsButton->enabled);
+        atk_object_notify_state_change(ATK_OBJECT(actionsButton), ATK_STATE_SENSITIVE, actionsButton->enabled);
+    }
+    actionsButton->bounds = (AtkRectangle){x, y, width, height};
+    show_content(activeList ? list : (AccessibleNode *)terminal);
 }
 void tw_accessibility_window_focus(TWWindow *window, int hasFocus) {
     (void)window;
@@ -701,8 +741,16 @@ int tw_accessibility_add_row(TWWindow *window, const char *id, const char *name,
     strcpy(pending.rows[index].id, id);
     strcpy(pending.rows[index].name, name);
     pending.rows[index].selected = selected != 0;
+    pending.rows[index].enabled = 1;
     pending.rows[index].bounds = (AtkRectangle){x, y, width, height};
     return 0;
+}
+int tw_accessibility_add_action_row(TWWindow *window, const char *id, const char *name, int selected,
+                                    int enabled, int x, int y, int width, int height) {
+    const int index = pending.count;
+    int result = tw_accessibility_add_row(window, id, name, selected, x, y, width, height);
+    if (result == 0 && bridgeReady && pending.count == index + 1) pending.rows[index].enabled = enabled != 0;
+    return result;
 }
 void tw_accessibility_end_list(TWWindow *window) {
     (void)window;
@@ -729,6 +777,7 @@ void tw_accessibility_end_list(TWWindow *window) {
             row->row = i;
             row->selected = pending.rows[i].selected;
             row->canOpen = pending.canOpen;
+            row->enabled = pending.rows[i].enabled;
             row->bounds = pending.rows[i].bounds;
             add_child(list, row);
             g_object_unref(row);
@@ -738,7 +787,13 @@ void tw_accessibility_end_list(TWWindow *window) {
         for (int i = 0; i < pending.count; i++) {
             AccessibleNode *row = g_ptr_array_index(list->children, (guint)i);
             set_name_if_changed(row, pending.rows[i].name);
+            if (row->enabled != pending.rows[i].enabled || row->canOpen != pending.canOpen) generation++;
             row->canOpen = pending.canOpen;
+            if (row->enabled != pending.rows[i].enabled) {
+                row->enabled = pending.rows[i].enabled;
+                atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_ENABLED, row->enabled);
+                atk_object_notify_state_change(ATK_OBJECT(row), ATK_STATE_SENSITIVE, row->enabled);
+            }
             row->bounds = pending.rows[i].bounds;
             if (row->selected != pending.rows[i].selected) {
                 row->selected = pending.rows[i].selected;

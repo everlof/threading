@@ -11,6 +11,9 @@ void tw_accessibility_title(const char *title);
 uint32_t tw_accessibility_event_type(void);
 int tw_accessibility_event_is_current(uint32_t generation);
 int tw_accessibility_row_center(int row, int *x, int *y);
+int tw_accessibility_row_can_open(int row);
+void tw_accessibility_actions_button(TWWindow *, const char *label, int enabled,
+                                     int x, int y, int width, int height);
 void tw_window_geometry(TWWindow *window, int *x, int *y, int *width, int *height);
 int tw_workspace_sidebar_width(TWWindow *window);
 int tw_workspace_sidebar_focused(TWWindow *window);
