@@ -49,3 +49,6 @@ together: the window uses its sibling host for project-folder import. Closing th
 live children with the daemon; running `./run-app.sh` again reattaches the selected live agent or
 standalone terminal. An exited or absent standalone terminal returns to the project list; saved
 terminals are also available from their project's picker.
+Opening a saved terminal explicitly starts a fresh shell if its prior child has exited or is
+absent. The saved terminal keeps its identity and settings. Its recorded working directory is
+used when available, with the owning project as fallback.

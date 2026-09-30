@@ -99,6 +99,7 @@ do {
     try runBindingContracts()
     try runSocketContracts()
     try runCreationContracts()
+    try runTerminalPlanContracts()
     try runNavigationContracts()
     try runContracts()
     try runRecoveryContracts()

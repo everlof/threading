@@ -121,6 +121,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var createdTerminalStore: String?
     private var createdAgent = false
     private var spawnMayBeLive = false
+    private var savedTerminalSpawnRefused = false
     private var finished = false
     private var initialViewport: (Int, Int)?
     // Worker-owned runtime. Every emulator operation stays off the UI actor.
@@ -140,6 +141,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var attachmentViewportApplied = false
     private var savedAgent: (store: String, id: SessionID)?
     private var pendingResumeRecording: (store: String, id: SessionID, plan: AgentLaunchPlan)?
+    private var openingSavedTerminal = false
     private var codexDiscovery: (store: String, directory: String, home: String, sessionID: SessionID, launchedAt: Date)?
     private var agentResume: (store: String, socket: String, shell: String, codex: String?,
                               claude: String?, sessionID: SessionID, width: Int, height: Int)?
@@ -249,6 +251,78 @@ final class GraphicalTerminal: @unchecked Sendable {
         attach(store: store, socket: socket, savedID: terminalID, kind: .terminal,
                projectID: projectID)
     }
+    /// Explicit activation may start this saved shell again. Startup restoration still uses
+    /// attach only. One selected project payload and one bounded daemon survey stay on the worker;
+    /// terminal lookup is linear in that project's embedded terminal records, not its agents.
+    func openTerminal(store: String, socket: String, terminalID: String, projectID: String,
+                      executable: String, arguments: [String], width: Int, height: Int) {
+        worker.async { [self] in
+            do {
+                guard executable.hasPrefix("/") else {
+                    throw WindowFailure("shell executable must be an absolute path")
+                }
+                let plan = try Self.savedTerminalPlan(store: store, terminalID: terminalID,
+                                                      projectID: projectID)
+                let id = PTYHostSessionIdentity(.projectTerminal(plan.terminalID))
+                identity = id
+                let presence = Self.terminalPresence(socket: socket, id: plan.terminalID)
+                lock.lock()
+                guard !closed else { lock.unlock(); return }
+                lock.unlock()
+                switch presence {
+                case .running:
+                    try attachIdentity(id, socket: socket)
+                case .absent, .exited:
+                    let columns = max(2, width / Self.cellWidth)
+                    let rows = max(1, height / Self.cellHeight)
+                    let link = try connect(socket: socket, columns: columns, rows: rows)
+                    lastWidth = width; lastHeight = height
+                    // The survey cannot prevent another client winning this identity. Plain
+                    // spawn lets the daemon refuse that race, including an exit still draining.
+                    // No automatic retry or replacement follows a refusal or lost reply.
+                    openingSavedTerminal = true
+                    lock.lock()
+                    guard !closed else { lock.unlock(); return }
+                    spawnMayBeLive = true
+                    lock.unlock()
+                    try link.spawn(PTYHostSpawnRequest(id: id,
+                        channel: .pty(grid: PTYHostGrid(cols: columns, rows: rows)),
+                        executable: executable, arguments: arguments,
+                        environment: Self.launchEnvironment(), cwd: plan.directory.path))
+                case .unavailable:
+                    throw WindowFailure("saved terminal ownership is unavailable; no shell was started")
+                }
+            } catch { fail(error) }
+        }
+    }
+    private static func savedTerminalPlan(store: String, terminalID: String, projectID: String)
+        throws -> ProjectTerminalStartPlan {
+        guard let id = TerminalID(uuidString: terminalID),
+              let owner = ProjectID(uuidString: projectID) else {
+            throw WindowFailure("invalid saved terminal identity")
+        }
+        let root = URL(fileURLWithPath: store, isDirectory: true)
+        let file = root.appendingPathComponent("threading.db")
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            throw WindowFailure("store does not exist")
+        }
+        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
+        defer { Glibc.close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let database = try ProjectDatabase(url: file)
+        defer { database.close() }
+        guard let project = try database.projectRecord(id: owner),
+              let terminal = project.terminals.first(where: { $0.id == id }) else {
+            throw WindowFailure("terminal is not in its saved project")
+        }
+        let preferred = URL(fileURLWithPath: terminal.currentDirectory, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        let available = FileManager.default.fileExists(atPath: preferred.path,
+                                                       isDirectory: &isDirectory) && isDirectory.boolValue
+        return ProjectTerminalStartPlan(terminal: terminal, project: project,
+                                        preferredDirectoryIsAvailable: available)
+    }
     var terminalID: String? {
         lock.lock(); defer { lock.unlock() }
         return createdTerminalID?.uuidString
@@ -340,14 +414,18 @@ final class GraphicalTerminal: @unchecked Sendable {
                     case .running, .unavailable: break
                     }
                 }
-                let link = try connect(socket: socket)
-                lock.lock(); spawnMayBeLive = true; lock.unlock()
-                try link.attach(PTYHostAttach(id: id))
-                worker.asyncAfter(deadline: .now() + Self.exitWaitSeconds) { [weak self] in
-                    guard let self, self.replayRemaining != 0 else { return }
-                    self.fail(WindowFailure("timed out waiting for terminal replay"))
-                }
+                try attachIdentity(id, socket: socket)
             } catch { fail(error) }
+        }
+    }
+    private func attachIdentity(_ id: PTYHostSessionIdentity, socket: String) throws {
+        attaching = true
+        let link = try connect(socket: socket)
+        lock.lock(); spawnMayBeLive = true; lock.unlock()
+        try link.attach(PTYHostAttach(id: id))
+        worker.asyncAfter(deadline: .now() + Self.exitWaitSeconds) { [weak self] in
+            guard let self, self.replayRemaining != 0 else { return }
+            self.fail(WindowFailure("timed out waiting for terminal replay"))
         }
     }
     private static func storedIdentity(store: String, savedID: String, kind: SavedKind,
@@ -520,6 +598,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             dirty = true
         case .spawned(let value):
             guard !attaching, value.id == identity else { fail(WindowFailure("spawn identity mismatch")); return }
+            openingSavedTerminal = false
             if let pending = pendingResumeRecording {
                 do {
                     try Self.recordAdmittedResume(pending.plan, store: pending.store, id: pending.id)
@@ -543,6 +622,13 @@ final class GraphicalTerminal: @unchecked Sendable {
             }
         case .spawnRefused(let value):
             guard value.id == identity else { fail(WindowFailure("spawn refusal identity mismatch")); return }
+            if openingSavedTerminal {
+                // This attempt definitely made no child. A later explicit activation may
+                // discard only this surface and re-survey the same durable identity. Unlike
+                // canReplace, this does not authorize replacing a possibly live incarnation.
+                lock.lock(); savedTerminalSpawnRefused = true; lock.unlock()
+                openingSavedTerminal = false
+            }
             pendingResumeRecording = nil
             if value.reason != .alreadyExists {
                 lock.lock(); spawnMayBeLive = false; lock.unlock()
@@ -559,7 +645,14 @@ final class GraphicalTerminal: @unchecked Sendable {
                 self.fail(WindowFailure("timed out waiting for child exit after input refusal"))
             }
         case .error(let value) where value.code == .unknownSession && value.detail == "attach" && attaching:
-            guard let resume = agentResume else { fail(WindowFailure("PTY: \(value)")); return }
+            guard let resume = agentResume else {
+                // A definite missing attachment permits a later explicit activation to survey
+                // again. It never turns startup restoration into a shell launch.
+                if let identity, case .projectTerminal = identity.identity {
+                    lock.lock(); spawnMayBeLive = false; lock.unlock()
+                }
+                fail(WindowFailure("PTY: \(value)")); return
+            }
             lock.lock(); spawnMayBeLive = false; lock.unlock()
             do { try spawnResumedAgent(resume) } catch { fail(error) }
         case .error(let value): fail(WindowFailure("PTY: \(value)"))
@@ -856,6 +949,10 @@ final class GraphicalTerminal: @unchecked Sendable {
     var canReplace: Bool {
         lock.lock(); defer { lock.unlock() }
         return !spawnMayBeLive && (finished || failure != nil)
+    }
+    var canReopenSavedTerminal: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return savedTerminalSpawnRefused && failure != nil
     }
     func takeInitialViewport() -> (Int, Int)? {
         lock.lock(); defer { lock.unlock() }
