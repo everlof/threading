@@ -2975,3 +2975,46 @@ and shell lifecycle scenarios, and eleven runner tests passed. Both changed comp
 matched their build-time hashes after validation. The artifact identifies `19634fb38` with
 `source_dirty=true`; its `.deb` SHA-256 is
 `1a7aacbb199f470d04a5a5d21a2351b1e16ae8cbbde9655fd8e8c0bed1feebce`.
+
+## 107. Production provider image drawing reaches the native Linux sidebar
+
+Saved agent rows now keep title, provider and account as separate values. Claude and Codex
+marks replace the generic dot and provider prefix, giving the session title more of the fixed
+320-pixel sidebar. Their exact asset-catalogue PNGs are verified and packaged beside the window
+binary. Missing artwork retains the explicit provider-name fallback. The accessible label keeps
+provider, account and stable identity, reserving their byte budget before truncating a long title.
+This remains the host-owned diagnostic navigator: selection, persistence, account routing,
+launch and input authority stay in the host; no new extension contract is introduced.
+
+`TemplateImageDrawing.swift` is vendored byte-identically and compiled against the shim. Its real
+transparency-layer and source-in operations now work, including fractional tint and inherited
+opacity. Graphics state is thread-local, matching AppKit's background drawing contract, while
+views retain main-actor isolation. Layers allocate sparse 16-pixel tiles instead of one window
+buffer per icon. Image storage is bounded; fixed provider decoding accepts at most 64 KiB and
+64×64 pixels, checks PNG dimensions before Cairo allocation, and runs once on a utility worker.
+Four cached presentations share the two decoded payloads; only mounted rows draw them.
+
+The lab compiles the same production file against real AppKit and the shim, using the catalogue
+artwork at 1× and 2×. It checks aspect fit, clipping, color artwork, selection ink, translucent
+source-in tint and inherited opacity, and reports exact pixel differences rather than claiming
+raster equivalence between different image samplers. Separate shim contracts cover asymmetric
+pixel orientation, nested groups, fractional clips, invalid image bounds and concurrent contexts.
+Custom account badges, theme choice, extension icon overrides and the full production sidebar
+remain outside this slice.
+
+Validation passed: all 36 cases on both real macOS AppKit and Linux, the focused Swift 6 image
+contracts, seven byte-identical frozen-reference raster frames plus the mask fixture, eleven
+runner tests, Release client/emulator contracts and the full installed-package lane. The latter
+includes simultaneous workspace input/geometry, catalogue admission and caps, shell restart and
+working-directory identity, live-child reinstall and desktop launch. The new installed fixture
+proves both marks and selection states, long Unicode titles, account/ID accessibility and the
+same shell UUID/PID across a deliberately resource-free copied-binary fallback. Its native
+screenshots and representative cross-platform images were inspected. The comparison report is
+`out/provider-image-comparison-20260930/index.html`; different samplers and transparent-pixel RGB
+quantization remain visible in its exact difference counts, not hidden by a baseline tolerance.
+
+The tested package identifies `e44038b58` with `source_dirty=true`; all shipping compiled inputs
+matched their recorded build-time hashes afterward. The nonshipping lab separately needed an
+explicit SwiftPM source link and conversion of `CGFloat` report values to `Double` for Linux
+Foundation JSON serialization. The final `.deb` SHA-256 is
+`31398cd761132f6c8e80f8741b97e130687027529586361ebfede61a61f3bbd4`.

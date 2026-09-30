@@ -14,6 +14,14 @@ struct ProjectSnapshot: Sendable {
     struct SavedRuntime: Sendable {
         let id: String
         let title: String
+        var kind: AgentKind? = nil
+        var account: String? = nil
+
+        var identityTitle: String {
+            let provider = kind.map { "[\($0.displayName)] " } ?? ""
+            let suffix = account.map { " [\($0)]" } ?? ""
+            return provider + title + suffix
+        }
     }
     let id: String
     let name: String
@@ -94,10 +102,10 @@ struct WindowHarness {
     @MainActor private static func addNavigatorRow(
         _ text: String, index: Int, width: Int, height: Int,
         accent: NSColor, selected: Bool, root: Specimen.Window,
-        textRows: inout [NavigatorTextRow]
+        textRows: inout [NavigatorTextRow], image: NSImage? = nil
     ) {
         let frame = navigatorRowRect(index, width: width, height: height)
-        root.addSubview(Specimen.Row(frame: frame, text: "", accent: accent, selected: selected))
+        root.addSubview(Specimen.Row(frame: frame, text: "", accent: accent, selected: selected, image: image))
         let pixels = navigatorRowPixels(index, width: width, height: height)
         textRows.append(NavigatorTextRow(text: readableNavigatorText(text), x: pixels.x, y: pixels.y,
                                          width: pixels.width, height: pixels.height,
@@ -156,19 +164,6 @@ struct WindowHarness {
         case saved(SavedRuntimeKey)
     }
 
-    private static func savedAgentTitle(_ title: String, kind: AgentKind,
-                                        accountHandle: AccountHandle) -> String {
-        // The specimen has no provider icon. Keep that identity as decoration before the
-        // title so ellipsis cannot make two providers' unnamed sessions indistinguishable.
-        let provider = "[\(kind.displayName)] "
-        let account = accountHandle.isStandard ? "" :
-            " [\(String(accountHandle.name.unicodeScalars.prefix(64)))]"
-        let visibleTitle = String(title.unicodeScalars.prefix(
-            max(0, maximumPersistedRuntimeTitleScalars - provider.unicodeScalars.count
-                - account.unicodeScalars.count)))
-        return provider + visibleTitle + account
-    }
-
     private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
         savedAgent(agentRow(session))
     }
@@ -181,7 +176,9 @@ struct WindowHarness {
 
     private static func savedAgent(_ row: AgentSessionRowPresentation) -> ProjectSnapshot.SavedRuntime {
         .init(id: row.id.uuidString,
-              title: savedAgentTitle(row.title, kind: row.kind, accountHandle: row.accountHandle))
+              title: String(row.title.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)),
+              kind: row.kind,
+              account: row.accountHandle.isStandard ? nil : String(row.accountHandle.name.unicodeScalars.prefix(64)))
     }
 
     @MainActor static func main() async {
@@ -201,6 +198,8 @@ struct WindowHarness {
 
     @MainActor private static func run() async throws {
         #if os(Linux)
+        let decodedMarks = await Task.detached(priority: .utility) { ProviderMarks.decode() }.value
+        ProviderMarks.install(decodedMarks)
         let mode = CommandLine.arguments.dropFirst().first
         if mode == "--attach" {
             let args = Array(CommandLine.arguments.dropFirst(2))
@@ -1204,7 +1203,11 @@ struct WindowHarness {
                     end = min(saved.count, savedFirst + count)
                     for index in savedFirst..<end {
                         let runtime = saved[index]
-                        let display = String(runtime.title.unicodeScalars.prefix(68))
+                        let mark = ProviderMarks.image(for: runtime.kind, selected: index == savedSelected)
+                        // Provider text remains the fallback if a bundled mark is absent. The
+                        // semantic provider/account/ID label below is independent of this drawing.
+                        let display = mark == nil ? runtime.identityTitle : runtime.title
+                            + (runtime.account.map { " [\($0)]" } ?? "")
                         let identity = String(runtime.id.prefix(8))
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
@@ -1212,7 +1215,7 @@ struct WindowHarness {
                         addNavigatorRow(text, index: index - savedFirst, width: width,
                                         height: height, accent: accent,
                                         selected: index == savedSelected,
-                                        root: root, textRows: &textRows)
+                                        root: root, textRows: &textRows, image: mark)
                     }
                 } else {
                     let codexName = codexAccount.isStandard ? "Codex" :
@@ -1327,7 +1330,11 @@ struct WindowHarness {
                         let runtime = saved[index]
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
-                        let label = "\(boundedAccessibilityLabel(runtime.title)) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
+                        let provider = runtime.kind.map { "[\($0.displayName)] " } ?? ""
+                        let account = runtime.account.map { " [\($0)]" } ?? ""
+                        let title = boundedAccessibilityLabel(runtime.title,
+                            maximumBytes: 400 - provider.utf8.count - account.utf8.count)
+                        let label = "\(provider)\(title)\(account) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
                         try publishAccessibleRow(window, id: runtime.id, label: label,
                                                  selected: index == savedSelected,
                                                  visibleIndex: index - savedFirst, width: width, height: height)
@@ -1697,12 +1704,12 @@ struct WindowHarness {
 
     // The accessibility bridge receives the same viewport rows as the renderer. Stop at a byte
     // boundary so a long grapheme or externally supplied title cannot expand its C projection.
-    private static func boundedAccessibilityLabel(_ value: String) -> String {
+    private static func boundedAccessibilityLabel(_ value: String, maximumBytes: Int = 400) -> String {
         var result = "", bytes = 0
         for scalar in value.unicodeScalars {
             let part = String(scalar)
             let length = part.utf8.count
-            if bytes + length > 400 { break }
+            if bytes + length > maximumBytes { break }
             result.append(part)
             bytes += length
         }

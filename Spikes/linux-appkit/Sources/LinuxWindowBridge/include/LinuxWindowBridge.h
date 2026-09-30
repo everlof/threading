@@ -82,6 +82,12 @@ int tw_draw_navigator_labels(uint8_t *rgba, int width, int height,
                              const uint8_t *utf8, int byteCount,
                              const TWNavigatorLabel *labels, int labelCount);
 
+// Worker-only fixed-provider PNG decoder: <=64 KiB compressed, <=64x64 pixels. Produces
+// top-row-first straight RGBA; rejects oversized/malformed input before pixel allocation.
+// Returns 0 on success and -1 on refusal; width/height are written only on success.
+int tw_decode_provider_png(const uint8_t *png, int length, uint8_t *rgba, int capacity,
+                           int *width, int *height);
+
 int tw_repaint(TWWindow *);
 
 // Functional keys are semantic events (kind 7), never platform-authored escape sequences.

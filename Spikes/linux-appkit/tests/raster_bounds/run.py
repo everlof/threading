@@ -38,7 +38,8 @@ frames = Path(tempfile.mkdtemp(prefix='frames-', dir=output))
 # Compile into one isolated module so the fixture can call the internal rasterizer. Strip only
 # imports of the shim's package name from its clients; drawing code remains byte-for-byte exact.
 clients = []
-for relative in ['Sources/Harness/Specimen.swift', 'Sources/Harness/Vendored/PlatinumBitmapFont.swift']:
+for relative in ['Sources/Harness/Specimen.swift', 'Sources/Harness/Vendored/PlatinumBitmapFont.swift',
+                 'Sources/Harness/Vendored/TemplateImageDrawing.swift']:
     source = spike / relative
     destination = output / source.name
     destination.write_text(source.read_text().replace('import AppKit\n', ''))

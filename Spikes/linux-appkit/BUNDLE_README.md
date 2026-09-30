@@ -45,7 +45,7 @@ Set the `PATH` to include the CLI's interpreter (for example, Node) as well as t
 absolute paths in the desktop entry: it does not expand `$HOME`.
 
 The `bin/` directory contains the window, store host and PTY daemon. Keep all three binaries
-together: the window uses its sibling host for project-folder import. Closing the window leaves
+and the `LinuxAppKitSpike_WindowHarness.resources` folder together: the window uses its sibling host for project-folder import. Closing the window leaves
 live children with the daemon; running `./run-app.sh` again reattaches the selected live agent or
 standalone terminal. An exited or absent standalone terminal returns to the project list; saved
 terminals are also available from their project's picker.
@@ -63,3 +63,7 @@ the terminal; clicking a pane focuses it too. Up/Down and Enter select/open a pr
 runtime without sending those keys to the shell. From the focused project list, Ctrl+Shift+P
 opens the folder chooser. Escape backs out of a picker or returns focus to the terminal.
 Alt+F4 closes the window while running children remain with the daemon.
+
+Saved Claude and Codex sessions show their provider marks beside the title. If artwork is
+unavailable, the row shows the provider name instead. Accessible labels retain the provider,
+account and session identity. Custom account badges and themes are not available in this preview.

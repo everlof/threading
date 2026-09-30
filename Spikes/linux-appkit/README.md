@@ -595,6 +595,20 @@ account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NA
 ./window-smoke.sh` isolates named Codex and Claude creation and exact resume. The ordinary
 `./window-smoke.sh` runs the complete Xvfb suite.
 
+Saved Claude and Codex rows show the production provider artwork beside the session title.
+The PNGs are byte-identical to the Mac asset catalogue (`./vendor-marks.sh --verify`), and the
+production `TemplateImageDrawing.swift` compiles unchanged against the shim. Selected marks use
+selection ink; an unavailable asset falls back to the provider's textual name. Provider, account
+and stable session identity remain in the accessible label even when a long title is truncated.
+Two bounded PNGs decode once on a worker, and mounted rows reuse their cached images.
+`tests/image_shim/run.py` checks the narrow compositing contracts in an isolated Swift build.
+For cross-platform evidence, run `tests/provider_image_lab.py render-macos NEW_MAC_OUTPUT`,
+run the `ImageHarness` product on Linux with `Sources/WindowHarness/Resources/ProviderMarks`
+and a new output directory, then use `tests/provider_image_lab.py compare MAC_OUTPUT LINUX_OUTPUT
+NEW_REPORT`. The report checks invariants and records exact sampling differences. The resource
+folder beside `WindowHarness` must travel with the binary. Theme choice, custom account badges
+and extension icon overrides are not part of this diagnostic surface yet.
+
 The project catalogue is an initial snapshot plus this window's newly created terminal counts
 and agent sessions. Fresh agents publish their committed row and full project count once, so a
 folder-import refresh cannot count the same admission twice, including outside the recent

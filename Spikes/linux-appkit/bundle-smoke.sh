@@ -60,6 +60,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/terminal_directory_identity_smoke.py:/terminal_directory_identity_smoke.py:ro" \
   -v "$PWD/tests/workspace_smoke.py:/workspace_smoke.py:ro" \
   -v "$PWD/tests/agent_catalogue_smoke.py:/agent_catalogue_smoke.py:ro" \
+  -v "$PWD/tests/provider_marks_smoke.py:/provider_marks_smoke.py:ro" \
   -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \
   -v "$PWD/tests/saved_terminal_refusal_smoke.py:/saved_terminal_refusal_smoke.py:ro" \
   -v "$PWD/tests/bundle_runtime_smoke.sh:/runner.sh:ro" \
