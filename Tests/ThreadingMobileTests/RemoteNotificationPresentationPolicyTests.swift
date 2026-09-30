@@ -79,11 +79,11 @@ final class RemoteNotificationPresentationPolicyTests: XCTestCase {
         }
     }
 
-    func testOnlyAnExplicitlyRequestedAgentUpdatePresentsInForeground() {
+    func testOnlyExplicitAgentUpdatesAndFaceIDApprovalsPresentInForeground() {
         for kind in RemoteNotificationKind.allCases {
             XCTAssertEqual(
                 RemoteNotificationPresentationPolicy.presentsInForeground(kind),
-                kind == .agentMessage,
+                kind == .agentMessage || kind == .secretApproval,
                 "Unexpected foreground presentation policy for \(kind.rawValue)"
             )
         }

@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 extension PTYHostClient {
@@ -15,8 +16,46 @@ extension PTYHostClient {
     ) {
         self.init(socketPath: socketPath, build: build, events: events,
                   journal: { message, detail in eventLog.record(.session, message, detail) },
+                  diagnostic: { Self.record($0) },
                   queue: queue, connectTimeout: connectTimeout, helloTimeout: helloTimeout,
                   maximumQueuedWriteBytes: maximumQueuedWriteBytes)
+    }
+
+    private static func record(_ diagnostic: PTYHostClientDiagnostic) {
+        switch diagnostic {
+        case .connected(let version):
+            ThreadingLogger.ptyHost.info("PTY host connected, protocol \(version, privacy: .public)")
+        case .protocolMismatch(let compatibility, let update):
+            ThreadingLogger.ptyHost.warning(
+                "PTY host protocol mismatch: \(compatibility.rawValue, privacy: .public), update \(update, privacy: .public)"
+            )
+        case .framingRefused(let reason, let duringHandshake):
+            if duringHandshake {
+                ThreadingLogger.ptyHost.error(
+                    "PTY host framing refused during handshake: \(reason, privacy: .public)"
+                )
+            } else {
+                ThreadingLogger.ptyHost.error("PTY host framing refused: \(reason, privacy: .public)")
+            }
+        case .unexpectedInput:
+            ThreadingLogger.ptyHost.error("PTY host sent an input frame; ignored")
+        case .lostSessions(let count):
+            ThreadingLogger.ptyHost.warning(
+                "PTY host lost \(count, privacy: .public) session(s) across a restart"
+            )
+        case .unknownFrameType(let type):
+            ThreadingLogger.ptyHost.info(
+                "PTY host sent an unknown frame type; ignored: \(type, privacy: .public)"
+            )
+        case .unreadableControl(let reason):
+            ThreadingLogger.ptyHost.error(
+                "PTY host sent a control frame this build could not read; ignored: \(reason, privacy: .private(mask: .hash))"
+            )
+        case .writeQueueOverflow(let queued, let bound):
+            ThreadingLogger.ptyHost.error(
+                "PTY host stopped reading; \(queued, privacy: .public) bytes queued, over the \(bound, privacy: .public)-byte bound; closing"
+            )
+        }
     }
 
     // MARK: - Probing

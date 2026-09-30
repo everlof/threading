@@ -80,6 +80,12 @@ fallback git branch, persists the record and emits presentation notifications. I
 keep their distinct resume/provenance paths. The factory works on one record and the existing
 bounded handoff chain; it performs no discovery, I/O or catalogue scan.
 
+Terminal launches pass their resolved `AgentLaunchPlan` through `AgentLaunchRecording` before
+persistence and spawn. This is a one-record transition shared by macOS and the Linux host:
+`hasLaunched`, activity time, stale exit code and resume state follow the attempt, while a prior
+launch failure remains visible until runtime survival clears it. Hosts still own admission,
+transaction scope and process-start acknowledgement.
+
 Reasoning effort has a second, narrower admission check in `ProjectStore.addSession`: an
 explicit value must be one of the resolved model's `reasoningLevels`. Claude attaches the
 installed CLI's documented session set (`low`, `medium`, `high`, `xhigh`, `max`) to every model

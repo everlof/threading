@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingPTYHostKit
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// Test-only shutdown for a scratch `threading-ptyd` rendezvous.

@@ -36,7 +36,7 @@ import ThreadingPTYHostKit
 /// version gate admitted — the correct response is to log it and read on. Only a
 /// `PTYHostFramingRefusal` closes the connection, because once a length or a `kind` is wrong
 /// there is no way to find the next header.
-final class PTYHostClient: @unchecked Sendable {
+public final class PTYHostClient: @unchecked Sendable {
 
     // MARK: - Types
 
@@ -46,16 +46,16 @@ final class PTYHostClient: @unchecked Sendable {
     /// next door: under complete strict concurrency a weak delegate would have to be `Sendable`
     /// and would then be sendable to the main actor by accident, which is precisely the hop this
     /// type exists to avoid.
-    struct Events: Sendable {
+    public struct Events: Sendable {
 
         /// A decoded control frame. `hello`, `helloRefused` and the handshake's own frames are
         /// **not** delivered here — the handshake consumes them — but everything the daemon says
         /// afterwards is, including `lost`, which is also recorded on the client.
-        var frame: @Sendable (PTYHostFrame) -> Void
+        public var frame: @Sendable (PTYHostFrame) -> Void
 
         /// Raw output (`kind` 1): replay bytes first, in order, then live output. A pty
         /// session's whole stream, and a pipes session's **standard output** only.
-        var output: @Sendable (Data) -> Void
+        public var output: @Sendable (Data) -> Void
 
         /// A pipes session's standard error (`kind` 1 with
         /// `PTYHostFramingDefaults.standardErrorFlag`).
@@ -66,13 +66,13 @@ final class PTYHostClient: @unchecked Sendable {
         /// default drops them, which is the right answer for a terminal: a pty child's stderr
         /// *is* the terminal, so a frame carrying this flag on a pty session is a frame that
         /// should not exist.
-        var standardError: @Sendable (Data) -> Void
+        public var standardError: @Sendable (Data) -> Void
 
         /// The link ended. Delivered exactly once, and only for a client whose `connect()`
         /// returned — a `connect()` that throws *is* its own report. `nil` means `close()`.
-        var closed: @Sendable (PTYHostClientError?) -> Void
+        public var closed: @Sendable (PTYHostClientError?) -> Void
 
-        init(
+        public init(
             frame: @escaping @Sendable (PTYHostFrame) -> Void = { _ in },
             output: @escaping @Sendable (Data) -> Void = { _ in },
             standardError: @escaping @Sendable (Data) -> Void = { _ in },
@@ -85,7 +85,7 @@ final class PTYHostClient: @unchecked Sendable {
         }
 
         /// For a caller that only wants the handshake — the availability probe.
-        static let ignored = Events()
+        public static let ignored = Events()
     }
 
     private enum State {
@@ -105,13 +105,14 @@ final class PTYHostClient: @unchecked Sendable {
     // MARK: - Properties
 
     /// The queue every event is delivered on. Serial, so frames arrive in wire order.
-    let queue: DispatchQueue
+    public let queue: DispatchQueue
 
     private let socketPath: String
     private let build: String
     private let events: Events
-    typealias Journal = @Sendable (String, [String: String]) -> Void
+    public typealias Journal = @Sendable (String, [String: String]) -> Void
     private let journal: Journal
+    private let diagnostic: @Sendable (PTYHostClientDiagnostic) -> Void
     private let connectTimeout: TimeInterval
     private let helloTimeout: TimeInterval
     private let maximumQueuedWriteBytes: Int
@@ -140,11 +141,12 @@ final class PTYHostClient: @unchecked Sendable {
 
     // MARK: - Initialization
 
-    init(
+    public init(
         socketPath: String,
         build: String,
         events: Events,
         journal: @escaping Journal,
+        diagnostic: @escaping @Sendable (PTYHostClientDiagnostic) -> Void = { _ in },
         queue: DispatchQueue? = nil,
         connectTimeout: TimeInterval = PTYHostClientDefaults.connectTimeout,
         helloTimeout: TimeInterval = PTYHostClientDefaults.helloTimeout,
@@ -154,6 +156,7 @@ final class PTYHostClient: @unchecked Sendable {
         self.build = build
         self.events = events
         self.journal = journal
+        self.diagnostic = diagnostic
         self.queue = queue ?? DispatchQueue(
             label: PTYHostClientDefaults.clientQueueLabel,
             qos: PTYHostClientDefaults.clientQueueQoS
@@ -177,7 +180,7 @@ final class PTYHostClient: @unchecked Sendable {
 
     /// The daemon's `hello`, once the gate admitted it. Its `build` is what a journal reports and
     /// what the retirement policy compares; it is never compared for admission.
-    var peerHello: PTYHostHello? {
+    public var peerHello: PTYHostHello? {
         lock.lock()
         defer { lock.unlock() }
         return peerHelloStorage
@@ -189,20 +192,20 @@ final class PTYHostClient: @unchecked Sendable {
     /// Recorded here as well as delivered through `Events.frame` because it arrives immediately
     /// after `hello`, before any caller has had a chance to install a handler for it, and it is
     /// the one thing this connection knows that nothing else can reconstruct.
-    var reportedLoss: PTYHostLost? {
+    public var reportedLoss: PTYHostLost? {
         lock.lock()
         defer { lock.unlock() }
         return reportedLossStorage
     }
 
     /// The session this connection is bound to, or nil before `spawn`/`attach`.
-    var boundSession: PTYHostSessionIdentity? {
+    public var boundSession: PTYHostSessionIdentity? {
         lock.lock()
         defer { lock.unlock() }
         return binding.session
     }
 
-    var isReady: Bool {
+    public var isReady: Bool {
         lock.lock()
         defer { lock.unlock() }
         return state == .ready
@@ -228,7 +231,7 @@ final class PTYHostClient: @unchecked Sendable {
     /// image of ours — its `peerTooOld` is our `selfTooOld`. It is flipped here so that a caller
     /// reading `.incompatible(_)` never has to know which side did the arithmetic.
     @discardableResult
-    func connect() throws -> PTYHostHello {
+    public func connect() throws -> PTYHostHello {
         try beginHandshake()
         do {
             let completion = try performHandshake()
@@ -245,7 +248,7 @@ final class PTYHostClient: @unchecked Sendable {
     ///
     /// The binding rules are enforced here rather than at each convenience method, so there is
     /// one place that decides what this connection is allowed to say.
-    func send(_ frame: PTYHostFrame) throws {
+    public func send(_ frame: PTYHostFrame) throws {
         let reservation = try prepareToSend(frame)
 
         do {
@@ -256,23 +259,23 @@ final class PTYHostClient: @unchecked Sendable {
         }
     }
 
-    func list() throws { try send(.list) }
+    public func list() throws { try send(.list) }
 
-    func spawn(_ request: PTYHostSpawnRequest) throws { try send(.spawn(request)) }
+    public func spawn(_ request: PTYHostSpawnRequest) throws { try send(.spawn(request)) }
 
-    func attach(_ request: PTYHostAttach) throws { try send(.attach(request)) }
+    public func attach(_ request: PTYHostAttach) throws { try send(.attach(request)) }
 
-    func resize(_ request: PTYHostResize) throws { try send(.resize(request)) }
+    public func resize(_ request: PTYHostResize) throws { try send(.resize(request)) }
 
-    func detach(_ request: PTYHostDetach) throws { try send(.detach(request)) }
+    public func detach(_ request: PTYHostDetach) throws { try send(.detach(request)) }
 
-    func closeInput(_ request: PTYHostCloseInput) throws { try send(.closeInput(request)) }
+    public func closeInput(_ request: PTYHostCloseInput) throws { try send(.closeInput(request)) }
 
-    func kill(_ request: PTYHostKill) throws { try send(.kill(request)) }
+    public func kill(_ request: PTYHostKill) throws { try send(.kill(request)) }
 
-    func retire() throws { try send(.retire) }
+    public func retire() throws { try send(.retire) }
 
-    func journalTail(maxBytes: Int) throws {
+    public func journalTail(maxBytes: Int) throws {
         try send(.journalTail(PTYHostJournalTail(maxBytes: maxBytes)))
     }
 
@@ -281,7 +284,7 @@ final class PTYHostClient: @unchecked Sendable {
     /// Refused before a binding exists: input carries no session id, so a connection that has not
     /// bound has nothing to say who it is for, and guessing would type into somebody else's
     /// agent.
-    func sendInput(_ bytes: Data) throws {
+    public func sendInput(_ bytes: Data) throws {
         try requireInputBinding()
         try enqueue(PTYHostFraming.framed(kind: .input, payload: bytes))
     }
@@ -296,7 +299,7 @@ final class PTYHostClient: @unchecked Sendable {
     /// **Blocking.** Bounded by the caller's deadline, which is the whole reason the deadline is
     /// the caller's: a quit with forty host-backed sessions must cost one wait, not forty.
     @discardableResult
-    func drainWrites(until deadline: Date) -> Bool {
+    public func drainWrites(until deadline: Date) -> Bool {
         lock.lock()
         guard queuedWriteBytes > 0, state == .ready else {
             let drained = queuedWriteBytes == 0
@@ -314,7 +317,7 @@ final class PTYHostClient: @unchecked Sendable {
     }
 
     /// Ends the link. Idempotent; `Events.closed` fires at most once.
-    func close() {
+    public func close() {
         close(with: nil)
     }
 
@@ -367,7 +370,7 @@ final class PTYHostClient: @unchecked Sendable {
                 wire,
                 decodeControl: decodeControl,
                 admit: { try admit($0, compatibility: $1, descriptor: connected) },
-                unexpectedInput: { ThreadingLogger.ptyHost.error("PTY host sent an input frame; ignored") }
+                unexpectedInput: { diagnostic(.unexpectedInput) }
             ) {
                 return completion
             }
@@ -390,9 +393,7 @@ final class PTYHostClient: @unchecked Sendable {
                 "PTY host connected",
                 ["build": peer.build, "protocol": String(peer.protocolVersion)]
             )
-            ThreadingLogger.ptyHost.info(
-                "PTY host connected, protocol \(peer.protocolVersion, privacy: .public)"
-            )
+            diagnostic(.connected(protocolVersion: peer.protocolVersion))
 
         case .peerTooOld:
             // The daemon is behind. Ask it to retire: it unlinks the socket immediately so the
@@ -432,12 +433,7 @@ final class PTYHostClient: @unchecked Sendable {
                 "retired": retired ? "true" : "false"
             ]
         )
-        ThreadingLogger.ptyHost.warning(
-            """
-            PTY host protocol mismatch: \(compatibility.rawValue, privacy: .public), \
-            update \(update, privacy: .public)
-            """
-        )
+        diagnostic(.protocolMismatch(compatibility: compatibility, update: update))
     }
 
     /// Frames that arrived in the same read as `hello` — the daemon's `lost` set is the one that
@@ -476,9 +472,7 @@ final class PTYHostClient: @unchecked Sendable {
         }
         if case .framing(let refusal) = error {
             journal("PTY host framing refused", ["cause": error.token])
-            ThreadingLogger.ptyHost.error(
-                "PTY host framing refused during handshake: \(String(describing: refusal), privacy: .public)"
-            )
+            diagnostic(.framingRefused(String(describing: refusal), duringHandshake: true))
         }
     }
 
@@ -529,9 +523,7 @@ final class PTYHostClient: @unchecked Sendable {
             switch outcome {
             case .refused(let refusal):
                 journal("PTY host framing refused", ["cause": "framing"])
-                ThreadingLogger.ptyHost.error(
-                    "PTY host framing refused: \(String(describing: refusal), privacy: .public)"
-                )
+                diagnostic(.framingRefused(String(describing: refusal), duringHandshake: false))
                 close(with: .framing(refusal))
                 return
             case .frames(let frames):
@@ -556,7 +548,7 @@ final class PTYHostClient: @unchecked Sendable {
                 events.output(frame.payload)
             }
         case .input:
-            ThreadingLogger.ptyHost.error("PTY host sent an input frame; ignored")
+            diagnostic(.unexpectedInput)
         case .control:
             guard let control = decodeControl(frame.payload) else { return }
             handle(control: control)
@@ -573,9 +565,7 @@ final class PTYHostClient: @unchecked Sendable {
                 "PTY host reported lost sessions",
                 ["count": String(lost.ids.count)]
             )
-            ThreadingLogger.ptyHost.warning(
-                "PTY host lost \(lost.ids.count, privacy: .public) session(s) across a restart"
-            )
+            diagnostic(.lostSessions(lost.ids.count))
         case .spawnRefused:
             // The binding was taken optimistically when the request went out. A refusal releases
             // it, so the caller may try another session on this connection rather than having to
@@ -598,17 +588,10 @@ final class PTYHostClient: @unchecked Sendable {
         do {
             return try JSONDecoder().decode(PTYHostFrame.self, from: payload)
         } catch PTYHostFrameRefusal.unknownFrameType(let type) {
-            ThreadingLogger.ptyHost.info(
-                "PTY host sent an unknown frame type; ignored: \(type, privacy: .public)"
-            )
+            diagnostic(.unknownFrameType(type))
             return nil
         } catch {
-            ThreadingLogger.ptyHost.error(
-                """
-                PTY host sent a control frame this build could not read; ignored: \
-                \(String(describing: error), privacy: .private(mask: .hash))
-                """
-            )
+            diagnostic(.unreadableControl(String(describing: error)))
             return nil
         }
     }
@@ -671,12 +654,7 @@ final class PTYHostClient: @unchecked Sendable {
                 "PTY host write queue overflowed",
                 ["queuedBytes": String(queued)]
             )
-            ThreadingLogger.ptyHost.error(
-                """
-                PTY host stopped reading; \(queued, privacy: .public) bytes queued, \
-                over the \(bound, privacy: .public)-byte bound; closing
-                """
-            )
+            diagnostic(.writeQueueOverflow(queuedBytes: queued, bound: bound))
             close(with: overflow)
             throw overflow
         }

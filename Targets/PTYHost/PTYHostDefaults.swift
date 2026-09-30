@@ -6,7 +6,7 @@ import ThreadingPTYHostKit
 
 /// Every constant `threading-ptyd` has, in one namespace.
 ///
-/// The daemon links `ThreadingPTYHostKit` and nothing else, so anything the wire already decides
+/// The daemon links `ThreadingPTYHostKit` and `ThreadingDomain`, so anything the wire already decides
 /// — the frame bound, the replay budget range, the ring size — is read from the package rather
 /// than restated here. What is left is the daemon's own behaviour: how much it will buffer for a
 /// watcher, how long it holds an exited session, and how quickly it escalates a kill.

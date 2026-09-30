@@ -37,4 +37,23 @@ final class AgentSessionCreationTests: XCTestCase {
         XCTAssertEqual(record.fastMode, true)
         XCTAssertEqual(record.permissionMode, .manual)
     }
+
+    func testTerminalLaunchRecordingUsesPlanStateAndRetainsPriorFailureUntilSurvival() throws {
+        var session = try XCTUnwrap(AgentSessionCreation.makeRecord(kind: .codex))
+        let launchedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        session.lastExitCode = 7
+        session.lastLaunchFailure = SessionLaunchFailure(
+            origin: .preflight, summary: "previous failure", detail: [], knownCause: "test"
+        )
+        let plan = AgentLaunchPlan(executable: "/bin/sh", arguments: [],
+                                   resumeState: .awaitingIdentifier)
+
+        AgentLaunchRecording.apply(plan, to: &session, at: launchedAt)
+
+        XCTAssertTrue(session.hasLaunched)
+        XCTAssertEqual(session.lastActiveAt, launchedAt)
+        XCTAssertNil(session.lastExitCode)
+        XCTAssertEqual(session.resumeState, plan.resumeState)
+        XCTAssertEqual(session.lastLaunchFailure?.knownCause, "test")
+    }
 }

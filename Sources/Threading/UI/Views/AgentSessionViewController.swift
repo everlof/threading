@@ -1054,10 +1054,7 @@ final class AgentSessionViewController: NSViewController {
         SessionRestorationLedger.shared.forget(sessionID: sessionID)
 
         let recorded = self.projectStore.update(sessionID: sessionID) { stored in
-            stored.hasLaunched = true
-            stored.lastActiveAt = Date()
-            stored.lastExitCode = nil
-            stored.resumeState = plan.resumeState
+            AgentLaunchRecording.apply(plan, to: &stored, at: Date())
         }
         guard recorded.succeeded else {
             pendingLaunchPlan = nil

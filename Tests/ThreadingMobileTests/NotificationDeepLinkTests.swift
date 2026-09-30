@@ -173,6 +173,7 @@ final class NotificationDeepLinkTests: XCTestCase {
 
     /// A Face ID approval alert is not a chat: it opens Face ID Approvals for the Mac that sent
     /// it, and an alert from a Mac this phone does not know opens nothing.
+    @MainActor
     func testAFaceIDApprovalAlertOpensApprovalsForItsMac() throws {
         let (model, _, defaults, suite) = try makeDemoModel()
         defer { defaults.removePersistentDomain(forName: suite) }

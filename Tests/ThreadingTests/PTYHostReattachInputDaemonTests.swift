@@ -4,6 +4,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// What the child receives after it has been handed back, against the real `threading-ptyd`.

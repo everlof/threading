@@ -6,6 +6,7 @@ import SwiftTerm
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// Handing a session over instead of ending it, and taking one back, driven by a fake link.

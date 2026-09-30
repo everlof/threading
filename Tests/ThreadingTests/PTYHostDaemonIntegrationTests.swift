@@ -3,6 +3,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// The client against the real `threading-ptyd`.

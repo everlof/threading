@@ -4,6 +4,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// Quitting and coming back, against the real `threading-ptyd`.

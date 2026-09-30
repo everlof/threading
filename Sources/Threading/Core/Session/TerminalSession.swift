@@ -1,5 +1,6 @@
 import AppKit
 @preconcurrency import SwiftTerm
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 /// A person-originated terminal write and the semantic boundary activity actually needs.

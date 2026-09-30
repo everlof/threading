@@ -3,6 +3,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 // MARK: - The fake daemon

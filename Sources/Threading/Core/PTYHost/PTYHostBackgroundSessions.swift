@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingDomain
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 // MARK: - Defaults

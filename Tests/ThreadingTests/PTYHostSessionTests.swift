@@ -5,6 +5,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// A `TerminalSession` whose child lives in `threading-ptyd`, driven by a fake link.

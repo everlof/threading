@@ -2,8 +2,7 @@
 
 Status: **a session survives a quit and a relaunch, on a terminal or on pipes, and the app now
 says so.** `Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost` is the daemon and
-launchd starts it, `Sources/Threading/Core/PTYHost` can connect to it, refuse an incompatible one
-and say why it did not, an **agent session** runs its child there instead of in this process,
+launchd starts it, `Packages/ThreadingPTYClient` connects to it and reports why it refused an incompatible one, an **agent session** runs its child there instead of in this process,
 a **native conversation** runs its CLI there over three pipes, and quitting Threading hands those
 children over rather than killing them — the next launch takes the terminals back, replays exactly
 what they missed where it can, does not reflow an agent that kept working, and resumes each
@@ -137,10 +136,12 @@ asynchronous writes, diagnostics and event delivery.
 
 ### Portable client and host adapter
 
-`PTYHostClient` now compiles on Darwin and Linux. `PTYHostClientHost` supplies the macOS EventLog
-adapter and availability probe; `PTYHostClientDefaults` owns connection, handshake and queue bounds
-without depending on registration paths. Existing app call sites keep their journal-backed API.
-The core still uses the platform logging adapter for diagnostic messages.
+`Packages/ThreadingPTYClient` is the single compiled Darwin/Linux client module used by both
+hosts. It depends on the wire kit, its typed-identity domain package, and Foundation/Dispatch; the Mac app's
+`PTYHostClientHost` supplies EventLog, OSLog diagnostics and the availability probe.
+`PTYHostClientDefaults` owns connection, handshake and queue bounds without depending on
+registration paths. The client passes typed diagnostics to its host rather than importing the
+app's logger. Existing Mac call sites keep their journal-backed API.
 
 macOS retains its DispatchIO reader/writer. Linux retains the DispatchIO reader and uses
 `PTYHostSocketWriter` for ordered writes through `MSG_NOSIGNAL`; the library installs no global

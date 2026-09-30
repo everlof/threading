@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 // MARK: - PTY Host Defaults

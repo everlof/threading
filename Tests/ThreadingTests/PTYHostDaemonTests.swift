@@ -8,6 +8,7 @@ import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
 #if !SWIFT_PACKAGE
+@testable import ThreadingPTYClient
 @testable import Threading
 #endif
 

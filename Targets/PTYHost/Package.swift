@@ -33,6 +33,7 @@ let package = Package(
             name: "ThreadingPTYHost",
             dependencies: [
                 .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
+                .product(name: "ThreadingDomain", package: "ThreadingDomain"),
                 .target(name: "CPTYHostPlatform", condition: .when(platforms: [.linux]))
             ],
             path: ".",

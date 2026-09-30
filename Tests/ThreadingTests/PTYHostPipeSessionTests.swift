@@ -4,6 +4,7 @@ import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
 
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// A native conversation whose CLI runs in `threading-ptyd`.

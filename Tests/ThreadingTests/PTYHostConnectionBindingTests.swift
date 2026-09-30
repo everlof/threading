@@ -1,6 +1,7 @@
 import Foundation
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 final class PTYHostConnectionBindingTests: XCTestCase {

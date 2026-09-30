@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingPTYClient
 import SwiftTerm
 
 /// Where a terminal sends the three things it can no longer do for itself once its child lives

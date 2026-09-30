@@ -77,11 +77,16 @@ flags, permission/default resolution and `launchEnvironment()`; compiling a comm
 not import those host services or silently replace their policy. `CodexLaunchCommand` composes
 the provider's invocation and terminal flags from resolved values; the macOS launcher still owns
 model metadata, account/hook setup, permission defaults and resume preflight.
+`ClaudeLaunchCommand` likewise composes the fresh/resume command pair from resolved session
+values and host-supplied integration flags. The macOS remote launcher uses it while account
+routing, local hooks, fork handling and transcript existence checks remain host-owned.
 
 `AgentSessionCreation` owns fresh-record assembly and handoff admission independently of the
 store and UI. Host adapters retain account/model admission,
 project/identity checks, fallback branch lookup, persistence and notification delivery. This is
-not yet a shared session-creation transaction or runtime coordinator.
+not yet a shared session-creation transaction or runtime coordinator. `AgentLaunchRecording`
+applies the resolved plan to one durable session before persistence and spawn; admission,
+transaction scope and process-start acknowledgement stay with the host.
 
 `PTYHostSocket` is the shared Unix connection leaf: it receives a path, deadline and desired
 blocking mode, then returns an owned descriptor or a portable `PTYHostClientError`. It does not
@@ -91,8 +96,9 @@ hosts synchronize the value rather than putting locks or event delivery into the
 control diagnostics and admission effects; handshake I/O, event pumping and write queue ownership
 remain above these values in the client.
 
-`PTYHostClient` itself now compiles on Darwin and Linux. Its journal callback is injected;
-`PTYHostClientHost` preserves macOS EventLog defaults and the availability probe. Client bounds
+`PTYHostClient` lives in `Packages/ThreadingPTYClient`, a compiled Darwin/Linux module. Its
+journal and typed diagnostic callbacks are injected; `PTYHostClientHost` preserves macOS
+EventLog/OSLog defaults and the availability probe. Client bounds
 live apart from registration paths. A Linux socket writer owns its descriptor and per-send signal
 policy, while the shared client owns queue admission, protocol state and event delivery.
 

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 // MARK: - Hold reasons

@@ -5,6 +5,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// A host-backed `TerminalSession` meeting the real `threading-ptyd`.

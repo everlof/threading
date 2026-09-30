@@ -45,6 +45,9 @@
 		7C000008000000000000A004 /* PTYHostPlatform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B004 /* PTYHostPlatform.swift */; };
 		7C000005000000000000A009 /* threading-ptyd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B011 /* threading-ptyd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000005000000000000A010 /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000005000000000000C010 /* ThreadingPTYHostKit */; };
+		7C000005000000000000A011 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
+		7C000005000000000000A012 /* ThreadingPTYHostKit in ThreadingTests Frameworks */ = {isa = PBXBuildFile; productRef = 7C000004000000000000000C /* ThreadingPTYHostKit */; };
+		7C000005000000000000A013 /* ThreadingDomain in ThreadingTests Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
 		7C000007000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B001 /* main.swift */; };
 		7C000007000000000000A002 /* SimulatorHelperServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B002 /* SimulatorHelperServer.swift */; };
 		7C000007000000000000A003 /* SimulatorFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B003 /* SimulatorFrameEncoder.swift */; };
@@ -150,6 +153,8 @@
 		B81F7A1E07A694FFB193A1BD /* threading-extension-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = C20CE9CA503B8DC639CAB992 /* threading-extension-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D0A100010000000000000001 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
 		7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000004000000000000000C /* ThreadingPTYHostKit */; };
+		D7C100010000000000000001 /* ThreadingPTYClient in Frameworks */ = {isa = PBXBuildFile; productRef = D7C100010000000000000012 /* ThreadingPTYClient */; };
+		D7C100010000000000000002 /* ThreadingPTYClient in Frameworks */ = {isa = PBXBuildFile; productRef = D7C100010000000000000013 /* ThreadingPTYClient */; };
 		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
 		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
 		D1FF00010000000000000013 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000003 /* NativeDiffCore */; };
@@ -619,6 +624,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				E50000010000000000000013 /* Sentry in Frameworks */,
+				D7C100010000000000000002 /* ThreadingPTYClient in Frameworks */,
+				7C000005000000000000A012 /* ThreadingPTYHostKit in ThreadingTests Frameworks */,
+				7C000005000000000000A013 /* ThreadingDomain in ThreadingTests Frameworks */,
 				7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */,
 				B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */,
 				F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */,
@@ -638,6 +646,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7C000005000000000000A010 /* ThreadingPTYHostKit in Frameworks */,
+				7C000005000000000000A011 /* ThreadingDomain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -705,6 +714,7 @@
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
+				D7C100010000000000000001 /* ThreadingPTYClient in Frameworks */,
 				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
 				7C000007000000000000A0F0 /* ThreadingPluginKit in Frameworks */,
 				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
@@ -1060,6 +1070,9 @@
 				E50000010000000000000001 /* Sentry */,
 				7C000007000000000000C0F1 /* ThreadingPluginKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
+				D7C100010000000000000013 /* ThreadingPTYClient */,
+				7C000004000000000000000C /* ThreadingPTYHostKit */,
+				D0A100010000000000000003 /* ThreadingDomain */,
 			);
 			productName = ThreadingTests;
 			productReference = 72E4FC8EDC79F143EA49545C /* ThreadingTests.xctest */;
@@ -1113,6 +1126,7 @@
 			name = ThreadingPTYHost;
 			packageProductDependencies = (
 				7C000005000000000000C010 /* ThreadingPTYHostKit */,
+				D0A100010000000000000003 /* ThreadingDomain */,
 			);
 			productName = ThreadingPTYHost;
 			productReference = 7C000005000000000000B011 /* threading-ptyd */;
@@ -1312,6 +1326,7 @@
 				F4000001000000000000009 /* ThreadingRemoteKit */,
 				D0A100010000000000000003 /* ThreadingDomain */,
 				7C000004000000000000000C /* ThreadingPTYHostKit */,
+				D7C100010000000000000012 /* ThreadingPTYClient */,
 				7C000007000000000000C011 /* ThreadingSimulatorKit */,
 				7C000007000000000000C0F0 /* ThreadingPluginKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
@@ -1391,6 +1406,7 @@
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
+				D7C100010000000000000011 /* XCLocalSwiftPackageReference "Packages/ThreadingPTYClient" */,
 				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
 				7C00000700000000000000F0 /* XCLocalSwiftPackageReference "Packages/ThreadingPluginKit" */,
 				7C000009000000000000F000 /* XCLocalSwiftPackageReference "Packages/ThreadingDesignKit" */,
@@ -3008,6 +3024,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPTYHostKit;
 		};
+		D7C100010000000000000011 /* XCLocalSwiftPackageReference "Packages/ThreadingPTYClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingPTYClient;
+		};
 		7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingSimulatorKit;
@@ -3117,6 +3137,14 @@
 		7C000004000000000000000C /* ThreadingPTYHostKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingPTYHostKit;
+		};
+		D7C100010000000000000012 /* ThreadingPTYClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPTYClient;
+		};
+		D7C100010000000000000013 /* ThreadingPTYClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPTYClient;
 		};
 		7C000005000000000000C010 /* ThreadingPTYHostKit */ = {
 			isa = XCSwiftPackageProductDependency;

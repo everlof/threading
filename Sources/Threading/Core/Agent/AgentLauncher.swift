@@ -1023,30 +1023,19 @@ enum AgentLauncher {
         prompt: String?,
         integration: RemoteAgentIntegrationFlags = RemoteAgentIntegrationFlags()
     ) -> (resume: ShellCommand, fresh: ShellCommand, transcriptID: TranscriptID) {
-        var base = ShellCommand(word: AgentDefaults.claudeExecutable)
-        appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &base)
-        appendReasoningEffort(for: session, to: &base)
-        appendPermissionMode(for: session, to: &base)
+        var integrationFlags = ShellCommand()
         if let settingsPath = integration.settingsPath {
-            base.append(flag: "--settings", value: settingsPath)
+            integrationFlags.append(flag: "--settings", value: settingsPath)
         }
         if let mcpConfigPath = integration.mcpConfigPath, !integration.allowedTools.isEmpty {
-            base.append(flag: "--mcp-config", value: mcpConfigPath)
-            base.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsArgument(integration.allowedTools))
+            integrationFlags.append(flag: "--mcp-config", value: mcpConfigPath)
+            integrationFlags.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsArgument(integration.allowedTools))
         }
-
-        let transcriptID = session.resumeState.transcriptID
-            ?? TranscriptID(session.id.uuidString.lowercased())
-
-        var resume = base
-        resume.append(flag: "--resume", value: transcriptID.rawValue)
-
-        var fresh = base
-        fresh.append(flag: "--session-id", value: transcriptID.rawValue)
-        appendLaunchName(for: session, to: &fresh)
-        appendPrompt(prompt, to: &fresh)
-
-        return (resume, fresh, transcriptID)
+        return ClaudeLaunchCommand.terminalPair(
+            for: session, executable: AgentDefaults.claudeExecutable,
+            permissionMode: permissionMode(for: session), prompt: prompt,
+            integrationFlags: integrationFlags
+        )
     }
 
     /// The launch that makes a **side chat**: resume the *parent's* conversation, but write

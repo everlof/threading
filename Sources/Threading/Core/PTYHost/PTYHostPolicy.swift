@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingDomain
+import ThreadingPTYClient
 import ThreadingPTYHostKit
 
 /// Whether one session's pty belongs in `threading-ptyd`, and — if it does — how to reach it.

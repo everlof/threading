@@ -9,7 +9,7 @@ import ThreadingPTYHostKit
 /// because every one names a different cause: some mean the daemon is unavailable, two expose a
 /// caller bug, and the rest mean the peer is not a daemon this app can talk to. The launch layer
 /// preserves that distinction when it surfaces a selected host's refusal.
-enum PTYHostClientError: Error, Equatable, Sendable {
+public enum PTYHostClientError: Error, Equatable, Sendable {
 
     /// The rendezvous path does not fit `sockaddr_un.sun_path`.
     case pathTooLong(bytes: Int)
@@ -54,7 +54,7 @@ enum PTYHostClientError: Error, Equatable, Sendable {
     case sessionMismatch(bound: PTYHostSessionIdentity, frame: PTYHostSessionIdentity)
 
     /// The journal token. A cause, never a path.
-    var token: String {
+    public var token: String {
         switch self {
         case .pathTooLong: return "pathTooLong"
         case .socketUnavailable: return "socketUnavailable"

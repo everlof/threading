@@ -3,6 +3,7 @@ import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
 import XCTest
+@testable import ThreadingPTYClient
 @testable import Threading
 
 /// Remote execution hosts against a real Linux machine, end to end: facts, upload, unit, linger,
