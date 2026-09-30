@@ -645,6 +645,8 @@ open class Terminal {
     ///
     /// To register a custom OSC handler, use ``registerOscHandler(code:handler:)``.
     private var parser: EscapeSequenceParser
+    // Feed-scoped permission; the parser also retains it across fragmented OSC sequences.
+    var recordsCurrentDirectory = true
 
     /// The DCS handler that the parser has active, if a DCS sequence is open.
     ///
@@ -3209,7 +3211,8 @@ open class Terminal {
     // Implements OSC 7 ; URL which records the current working directory
     func oscSetCurrentDirectory (_ data: ArraySlice<UInt8>)
     {
-        if !(tdel?.isProcessTrusted(source: self) ?? false) {
+        if !recordsCurrentDirectory || !parser.oscRecordsCurrentDirectory
+            || !(tdel?.isProcessTrusted(source: self) ?? false) {
             return
         }
         var s = String (bytes:data, encoding: .utf8)
@@ -6896,6 +6899,17 @@ open class Terminal {
     public func feed (buffer: ArraySlice<UInt8>)
     {
         parse (buffer: buffer)
+    }
+
+    /// Feeds historical output without accepting its OSC 7 directory as current state.
+    /// A sequence containing suppressed bytes stays suppressed if it completes in a later
+    /// live feed. Screen rendering and other delegate effects retain their normal behavior.
+    /// The caller synchronizes through `terminalLock`, as with the ordinary feed methods.
+    public func feed(buffer: ArraySlice<UInt8>, recordingCurrentDirectory: Bool) {
+        let previous = recordsCurrentDirectory
+        recordsCurrentDirectory = previous && recordingCurrentDirectory
+        defer { recordsCurrentDirectory = previous }
+        parse(buffer: buffer)
     }
 
     /// Processes one borrowed parser batch synchronously.

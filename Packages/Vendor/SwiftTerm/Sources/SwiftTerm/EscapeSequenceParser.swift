@@ -422,6 +422,8 @@ final class EscapeSequenceParser {
 
     var initialState: ParserState = .ground
     var currentState: ParserState = .ground
+    var oscRecordsCurrentDirectory = true
+    private var escapeRecordsCurrentDirectory = true
     
     // buffers over several calls
     var _osc: cstring
@@ -757,6 +759,8 @@ final class EscapeSequenceParser {
             resetSerial &+= 1
         }
         currentState = initialState
+        oscRecordsCurrentDirectory = true
+        escapeRecordsCurrentDirectory = true
         _osc = []
         _oscLimitExceeded = false
         _apc = []
@@ -809,6 +813,10 @@ final class EscapeSequenceParser {
         var transition : UInt8 = 0
         var error = false
         var currentState = self.currentState.rawValue
+        if !data.isEmpty && !terminal.recordsCurrentDirectory {
+            if self.currentState == .escape { escapeRecordsCurrentDirectory = false }
+            if self.currentState == .oscString { oscRecordsCurrentDirectory = false }
+        }
         var print = -1
         var dcs = -1
         var osc = self._osc
@@ -904,6 +912,7 @@ final class EscapeSequenceParser {
             }
             
             // Normal transition and action loop
+            if code == 0x1b { escapeRecordsCurrentDirectory = terminal.recordsCurrentDirectory }
             transition = tableData [(Int(currentState) << 8) | Int (UInt8 ((code < 0xa0 ? code : EscapeSequenceParser.NonAsciiPrintable)))]
             let action = ParserAction.decode (transition >> 4)
             var consumed = 1
@@ -1059,6 +1068,8 @@ final class EscapeSequenceParser {
                 } else {
                     osc = []
                     oscLimitExceeded = false
+                    oscRecordsCurrentDirectory = terminal.recordsCurrentDirectory
+                        && (code == 0x9d || escapeRecordsCurrentDirectory)
                 }
             case .oscPut:
                 let j = ByteRunScanner.firstC0Byte(in: data, from: i)
