@@ -52,3 +52,5 @@ terminals are also available from their project's picker.
 Opening a saved terminal explicitly starts a fresh shell if its prior child has exited or is
 absent. The saved terminal keeps its identity and settings. Its recorded working directory is
 used when available, with the owning project as fallback.
+Shells created in this window appear in the saved-terminal picker immediately. Opening the same
+shell from its project or saved row reuses its retained runtime.

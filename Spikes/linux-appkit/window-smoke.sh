@@ -6,7 +6,7 @@ mkdir -p out
 docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_RESTART_ONLY="${THREADING_LINUX_RESTART_ONLY:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool xclip imagemagick zenity >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool xclip imagemagick zenity python3-gi gir1.2-atspi-2.0 dbus-x11 >/dev/null
 if [[ "$THREADING_LINUX_IME_ONLY" == 1 ]]; then
   apt-get install -y -qq ibus ibus-libpinyin dbus-x11 >/dev/null
 fi
@@ -87,6 +87,10 @@ check_saved_terminal_restart() {
     "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/saved_terminal_refusal_smoke.py "$bin/WindowHarness" \
     "$fixture/terminal-restart-store" "$fixture"
+  dbus-run-session -- python3 tests/terminal_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/pty.sock" "$fixture"
+  dbus-run-session -- python3 tests/terminal_catalogue_limits_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/pty.sock" "$fixture"
 }
 if [[ "$THREADING_LINUX_RESTART_ONLY" == 1 ]]; then
   check_saved_terminal_restart
