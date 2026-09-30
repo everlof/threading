@@ -600,6 +600,10 @@ The PNGs are byte-identical to the Mac asset catalogue (`./vendor-marks.sh --ver
 production `TemplateImageDrawing.swift` compiles unchanged against the shim. Selected marks use
 selection ink; an unavailable asset falls back to the provider's textual name. Provider, account
 and stable session identity remain in the accessible label even when a long title is truncated.
+The title and provider/short-ID/account detail occupy separate lines. A reserved status region
+shows durable wake/snooze attention or `Retained` for a cached runtime; it does not claim agent
+activity. Visible snooze deadlines refresh even before a terminal is opened. The native wait
+keeps accessibility responsive while waiting for the next deadline.
 Two bounded PNGs decode once on a worker, and mounted rows reuse their cached images.
 `tests/image_shim/run.py` checks the narrow compositing contracts in an isolated Swift build.
 For cross-platform evidence, run `tests/provider_image_lab.py render-macos NEW_MAC_OUTPUT`,

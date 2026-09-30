@@ -85,7 +85,13 @@ int tw_render_terminal(uint8_t *rgba, int width, int height, const TWCell *, int
 // Navigator text is a bounded, shaped platform leaf for the title and mounted rows. Rectangles
 // use window pixels, and each offset/length points into the shared UTF-8 byte buffer. Backgrounds
 // and row marks are already present in the opaque RGBA frame; this function draws only text.
-typedef struct { int x, y, width, height, inset, offset, length, selected; } TWNavigatorLabel;
+// At most three independently clipped text runs per mounted row, plus title and Actions.
+// Text remains borrowed UTF-8 for this synchronous call; no string/row survives its return.
+enum { TW_NAVIGATOR_MAX_ROWS = 32, TW_NAVIGATOR_MAX_LABELS = TW_NAVIGATOR_MAX_ROWS * 3 + 2 };
+typedef struct {
+    int x, y, width, height, inset, offset, length, selected;
+    int trailingInset, detail;
+} TWNavigatorLabel;
 int tw_draw_navigator_labels(uint8_t *rgba, int width, int height,
                              const uint8_t *utf8, int byteCount,
                              const TWNavigatorLabel *labels, int labelCount);

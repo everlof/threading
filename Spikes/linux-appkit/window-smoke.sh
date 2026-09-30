@@ -24,6 +24,7 @@ fixture=$(mktemp -d /tmp/lwindow.XXXXXX)
 clang -shared -fPIC Sources/LinuxWindowBridge/TerminalDrawing.c Sources/LinuxWindowBridge/NavigatorDrawing.c -I Sources/LinuxWindowBridge/include $(pkg-config --cflags --libs pangocairo) -o "$fixture/renderer.so"
 python3 tests/terminal_renderer_contract.py "$fixture/renderer.so"
 python3 tests/navigator_renderer_contract.py "$fixture/renderer.so"
+clang tests/window_wait_contract.c Sources/LinuxWindowBridge/Window.c Sources/LinuxWindowBridge/Accessibility.c -I Sources/LinuxWindowBridge/include -I Sources/LinuxWindowBridge $(pkg-config --cflags --libs sdl2 atk-bridge-2.0 atk gobject-2.0) -o "$fixture/window-wait-contract"
 mkdir "$fixture/daemon"
 "$daemon" --socket "$fixture/pty.sock" --state "$fixture/daemon" >"$fixture/daemon.log" 2>&1 &
 daemon_pid=$!
@@ -51,6 +52,7 @@ for attempt in $(seq 1 100); do
   sleep .1
 done
 timeout 30 "$bin/PortablePTYClientHarness" "$fixture/pty.sock"
+timeout 15 dbus-run-session -- "$fixture/window-wait-contract"
 if [[ "$THREADING_LINUX_A11Y_ONLY" == 1 ]]; then
   dbus-run-session -- python3 tests/session_title_smoke.py "$bin/WindowHarness" \
     "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"

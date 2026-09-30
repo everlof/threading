@@ -16,6 +16,24 @@ struct ProjectSnapshot: Sendable {
         let title: String
         var kind: AgentKind? = nil
         var account: String? = nil
+        var attention: AgentSessionRowPresentation.Attention? = nil
+
+        var snoozedUntil: Date? = nil
+
+        func attention(at date: Date) -> AgentSessionRowPresentation.Attention? {
+            AgentSessionRowPresentation.Attention.resolve(
+                isScheduled: attention == .scheduled, hasWoken: attention == .woke,
+                isSnoozed: snoozedUntil.map { date < $0 } ?? false)
+        }
+
+        func attentionTitle(at date: Date) -> String? {
+            switch attention(at: date) {
+            case .scheduled: return "Scheduled"
+            case .woke: return "Woke"
+            case .snoozed: return "Snoozed"
+            case nil: return nil
+            }
+        }
 
         var identityTitle: String {
             let provider = kind.map { "[\($0.displayName)] " } ?? ""
@@ -89,6 +107,8 @@ struct WindowHarness {
         let height: Int32
         let inset: Int32
         let selected: Bool
+        var trailingInset: Int32 = 12
+        var isDetail = false
     }
 
     private static func readableNavigatorText(_ text: String) -> String {
@@ -113,8 +133,43 @@ struct WindowHarness {
                                          selected: selected))
     }
 
+    /// A row keeps its host identity even when one visual field is ellipsized. Only mounted
+    /// rows produce these three bounded runs; title changes cannot push account/status offscreen.
+    @MainActor private static func addSavedAgentRow(
+        _ runtime: ProjectSnapshot.SavedRuntime, retained: Bool, at date: Date,
+        index: Int, width: Int, height: Int, accent: NSColor, selected: Bool,
+        root: Specimen.Window, textRows: inout [NavigatorTextRow], image: NSImage?
+    ) {
+        let frame = navigatorRowRect(index, width: width, height: height)
+        root.addSubview(Specimen.Row(frame: frame, text: "", accent: accent,
+                                    selected: selected, image: image))
+        let pixels = navigatorRowPixels(index, width: width, height: height)
+        let status = runtime.attentionTitle(at: date) ?? (retained ? "Retained" : nil)
+        let regions = SavedAgentRowLayout(
+            row: CGRect(x: Int(pixels.x), y: Int(pixels.y),
+                        width: Int(pixels.width), height: Int(pixels.height)),
+            showsStatus: status != nil
+        )
+        func append(_ text: String, in rect: CGRect, detail: Bool) {
+            guard rect.width > 0, rect.height > 0, !text.isEmpty else { return }
+            textRows.append(NavigatorTextRow(text: readableNavigatorText(text),
+                x: Int32(rect.minX), y: Int32(rect.minY), width: Int32(rect.width),
+                height: Int32(rect.height), inset: 0, selected: selected,
+                trailingInset: 0, isDetail: detail))
+        }
+        append(runtime.title, in: regions.title, detail: false)
+        let identity = runtime.kind?.displayName ?? "Agent"
+        append(identity + " · " + String(runtime.id.prefix(8))
+               + (runtime.account.map { " · " + $0 } ?? ""),
+               in: regions.identityDetail, detail: true)
+        if let status { append(status, in: regions.status, detail: true) }
+    }
+
     @MainActor private static func drawNavigatorText(_ rows: [NavigatorTextRow],
                                                      into bitmap: Bitmap) throws {
+        guard rows.count <= Int(TW_NAVIGATOR_MAX_LABELS) else {
+            throw WindowFailure("navigator text exceeds mounted-row fragment budget")
+        }
         var bytes: [UInt8] = []
         var labels: [TWNavigatorLabel] = []
         labels.reserveCapacity(rows.count)
@@ -127,7 +182,9 @@ struct WindowHarness {
                                            width: row.width, height: row.height,
                                            inset: row.inset,
                                            offset: Int32(bytes.count), length: Int32(encoded.count),
-                                           selected: row.selected ? 1 : 0))
+                                           selected: row.selected ? 1 : 0,
+                                           trailingInset: row.trailingInset,
+                                           detail: row.isDetail ? 1 : 0))
             bytes.append(contentsOf: encoded)
         }
         let result = bitmap.withMutablePixels { pixels in
@@ -165,20 +222,33 @@ struct WindowHarness {
     }
 
     private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
-        savedAgent(agentRow(session))
+        var saved = savedAgent(agentRow(session))
+        // Retain durable facts, not a clock-derived state which can expire while the picker
+        // stays open. Invalid/archived snooze records follow AgentSession.isSnoozed semantics.
+        if !session.isArchived, let start = session.snoozedAt,
+           let end = session.snoozedUntil, start < end {
+            saved.snoozedUntil = end
+        }
+        return saved
     }
 
     private static func agentRow(_ session: AgentSession) -> AgentSessionRowPresentation {
         // The preview has no title preference yet; follow agent titles, as the Mac default does.
         AgentSessionRowPresentation(session: session, usesAgentTitle: true,
-                                    untitledTitle: AgentDefaults.untitledSessionName)
+            untitledTitle: AgentDefaults.untitledSessionName,
+            attention: AgentSessionRowPresentation.Attention.resolve(
+                // The preview has no scheduler. Snooze is resolved from the snapshot deadline at paint.
+                isScheduled: false, hasWoken: session.wake != nil,
+                isSnoozed: false
+            ))
     }
 
     private static func savedAgent(_ row: AgentSessionRowPresentation) -> ProjectSnapshot.SavedRuntime {
         .init(id: row.id.uuidString,
               title: String(row.title.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)),
               kind: row.kind,
-              account: row.accountHandle.isStandard ? nil : String(row.accountHandle.name.unicodeScalars.prefix(64)))
+              account: row.accountHandle.isStandard ? nil : String(row.accountHandle.name.unicodeScalars.prefix(64)),
+              attention: row.attention)
     }
 
     @MainActor static func main() async {
@@ -1011,6 +1081,7 @@ struct WindowHarness {
         }
         defer { pendingFolderImport?.cancel() }
         var dirty = true
+        var nextVisibleAttentionExpiry: Date?
         let sidebarWidth = 320
         var activePane: WorkspaceTerminalPane?
         var sidebarFocused = true
@@ -1188,7 +1259,8 @@ struct WindowHarness {
                 tw_actions_button(window, actions == nil ? "Actions" : "Close actions", enabled ? 1 : 0,
                                   Int32(navigatorWidth - 112), 8, 100, 36)
             }
-            let count = max(1, (height / 2 - 32) / Int(navigatorRowStride))
+            let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
+                            max(1, (height / 2 - 32) / Int(navigatorRowStride)))
             if var menu = actions {
                 let commands = NavigatorActions.commands(actionState())
                 if menu.commands != commands { menu.commands = commands; dirty = true }
@@ -1211,14 +1283,19 @@ struct WindowHarness {
                 if selected < first { first = selected }
                 if selected >= first + count { first = selected - count + 1 }
             }
+            let presentationDate = Date()
+            if let expiry = nextVisibleAttentionExpiry, presentationDate >= expiry {
+                dirty = true
+            }
             if dirty {
+                nextVisibleAttentionExpiry = nil
                 let width = navigatorWidth
                 trace(traceFirstFrame ? "first-frame.begin" : "frame.begin")
                 // At most viewport/count row objects, even for a large persisted catalogue.
                 let root = Specimen.Window(frame: NSRect(x: 0, y: 0, width: width / 2, height: height / 2))
                 let accent = NSColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1)
                 var textRows: [NavigatorTextRow] = []
-                textRows.reserveCapacity(min(count, 32))
+                textRows.reserveCapacity(count * 3 + 2)
                 let end: Int
                 if let menu = actions {
                     root.title = "Actions"
@@ -1255,18 +1332,24 @@ struct WindowHarness {
                     for index in savedFirst..<end {
                         let runtime = saved[index]
                         let mark = ProviderMarks.image(for: runtime.kind, selected: index == savedSelected)
-                        // Provider text remains the fallback if a bundled mark is absent. The
-                        // semantic provider/account/ID label below is independent of this drawing.
-                        let display = mark == nil ? runtime.identityTitle : runtime.title
-                            + (runtime.account.map { " [\($0)]" } ?? "")
-                        let identity = String(runtime.id.prefix(8))
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                         let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
-                        let text = "\(display) [\(identity)]\(retained ? " *" : "")"
-                        addNavigatorRow(text, index: index - savedFirst, width: width,
-                                        height: height, accent: accent,
-                                        selected: index == savedSelected,
-                                        root: root, textRows: &textRows, image: mark)
+                        if savedPicker.isAgent {
+                            if runtime.attention(at: presentationDate) == .snoozed,
+                               let expiry = runtime.snoozedUntil {
+                                nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
+                            }
+                            addSavedAgentRow(runtime, retained: retained, at: presentationDate,
+                                index: index - savedFirst,
+                                width: width, height: height, accent: accent,
+                                selected: index == savedSelected, root: root,
+                                textRows: &textRows, image: mark)
+                        } else {
+                            let text = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " *" : "")"
+                            addNavigatorRow(text, index: index - savedFirst, width: width,
+                                height: height, accent: accent, selected: index == savedSelected,
+                                root: root, textRows: &textRows, image: mark)
+                        }
                     }
                 } else {
                     let codexName = codexAccount.isStandard ? "Codex" :
@@ -1415,6 +1498,7 @@ struct WindowHarness {
                         let title = boundedAccessibilityLabel(runtime.title,
                             maximumBytes: 400 - provider.utf8.count - account.utf8.count)
                         let label = "\(provider)\(title)\(account) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
+                            + (runtime.attentionTitle(at: presentationDate).map { " " + $0 } ?? "")
                         try publishAccessibleRow(window, id: runtime.id, label: label,
                                                  selected: index == savedSelected,
                                                  visibleIndex: index - savedFirst, width: width, height: height)
@@ -1505,9 +1589,17 @@ struct WindowHarness {
                 // Poll only while one of at most eight runtimes owes an admission publication.
                 let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
                     || restoredRuntimes.values.contains { $0.hasPendingAgentCreation }
-                let timed = awaitingCreation || activePane?.needsPolling == true
-                let received = timed ? tw_next_timeout(window, &event, 33) : tw_next(window, &event)
-                if timed, received == 0 { continue }
+                let pollsRuntime = awaitingCreation || activePane?.needsPolling == true
+                // A picker without a terminal still owes a deadline update. Sleep until that
+                // expiry (at most one second to recheck wall-clock changes), while the bridge
+                // keeps servicing accessibility without returning to the Swift loop every 33ms.
+                let expiryWait = nextVisibleAttentionExpiry.map {
+                    Int32(max(1, min(1_000, ceil($0.timeIntervalSinceNow * 1_000))))
+                }
+                let timeout: Int32? = pollsRuntime ? 33 : expiryWait
+                let received = timeout.map { tw_next_timeout(window, &event, $0) }
+                    ?? tw_next(window, &event)
+                if timeout != nil, received == 0 { continue }
                 guard received == 1 else {
                     throw WindowFailure(String(cString: tw_error()))
                 }

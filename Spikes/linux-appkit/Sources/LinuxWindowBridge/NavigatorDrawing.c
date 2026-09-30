@@ -8,14 +8,17 @@ int tw_draw_navigator_labels(uint8_t *rgba, int width, int height,
                              const TWNavigatorLabel *labels, int labelCount) {
     if (!rgba || width < 320 || width > 1280 || height < 180 || height > 900 ||
         byteCount < 0 || byteCount > 32768 || (byteCount && !utf8) ||
-        labelCount < 0 || labelCount > 33 || (labelCount && !labels)) return -1;
+        labelCount < 0 || labelCount > TW_NAVIGATOR_MAX_LABELS || (labelCount && !labels)) return -1;
     if (!labelCount) return 0;
     if (!byteCount) return -1;
     for (int index = 0; index < labelCount; index++) {
         const TWNavigatorLabel *row = &labels[index];
-        if (row->x < 0 || row->y < 0 || row->width < 65 || row->width > width ||
+        if (row->x < 0 || row->y < 0 || row->width < 1 || row->width > width ||
             row->height < 1 || row->height > 64 ||
-            row->inset < 0 || row->inset > 128 || row->inset > row->width - 13 ||
+            row->inset < 0 || row->inset > 128 || row->inset >= row->width ||
+            row->trailingInset < 0 || row->trailingInset > 128 ||
+            row->trailingInset >= row->width - row->inset ||
+            (row->detail != 0 && row->detail != 1) ||
             row->x > width - row->width || row->y > height - row->height ||
             row->offset < 0 || row->length < 1 || row->length > 1024 ||
             row->offset > byteCount - row->length || (row->selected != 0 && row->selected != 1) ||
@@ -40,10 +43,12 @@ int tw_draw_navigator_labels(uint8_t *rgba, int width, int height,
 
     for (int index = 0; index < labelCount; index++) {
         const TWNavigatorLabel *row = &labels[index];
-        const int textWidth = row->width - row->inset - 12;
+        const int textWidth = row->width - row->inset - row->trailingInset;
         cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
         cairo_paint(cr);
         cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+        pango_font_description_set_absolute_size(font, (row->detail ? 14 : 18) * PANGO_SCALE);
+        pango_layout_set_font_description(layout, font);
         pango_layout_set_width(layout, textWidth * PANGO_SCALE);
         pango_layout_set_text(layout, (const char *)utf8 + row->offset, row->length);
         int textHeight;
@@ -52,6 +57,7 @@ int tw_draw_navigator_labels(uint8_t *rgba, int width, int height,
         cairo_rectangle(cr, 0, 0, textWidth, row->height);
         cairo_clip(cr);
         if (row->selected) cairo_set_source_rgb(cr, 1, 1, 1);
+        else if (row->detail) cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
         else cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
         cairo_move_to(cr, 0, (row->height - textHeight) / 2);
         pango_cairo_show_layout(cr, layout);

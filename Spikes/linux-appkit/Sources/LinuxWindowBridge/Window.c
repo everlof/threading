@@ -299,8 +299,26 @@ int tw_next(TWWindow *w, TWEvent *out) {
 }
 int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
     SDL_Event e;
-    tw_accessibility_poll();
-    while (SDL_WaitEventTimeout(&e, milliseconds)) {
+    const uint64_t deadline = milliseconds >= 0 ? SDL_GetTicks64() + (uint64_t)milliseconds : 0;
+    int attempted = 0;
+    for (;;) {
+        int wait = milliseconds;
+        if (milliseconds >= 0) {
+            const uint64_t now = SDL_GetTicks64();
+            if (attempted && now >= deadline) return 0;
+            wait = now >= deadline ? 0 : (int)(deadline - now);
+        }
+        attempted = 1;
+        // AT-SPI dispatch shares this thread. Long host deadlines must retain the same bridge
+        // pump as tw_next, without waking the host loop until an event or the total deadline.
+        tw_accessibility_poll();
+        if (tw_accessibility_event_type() != UINT32_MAX && (wait < 0 || wait > 33)) wait = 33;
+        SDL_ClearError();
+        if (!SDL_WaitEventTimeout(&e, wait)) {
+            if (SDL_GetError()[0]) return -1;
+            if (milliseconds == 0 || (milliseconds < 0 && wait < 0)) return 0;
+            continue;
+        }
         if (!w->terminal && e.type == SDL_TEXTEDITING_EXT) {
             SDL_free(e.editExt.text);
             continue;
@@ -584,8 +602,6 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             else if (e.key.keysym.sym == SDLK_RETURN && !e.key.repeat) { out->kind = 8; w->suppressActivation = SDLK_RETURN; }
         }
         if (out->kind) return 1;
-        if (milliseconds >= 0) return 0;
     }
-    return 0;
 }
 #endif

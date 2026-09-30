@@ -3118,3 +3118,64 @@ partial comparison was preserved rather than reported as complete. It also expos
 gallery variability: a clock/random greeting, animated artwork and time-based usage data, plus
 ambiguous accessory/banner widths. Those owners were unchanged by the extraction. No baseline
 was accepted, no pixels were masked, and the partial report is not a clean full-catalogue result.
+
+
+## 110. Saved-agent identity, title and attention have separate presentation owners
+
+The preview's single concatenated label let a long title push account and session identity past
+its ellipsis. Saved-agent rows now have a primary title, a smaller provider/short-ID/account line,
+and a reserved status region. The provider mark remains beside those runs. Missing artwork still
+leaves the textual provider; the bounded accessible name still includes provider, account, short
+ID and attention, and the accessible ID remains the exact durable UUID. A retained runtime says
+`Retained`, not `Working`: the preview has no provider activity observer.
+
+Both hosts consume `AgentSessionRowPresentation` for identity and semantic attention precedence.
+Mac `SessionRowView.configure` passes its existing `NativeSidebarParity` facts through the value;
+its constraints, badge, theme, extension slots, trailing actions and command ownership are unchanged.
+The snooze predicate stays lazy when scheduled/wake already wins. Linux supplies no unsupported
+scheduled-start state. Valid durable snooze deadlines remain values in its snapshot, and the next
+visible expiry invalidates the cached raster and accessibility without rebuilding the catalogue.
+
+This is still the existing host-only diagnostic sidebar, with no new public extension contract.
+Selection, durable IDs, runtime ownership, account admission and command execution remain with
+the host. Layout differs intentionally from the Mac sidebar, whose account badge and hover actions
+need different reservations; no unused shared rectangle API was introduced.
+
+Scaling stays tied to the viewport: the 512-row saved catalogue remains value data, while the
+current 900px maximum mounts at most 17 rows. There are at most three text fragments per mounted
+agent row plus two header fragments. The bridge explicitly caps rows at 32 and fragments at 98,
+retains the 32KiB aggregate UTF-8 limit and 1KiB fragment limit, and validates the complete batch
+before drawing. It borrows bytes only during the synchronous call and reuses one width-by-64px
+Cairo surface. Deadline bookkeeping visits only the mounted rows during an existing redraw;
+terminal output still reuses the cached navigator.
+
+The focused Pango contract passed Unicode, independent clipping, complete-batch rejection and
+unellipsized status widths. The first full installed Release package lane also passed, including
+workspace, 512-row catalogue, Actions, retained provider PIDs, reinstall and desktop launch.
+Selected, unselected, retained-status and missing-artwork row renders were inspected. All 132
+recorded package inputs stayed unchanged. That package's SHA-256 is
+`3a22696a5ea157fd27d2111e35522526c9a5e6a70c828e41d82ca09a24635292`.
+
+Review then found a gap in that passing fixture: its live terminal already woke the host loop.
+Without a terminal, an indefinite native event wait left an idle saved-agent picker showing
+`Snoozed` after its deadline. A separate installed run of that same package reproduced the stale
+label after 25 seconds, with only the list and Actions button mounted and no child spawned.
+The corrected host chooses a deadline wait, capped at one second to recheck wall-clock changes.
+The native wait keeps one monotonic total deadline and continues pumping accessibility internally;
+ignored events neither finish the wait early nor restart its timeout.
+
+The native wait comparison reproduced both defects before the fix: an ignored SDL event ended a
+200ms wait at 75ms, and a 2000ms wait left the accessibility callback undispatched. Afterward the
+same checks passed at 203ms for the deadline, 0ms for a queued event and 69ms for accessibility
+dispatch. These are focused wait-contract measurements, not application performance results.
+The corrected installed Release suite passed, including the no-terminal expiry and live-terminal
+expiry cases, preserved selected UUID, and absence of an unintended child. Both idle states were
+inspected in the native window. Workspace, Actions, provider, catalogue, restart, reinstall and
+desktop-entry lanes passed again, and all 132 recorded package inputs kept their frozen hashes.
+The corrected package's SHA-256 is
+`6feccd0ca6830ce4695a7d3520a84d956620291ce9d03de88dfdd77e1ee013aa`.
+The Mac row suite passed all 19 focused tests, including attention precedence, unchanged titles,
+refresh/reuse and press-start/recycle/release routing. A fresh host captured the 38 canonical
+light/dark sidebar rows; all 1,021,440 decoded pixels matched the before capture exactly.
+Representative idle, long-title, selected, pinned, scheduled and blocked rows were inspected.
+This verifies the native row surface, not full-application pixel equivalence or performance.
