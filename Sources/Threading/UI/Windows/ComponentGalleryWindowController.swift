@@ -16,8 +16,8 @@ final class ComponentGalleryWindowController: ThemedWindowController {
         static let minimumSize = NSSize(width: 780, height: 580)
     }
 
-    convenience init() {
-        let content = ComponentGalleryViewController()
+    convenience init(initialGreeting: String? = nil) {
+        let content = ComponentGalleryViewController(initialGreeting: initialGreeting)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Defaults.size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -293,6 +293,9 @@ final class ComponentGalleryViewController: NSViewController {
     /// greeting on one line against a manager's brief on three.
     private let morphingBlock = MorphingMultilineTitleLabel()
     private var morphingBlockShowsBrief = false
+    /// Evidence supplies the initial sample; ordinary galleries still choose a fresh greeting.
+    /// This does not change the interactive preview's subsequent random greetings.
+    private let initialGreeting: String?
 
     /// The highlight story's field and the lines it marks, retained so typing re-marks them.
     /// A search's answer is the one thing here that cannot be shown at rest: the component's
@@ -368,7 +371,8 @@ final class ComponentGalleryViewController: NSViewController {
     private var didPrepareDataFixtures = false
     private(set) var appearanceMode: AppearanceMode
 
-    init() {
+    init(initialGreeting: String? = nil) {
+        self.initialGreeting = initialGreeting
         let currentAppearance = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
         appearanceMode = currentAppearance == .darkAqua ? .dark : .light
         super.init(nibName: nil, bundle: nil)
@@ -2019,7 +2023,7 @@ final class ComponentGalleryViewController: NSViewController {
         let morphButton = button("Preview rename", action: #selector(previewTitleMorph))
 
         morphingBlock.applyFont(.emphasizedBody)
-        morphingBlock.setStringValue(ComposerGreeting.message(), animated: false)
+        morphingBlock.setStringValue(initialGreeting ?? ComposerGreeting.message(), animated: false)
         // A floor rather than a width: the block is as wide as its widest line, and a story whose
         // button slid left and right with the greeting it was previewing would be demonstrating
         // the row rather than the component.

@@ -8600,6 +8600,97 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     }
   }
 
+  func testComponentCustomizationGalleryRowsKeepAccessoriesAtTheirFittingWidth() throws {
+    AppThemePalette.set(.system)
+    let identifiers = Set([
+      "gallery.extension.component.default",
+      "gallery.extension.component.slot",
+      "gallery.extension.component.replacement",
+      "gallery.extension.component.invalid",
+    ])
+    let stories = ComponentCustomizationGalleryFixture.stories().filter {
+      identifiers.contains($0.view.accessibilityIdentifier())
+    }
+    XCTAssertEqual(stories.count, identifiers.count)
+
+    for story in stories {
+      let row = try XCTUnwrap(story.view as? NSStackView)
+      let content = try XCTUnwrap(row.arrangedSubviews.first as? ComponentContentContainer)
+      let slot = try XCTUnwrap(row.arrangedSubviews.last as? NSStackView)
+      let widthConstraint = try XCTUnwrap(row.constraints.first {
+        $0.firstAttribute == .width && $0.secondItem == nil
+      })
+      let canvas = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 100))
+      canvas.addSubview(row)
+      NSLayoutConstraint.activate([
+        row.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: 20),
+        row.topAnchor.constraint(equalTo: canvas.topAnchor, constant: 20),
+      ])
+      let window = NSWindow(
+        contentRect: canvas.bounds, styleMask: [.borderless], backing: .buffered, defer: false
+      )
+      window.contentView = canvas
+      defer { window.orderOut(nil) }
+
+      for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        canvas.appearance = NSAppearance(named: appearance)
+        var originalFrames: [NSRect]?
+        for width: CGFloat in [420, 520, 420] {
+          widthConstraint.constant = width
+          AppThemeRefresh.repaint(canvas)
+          canvas.layoutSubtreeIfNeeded()
+          let contentRect = row.convert(content.bounds, from: content)
+          XCTAssertEqual(row.bounds.width, width, accuracy: 0.5, story.title)
+          XCTAssertEqual(contentRect.minX, row.edgeInsets.left, accuracy: 0.5, story.title)
+          XCTAssertFalse(content.hasAmbiguousLayout, story.title)
+
+          if !slot.isHidden {
+            let slotRect = row.convert(slot.bounds, from: slot)
+            XCTAssertFalse(slot.arrangedSubviews.isEmpty, story.title)
+            XCTAssertFalse(slot.hasAmbiguousLayout, story.title)
+            XCTAssertEqual(slotRect.width, slot.fittingSize.width, accuracy: 0.5, story.title)
+            XCTAssertEqual(slotRect.height, slot.fittingSize.height, accuracy: 0.5, story.title)
+            XCTAssertEqual(slotRect.midY, contentRect.midY, accuracy: 0.5, story.title)
+            XCTAssertEqual(
+              row.bounds.height,
+              max(contentRect.height, slotRect.height) + row.edgeInsets.top + row.edgeInsets.bottom,
+              accuracy: 0.5, story.title
+            )
+            XCTAssertEqual(
+              slotRect.maxX, row.bounds.maxX - row.edgeInsets.right,
+              accuracy: 0.5, story.title
+            )
+            XCTAssertEqual(
+              slotRect.minX - contentRect.maxX, row.spacing, accuracy: 0.5, story.title
+            )
+          } else {
+            XCTAssertEqual(
+              contentRect.maxX, row.bounds.maxX - row.edgeInsets.right,
+              accuracy: 0.5, story.title
+            )
+          }
+
+          if let replacement = content.replacementContent {
+            XCTAssertTrue(content.defaultContent.isHidden, story.title)
+            XCTAssertEqual(replacement.frame, content.bounds, story.title)
+            XCTAssertGreaterThan(replacement.bounds.width, 300, story.title)
+          } else {
+            XCTAssertFalse(content.defaultContent.isHidden, story.title)
+          }
+
+          let frames = [contentRect, row.convert(slot.bounds, from: slot)]
+          if width == 420 {
+            if let originalFrames {
+              XCTAssertEqual(frames, originalFrames, "\(story.title) moved after a resize round trip")
+            } else {
+              originalFrames = frames
+            }
+          }
+        }
+      }
+    }
+  }
+
   func testComponentGalleryContainsTheLiveExtensionExperiment() throws {
     let controller = ComponentGalleryViewController()
     let window = NSWindow(

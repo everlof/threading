@@ -390,6 +390,7 @@ enum ComponentCustomizationGalleryFixture {
         native.orientation = .horizontal
         native.alignment = .centerY
         native.spacing = Design.Spacing.small
+        native.setHuggingPriority(.defaultLow, for: .horizontal)
 
         let content = ComponentContentContainer(defaultContent: native)
         content.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -398,9 +399,17 @@ enum ComponentCustomizationGalleryFixture {
         slot.orientation = .horizontal
         slot.alignment = .centerY
         slot.spacing = Design.Spacing.tight
+        // The native content takes the spare width. NSStackView owns its own hugging priority;
+        // the content container has no intrinsic width, so lowering its NSView priority alone
+        // leaves the accessory and native stack equally willing to grow.
+        slot.setHuggingPriority(.required, for: .horizontal)
+        slot.setHuggingPriority(.required, for: .vertical)
 
         let shell = NSStackView(views: [content, slot])
         shell.orientation = .horizontal
+        // Fill the declared row width; gravity areas only pack the children at their fitting
+        // widths, so their hugging priorities cannot assign the remaining space to content.
+        shell.distribution = .fill
         shell.alignment = .centerY
         shell.spacing = Design.Spacing.small
         shell.edgeInsets = NSEdgeInsets(
@@ -425,6 +434,18 @@ enum ComponentCustomizationGalleryFixture {
             lookup: registry.customization(for:)
         )
         host.refresh()
+        // Center alignment uses soft edge constraints. With differently sized children, the
+        // shell can otherwise trade padding against either child's height at the same cost.
+        // Keep the padding required while letting the row follow its actual content height.
+        let verticalPadding = shell.edgeInsets.top + shell.edgeInsets.bottom
+        shell.heightAnchor.constraint(
+            greaterThanOrEqualTo: content.heightAnchor, constant: verticalPadding
+        ).isActive = true
+        if !slot.isHidden {
+            shell.heightAnchor.constraint(
+                greaterThanOrEqualTo: slot.heightAnchor, constant: verticalPadding
+            ).isActive = true
+        }
         return shell
     }
 }

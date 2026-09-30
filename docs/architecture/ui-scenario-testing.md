@@ -250,6 +250,15 @@ whose data comes from transcripts, sessions, files or usage history still use th
 virtualized fixture controllers; the evidence runner does not build an unbounded visual stack to
 make a screenshot.
 
+The component capture supplies a fixed initial greeting to the ordinary gallery controller;
+interactive galleries still use the clock and random phrase selection. A capture must not ask
+production randomness to choose its reference text. The customization gallery's outer stack fills
+its declared width, and its accessory stack declares its own horizontal and vertical hugging
+priorities. Required minimum heights preserve padding around centered children of different sizes.
+Gravity areas only pack children at fitting widths; lowering an enclosing content container's priority
+cannot assign spare width when that container has no intrinsic width. Geometry tests
+exercise default, additive, replacement and refused stories across appearance and resize changes.
+
 The report/approval machinery itself is covered by
 `scripts/tests/test_ui_evidence_tools.py`, which is part of `scripts/ci.sh`. It proves decoded
 16-bit PNG equality independent of compression, one-pixel strict failure with a written report,

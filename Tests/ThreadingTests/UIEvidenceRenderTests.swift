@@ -146,6 +146,32 @@ final class UIEvidenceRenderTests: XCTestCase {
 
     // MARK: - Component evidence
 
+    func testComponentGreetingFixtureSurvivesAppearanceAndLayoutChanges() throws {
+        let greeting = "A fixed evidence greeting."
+        let owner = ComponentGalleryWindowController(initialGreeting: greeting)
+        let window = try XCTUnwrap(owner.window)
+        defer { window.orderOut(nil) }
+        let controller = try XCTUnwrap(
+            window.contentViewController as? ComponentGalleryViewController
+        )
+        let story = try XCTUnwrap(descendants(of: controller.view).first {
+            $0.accessibilityIdentifier() == "gallery.story.MorphingMultilineTitleLabel"
+        })
+        let label = try XCTUnwrap(
+            descendants(of: story).compactMap { $0 as? MorphingMultilineTitleLabel }.first
+        )
+
+        for appearance in ComponentGalleryViewController.AppearanceMode.allCases {
+            controller.setAppearance(appearance)
+            for width: CGFloat in [1_020, 900, 1_020] {
+                window.setContentSize(NSSize(width: width, height: 780))
+                AppThemeRefresh.repaint(controller.view)
+                controller.view.layoutSubtreeIfNeeded()
+                XCTAssertEqual(label.stringValue, greeting)
+            }
+        }
+    }
+
     func testCapturesEveryComponentGalleryStory() throws {
         // Empty, not absent, is the case worth guarding: the test plan forwards this as
         // `$(THREADING_UI_EVIDENCE_OUT)`, which expands to the empty string when nothing set it.
@@ -177,7 +203,9 @@ final class UIEvidenceRenderTests: XCTestCase {
         defer { AppThemePalette.set(previousTheme) }
         AppThemePalette.set(.system)
 
-        let owner = ComponentGalleryWindowController()
+        let owner = ComponentGalleryWindowController(
+            initialGreeting: L10n.string("Ready when you are.")
+        )
         let window = try XCTUnwrap(owner.window)
         let controller = try XCTUnwrap(
             window.contentViewController as? ComponentGalleryViewController
