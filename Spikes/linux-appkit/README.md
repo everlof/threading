@@ -48,13 +48,14 @@ project-graph slice and runs the on-disk contracts below:
 | Future-schema refusal for checkpointed and live-WAL stores | 2 | 34 |
 | Pinned-WAL move refusal and relocation of healthy/damaged project stores | 2 | 35 |
 | Fresh-session capabilities, defaults and handoff admission | 1 | 41 |
+| Shared session row identity, title precedence and host presentation boundaries | 1 | 99 |
 | Shared terminal launch recording | 1 | 72 |
 | Bounded project navigation, selected identity and partial-read write fence | 1 | 74 |
 | Shared Unix connector modes, descriptor inheritance and path refusals | 1 | 43 |
 | Shared session binding, typed identity and attempt-scoped rollback | 1 | 44 |
 | Shared hello-batch ordering, compatibility perspective and aggregate buffer bound | 1 | 45 |
 
-The 44 production files are byte-identical to their sources. Fresh-session record assembly,
+The 45 production files are byte-identical to their sources. Fresh-session record assembly,
 terminal launch recording, launch values, account command routing, bounded Codex rollout checks
 and Claude transcript paths are shared with the app.
 Live account discovery remains outside the slice, which includes neither RemoteKit nor a full
@@ -68,6 +69,18 @@ complete graph read with bounded navigation, new-agent creation and terminal pro
 that same store in a Release build. Fixture creation is reported separately. This is an opt-in
 scaling check, not a launch-time measurement of the native window or a replacement for the
 behavioral contracts.
+
+`python3 tests/raster_bounds/run.py --output /tmp/threading-raster-bounds` compares the native
+navigator's raster leaf with its frozen reference. It checks raw RGBA and quantized-mask equality
+for fractional geometry, offscreen paths, holes, nested clips, translucent strokes and the actual
+navigator chrome at three viewport sizes, then reports repeated render timings. Add
+`--optimization O --cpu-timings` for optimized code with process CPU measurements alongside elapsed
+time, or `--profile-mask` to also attribute clip-mask CPU in scratch copies of each implementation.
+Each comparison keeps its images in a fresh directory identified by `report.json`, so reusing an
+output path cannot let an older image satisfy a missing output in the current run.
+This measures drawing in isolation; native startup remains covered by
+`THREADING_LINUX_STARTUP_ONLY=1 ./window-smoke.sh`. Add `THREADING_LINUX_STARTUP_TRACE=1` to
+that command for first-frame phase timings, including SDL, raster, Pango and presentation.
 
 `./coreslice.sh --sqlite` builds and runs nine independent storage contracts against the unchanged
 production `SQLiteDatabase` and logger, symlinked from the verified core copies. They cover bound
@@ -92,19 +105,19 @@ and `flock` installed:
 
 The first command imports the canonical project directory into a local store and opens that
 project even when the store contains others. The no-argument command follows a saved selected
-agent to its project; with no selected agent, it opens the saved project list, including from a
-clean profile. In an empty list, activate **Add project folder** with
+agent or standalone terminal to its project; with no selected runtime, it opens the saved project
+list, including from a clean profile. In an empty list, activate **Add project folder** with
 Enter or a click; Ctrl+Shift+P opens the same native folder dialog from any project list.
 Choosing an existing directory imports and selects it without starting a child. Cancellation
 leaves the list unchanged; choosing an already imported directory selects its existing row.
 Both commands build the two host executables
 and `threading-ptyd` when needed, and start or reuse one background daemon.
-If the saved selected agent belongs to the chosen project, is launched, is unarchived and has no
-recorded exit, the window checks the daemon after releasing the store lock. It attaches only
-when that exact child is still running. A held exit is saved to the selected row; an absent
-child opens the project list without inventing an exit code. A failed daemon query still attempts
-attach and surfaces its failure. Startup never spawns a child. A selected agent older
-than the recent window is fetched by identity and shown within the 512-row picker limit.
+If the saved selected runtime belongs to the chosen project, the window checks the daemon after
+releasing the store lock. It attaches only to that exact live child. A held agent exit is saved
+to its row; an absent or exited standalone terminal opens the project list. A failed daemon query
+still attempts attach and surfaces its failure. Startup never spawns a child. A selected agent
+older than the recent window is fetched by identity; a selected terminal older than the recent
+window is found in its owning project payload. Both appear within their 512-row picker limits.
 Otherwise the project list opens without starting a child. Enter opens a shell; the saved-agent
 and saved-terminal pickers can reattach other runtimes. It keeps data under
 `${XDG_DATA_HOME:-$HOME/.local/share}/threading-linux-spike` and its socket under
@@ -463,6 +476,12 @@ runtime retained by this window. Left from projects opens saved agent sessions, 
 first; Enter attaches the selected agent through its own persisted identity. Both pickers retain
 their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window,
 Escape closes from projects, and Escape remains terminal input while in a shell.
+Agent rows use the same title precedence as macOS: a user rename wins, then the agent's title,
+then the prompt title, then **New Session**. The preview follows agent titles by default; it has
+no title-preference control yet. A provider label precedes the name because the specimen has no
+provider icons; named accounts keep their separate suffix. The shared row value
+preserves typed session/provider/account identity; Linux retains its bounded native labels and
+AT-SPI presentation. The accessibility lane checks persisted Unicode names and fresh admission.
 In `--app-codex` mode, Ctrl+Shift+A on a project creates a fresh managed Codex session with the
 shared Manual permission and read-only sandbox defaults, opens it in the same terminal window,
 and adds its saved identity to the agent picker. The picker reattaches daemon-held children and,
@@ -496,7 +515,8 @@ the currently mounted project/saved-runtime rows. Rows carry their durable IDs a
 names in both native drawing and accessibility; selection state and `select`/`open` actions use the same native
 navigation route as pointer and keyboard input. The list describes its visible range and never
 materializes offscreen accessibility rows. `THREADING_LINUX_A11Y_ONLY=1 ./window-smoke.sh`
-checks the empty list's Add project action and dialog cancellation, then queries a populated
+checks shared session names and deep selection, the empty list's Add project action and dialog
+cancellation, then queries a populated
 tree with an AT-SPI client, scrolls a 15-project list, and opens a Unicode-named
 project into a real PTY through the row action. The terminal node exposes the current visible
 screen through the read-only ATK Text interface. Unicode character and caret offsets come from the
@@ -515,6 +535,14 @@ pointer click, while clear and multiselect requests are refused. Terminal text s
 bounds-change notifications, full focus/event coverage, and native screen-reader inspection
 remain open.
 
+The populated accessibility fixture enables `THREADING_LINUX_NAVIGATION_TRACE=1` to distinguish
+queued accessibility actions, SDL delivery, selected row indices and drawing phases. Direct
+launcher runs may opt into the same flag. Each C scope emits at most 64 records and the navigator
+at most 256; traces contain timing and numeric state, without user text. Runner cleanup preserves
+`out/accessibility-window.log` and `out/accessibility-empty-project.log` on success or failure.
+The tests identify their own application/window process, and wait for GTK dialogs to become
+visible before attempting focus.
+
 This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
 terminals and agents, and requests frames only for the visible terminal. It saves each new
 terminal through the production store before spawning through the production PTY client. The
@@ -522,11 +550,11 @@ fixed initial snapshot projects at most 512 agents and 512 terminals per project
 into their pickers and constructs only viewport rows. New agents created by this window join
 its in-memory catalogue after persistence; creation asks for zero standing session payloads and
 checks the new UUID by indexed lookup. Both normal and project-targeted launches attempt
-attach-only restoration of the saved agent selection in the chosen project. Opening an agent
-persists that selection on a worker before entering its terminal; opening a terminal clears it
-when the store accepts the write, as on macOS. The generic `--app` mode chooses the saved agent's
-project when one is selected; saved terminals still require explicit selection. `--attach` and
-`--attach-agent` remain available below.
+attach-only restoration of the saved agent or standalone-terminal selection in the chosen
+project. Opening either persists its selection and clears the other in one transaction on a
+worker before entering its terminal. The generic `--app` mode follows the saved runtime's project;
+an explicit different project wins. An absent or exited standalone child returns to projects.
+`--attach` and `--attach-agent` remain available below.
 
 Run `THREADING_LINUX_AGENT_ONLY=1 ./window-smoke.sh` for focused native agent selection, Codex
 account routing, and Claude create/reattach/resume journeys. `THREADING_LINUX_NAMED_ONLY=1

@@ -31,13 +31,15 @@ def application():
     desktop = Atspi.get_desktop(0)
     for index in range(desktop.get_child_count()):
         child = desktop.get_child_at_index(index)
-        if child.get_name() == 'Threading Linux':
+        if child.get_name() == 'Threading Linux' and child.get_process_id() == process.pid:
             return child
     return None
 
 
 def dialog_window():
-    found = subprocess.run(['xdotool', 'search', '--name', '^Add project folder$'],
+    # GTK can publish its title before mapping the window; X_SetInputFocus rejects that
+    # intermediate state with BadMatch. Wait for the actual focusable native dialog.
+    found = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '^Add project folder$'],
                            capture_output=True, text=True, timeout=5)
     return found.stdout.splitlines()[0] if found.returncode == 0 else None
 
@@ -72,7 +74,8 @@ with log_path.open('w+') as log:
                    'dialog cancellation')
         assert frame.get_child_at_index(0).get_child_count() == 1
         assert row.get_accessible_id() == 'add-project'
-        window = subprocess.check_output(['xdotool', 'search', '--name',
+        window = subprocess.check_output(['xdotool', 'search', '--all', '--onlyvisible',
+                                          '--pid', str(process.pid), '--name',
                                           '^Threading experiment - empty store$'], text=True).splitlines()[0]
         subprocess.run(['xdotool', 'windowfocus', '--sync', window, 'key', 'Escape'],
                        check=True, timeout=5)

@@ -7,8 +7,10 @@ extracted one ownership boundary at a time.
 
 `scripts/check_ui_structure.py --report` inventories direct AppKit controller and view/window
 subclasses, constraint construction, and drawing references outside `UI/Design`. Its checked-in
-ceilings run in the ordinary architecture build phase: 83 direct controllers, 119 platform
-views/windows, 2,818 constraint sites, and 96 drawing sites on 2026-09-25. A reduction must
+ceilings run in the ordinary architecture build phase: 85 direct controllers, 119 platform
+views/windows, 2,852 constraint sites, and 96 drawing sites on 2026-09-30. The current counts
+include the master UI changes brought into the Linux branch; the same inventory on master
+produces identical totals. A reduction must
 lower the corresponding ceiling. This prevents growth while the semantic structural seam is
 built; it does not make the remaining feature-owned sites portable or certify their layout.
 
@@ -176,8 +178,10 @@ child's explicit picker selection resumes after preflight and records its launch
 daemon accepts spawn. If the agent falls outside the recent window, one indexed read
 puts it in the picker without increasing the 512-row cap. Opening a different agent
 updates the selected ID on a worker before entering its terminal; opening a shell or saved terminal
-clears it on a writable store. Startup restoration never starts a child, and automatic terminal
-restoration remains missing. Explicit Codex picker selection can still resume a departed agent.
+replaces it with the selected standalone-terminal ID in the same transaction. A normal relaunch
+can also restore that exact terminal child, including a selection older than the recent picker
+window; an absent or exited child leaves the project list visible. Startup restoration never
+starts a child. Explicit Codex picker selection can still resume a departed agent.
 Attach validates store membership on a worker, adopts the daemon grid without resizing the child,
 suppresses query responses for the announced replay byte prefix and marks cut history. Input and
 frames remain gated until replay completes; old or invalid peers fail explicitly under an attach

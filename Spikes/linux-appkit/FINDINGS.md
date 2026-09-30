@@ -2607,9 +2607,148 @@ This desktop integration is deliberately host-only: Threading still owns launch,
 identity, store, daemon and process authority, while the operating system owns menu placement.
 The artifact remains a preview: the experimental host still builds with `-enable-testing`, and
 Wayland, other distributions, authenticated providers and a production upgrade channel remain
-unverified. A graphical session may omit shell-installed CLIs from `PATH`; the bundle README
-documents explicit executable paths for terminal and desktop-entry launches.
+unverified.
 
 The archive/package runtime smoke, 10 spike runner tests, architecture/theme/main-actor-latency
 checks and `scripts/test.sh all` passed. The complete Mac target ran 9,522 tests (83 skipped),
 and the iOS Simulator target ran 898 tests (one skipped), with zero failures.
+
+## 97. Desktop launches recover the login-shell provider path
+
+A graphical desktop session can omit `~/.local/bin` or a shell-managed Node prefix from `PATH`.
+The Linux launcher previously searched only that inherited path, so a working CLI could be
+absent from the provider list. Even an explicit executable override could reach a script with an
+`/usr/bin/env node` shebang but fail when `node` was missing from the inherited path.
+
+`run-app.sh` now asks the configured shell for `PATH` with `-l -c`, the same mode used to launch
+providers, once before discovering Codex and Claude. It reads the result from a private runtime
+file so profile output cannot be mistaken for path data, accepts at most 16 KiB without line
+breaks, and puts the login-shell entries ahead of the inherited path without dropping them.
+The probe has a three-second deadline and a one-second kill grace; failure, timeout or unusable
+output leaves the inherited path in place. Explicit provider overrides still win, including an
+empty value that disables discovery. The README keeps explicit paths as a fallback for CLIs
+configured only in an interactive profile.
+
+The focused Ubuntu 24.04 arm64 fixture passed for discovery from a minimal GUI path, a real
+Bash login profile, an `/usr/bin/env` interpreter, inherited path retention, explicit and empty
+overrides, oversized output, shell failure and timeout. The fixture uses stand-in binaries and
+does not establish authenticated provider behavior.
+
+## 98. Ordinary relaunch and package reinstall retain the selected terminal
+
+The store now records a selected standalone terminal alongside the existing selected-agent
+state. Choosing either clears the other in the same transaction. Navigation finds the terminal
+in its owning project's already-decoded payload, and a selection older than the recent window
+takes a slot within the existing 512-row limit. An explicit different project still wins.
+Startup surveys the daemon after releasing the store lock and only reattaches the saved child;
+an absent or exited terminal returns to the project list without spawning a replacement. An
+unavailable survey is not evidence of exit, so attachment retains its explicit failure path.
+
+Linux package builds now compile a daemon generation from the preview version and source
+revision. Dirty builds also fingerprint the daemon and its contract/domain sources, so changed
+daemon inputs at one Git revision cannot claim the same clean generation. The bundle manifest
+records that generation for comparison with the live daemon's status.
+
+The source startup fixture passed with 514 saved terminals: ordinary reopen restored the deep
+selection's original PID, an explicit different project took precedence, and exited/absent
+children returned to navigation. The extracted archive and installed non-root application passed
+the native folder-import and reopen journeys. A live fixture closed the window, reinstalled the
+actual same-version `.deb`, verified unchanged store bytes and daemon/child identities, then
+automatically reattached through the installed launcher. Live status matched the manifest's
+generation. Fresh startup, restored-terminal and post-exit navigator screenshots were inspected.
+
+An earlier first-window timeout did not reproduce in the source or packaged runs. It exposed a
+fixture cleanup defect: the test learned the daemon PID only after observing the first window.
+Failure handling now captures bounded fixture logs, process state and visible titles before
+cleanup, and verifies the daemon identity from its runtime PID file independently of window
+success. A temporary impossible-title probe preserved the original assertion, captured the actual
+empty-project window in `out/bundle-smoke/failure-probe/startup-failure.log`, and confirmed that
+the fixture daemon had exited. No startup deadline or product behavior was changed for that test.
+
+This proves same-package reinstall on Ubuntu 24.04 arm64 with Xvfb. It does not establish safe
+cross-generation daemon replacement, Wayland support or authenticated provider behavior. These
+artifacts are stamped `source_dirty=true`. The complete macOS suite passed 9,642 tests with
+83 skips and no failures, including all 61 database tests (one skipped). The iOS suite also
+passed all 920 tests with one skip and no failures; the complete `scripts/test.sh all` gate passed.
+
+The Release archive and `.deb` were rebuilt after rebasing onto master `1355acd79`, at Linux
+revision `32e2e27ec` with the pending title and renderer changes. The Swift-free archive and
+installed non-root journeys, desktop provider discovery, same-child live reinstall and desktop
+entry all passed again. The installed target-project, reattached-terminal and desktop-first-run
+screenshots were inspected. These artifacts remain explicitly marked `source_dirty=true`.
+
+## 99. Session names share the macOS policy
+
+`AgentSessionRowPresentation` projects typed session, provider and account identity alongside
+the existing title policy: a nonempty custom name wins, followed by the agent title when enabled,
+the prompt title and the host's unnamed fallback. The macOS property supplies its existing
+preference; the Linux preview follows the same enabled default without reading Mac settings.
+The native renderer owns bounded labels, provider/account decoration and accessibility text.
+Fresh admission and indexed restoration of an older selected session use the same projection.
+
+The Linux core contracts and native AT-SPI fixture passed. Five stored rows exercised the
+precedence and Unicode cases without changing their persisted bytes. A fresh stand-in Claude
+process produced the unnamed row alongside Codex rows. With 519 saved sessions, an older selected
+row retained its name and selection within the 512-entry catalogue and eight-row viewport.
+All three native screenshots were inspected. The fixture uses `/bin/true`, so it verifies title
+presentation and admission rather than authenticated provider behavior. All four new macOS
+policy tests passed within the complete 9,642-test macOS run (83 skips, no failures). The iOS
+gate also passed 920 tests with one skip and no failures.
+
+## 100. Raster scans stay within each shape's horizontal bounds
+
+An opt-in startup trace placed 6,995 ms of an 8,265 ms Debug first frame in raster work on the
+loaded Linux VM. The scanline rasterizer cleared and composited every column for each covered
+row, including narrow stroke segments and joints. Those two loops now stay inside clipped shape
+bounds. Crossing order, antialiasing, clip arithmetic and source-over submission order remain
+unchanged. Full-frame clip-mask allocation remains a separate cost.
+
+The isolated optimized fixture compared the real shim and specimen with a frozen reference:
+all six raw RGBA outputs matched, including fractional/offscreen paths, holes, transformed nested
+clips, overlapping translucent strokes and four navigator sizes/row counts. Five-run process CPU
+medians improved by 4–17%; the exact median/max measurements and reproduction command are in
+[`performance.md`](../../docs/architecture/performance.md#linux-preview-raster-bounds-2026-09-30).
+Heavy scheduling contention made wall times unsuitable for a launch-speedup claim. Native title
+and deep-selection checks passed with the new renderer. The original startup and selected-terminal
+restoration scenarios also passed on a frozen-runner rerun, with unchanged deadlines; that does
+not prove the earlier intermittent timeout eliminated. The following empty-project accessibility fixture
+also passed, but the broader 15-project accessibility fixture timed out waiting for its second-row
+selection to reach the window title. That run did not establish a passing complete accessibility
+lane; the later trace and mask correction below resolved the observed failure.
+
+The diagnostic rerun subsequently caught a separate fixture race: GTK had published the folder
+dialog's title before its X window was mapped, so `X_SetInputFocus` failed with `BadMatch`.
+The fixture now waits for a visible dialog. Application/window lookups are scoped to the fixture's
+PID, and a bounded opt-in trace follows accessibility enqueue, SDL delivery, row selection and
+frame phases. The complete native accessibility path subsequently passed with the direct-mask
+and retained-exposure changes below, without increasing deadlines.
+
+## 101. Populated navigator drawing spends less time building clip masks
+
+The navigation trace showed accepted accessibility selection reaching Swift immediately, followed
+by seconds in raster work. Returning from the terminal at 960×600 with 11 rows spent 12,512 ms
+in rasterization and exceeded the unchanged 12-second fixture deadline. An optimized CPU probe
+attributed 60–75% of populated navigator drawing to clip masks.
+
+Masks now write thresholded, byte-quantized alpha directly through the same scan converter as
+fills. They no longer allocate an RGBA probe, blend discarded RGB or traverse it to extract alpha.
+Seven raw frame fixtures and 6,912 bytes of direct mask values matched both the original and
+intermediate implementations exactly. The mask change alone reduced the 960×600/11-row CPU
+median/max from 42.14/43.31 to 17.30/17.58 ms, and 1280×900/17 rows from 105.67/107.09 to
+31.73/33.68 ms. Full-frame alpha storage remains; these are optimized isolated drawing results,
+not a Linux launch-time claim.
+
+Same-size native exposures now replay the retained texture rather than rebuilding row models,
+republishing accessibility and rasterizing an unchanged navigator. Actual geometry changes still
+redraw, and semantic changes retain their dirty state. The three navigator event paths use one
+implementation, including while store selection or folder import is pending. A real X11 exposure
+test failed against the preserved earlier executable because it produced another raster frame.
+The updated full native accessibility lane passed exact pixel restoration without another raster,
+subsequent selection, actual and odd-sized resize, focus, Unicode terminal geometry and return
+to projects. The startup lane also passed folder import, ordinary reopen and selected-terminal
+restoration. Native navigator, terminal and restored/exited-terminal screenshots were inspected.
+The observed Debug terminal-return raster took 1,088 ms on this run; changing host load prevents
+treating its comparison with the earlier 12,512 ms as a stable launch-speedup measurement.
+The raster oracle now stores each run's frames in a fresh directory. A repeated comparison
+passed; a deliberate missing-mask probe on the reused output path correctly failed while
+retaining the previous successful report, so stale artifacts cannot satisfy a missing output.

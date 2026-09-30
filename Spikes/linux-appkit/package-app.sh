@@ -22,14 +22,37 @@ if [[ ! $revision =~ ^[0-9a-f]{40,64}$ || ( $dirty != true && $dirty != false ) 
   echo 'package-app: valid source revision and dirty status are required' >&2
   exit 1
 fi
+package=threading-linux-preview
+version=0.0.1+git${revision:0:12}
+# Linux has no embedded Info.plist. Give the daemon the same compiled generation contract as
+# scripts/test-ptyd-linux.sh; a dirty source tree must not claim to be the clean commit.
+generation_revision=$revision
+if [[ $dirty == true ]]; then
+  # A second build from the same HEAD can contain different daemon sources. Hash the actual
+  # daemon inputs before SwiftPM creates output so two such packages cannot claim one generation.
+  daemon_source_hash=$(
+    find ../../Targets/PTYHost ../../Packages/ThreadingPTYHostKit ../../Packages/ThreadingDomain \
+      -type d \( -name .build -o -name .swiftpm \) -prune -o \
+      -type f \( -name '*.swift' -o -name '*.c' -o -name '*.h' \
+        -o -name '*.modulemap' -o -name '*.def' \) -print0 \
+      | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1
+  )
+  generation_revision+="-dirty.${daemon_source_hash:0:12}"
+fi
+daemon_generation="0.0.1 ($version) @$generation_revision"
+daemon_build_flags=(
+  -Xcc '-DTHREADING_PTYD_SHORT_VERSION="0.0.1"'
+  -Xcc "-DTHREADING_PTYD_BUNDLE_VERSION=\"$version\""
+  -Xcc "-DTHREADING_PTYD_SOURCE_REVISION=\"$generation_revision\""
+)
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product WindowHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product LinuxHost
 swift build --package-path ../../Targets/PTYHost -c release --static-swift-stdlib \
-  --product threading-ptyd
+  "${daemon_build_flags[@]}" --product threading-ptyd
 
 bin_dir=$(swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --show-bin-path)
 daemon_dir=$(swift build --package-path ../../Targets/PTYHost -c release \
-  --static-swift-stdlib --show-bin-path)
+  --static-swift-stdlib "${daemon_build_flags[@]}" --show-bin-path)
 name=threading-linux-preview-ubuntu24.04-arm64
 mkdir -p out
 staging=$(mktemp -d "$PWD/out/.bundle.XXXXXXXX")
@@ -46,6 +69,7 @@ format=threading-linux-preview-1
 target=ubuntu-24.04-aarch64
 source_revision=$revision
 source_dirty=$dirty
+daemon_generation=$daemon_generation
 EOF
 
 output=$PWD/out/$name
@@ -54,8 +78,6 @@ mv -- "$bundle" "$output"
 tar -C out -czf "out/$name.tar.gz" "$name"
 
 # Keep the launcher beside its binaries: run-app.sh resolves them from BASH_SOURCE.
-package=threading-linux-preview
-version=0.0.1+git${revision:0:12}
 package_root=$staging/package-root
 installed_bundle=$package_root/opt/$package
 mkdir -p "$installed_bundle" "$package_root/DEBIAN" \

@@ -5,6 +5,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 script, host, daemon, bin_dir, fixture = sys.argv[1:6]
@@ -107,6 +108,93 @@ def launch(log_name, project_argument=project, codex=None, claude=None):
     return process, log
 
 
+def fixture_daemon_pid():
+    """The launcher may start its daemon before the first window becomes observable."""
+    try:
+        with (runtime / 'daemon.pid').open('rb') as source:
+            pid = int(source.read(32))
+        if pid <= 1:
+            return None
+        with Path(f'/proc/{pid}/cmdline').open('rb') as source:
+            arguments = source.read(16384).split(b'\0')
+        expected = [os.fsencode(daemon), b'--socket', os.fsencode(socket),
+                    b'--state', os.fsencode(data / 'daemon')]
+        return pid if arguments[:5] == expected else None
+    except (OSError, ValueError):
+        return None
+
+
+def capture_startup_failure(error):
+    """Keep bounded fixture evidence before cleanup, without collecting the environment."""
+    evidence = [f'{type(error).__name__}: {str(error)[:4096]}']
+    for name, path in [('launcher', Path(log.name) if log is not None else None),
+                       ('daemon', data / 'daemon.log')]:
+        try:
+            if path is None:
+                continue
+            with path.open('rb') as source:
+                source.seek(0, os.SEEK_END)
+                source.seek(max(0, source.tell() - 16384))
+                evidence.append(f'{name} log (last 16 KiB):\n' + source.read(16384).decode('utf-8', 'replace'))
+        except OSError as failure:
+            evidence.append(f'{name} log unavailable: {failure}')
+
+    pending = [pid for pid in (process.pid if process is not None else None,
+                               fixture_daemon_pid()) if pid is not None]
+    seen = set()
+    while pending and len(seen) < 32:
+        pid = pending.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        try:
+            with Path(f'/proc/{pid}/stat').open('rb') as source:
+                status = source.read(1024).decode('utf-8', 'replace')
+            with Path(f'/proc/{pid}/wchan').open('rb') as source:
+                waiting = source.read(128).decode('utf-8', 'replace')
+            evidence.append(f'fixture process: {status.rstrip()} wait={waiting}')
+            with os.scandir(f'/proc/{pid}/task') as tasks:
+                for index, task in enumerate(tasks):
+                    if index >= 32:
+                        break
+                    try:
+                        with (Path(task.path) / 'children').open('rb') as source:
+                            children = [int(child) for child in source.read(4096).split()
+                                        if child.isdigit()]
+                            pending.extend(children[:max(0, 32 - len(seen) - len(pending))])
+                    except OSError:
+                        pass
+        except OSError as failure:
+            evidence.append(f'fixture process {pid} unavailable: {failure}')
+
+    deadline = time.monotonic() + 8
+
+    def diagnostic_command(arguments):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return ''
+        try:
+            with tempfile.TemporaryFile() as output:
+                subprocess.run(arguments, stdout=output, stderr=subprocess.STDOUT,
+                               timeout=min(1, remaining), check=False)
+                output.seek(0)
+                return output.read(4096).decode('utf-8', 'replace')
+        except (OSError, subprocess.TimeoutExpired) as failure:
+            evidence.append(f'diagnostic command unavailable: {type(failure).__name__}')
+            return ''
+
+    windows = set()
+    for pid in sorted(seen):
+        found = diagnostic_command(['xdotool', 'search', '--onlyvisible', '--all',
+                                    '--pid', str(pid), '--name', '.'])
+        for window in found.splitlines():
+            if window.isdecimal() and window not in windows and len(windows) < 16:
+                windows.add(window)
+                title = diagnostic_command(['xdotool', 'getwindowname', window])
+                evidence.append(f'fixture window {window}: {title.rstrip()}')
+    Path('out/startup-failure.log').write_text('\n\n'.join(evidence) + '\n')
+
+
 daemon_pid = None
 process = None
 log = None
@@ -166,11 +254,8 @@ try:
     process = None
 
     process, log = launch('startup-second.log', project.name)
-    window = title(process, 'Threading experiment - ' + str(project))
+    window = title(process, 'Threading terminal - .*')
     assert int((runtime / 'daemon.pid').read_text()) == daemon_pid, 'relaunch replaced the live daemon'
-    key(window, 'Right')
-    title(process, 'Threading terminals - ' + str(project))
-    key(window, 'Return')
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and not any(
             row['id'] == first['id'] and row['attached'] for row in held()):
@@ -189,17 +274,14 @@ try:
     log.close()
     process = None
 
-    # Reopening without a path uses the saved catalogue and does not import or start a child.
+    # Reopening without a path attaches the saved child directly, without spawning another.
     process, log = launch('startup-untargeted.log', project_argument=None)
-    window = title(process, 'Threading experiment - ' + str(project))
+    window = title(process, 'Threading terminal - .*')
     assert int((runtime / 'daemon.pid').read_text()) == daemon_pid
     assert len(held()) == 1 and held()[0]['pid'] == first['pid'], held()
     listing = subprocess.check_output([host, str(store), str(socket), 'list'], text=True, timeout=5)
     assert listing.count(str(project)) == 1 and listing.count(str(other_project)) == 1, listing
     assert sum(line.startswith('  ') for line in listing.splitlines()) == 1, listing
-    key(window, 'Right')
-    title(process, 'Threading terminals - ' + str(project))
-    key(window, 'Return')
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and not any(
             row['id'] == first['id'] and row['attached'] for row in held()):
@@ -214,10 +296,14 @@ try:
     log.close()
     process = None
 
-    # The generic provider-enabled path also exposes every saved project without spawning.
+    # Provider availability does not displace the saved standalone-terminal route.
     process, log = launch('startup-untargeted-agents.log', project_argument=None,
                           codex='/bin/true', claude='/bin/true')
-    window = title(process, 'Threading experiment - ' + str(project))
+    window = title(process, 'Threading terminal - .*')
+    key(window, 'ctrl+shift+p')
+    title(process, 'Threading terminals - ' + str(project))
+    key(window, 'Escape')
+    title(process, 'Threading experiment - ' + str(project))
     key(window, 'Down')
     title(process, 'Threading experiment - ' + str(other_project))
     key(window, 'Right')
@@ -226,14 +312,27 @@ try:
     key(window, 'Escape')
     assert process.wait(timeout=5) == 0
     print('PASS clean-profile native folder import, cancel, duplicate, no-argument reopen, daemon reuse and same-child native reattach', flush=True)
+except BaseException as error:
+    try:
+        capture_startup_failure(error)
+    except Exception as failure:
+        print(f'startup diagnostics unavailable: {type(failure).__name__}', file=sys.stderr)
+    raise
 finally:
-    if process is not None and process.poll() is None:
-        process.kill()
-        process.wait(timeout=5)
-    if log is not None:
-        log.close()
-    if daemon_pid is not None:
+    try:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as failure:
+        print(f'startup launcher cleanup failed: {type(failure).__name__}', file=sys.stderr)
+    try:
+        if log is not None:
+            log.close()
+    except OSError as failure:
+        print(f'startup log cleanup failed: {type(failure).__name__}', file=sys.stderr)
+    cleanup_daemon_pid = fixture_daemon_pid()
+    if cleanup_daemon_pid is not None:
         try:
-            os.kill(daemon_pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+            os.kill(cleanup_daemon_pid, signal.SIGTERM)
+        except OSError as failure:
+            print(f'startup daemon cleanup failed: {type(failure).__name__}', file=sys.stderr)

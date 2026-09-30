@@ -96,6 +96,12 @@ struct ProjectsStateLoad {
 struct ProjectNavigationSnapshot {
     let projects: [ProjectNavigationEntry]
     let selectedSessionID: SessionID?
+    let selectedTerminal: SelectedProjectTerminal?
+}
+
+struct SelectedProjectTerminal {
+    let projectID: ProjectID
+    let terminal: ProjectTerminal
 }
 
 struct ProjectNavigationEntry {
@@ -331,6 +337,7 @@ final class ProjectDatabase {
     ) throws -> ProjectNavigationSnapshot {
         precondition(recentSessionLimit >= 0 && recentTerminalLimit >= 0)
         partialGraphRead = true
+        let selectedTerminalID = try selectedTerminalID()
 
         var countsByProject: [ProjectID: Int] = [:]
         let counts = try database.prepare(ProjectDatabaseSchema.selectSessionCountsByProject)
@@ -348,8 +355,13 @@ final class ProjectDatabase {
         let recent = try database.prepare(ProjectDatabaseSchema.selectRecentSessionsByProject)
         defer { recent.finalize() }
         var projects: [ProjectNavigationEntry] = []
+        var selectedTerminal: SelectedProjectTerminal?
         while try rows.step() {
             let project = try decodedProject(from: rows)
+            if let selectedTerminalID,
+               let terminal = project.terminals.first(where: { $0.id == selectedTerminalID }) {
+                selectedTerminal = SelectedProjectTerminal(projectID: project.id, terminal: terminal)
+            }
             try recent.reset()
             recent.bind(1, project.id.uuidString).bind(2, recentSessionLimit)
             var stored: [StoredSessionRow] = []
@@ -373,7 +385,8 @@ final class ProjectDatabase {
                              reason: "references missing project '\(orphanedID.uuidString)'")
         }
         return ProjectNavigationSnapshot(projects: projects,
-                                         selectedSessionID: try selectedSessionID())
+                                         selectedSessionID: try selectedSessionID(),
+                                         selectedTerminal: selectedTerminal)
     }
 
     /// Reads project payloads in stored order without decoding any session row. Terminals are
@@ -389,6 +402,16 @@ final class ProjectDatabase {
                                          position: records.count))
         }
         return records
+    }
+
+    /// One indexed project payload for a terminal route whose project identity is already known.
+    /// Terminals are embedded in that payload, but unrelated projects and all sessions stay unread.
+    func projectRecord(id: ProjectID) throws -> Project? {
+        partialGraphRead = true
+        let row = try database.prepare(ProjectDatabaseSchema.selectProjectByID)
+        defer { row.finalize() }
+        row.bind(1, id.uuidString)
+        return try row.step() ? decodedProject(from: row) : nil
     }
 
     /// Reads one session by its primary key and decodes only it and its owning project. Selected
@@ -597,7 +620,31 @@ final class ProjectDatabase {
     /// `save(_:)` needlessly re-encoded and upserted every project and session on the main
     /// thread, making a click cost grow with the size of the sidebar.
     func saveSelectedSessionID(_ id: SessionID?) throws {
-        try setSelectedSessionID(id)
+        try database.transaction { try setSelectedSessionID(id) }
+    }
+
+    /// The Linux standalone-terminal route uses the same one-choice navigation slot. The
+    /// terminal already lives in its project payload; this scalar only remembers what to try
+    /// attaching on the next launch and never authorizes a graph reconciliation.
+    func saveSelectedTerminalID(_ id: TerminalID) throws {
+        try database.transaction {
+            try setSelectedSessionID(nil)
+            try database.prepare(ProjectDatabaseSchema.upsertAppState)
+                .bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+                .bind(2, id.uuidString)
+                .run()
+        }
+    }
+
+    /// A refused first spawn may leave a saved shell destination, but must not leave it as the
+    /// automatic relaunch choice. Compare before clearing so a later navigation choice wins.
+    func clearSelectedTerminalID(ifMatches id: TerminalID) throws {
+        try database.transaction {
+            guard try selectedTerminalID() == id else { return }
+            try database.prepare("DELETE FROM app_state WHERE key = ?")
+                .bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+                .run()
+        }
     }
 
     /// Deletes one session without re-encoding every other row in the project graph.
@@ -1130,7 +1177,22 @@ final class ProjectDatabase {
         return id
     }
 
+    private func selectedTerminalID() throws -> TerminalID? {
+        let statement = try database.prepare("SELECT value FROM app_state WHERE key = ?")
+        defer { statement.finalize() }
+        statement.bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+        guard try statement.step(), let raw = statement.text(0) else { return nil }
+        guard let id = TerminalID(uuidString: raw) else {
+            throw corruptRow("app_state", id: ProjectDatabaseSchema.selectedTerminalKey,
+                             reason: "invalid terminal identifier '\(raw)'")
+        }
+        return id
+    }
+
     private func setSelectedSessionID(_ id: SessionID?) throws {
+        try database.prepare("DELETE FROM app_state WHERE key = ?")
+            .bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+            .run()
         guard let id else {
             let statement = try database.prepare("DELETE FROM app_state WHERE key = ?")
             statement.bind(1, ProjectDatabaseSchema.selectedSessionKey)
@@ -1481,6 +1543,7 @@ enum ProjectDatabaseSchema {
     static let version = 6
 
     static let selectedSessionKey = "selectedSessionID"
+    static let selectedTerminalKey = "selectedTerminalID"
 
     static let runningSessionsKey = "runningSessionIDs"
 

@@ -50,5 +50,6 @@ Sources/Threading/Core/Agent/CodexRolloutIdentity.swift
 Sources/Threading/Core/Agent/CodexRolloutNumbering.swift
 Sources/Threading/Core/Project/ProjectDirectory.swift
 Sources/Threading/Core/Session/AgentSessionCreation.swift
+Sources/Threading/Core/Session/AgentSessionRowPresentation.swift
 Sources/Threading/Core/Agent/AgentEnvironment.swift
 Sources/Threading/Core/Constants/EnvironmentKeys.swift

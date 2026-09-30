@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
 mkdir -p out
-docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
+docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Spikes/linux-appkit swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev fonts-dejavu-core fonts-noto-cjk xvfb xdotool xclip imagemagick zenity >/dev/null
@@ -34,6 +34,8 @@ cleanup() {
   result=$?
   if [[ -f "$fixture/window.log" ]]; then cp "$fixture/window.log" out/window-session.log; fi
   if [[ -f "$fixture/startup-first.log" ]]; then cp "$fixture/startup-first.log" out/startup-first.log; fi
+  if [[ -f "$fixture/accessibility-window.log" ]]; then cp "$fixture/accessibility-window.log" out/accessibility-window.log; fi
+  if [[ -f "$fixture/accessibility-empty-project.log" ]]; then cp "$fixture/accessibility-empty-project.log" out/accessibility-empty-project.log; fi
   if [[ $result -ne 0 ]]; then
     cat "$fixture/window.log" "$fixture/daemon.log" "$fixture/xvfb.log" 2>/dev/null || true
   fi
@@ -50,6 +52,8 @@ for attempt in $(seq 1 100); do
 done
 timeout 30 "$bin/PortablePTYClientHarness" "$fixture/pty.sock"
 if [[ "$THREADING_LINUX_A11Y_ONLY" == 1 ]]; then
+  dbus-run-session -- python3 tests/session_title_smoke.py "$bin/WindowHarness" \
+    "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
   "$bin/LinuxHost" --init-store "$fixture/a11y-empty-store"
   dbus-run-session -- python3 tests/accessibility_empty_project_smoke.py "$bin/WindowHarness" \
     "$fixture/a11y-empty-store" "$fixture/pty.sock" "$fixture"
@@ -61,7 +65,6 @@ if [[ "$THREADING_LINUX_A11Y_ONLY" == 1 ]]; then
   done
   dbus-run-session -- python3 tests/accessibility_smoke.py "$bin/WindowHarness" \
     "$fixture/a11y-store" "$fixture/pty.sock" "$fixture"
-  cp "$fixture/accessibility-window.log" out/accessibility-window.log
   exit 0
 fi
 if [[ "$THREADING_LINUX_IME_ONLY" == 1 ]]; then
@@ -81,6 +84,8 @@ IME
 fi
 if [[ "$THREADING_LINUX_STARTUP_ONLY" == 1 ]]; then
   python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
+  python3 tests/terminal_restore_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/pty.sock" "$fixture"
   exit 0
 fi
 if [[ "$THREADING_LINUX_AGENT_ONLY" == 1 ]]; then

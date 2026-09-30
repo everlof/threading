@@ -37,4 +37,30 @@ func runCreationContracts() throws {
     try require(launched.lastExitCode == nil && launched.resumeState == plan.resumeState,
                 "launch transition follows plan and clears stale exit")
     print("PASS shared terminal launch recording")
+
+    var named = AgentSession(kind: .codex, title: "Prompt title",
+                             accountHandle: .named("codex-work"))
+    named.agentTitle = "Agent title"
+    named.customTitle = "My title — 日本語 👩🏽‍💻"
+    func row(_ enabled: Bool = true) -> AgentSessionRowPresentation {
+        AgentSessionRowPresentation(session: named, usesAgentTitle: enabled,
+                                    untitledTitle: "Host fallback")
+    }
+    try require(row().id == named.id && row().kind == named.kind
+                && row().accountHandle == named.accountHandle, "row retains typed identity")
+    try require(row().title == named.customTitle && row(false).title == named.customTitle,
+                "user title wins independently of preference")
+    named.customTitle = ""
+    try require(row().title == "Agent title" && row(false).title == "Prompt title",
+                "agent-title preference controls precedence")
+    named.agentTitle = ""
+    try require(row().title == "Prompt title", "empty agent title falls through")
+    named.title = ""
+    try require(row().title == "Host fallback", "empty sources use host wording")
+    try require(row() == .unnamed(id: named.id, kind: named.kind,
+                                 accountHandle: named.accountHandle, untitledTitle: "Host fallback"),
+                "newly admitted row matches unnamed stored row")
+    named.customTitle = "  " + String(repeating: "日本語e\u{301}👩🏽‍💻", count: 80) + "\n"
+    try require(row().title == named.customTitle, "renderer owns Unicode bounds and whitespace")
+    print("PASS shared session row identity, title precedence and host presentation boundaries")
 }

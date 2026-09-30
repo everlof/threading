@@ -56,6 +56,21 @@ static AccessibleNode *focused;
 static TWWindow *hostWindow;
 static uint32_t eventType = UINT32_MAX, generation = 1;
 static int bridgeReady, windowFocused;
+static void navigation_trace_enqueue(const SDL_Event *event, int result) {
+    static int enabled = -1;
+    static unsigned records;
+    if (enabled < 0) {
+        const char *value = getenv("THREADING_LINUX_NAVIGATION_TRACE");
+        enabled = value && strcmp(value, "1") == 0;
+    }
+    if (!enabled || records >= TW_MAX_NAVIGATION_TRACE_RECORDS) return;
+    records++;
+    fprintf(stderr, "NAVIGATION_TRACE scope=accessibility stage=enqueue monotonicMs=%.3f "
+            "code=%d row=%d generation=%u pushResult=%d\n",
+            (double)g_get_monotonic_time() / 1000, event->user.code,
+            (int)(intptr_t)event->user.data1, (uint32_t)(uintptr_t)event->user.data2, result);
+    fflush(stderr);
+}
 static struct {
     char title[128];
     int first, total, count, canOpen;
@@ -226,10 +241,14 @@ static gboolean action_do(AtkAction *action, gint index) {
     event.user.code = 1;
     event.user.data1 = (void *)(intptr_t)node->row;
     event.user.data2 = (void *)(uintptr_t)generation;
-    if (SDL_PushEvent(&event) != 1) return FALSE;
+    int pushed = SDL_PushEvent(&event);
+    navigation_trace_enqueue(&event, pushed);
+    if (pushed != 1) return FALSE;
     if (index == 1) {
         event.user.code = 2;
-        if (SDL_PushEvent(&event) != 1) return FALSE;
+        pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        if (pushed != 1) return FALSE;
     }
     return TRUE;
 }

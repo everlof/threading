@@ -77,6 +77,8 @@ public enum ThreadingLogger {
 
     /// Remote access — the tunnel, its loopback server, connections and auth decisions.
     public static let remote = Logger(subsystem: subsystem, category: "remote")
+    /// Face ID approvals: enrollment, each request keyvault sends, what the phone did with it.
+    public static let secretApproval = Logger(subsystem: subsystem, category: "secret-approval")
 
     /// The `threading-ptyd` background PTY host — availability, the hello gate, the frame pump.
     /// Its own category because the link is invisible by construction: when it degrades, every

@@ -1,5 +1,8 @@
 """Query the native window through AT-SPI, then use a row action to open its PTY."""
 from pathlib import Path
+import ctypes
+import ctypes.util
+import os
 import re
 import subprocess
 import sys
@@ -19,6 +22,7 @@ def eventually(read, label, timeout=12):
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
+        assert process.poll() is None, f'window exited before {label}: {log_path.read_text()}'
         try:
             result = read()
             if result:
@@ -33,7 +37,7 @@ def application():
     desktop = Atspi.get_desktop(0)
     for index in range(desktop.get_child_count()):
         child = desktop.get_child_at_index(index)
-        if child.get_name() == 'Threading Linux':
+        if child.get_name() == 'Threading Linux' and child.get_process_id() == process.pid:
             return child
     return None
 
@@ -45,7 +49,8 @@ def content(app):
 
 
 def window_title():
-    result = subprocess.run(['xdotool', 'search', '--name', '^Threading experiment - '],
+    result = subprocess.run(['xdotool', 'search', '--all', '--pid', str(process.pid),
+                             '--name', '^Threading experiment - '],
                             capture_output=True, text=True, timeout=5)
     if result.returncode != 0:
         return ''
@@ -55,9 +60,33 @@ def window_title():
     return title.stdout.strip() if title.returncode == 0 else ''
 
 
+def expose(window):
+    """Damage the actual X drawable and request an exposure event without changing layout."""
+    x11 = ctypes.CDLL(ctypes.util.find_library('X11'))
+    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    x11.XClearArea.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                              ctypes.c_uint, ctypes.c_uint, ctypes.c_int]
+    x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    display = x11.XOpenDisplay(None)
+    assert display, 'fixture could not connect to its X display'
+    try:
+        x11.XClearArea(display, int(window), 0, 0, 0, 0, 1)
+        x11.XSync(display, 0)
+    finally:
+        x11.XCloseDisplay(display)
+
+
+def pixels(window):
+    return subprocess.run(['import', '-window', window, 'rgba:-'],
+                          check=True, capture_output=True, timeout=5).stdout
+
+
 with log_path.open('w+') as log:
     process = subprocess.Popen([binary, '--app', store, socket, '/usr/bin/python3',
                                 str(Path(__file__).with_name('accessibility_child.py'))],
+                               env=dict(os.environ, THREADING_LINUX_NAVIGATION_TRACE='1'),
                                stdout=log, stderr=log)
     try:
         app = eventually(application, 'AT-SPI application registration')
@@ -79,7 +108,8 @@ with log_path.open('w+') as log:
         assert not selection.clear_selection(), 'single-selection list accepted an empty selection'
         assert not selection.deselect_child(0)
         assert not selection.select_all(), 'single-selection list accepted all rows'
-        window = subprocess.run(['xdotool', 'search', '--name', '^Threading experiment - '],
+        window = subprocess.run(['xdotool', 'search', '--all', '--pid', str(process.pid),
+                                 '--name', '^Threading experiment - '],
                                 capture_output=True, text=True, timeout=5)
         assert window.returncode == 0
         window_id = window.stdout.splitlines()[0]
@@ -107,6 +137,16 @@ with log_path.open('w+') as log:
             int(window_geometry['X']), int(window_geometry['Y']), 800, 480)
         assert rect(first_component, Atspi.CoordType.SCREEN) == (
             int(window_geometry['X']) + 12, int(window_geometry['Y']) + 56, 776, 44)
+        before_pixels = pixels(window_id)
+        before_rasters = log_path.read_text().count('stage=raster.begin')
+        before_repaints = log_path.read_text().count('stage=repaint.end')
+        expose(window_id)
+        eventually(lambda: log_path.read_text().count('stage=repaint.end') > before_repaints
+                   or log_path.read_text().count('stage=raster.begin') > before_rasters,
+                   'native exposure handled')
+        assert log_path.read_text().count('stage=raster.begin') == before_rasters, \
+            'unchanged native exposure rasterized the navigator again'
+        assert pixels(window_id) == before_pixels, 'retained repaint changed native pixels'
         assert selection.select_child(1), 'AT-SPI list selection was refused'
         eventually(lambda: window_title().endswith('/Project02'), 'AT-SPI list selected second project')
         eventually(lambda: selection.get_selected_child(0)
@@ -243,7 +283,8 @@ with log_path.open('w+') as log:
             other = subprocess.Popen([binary, store], stdout=other_log, stderr=other_log)
             try:
                 def other_window():
-                    found = subprocess.run(['xdotool', 'search', '--name', '^Threading experiment - '],
+                    found = subprocess.run(['xdotool', 'search', '--all', '--pid', str(other.pid),
+                                            '--name', '^Threading experiment - '],
                                            capture_output=True, text=True, timeout=5)
                     return next((value for value in found.stdout.splitlines()
                                  if value != window_id), None)

@@ -112,6 +112,29 @@ fi
 flock -u 9
 exec 9>&-
 
+# A desktop entry may inherit only system directories, while the provider is installed by a
+# login-shell profile (for example in ~/.local/bin or a Node prefix). Probe with the same
+# `-l -c` mode used for the eventual provider launch. Keep the inherited entries too: the
+# window and an `/usr/bin/env node` shebang both need the resulting PATH after this script exits.
+# A slow or broken profile must not prevent the native window from opening.
+recover_login_path() {
+  local path_file path_size login_path
+  path_file=$(mktemp "$runtime_dir/login-path.XXXXXX") || return 0
+  if /usr/bin/timeout -k 1s 3s "$shell_path" -l -c 'printf "%s" "$PATH" > "$1"' \
+      threading-login-path "$path_file" >/dev/null 2>&1; then
+    path_size=$(/usr/bin/stat -c %s -- "$path_file" 2>/dev/null) || path_size=0
+    if (( path_size > 0 && path_size <= 16384 )); then
+      login_path=$(cat -- "$path_file" 2>/dev/null) || login_path=''
+      if [[ -n $login_path && $login_path != *$'\n'* && $login_path != *$'\r'* ]]; then
+        PATH=$login_path${PATH:+:$PATH}
+        export PATH
+      fi
+    fi
+  fi
+  rm -f -- "$path_file" || true
+}
+recover_login_path
+
 if [[ ${THREADING_LINUX_CODEX+x} ]]; then
   codex=$THREADING_LINUX_CODEX
 else
