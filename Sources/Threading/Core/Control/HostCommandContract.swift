@@ -128,62 +128,6 @@ struct HostCommandInvocationRequest: Equatable, Sendable {
     }
 }
 
-extension AppCommand {
-    /// The only projection from the app's stable command record into the host contract. Menus,
-    /// shortcut settings and palettes therefore cannot drift on identity or presentation.
-    func hostDescriptor(
-        shortcut: String?,
-        availability: HostCommandDescriptor.Availability,
-        nextInput: HostCommandInputRequest? = nil
-    ) -> HostCommandDescriptor {
-        let hostOrigin: HostCommandDescriptor.Origin
-        switch origin {
-        case .builtIn:
-            hostOrigin = .builtIn
-        case .extensionCommand(let identifier, let name, let localID):
-            hostOrigin = .extensionCommand(
-                identifier: identifier,
-                name: name,
-                localID: localID
-            )
-        case .projectScript(let localID):
-            hostOrigin = .projectScript(localID: localID)
-        }
-        // Projected case by case rather than through the raw strings. The mirror exists so this
-        // contract owns its own vocabulary; spelling the projection out is what makes a new case
-        // on the declaring side a compile error here instead of the nearest existing value.
-        let hostScope: HostCommandDescriptor.Scope
-        switch scope {
-        case .application:
-            hostScope = .application
-        case .project:
-            hostScope = .project
-        case .session:
-            hostScope = .session
-        }
-        let hostRisk: HostCommandDescriptor.Risk
-        switch risk {
-        case .ordinary:
-            hostRisk = .ordinary
-        case .destructive:
-            hostRisk = .destructive
-        }
-        return HostCommandDescriptor(
-            id: id,
-            title: title,
-            detail: detail,
-            group: group.rawValue,
-            shortcut: shortcut,
-            origin: hostOrigin,
-            scope: hostScope,
-            risk: hostRisk,
-            availability: availability,
-            nextInput: nextInput,
-            shortcutEditable: isEditable
-        )
-    }
-}
-
 enum HostCommandInvocationOutcome: Equatable, Sendable {
     case invoked(commandID: String)
     case refused(commandID: String, reason: String)

@@ -413,6 +413,14 @@ implementing commands beside it. Invocation enumerates again before dispatch, so
 selection, missing surface, or disabled extension becomes an honest refusal with its current
 reason. `CommandRegistryDidChange` causes an open palette to discard removed extension rows.
 
+The `AppCommand.hostDescriptor` projection lives beside the AppKit command record in
+`Core/Settings/AppCommand.swift`; `Core/Control/HostCommandContract.swift` depends only on
+Foundation. The Linux preview compiles that contract unchanged for its bounded contextual Actions
+catalogue. Its host adapter owns the supported commands and routes invocation to the existing
+runtime handlers, retaining the selected project's identity while the picker is open. This shares
+command admission and refusal behavior; the current Linux picker is still diagnostic presentation,
+not the Mac themed menu or the complete product command catalogue.
+
 **Register user-invokable actions by default.** A menu or button must not be the only way to
 open a durable surface. Give it a stable command identity and route the palette, menu and shortcut
 to the same operation. Unbound commands remain editable; adding a shortcut needs no feature code.
