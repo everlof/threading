@@ -74,7 +74,7 @@ def close(process, output, window, terminal=False, saved_picker=False):
             title(process, r'^Threading terminals - ' + re.escape(str(project)) + r'$')
             key(window, 'Escape')
         title(process, r'^Threading experiment - ' + re.escape(str(project)) + r'$')
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0, log_path.read_text()
     output.close()
 

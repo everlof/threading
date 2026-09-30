@@ -86,7 +86,7 @@ try:
     check_daemon(daemon_pid, first)
     key(window, 'ctrl+shift+p')
     title(process, 'Threading experiment - ' + str(project))
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     log.close()
     process = None
@@ -121,7 +121,7 @@ try:
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     print('PASS live daemon and terminal child survive .deb reinstall and automatically reattach from installed launcher', flush=True)
 finally:

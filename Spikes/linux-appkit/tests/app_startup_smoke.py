@@ -234,7 +234,7 @@ try:
         line.startswith('  ') for line in listing.splitlines()) == 1, listing
     key(window, 'ctrl+shift+p')
     title(process, 'Threading experiment - ' + str(project))
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     log.close()
     process = None
@@ -248,7 +248,7 @@ try:
     assert next(row for row in held() if row['id'] == first['id'])['pid'] == first['pid']
     assert sum(line.startswith('  ') for line in subprocess.check_output(
         [host, str(store), str(socket), 'list'], text=True, timeout=5).splitlines()) == 1
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     log.close()
     process = None
@@ -269,7 +269,7 @@ try:
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     log.close()
     process = None
@@ -291,7 +291,7 @@ try:
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     log.close()
     process = None
@@ -309,7 +309,7 @@ try:
     key(window, 'Right')
     title(process, 'Threading experiment - no saved terminals')
     assert len(held()) == 1 and held()[0]['pid'] == first['pid'], held()
-    key(window, 'Escape')
+    key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
     print('PASS clean-profile native folder import, cancel, duplicate, no-argument reopen, daemon reuse and same-child native reattach', flush=True)
 except BaseException as error:

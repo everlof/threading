@@ -172,7 +172,7 @@ def close_live(saved_picker):
         picker()
         key('Escape')
     projects()
-    key('Escape')
+    key('alt+F4')
     assert process.wait(timeout=5) == 0, tail()
     log.close()
     process = log = None

@@ -494,16 +494,22 @@ WindowHarness --app-claude /path/to/experimental-store /path/to/ptyd.sock /bin/b
 WindowHarness --app-agents /path/to/experimental-store /path/to/ptyd.sock /bin/bash /absolute/path/to/codex /absolute/path/to/claude
 ```
 
-Select a project with Up/Down or a click, then press Enter to open its shell. Ctrl+Shift+P
-opens the folder dialog from projects and returns to projects from a terminal. Enter revisits
+Select a project with Up/Down or a click, then press Enter to open its shell. The navigator stays
+beside the terminal in a 320-pixel leading pane. Ctrl+Shift+P focuses navigation without hiding
+the terminal; from the focused project list it opens the folder dialog. Tab returns keyboard
+focus to the terminal. Clicking either pane focuses it. Enter revisits
 that project's existing terminal, including its child and
 emulator state. Right opens the selected project's saved terminals, newest first. Up/Down or a
 click selects one and Enter opens it, attaching a live child or starting the same saved terminal
 again after confirmed exit/absence; Left or Escape returns to projects. A star marks a
 runtime retained by this window. Left from projects opens saved agent sessions, also newest
 first; Enter attaches the selected agent through its own persisted identity. Both pickers retain
-their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window,
-Escape closes from projects, and Escape remains terminal input while in a shell.
+their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window.
+Escape moves out of an account/saved picker, then returns from Projects to the visible terminal;
+before any terminal is opened, Escape closes the project window. Escape and Tab remain terminal
+input while the shell has focus. The sidebar and terminal retain separate frame textures, so
+shell output does not rebuild navigation. Attached grids retain their terminal dimensions when
+the window grows to include navigation; the combined window is capped at 1600×900 pixels.
 Agent rows use the same title precedence as macOS: a user rename wins, then the agent's title,
 then the prompt title, then **New Session**. The preview follows agent titles by default; it has
 no title-preference control yet. A provider label precedes the name because the specimen has no

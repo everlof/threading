@@ -4,11 +4,13 @@ typedef struct TWWindow TWWindow;
 // 1 repaint/resize, 2 project click (action=1 for AT-SPI select),
 // 3/4 project navigation, 5 window quit.
 // Terminal kinds 15/16/17 carry button (key 0/1/2, action 1 press/3 release), wheel (signed
-// key, one notch per unit), and held-left-button motion. Coordinates are window pixels;
+// key, one notch per unit), and held-left-button motion. Coordinates are terminal-local pixels;
 // the host maps them to grid cells. Kind 18 requests copying the current local selection.
 // Kind 19 is uncommitted IME text. textCursor/textSelectionLength are Unicode character
 // positions in that preedit, not bytes. It must never be sent to the PTY. A TEXTINPUT event
 // (kind 6) with action=1 is the subsequent commit; ordinary text uses action=0.
+// Kind 24 changes workspace focus: action=1 sidebar, action=0 terminal. Pointer presses also
+// focus their destination but retain kind 2/15. Sidebar click coordinates remain window pixels.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -18,6 +20,15 @@ TWWindow *tw_open(const char *title, int width, int height);
 const char *tw_error(void);
 int tw_next(TWWindow *, TWEvent *);
 int tw_present(TWWindow *, const uint8_t *rgba, int width, int height);
+// Persistent workspace: 320-pixel sidebar, terminal up to 1280 pixels, total up to 1600x900.
+// sidebarWidth must be 320 or zero (restore standalone presentation). No child is resized here.
+void tw_workspace_mode(TWWindow *, int sidebarWidth, int sidebarFocused);
+void tw_workspace_focus(TWWindow *, int sidebarFocused);
+// Explicit runtime activation invalidates the previous terminal image and mouse gesture owner.
+// Repaints the retained sidebar over an empty terminal ground; returns 0 on success.
+int tw_workspace_reset_terminal(TWWindow *);
+// Replace one bounded pane texture, then compose both. The pixels use pane-local coordinates.
+int tw_present_pane(TWWindow *, const uint8_t *rgba, int width, int height, int sidebar);
 void tw_title(TWWindow *, const char *);
 int tw_resize(TWWindow *, int width, int height);
 void tw_close(TWWindow *);

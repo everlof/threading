@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix='uncertain-spawn-') as root:
             else:
                 unexpected.close()
                 raise AssertionError('uncertain child was replaced')
-            assert xdo('key', 'Escape').returncode == 0
+            assert xdo('key', 'alt+F4').returncode == 0
             assert process.wait(timeout=5) == 0
             print('PASS native replacement refuses an unacknowledged spawn after disconnect', flush=True)
         except BaseException:

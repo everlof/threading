@@ -115,7 +115,7 @@ def visit(name, action, targeted=False):
         try:
             window = title(process, 'Threading experiment - ' + str(project), log)
             action(process, window, log)
-            key(window, 'Escape')
+            key(window, 'alt+F4')
             assert process.wait(timeout=5) == 0
         except BaseException:
             output.flush()
@@ -182,7 +182,7 @@ with reattach_log.open('w+') as output:
         title(process, 'Threading agents - ' + str(project), reattach_log)
         key(window, 'Escape')
         title(process, 'Threading experiment - ' + str(project), reattach_log)
-        key(window, 'Escape')
+        key(window, 'alt+F4')
         assert process.wait(timeout=5) == 0
     finally:
         if process.poll() is None:

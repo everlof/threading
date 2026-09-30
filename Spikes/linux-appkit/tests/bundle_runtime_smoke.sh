@@ -118,6 +118,8 @@ for ((attempt=0; attempt<100; attempt++)); do
   sleep .1
 done
 [[ $ready == 1 ]] || { cat "$fixture/daemon.log"; exit 1; }
+dbus-run-session -- python3 /workspace_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 python3 /terminal_restart_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 python3 /saved_terminal_refusal_smoke.py "$bin/WindowHarness" "$fixture/terminal-restart-store" "$fixture"

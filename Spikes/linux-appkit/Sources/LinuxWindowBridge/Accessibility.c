@@ -193,8 +193,10 @@ static void set_focused(AccessibleNode *next) {
 }
 static void refresh_focus(void) {
     AccessibleNode *next = NULL;
-    if (windowFocused && frame && frame->children->len == 1) {
-        AccessibleNode *content = g_ptr_array_index(frame->children, 0);
+    if (windowFocused && frame && frame->children->len) {
+        AccessibleNode *content = tw_workspace_sidebar_width(hostWindow)
+            ? (tw_workspace_sidebar_focused(hostWindow) ? list : (AccessibleNode *)terminal)
+            : g_ptr_array_index(frame->children, 0);
         if (content == list) {
             next = list;
             for (guint i = 0; i < list->children->len; i++) {
@@ -207,6 +209,19 @@ static void refresh_focus(void) {
 }
 static void show_content(AccessibleNode *content) {
     if (!frame) return;
+    if (tw_workspace_sidebar_width(hostWindow)) {
+        if (frame->children->len != 2 || g_ptr_array_index(frame->children, 0) != list ||
+            g_ptr_array_index(frame->children, 1) != (AccessibleNode *)terminal) {
+            set_focused(NULL);
+            clear_children(frame);
+            add_child(frame, list);
+            add_child(frame, (AccessibleNode *)terminal);
+            generation++;
+        }
+        activeList = list;
+        refresh_focus();
+        return;
+    }
     if (frame->children->len == 1 && g_ptr_array_index(frame->children, 0) == content) {
         refresh_focus();
         return;
@@ -217,6 +232,11 @@ static void show_content(AccessibleNode *content) {
     activeList = content == list ? list : NULL;
     generation++;
     refresh_focus();
+}
+void tw_accessibility_workspace_changed(TWWindow *window) {
+    if (!bridgeReady || window != hostWindow) return;
+    show_content(tw_workspace_sidebar_width(window) && !tw_workspace_sidebar_focused(window)
+                 ? (AccessibleNode *)terminal : list);
 }
 static AtkObject *get_root(void) { return ATK_OBJECT(app); }
 static const gchar *get_toolkit_name(void) { return "Threading Linux bridge"; }
@@ -317,8 +337,11 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
     if (!hostWindow || node->retired || !node_mounted(object)) return 0;
     int originX, originY, windowWidth, windowHeight;
     tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
-    if (object == ATK_OBJECT(frame) || object == ATK_OBJECT(terminal)) {
+    if (object == ATK_OBJECT(frame)) {
         *x = 0; *y = 0; *width = windowWidth; *height = windowHeight;
+    } else if (object == ATK_OBJECT(terminal)) {
+        *x = tw_workspace_sidebar_width(hostWindow); *y = 0;
+        *width = windowWidth > *x ? windowWidth - *x : 0; *height = windowHeight;
     } else if (object == ATK_OBJECT(list)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
@@ -406,7 +429,7 @@ static void terminal_character_extents(AtkText *text, gint offset, gint *x, gint
         }
         if (low < node->runCount && node->runs[low].offset <= offset) {
             TWTextRun run = node->runs[low];
-            resultX = run.column * TW_TERMINAL_CELL_WIDTH;
+            resultX = tw_workspace_sidebar_width(hostWindow) + run.column * TW_TERMINAL_CELL_WIDTH;
             resultY = run.row * TW_TERMINAL_CELL_HEIGHT;
             resultWidth = run.cells * TW_TERMINAL_CELL_WIDTH;
             resultHeight = TW_TERMINAL_CELL_HEIGHT;
@@ -430,6 +453,12 @@ static gint terminal_offset_at_point(AtkText *text, gint x, gint y, AtkCoordType
         tw_window_geometry(hostWindow, &originX, &originY, &windowWidth, &windowHeight);
         x -= originX; y -= originY;
     } else if (coordinates != ATK_XY_WINDOW && coordinates != ATK_XY_PARENT) return -1;
+    int terminalX, terminalY, terminalWidth, terminalHeight;
+    if (!component_rectangle(ATK_OBJECT(node), ATK_XY_WINDOW,
+                             &terminalX, &terminalY, &terminalWidth, &terminalHeight) ||
+        x < terminalX || x >= terminalX + terminalWidth ||
+        y < terminalY || y >= terminalY + terminalHeight) return -1;
+    x -= terminalX; y -= terminalY;
     if (x < 0 || y < 0 || y / TW_TERMINAL_CELL_HEIGHT >= 40) return -1;
     int row = y / TW_TERMINAL_CELL_HEIGHT;
     int low = 0, high = node->runCount;
@@ -661,6 +690,7 @@ int tw_accessibility_add_row(TWWindow *window, const char *id, const char *name,
     if (!bridgeReady) return 0;
     int originX, originY, windowWidth, windowHeight;
     tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
+    if (tw_workspace_sidebar_width(window)) windowWidth = tw_workspace_sidebar_width(window);
     if (!id || !name || pending.count >= MAX_VISIBLE_ROWS
         || strnlen(id, MAX_ROW_ID) == MAX_ROW_ID
         || strnlen(name, MAX_ROW_NAME) == MAX_ROW_NAME
@@ -690,7 +720,7 @@ void tw_accessibility_end_list(TWWindow *window) {
     }
     int selectionChanged = !same;
     if (!same) {
-        set_focused(NULL);
+        if (focused != (AccessibleNode *)terminal) set_focused(NULL);
         clear_children(list);
         for (int i = 0; i < pending.count; i++) {
             AccessibleNode *row = new_component(ATK_ROLE_LIST_ITEM, pending.rows[i].name);
@@ -720,7 +750,7 @@ void tw_accessibility_end_list(TWWindow *window) {
     show_content(list);
     refresh_focus();
     if (selectionChanged) g_signal_emit_by_name(list, "selection-changed");
-    set_terminal_text(NULL, 0, -1, NULL, 0);
+    if (!tw_workspace_sidebar_width(hostWindow)) set_terminal_text(NULL, 0, -1, NULL, 0);
 }
 void tw_accessibility_show_terminal(TWWindow *window, const char *name) {
     (void)window;

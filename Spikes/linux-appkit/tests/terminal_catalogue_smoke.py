@@ -188,7 +188,7 @@ with log_path.open('w+') as log:
         title(r'^Threading terminal - exited 0( \[(history cut|restored)\])?$')
         key('ctrl+shift+p')
         projects()
-        key('Escape')
+        key('alt+F4')
         assert process.wait(timeout=5) == 0
         assert persisted() == saved_record
         print('PASS newly created shell appears immediately in saved picker with one retained row; '

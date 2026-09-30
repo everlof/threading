@@ -127,7 +127,7 @@ def close_from_terminal():
     picker()
     key('Escape')
     projects()
-    key('Escape')
+    key('alt+F4')
     assert process.wait(timeout=5) == 0, Path(log.name).read_text()
     log.close()
     process = log = None

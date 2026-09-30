@@ -130,7 +130,7 @@ with open(Path(folder) / 'navigation.log', 'w+') as log:
         title('Threading terminal - exited 0')
         key('ctrl+shift+p')
         title('Threading experiment - ' + folder + '/Beta')
-        key('Escape')
+        key('alt+F4')
         assert process.wait(timeout=5) == 0
         assert terminal_count() == before_count + 4
         print('PASS one-window projects: selected cwd, safe failed/exited replacement, live refusal, same PID/emulator on revisit, exit and return', flush=True)
