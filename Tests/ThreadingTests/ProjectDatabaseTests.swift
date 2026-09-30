@@ -1243,6 +1243,163 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertThrowsError(try database.load())
     }
 
+    func testTerminalDirectoryUpdatePreservesCurrentProjectAndUnrelatedUnreadableRows() throws {
+        let database = try makeDatabase()
+        defer { database.close() }
+        let session = AgentSession(kind: .codex, title: "Unreadable archive")
+        var project = makeProject("target", sessions: [session])
+        project.terminals = [ProjectTerminal(currentDirectory: "/tmp/old"),
+                             ProjectTerminal(currentDirectory: "/tmp/sibling")]
+        project.terminals[0].customTitle = "My shell"
+        let other = makeProject("other")
+        try database.save(ProjectsState(projects: [other, project], selectedSessionID: session.id))
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { raw.close() }
+        try raw.prepare("UPDATE project SET data = ? WHERE id = ?")
+            .bind(1, "{ unreadable project").bind(2, other.id.uuidString).run()
+        try raw.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, "{ unreadable session").bind(2, session.id.uuidString).run()
+
+        // A different connection changes settings after the terminal's directory was observed.
+        let writer = try makeDatabase()
+        defer { writer.close() }
+        var latest = try XCTUnwrap(writer.projectRecord(id: project.id))
+        latest.notificationsMuted = true
+        latest.themeID = .homebrew
+        latest.terminals[1].customTitle = "New sibling title"
+        try writer.saveProject(latest, position: 7)
+        let desired = "/tmp/Ångström/日本語 folder"
+        XCTAssertTrue(try database.updateTerminalDirectory(id: project.terminals[0].id,
+            in: project.id, directory: desired, expectedCurrentDirectory: "/tmp/old"))
+        latest.terminals[0].currentDirectory = desired
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        XCTAssertEqual(try encoder.encode(XCTUnwrap(database.projectRecord(id: project.id))),
+                       try encoder.encode(latest))
+        XCTAssertEqual(try raw.scalar("SELECT position FROM project WHERE position = 7"), 7)
+        XCTAssertEqual(try storedSessionPayload(id: session.id, from: raw),
+                       Data("{ unreadable session".utf8))
+        XCTAssertEqual(try rawProjectPayload(id: other.id), "{ unreadable project")
+        let selected = try raw.prepare("SELECT value FROM app_state WHERE key = ?")
+        defer { selected.finalize() }
+        selected.bind(1, ProjectDatabaseSchema.selectedSessionKey)
+        XCTAssertTrue(try selected.step())
+        XCTAssertEqual(selected.text(0), session.id.uuidString)
+        XCTAssertThrowsError(try database.save(ProjectsState(projects: []))) {
+            guard case ProjectDatabaseWriteError.partialReadRequiresFullLoad = $0 else {
+                return XCTFail("unexpected error: \($0)")
+            }
+        }
+    }
+
+    func testTerminalDirectoryUpdateRefusesStaleAndMissingDestinations() throws {
+        let database = try makeDatabase()
+        defer { database.close() }
+        var project = makeProject("target")
+        let terminal = ProjectTerminal(currentDirectory: "/tmp/original")
+        project.terminals = [terminal]
+        try database.save(ProjectsState(projects: [project]))
+        XCTAssertTrue(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/newer", expectedCurrentDirectory: "/tmp/original"))
+        let unchanged = try rawProjectPayload(id: project.id)
+        XCTAssertFalse(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/stale", expectedCurrentDirectory: "/tmp/original"))
+        XCTAssertFalse(try database.updateTerminalDirectory(id: TerminalID(), in: project.id,
+            directory: "/tmp/newer", expectedCurrentDirectory: "/tmp/original"))
+        XCTAssertFalse(try database.updateTerminalDirectory(id: terminal.id, in: ProjectID(),
+            directory: "/tmp/newer", expectedCurrentDirectory: "/tmp/original"))
+        XCTAssertEqual(try rawProjectPayload(id: project.id), unchanged)
+
+        project.terminals = []
+        try database.saveProject(project, position: 0)
+        XCTAssertFalse(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/resurrected", expectedCurrentDirectory: "/tmp/newer"))
+        XCTAssertTrue(try XCTUnwrap(database.projectRecord(id: project.id)).terminals.isEmpty)
+        try database.removeProject(id: project.id, at: 0, selectedSessionID: nil)
+        XCTAssertFalse(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/resurrected", expectedCurrentDirectory: "/tmp/newer"))
+        XCTAssertNil(try database.projectRecord(id: project.id))
+    }
+
+    func testTerminalDirectoryIdempotentRetryDoesNotRewritePayload() throws {
+        let database = try makeDatabase()
+        defer { database.close() }
+        var project = makeProject("target")
+        let terminal = ProjectTerminal(currentDirectory: "/tmp/already desired")
+        project.terminals = [terminal]
+        try database.save(ProjectsState(projects: [project]))
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+        defer { raw.close() }
+        try raw.execute("""
+            CREATE TRIGGER refuse_project_update BEFORE UPDATE ON project
+            BEGIN SELECT RAISE(ABORT, 'unexpected project update'); END;
+            """)
+        XCTAssertTrue(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: terminal.currentDirectory, expectedCurrentDirectory: "/tmp/old observation"))
+        XCTAssertThrowsError(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/actually different", expectedCurrentDirectory: terminal.currentDirectory))
+        XCTAssertEqual(try database.projectRecord(id: project.id)?.terminals[0].currentDirectory,
+                       terminal.currentDirectory)
+    }
+
+    func testTerminalDirectoryCommitFailureRollsBackAndAllowsRetry() throws {
+        enum Expected: Error { case commitRefused }
+        var refuseNextCommit = false
+        let database = try ProjectDatabase(url: directory.appendingPathComponent("test.db"),
+            transactionCommitPreflight: {
+                guard refuseNextCommit else { return }
+                refuseNextCommit = false
+                throw Expected.commitRefused
+            })
+        defer { database.close() }
+        var project = makeProject("target")
+        let terminal = ProjectTerminal(currentDirectory: "/tmp/original")
+        project.terminals = [terminal]
+        try database.save(ProjectsState(projects: [project]))
+        let original = try rawProjectPayload(id: project.id)
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/new", expectedCurrentDirectory: terminal.currentDirectory))
+        XCTAssertEqual(try rawProjectPayload(id: project.id), original)
+        XCTAssertTrue(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/new", expectedCurrentDirectory: terminal.currentDirectory))
+        XCTAssertEqual(try database.projectRecord(id: project.id)?.terminals[0].currentDirectory,
+                       "/tmp/new")
+    }
+
+    func testTerminalDirectoryZeroBusyTimeoutRefusesContendedWriterAndAllowsRetry() throws {
+        let url = directory.appendingPathComponent("test.db")
+        let database = try ProjectDatabase(url: url, busyTimeoutMilliseconds: 0)
+        defer { database.close() }
+        var project = makeProject("target")
+        let terminal = ProjectTerminal(currentDirectory: "/tmp/original")
+        project.terminals = [terminal]
+        try database.save(ProjectsState(projects: [project]))
+        let writer = try SQLiteDatabase(path: url.path)
+        defer { writer.close() }
+        XCTAssertEqual(try writer.scalar("PRAGMA busy_timeout"), 5_000)
+        let immediate = try SQLiteDatabase(path: url.path, busyTimeoutMilliseconds: 0)
+        defer { immediate.close() }
+        XCTAssertEqual(try immediate.scalar("PRAGMA busy_timeout"), 0)
+
+        try writer.transaction {
+            let started = Date()
+            XCTAssertThrowsError(try database.updateTerminalDirectory(id: terminal.id,
+                in: project.id, directory: "/tmp/new", expectedCurrentDirectory: terminal.currentDirectory)) {
+                guard case SQLiteDatabase.Failure.step(let diagnostic) = $0 else {
+                    return XCTFail("unexpected error: \($0)")
+                }
+                XCTAssertEqual(diagnostic.code, SQLITE_BUSY)
+            }
+            XCTAssertLessThan(Date().timeIntervalSince(started), 1,
+                              "Metadata persistence must not wait for the ordinary five-second timeout")
+        }
+        XCTAssertEqual(try database.projectRecord(id: project.id)?.terminals[0].currentDirectory,
+                       terminal.currentDirectory)
+        XCTAssertTrue(try database.updateTerminalDirectory(id: terminal.id, in: project.id,
+            directory: "/tmp/new", expectedCurrentDirectory: terminal.currentDirectory))
+    }
+
     func testNavigationSnapshotBoundsPayloadsAndCannotAuthorizeGraphSave() throws {
         let database = try makeDatabase()
         let sessions = (0..<4).map { AgentSession(kind: .codex, title: "Chat \($0)") }

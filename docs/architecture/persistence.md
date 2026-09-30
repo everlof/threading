@@ -187,6 +187,15 @@ no session payloads. The caller can append a terminal with the exact-row `savePr
 whole graph from those project rows. The project-array decode remains the scale boundary until
 terminals have independent rows.
 
+Terminal directory observations use `updateTerminalDirectory` with the project and terminal ids
+and the caller's last acknowledged directory. One indexed project read and its payload update share
+a write transaction; the mutation retains current project settings, sibling terminals, position and
+all session rows. Missing destinations or a different intervening directory refuse without inserting
+anything. An already-desired directory acknowledges an idempotent retry without rewriting the row.
+This partial read never authorizes whole-graph reconciliation. A latency-sensitive metadata worker
+can open `ProjectDatabase` with `busyTimeoutMilliseconds: 0` and retry its coalesced latest value
+after contention; ordinary database owners retain the five-second timeout.
+
 The Linux project window persists one selected runtime: a session id or a standalone terminal id,
 never both. The two `app_state` scalars change in one transaction after a targeted membership
 check on a worker. A newly created shell records its terminal identity before daemon spawn; a
