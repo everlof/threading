@@ -3649,8 +3649,12 @@ than starting a second reader.
 The deeper compatibility check requires external `pymobiledevice3` 11.13.1 or newer. Threading
 does not bundle it in the app. Open **Settings → Advanced → iPhone Tooling** and choose
 **Install Latest** to download a managed copy, or **Update** later. Threading installs it in its own
-data folder and keeps the working version active if an update fails. Return to the iPhone pane and
-retry; no restart is needed. Its device-image and pairing cache also stays in Threading's own data
+data folder and keeps the working version active if an update fails. When tooling is missing, the
+pane offers **Install iPhone Tooling…**; an older tool offers **Update iPhone Tooling…**. Both open
+the exact Settings row without starting a download. After installation, a visible pane retries
+automatically; a hidden pane retries when you return. No restart is needed; enabling control still
+requires your approval.
+Its device-image and pairing cache also stays in Threading's own data
 folder, so a stale `~/.pymobiledevice3` from a manual installation cannot break the managed copy.
 When the tool is absent or older, the pane says the control check is unavailable; older phones can
 continue the screenshot preview, while iOS 27 also needs the managed tool for its DVT screenshot.

@@ -24531,6 +24531,28 @@
         }
       }
     },
+    "Install iPhone Tooling…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera iPhone-verktyg…"
+          }
+        }
+      }
+    },
+    "Install or update iPhone tooling to preview and control this phone. Settings will guide you; the pane retries when installation finishes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera eller uppdatera iPhone-verktygen för att visa och styra telefonen. Inställningar guidar dig; panelen försöker igen när installationen är klar."
+          }
+        }
+      }
+    },
     "Install the Claude Slack app" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42482,6 +42504,17 @@
         }
       }
     },
+    "Set up your iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kom igång med din iPhone"
+          }
+        }
+      }
+    },
     "Setting up…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42544,6 +42577,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klart"
+          }
+        }
+      }
+    },
+    "Setup required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfiguration krävs"
           }
         }
       }
@@ -56266,6 +56310,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdateringen misslyckades; version %1$@ är fortfarande aktiv. %2$@"
+          }
+        }
+      }
+    },
+    "Update iPhone Tooling…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera iPhone-verktyg…"
           }
         }
       }

@@ -81,6 +81,16 @@ same managed executable owns the modern screenshot fallback. Missing or older to
 **Control check unavailable**; on iOS 27 it also leaves the preview unavailable until the managed
 tool is installed, while older phones can continue through `idevicescreenshot`.
 
+Missing screenshot tooling remains a typed capture state, not an opaque red error string. The
+empty pane offers a themed setup explanation and **Install iPhone Tooling…** (or **Update iPhone
+Tooling…** for an unsupported probe version), opening Advanced Settings at the existing
+`pymobiledevice3` row. It never starts a download. When an older phone still has a working preview,
+the control action reaches the same settings destination without hiding that preview.
+`Pymobiledevice3ToolDidInstall` is emitted only after successful activation: a presented pane
+waiting for tooling retries its selected device; a hidden pane does no work and resolves the tool
+normally when presented again. Installation never grants input consent. The helper is a fixed-size
+value-driven composition with no discovery, filesystem inspection or process work in rendering.
+
 Every device command gives pymobiledevice3 a mode-`0700`, Threading-owned runtime directory and
 cache. A narrow `sitecustomize` adapter points pymobiledevice3's data-folder variable at that cache
 without replacing `HOME`, touching an existing `~/.pymobiledevice3`, or inheriting user Python

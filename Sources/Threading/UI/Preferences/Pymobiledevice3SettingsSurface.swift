@@ -46,15 +46,18 @@ final class Pymobiledevice3SettingsSurface {
     private let automaticallyRefreshes: Bool
     private let readStatus: @Sendable () -> Pymobiledevice3ManagedStatus
     private let install: @Sendable () throws -> Pymobiledevice3InstalledTool
+    private let notificationCenter: NotificationCenter
     private var task: Task<Void, Never>?
 
     init(
         installation: Pymobiledevice3Installation = Pymobiledevice3Installation(),
         initialState: Pymobiledevice3SettingsState = .checking,
-        automaticallyRefreshes: Bool = !StateManager.isHostedTest
+        automaticallyRefreshes: Bool = !StateManager.isHostedTest,
+        notificationCenter: NotificationCenter = .default
     ) {
         self.state = initialState
         self.automaticallyRefreshes = automaticallyRefreshes
+        self.notificationCenter = notificationCenter
         self.readStatus = { installation.status() }
         self.install = { try installation.installLatest() }
     }
@@ -62,12 +65,14 @@ final class Pymobiledevice3SettingsSurface {
     init(
         initialState: Pymobiledevice3SettingsState,
         readStatus: @escaping @Sendable () -> Pymobiledevice3ManagedStatus,
-        install: @escaping @Sendable () throws -> Pymobiledevice3InstalledTool
+        install: @escaping @Sendable () throws -> Pymobiledevice3InstalledTool,
+        notificationCenter: NotificationCenter = .default
     ) {
         state = initialState
         automaticallyRefreshes = false
         self.readStatus = readStatus
         self.install = install
+        self.notificationCenter = notificationCenter
     }
 
     func start() {
@@ -119,6 +124,7 @@ final class Pymobiledevice3SettingsSurface {
                 switch outcome {
                 case .installed(let tool):
                     self.state = .installed(version: tool.version, executable: tool.executable)
+                    self.notificationCenter.post(Pymobiledevice3ToolDidInstall())
                 case .failed(let message):
                     self.state = .failed(message: message, previous: previous)
                 }

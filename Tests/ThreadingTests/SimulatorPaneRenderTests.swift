@@ -260,6 +260,49 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
 
         print("Rendered the physical iPhone pane to \(Render.directory.path)")
+        try renderPhysicalIPhoneToolingSetup()
+    }
+
+    private func renderPhysicalIPhoneToolingSetup() throws {
+        let variants: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("system-dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua),
+        ]
+        for (name, theme, appearance) in variants {
+            AppThemePalette.set(theme)
+            let fixture = try makePhysicalDeviceFixture(
+                appearance: appearance,
+                deviceFrame: Data(),
+                missingTooling: true
+            )
+            defer { fixture.tearDown() }
+            eventually { fixture.realDevice.statusForTesting.contains("Setup required") }
+            settle(fixture.window)
+            let button = fixture.realDevice.toolingButtonForTesting
+            XCTAssertFalse(button.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(button.isEnabled)
+            XCTAssertEqual(button.accessibilityTitle(), L10n.string("Install iPhone Tooling…"))
+            XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2)
+            XCTAssertFalse(fixture.realDevice.emptyLabelForTesting.stringValue.contains("Connect and unlock"))
+            var openedSettings = false
+            fixture.realDevice.onOpenToolingSettings = { openedSettings = true }
+            XCTAssertTrue(button.accessibilityPerformPress())
+            XCTAssertTrue(openedSettings)
+            let pane = fixture.realDevice.view
+            XCTAssertTrue(pane.bounds.contains(button.convert(button.bounds, to: pane)))
+            let content = try XCTUnwrap(fixture.window.contentView)
+            let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("physical-iphone-pane-setup-\(name).png")
+            )
+            // The same attached helper follows a live palette switch without rebuilding its tree.
+            AppThemePalette.set(.system)
+            AppThemeRefresh.repaint(content)
+            XCTAssertEqual(button.title, L10n.string("Install iPhone Tooling…"))
+        }
     }
 
     func testRendersBootFailureInTheRightPanel() throws {
@@ -583,7 +626,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
 
     private func makePhysicalDeviceFixture(
         appearance appearanceName: NSAppearance.Name,
-        deviceFrame: Data
+        deviceFrame: Data,
+        missingTooling: Bool = false
     ) throws -> PhysicalDevicePaneRenderFixture {
         let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
         let device = PhysicalDevice(
@@ -593,12 +637,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
             ),
             name: "David’s iPhone",
             productType: "iPhone17,1",
-            osVersion: "26.6.2",
+            osVersion: missingTooling ? "27.0.1" : "26.6.2",
             connection: .localNetwork,
             developerModeEnabled: true,
             developerServicesAvailable: true
         )
-        let control = PhysicalDevicePaneRenderControl(device: device, frame: deviceFrame)
+        let control = PhysicalDevicePaneRenderControl(
+            device: device, frame: deviceFrame, missingTooling: missingTooling
+        )
         let project = Project(
             name: "Threading",
             folderURL: FileManager.default.temporaryDirectory
@@ -919,23 +965,28 @@ private struct PhysicalDevicePaneRenderFixture {
 private actor PhysicalDevicePaneRenderControl: PhysicalDeviceControlling {
     private let device: PhysicalDevice
     private let frame: Data
+    private let missingTooling: Bool
 
-    init(device: PhysicalDevice, frame: Data) {
+    init(device: PhysicalDevice, frame: Data, missingTooling: Bool = false) {
         self.device = device
         self.frame = frame
+        self.missingTooling = missingTooling
     }
 
     func availableDevices() async throws -> [PhysicalDevice] { [device] }
 
     func controlSupport(of device: PhysicalDevice) async throws -> PhysicalDeviceControlSupport {
-        .available(supportedMediaFeatures: 140)
+        missingTooling ? .unknown(.probeToolUnavailable) : .available(supportedMediaFeatures: 140)
     }
 
     func prepareControl(of device: PhysicalDevice) async throws {}
 
     func sendInput(_ input: PhysicalDeviceInput, to device: PhysicalDevice) async throws {}
 
-    func screenshot(of device: PhysicalDevice) async throws -> Data { frame }
+    func screenshot(of device: PhysicalDevice) async throws -> Data {
+        if missingTooling { throw PhysicalDeviceControlError.screenshotToolUnavailable }
+        return frame
+    }
 }
 
 private actor SimulatorPaneRenderControl: SimulatorControlling {

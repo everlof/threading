@@ -19,6 +19,7 @@ final class RealDevicePaneViewController: NSViewController {
         case idle
         case capturing
         case live
+        case toolingRequired
         case failed(String)
 
         var isFailure: Bool {
@@ -43,6 +44,7 @@ final class RealDevicePaneViewController: NSViewController {
 
     private let control: any PhysicalDeviceControlling
     private let inputAuthorizer: any PhysicalDeviceInputAuthorizing
+    private let appEvents: AppEventObservations
     private var preferredDeviceID: PhysicalDeviceID?
     private var devices: [PhysicalDevice] = []
     private var selectedDevice: PhysicalDevice?
@@ -74,6 +76,7 @@ final class RealDevicePaneViewController: NSViewController {
 
     var onSelectedDeviceChange: ((PhysicalDeviceID) -> Void)?
     var onOpenDeviceLogs: ((PhysicalDeviceID) -> Void)?
+    var onOpenToolingSettings: (() -> Void)?
 
     private lazy var deviceChip: ChipView = {
         let chip = ChipView()
@@ -178,10 +181,48 @@ final class RealDevicePaneViewController: NSViewController {
         label.applyFont(.detail())
         label.textColor = Design.Text.secondary
         label.alignment = .center
-        label.maximumNumberOfLines = 3
+        label.maximumNumberOfLines = 0
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.setAccessibilityIdentifier("realDevice.empty")
         return label
+    }()
+
+    private lazy var setupTitle: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString: L10n.string("Set up your iPhone"))
+        label.applyFont(.emphasizedBody)
+        label.textColor = Design.Text.label
+        label.alignment = .center
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setAccessibilityIdentifier("realDevice.setupTitle")
+        return label
+    }()
+
+    private lazy var toolingButton: ThemedButton = {
+        let button = ThemedButton()
+        button.emphasis = .primary
+        button.target = self
+        button.action = #selector(openToolingSettings)
+        button.setAccessibilityIdentifier("realDevice.setupTooling")
+        return button
+    }()
+
+    private lazy var emptyContent: NSStackView = {
+        let announcement = NSStackView(views: [setupTitle, emptyLabel])
+        announcement.orientation = .vertical
+        announcement.alignment = .centerX
+        announcement.spacing = Design.Placeholder.line
+        let stack = NSStackView(views: [announcement, toolingButton])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = Design.Placeholder.group
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        // The paragraph wraps within the pane instead of widening its split item.
+        NSLayoutConstraint.activate([
+            announcement.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            emptyLabel.widthAnchor.constraint(equalTo: announcement.widthAnchor),
+            setupTitle.widthAnchor.constraint(equalTo: announcement.widthAnchor),
+        ])
+        return stack
     }()
 
     private lazy var statusLabel: NSTextField = {
@@ -201,12 +242,18 @@ final class RealDevicePaneViewController: NSViewController {
         preferredDeviceID: PhysicalDeviceID? = nil,
         control: any PhysicalDeviceControlling = DevicectlPhysicalDeviceControl(),
         inputAuthorizer: any PhysicalDeviceInputAuthorizing =
-            PhysicalDeviceInputConsentController()
+            PhysicalDeviceInputConsentController(),
+        notificationCenter: NotificationCenter = .default
     ) {
         self.preferredDeviceID = preferredDeviceID
         self.control = control
         self.inputAuthorizer = inputAuthorizer
+        self.appEvents = AppEventObservations(center: notificationCenter)
         super.init(nibName: nil, bundle: nil)
+        appEvents.observe(Pymobiledevice3ToolDidInstall.self) { [weak self] _ in
+            guard let self, self.isPresented, self.needsToolingSetup else { return }
+            self.retry()
+        }
     }
 
     @available(*, unavailable)
@@ -229,7 +276,7 @@ final class RealDevicePaneViewController: NSViewController {
     private func setupUI() {
         view.addSubview(controlRow)
         view.addSubview(screenView)
-        view.addSubview(emptyLabel)
+        view.addSubview(emptyContent)
         view.addSubview(statusLabel)
 
         NSLayoutConstraint.activate([
@@ -263,13 +310,13 @@ final class RealDevicePaneViewController: NSViewController {
                 constant: -Design.Spacing.medium
             ),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: screenView.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(
+            emptyContent.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
+            emptyContent.centerYAnchor.constraint(equalTo: screenView.centerYAnchor),
+            emptyContent.leadingAnchor.constraint(
                 greaterThanOrEqualTo: screenView.leadingAnchor,
                 constant: Design.Spacing.inset
             ),
-            emptyLabel.trailingAnchor.constraint(
+            emptyContent.trailingAnchor.constraint(
                 lessThanOrEqualTo: screenView.trailingAnchor,
                 constant: -Design.Spacing.inset
             ),
@@ -484,6 +531,10 @@ final class RealDevicePaneViewController: NSViewController {
 
     private func activateControl() {
         guard let device = selectedDevice, isPresented else { return }
+        if needsToolingSetup {
+            openToolingSettings()
+            return
+        }
         switch controlSupportState {
         case .resolved(.available):
             if inputAuthorizer.decision(for: device.id) == true {
@@ -590,7 +641,11 @@ final class RealDevicePaneViewController: NSViewController {
                     guard let self,
                           !Task.isCancelled,
                           self.captureGeneration == generation else { return }
-                    self.captureState = .failed(error.localizedDescription)
+                    if error as? PhysicalDeviceControlError == .screenshotToolUnavailable {
+                        self.captureState = .toolingRequired
+                    } else {
+                        self.captureState = .failed(error.localizedDescription)
+                    }
                     return
                 }
             }
@@ -635,6 +690,7 @@ final class RealDevicePaneViewController: NSViewController {
             case .idle: break
             case .capturing: deviceParts.append(L10n.string("Capturing…"))
             case .live: deviceParts.append(L10n.string("Preview fallback"))
+            case .toolingRequired: deviceParts.append(L10n.string("Setup required"))
             case .failed(let message): deviceParts.append(message)
             }
             statusLabel.stringValue = [
@@ -652,7 +708,16 @@ final class RealDevicePaneViewController: NSViewController {
             retryButton.isEnabled = true
         }
 
+        let needsSetup = needsToolingSetup
+        emptyContent.isHidden = screenView.image != nil
         emptyLabel.isHidden = screenView.image != nil
+        setupTitle.isHidden = !needsSetup
+        toolingButton.isHidden = !needsSetup
+        toolingButton.isEnabled = isPresented && needsSetup
+        toolingButton.title = toolingActionTitle
+        emptyLabel.stringValue = needsSetup
+            ? L10n.string("Install or update iPhone tooling to preview and control this phone. Settings will guide you; the pane retries when installation finishes.")
+            : L10n.string("Connect and unlock a paired iPhone to preview it here.")
         deviceChip.isEnabled = !devices.isEmpty
         if case .ready = presentationState {
             logsButton.isEnabled = selectedDeviceID != nil
@@ -667,6 +732,13 @@ final class RealDevicePaneViewController: NSViewController {
 
     private func configureControlButton() {
         let decision = selectedDeviceID.flatMap { inputAuthorizer.decision(for: $0) }
+        if needsToolingSetup {
+            controlButton.setSymbol("hand.tap", accessibility: toolingActionTitle)
+            controlButton.toolTip = toolingActionTitle
+            controlButton.isSelected = false
+            controlButton.isEnabled = isPresented && selectedDevice != nil
+            return
+        }
         let title: String
         let enabled: Bool
         switch controlSupportState {
@@ -764,6 +836,37 @@ final class RealDevicePaneViewController: NSViewController {
             .joined(separator: " · ")
     }
 
+    private var needsToolingSetup: Bool {
+        guard case .ready = presentationState else { return false }
+        if captureState == .toolingRequired { return true }
+        switch controlSupportState {
+        case .resolved(.unknown(.probeToolUnavailable)),
+             .resolved(.unknown(.probeVersionUnsupported)):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var toolingActionTitle: String {
+        if case .resolved(.unknown(.probeVersionUnsupported)) = controlSupportState {
+            return L10n.string("Update iPhone Tooling…")
+        }
+        return L10n.string("Install iPhone Tooling…")
+    }
+
+    @objc private func openToolingSettings() {
+        guard isPresented, needsToolingSetup else { return }
+        if let onOpenToolingSettings {
+            onOpenToolingSettings()
+        } else {
+            (view.window?.windowController as? MainWindowController)?.showSettingsPage(
+                id: SettingsPages.advancedID,
+                revealing: AdvancedStrings.iphoneToolingTitle
+            )
+        }
+    }
+
     var frameImageForTesting: NSImage? { screenView.image }
     var isPresentedForTesting: Bool { isPresented }
     var statusForTesting: String { statusLabel.stringValue }
@@ -772,6 +875,7 @@ final class RealDevicePaneViewController: NSViewController {
         return support
     }
     var emptyLabelForTesting: NSTextField { emptyLabel }
+    var toolingButtonForTesting: ThemedButton { toolingButton }
     var logsButtonForTesting: ThemedIconButton { logsButton }
     var controlButtonForTesting: ThemedIconButton { controlButton }
     var screenViewForTesting: SimulatorScreenView { screenView }

@@ -1,6 +1,12 @@
 import Darwin
 import Foundation
 
+/// Published only after a validated managed tool becomes active. Visible device panes may retry;
+/// this event does not grant control or start work in a hidden pane.
+struct Pymobiledevice3ToolDidInstall: AppEvent {
+    static let name = Notification.Name("Pymobiledevice3ToolDidInstall")
+}
+
 /// The app-owned installation of the optional iPhone protocol tool.
 ///
 /// `pymobiledevice3` remains a separate GPL program. Threading does not ship it inside the app;

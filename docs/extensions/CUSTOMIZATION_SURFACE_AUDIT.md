@@ -552,6 +552,11 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+The physical-iPhone tooling helper is host-only setup UI for the selected device. Its existing
+Settings destination, explicit download decision, successful-install retry, visibility demand
+and separate input consent remain host-owned. Themes style its native labels and action; no
+extension gets installation authority, a device identity, or a replacement setup flow.
+
 The live Simulator and physical-iPhone **Open Device Logs in Bottom Pane** control is a host-only
 navigation affordance on the existing protected device surfaces. Its entity is the selected device
 UDID within the current session. Threading owns that identity, singleton routing, tab movement and

@@ -343,9 +343,9 @@
       "priority": "critical",
       "title": "Physical iPhone pane",
       "description": "The real native conversation and display-panel shell with a paired physical iPhone preview at the protected right-side width and an explicit user-control entry point.",
-      "states": ["Paired device", "Wi-Fi identity", "Screenshot preview", "Control available but not granted", "Device Logs shortcut"],
+      "states": ["Paired device", "Wi-Fi identity", "Screenshot preview", "Control available but not granted", "Device Logs shortcut", "Missing tooling setup helper"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
         "sizes": ["420-point right panel"]
       },

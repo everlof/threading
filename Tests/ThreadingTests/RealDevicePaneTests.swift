@@ -4,6 +4,92 @@ import XCTest
 
 @MainActor
 final class RealDevicePaneTests: HostedStoreTestCase {
+    func testMissingToolingOffersSetupInsteadOfAnUnrelatedConnectionInstruction() async throws {
+        let control = RealDeviceControlFake(
+            support: .unknown(.probeToolUnavailable),
+            screenshotFailure: .screenshotToolUnavailable
+        )
+        let controller = RealDevicePaneViewController(control: control)
+        _ = controller.view
+        defer { controller.terminate() }
+        var settingsOpens = 0
+        controller.onOpenToolingSettings = { settingsOpens += 1 }
+
+        controller.setPresented(true)
+        try await eventually { controller.statusForTesting.contains("Setup required") }
+        XCTAssertFalse(controller.toolingButtonForTesting.isHidden)
+        XCTAssertEqual(controller.toolingButtonForTesting.title, "Install iPhone Tooling…")
+        XCTAssertFalse(controller.emptyLabelForTesting.stringValue.contains("Connect and unlock"))
+        XCTAssertTrue(controller.toolingButtonForTesting.performPrimaryAction())
+        XCTAssertEqual(settingsOpens, 1)
+        let counts = await control.counts()
+        XCTAssertEqual(counts.preparations, 0, "Opening Settings cannot prepare or control a phone")
+        let inputs = await control.inputs()
+        XCTAssertTrue(inputs.isEmpty)
+    }
+
+    func testOlderToolOffersUpdateAndPreservesAnExistingPreview() async throws {
+        let controller = RealDevicePaneViewController(control: RealDeviceControlFake(
+            support: .unknown(.probeVersionUnsupported)
+        ))
+        _ = controller.view
+        defer { controller.terminate() }
+        var settingsOpens = 0
+        controller.onOpenToolingSettings = { settingsOpens += 1 }
+        controller.setPresented(true)
+        try await eventually {
+            controller.frameImageForTesting != nil && controller.controlSupportForTesting != nil
+        }
+        XCTAssertEqual(controller.toolingButtonForTesting.title, "Update iPhone Tooling…")
+        XCTAssertEqual(controller.controlButtonForTesting.toolTip, "Update iPhone Tooling…")
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        XCTAssertEqual(settingsOpens, 1)
+        XCTAssertNotNil(controller.frameImageForTesting)
+    }
+
+    func testSuccessfulInstallationRetriesOnlyPresentedPanesWithoutGrantingControl() async throws {
+        let center = NotificationCenter()
+        let control = RealDeviceControlFake(
+            support: .unknown(.probeToolUnavailable),
+            screenshotFailure: .screenshotToolUnavailable
+        )
+        let controller = RealDevicePaneViewController(control: control, notificationCenter: center)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.statusForTesting.contains("Setup required") }
+
+        controller.setPresented(false)
+        let before = await control.counts()
+        center.post(Pymobiledevice3ToolDidInstall())
+        await Task.yield()
+        let after = await control.counts()
+        XCTAssertEqual(before.available, after.available)
+        XCTAssertEqual(before.screenshots, after.screenshots)
+
+        controller.setPresented(true)
+        try await eventually { controller.statusForTesting.contains("Setup required") }
+        await control.installTooling()
+        center.post(Pymobiledevice3ToolDidInstall())
+        try await eventually {
+            controller.frameImageForTesting != nil
+                && controller.controlSupportForTesting == .available(supportedMediaFeatures: 140)
+        }
+        XCTAssertTrue(controller.toolingButtonForTesting.isHidden)
+        XCTAssertEqual(controller.screenInteractionStateForTesting, .unavailable)
+    }
+
+    func testUnrelatedCaptureFailureDoesNotOfferToolInstallation() async throws {
+        let controller = RealDevicePaneViewController(control: RealDeviceControlFake(
+            screenshotFailure: .invalidScreenshot
+        ))
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.statusForTesting.contains("valid screenshot") }
+        XCTAssertTrue(controller.toolingButtonForTesting.isHidden)
+    }
+
     func testCaptureRunsOnlyWhileThePaneIsPresented() async throws {
         let control = RealDeviceControlFake()
         let controller = RealDevicePaneViewController(control: control)
@@ -277,7 +363,8 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
     }
 
     private let failure: PhysicalDeviceControlError?
-    private let support: PhysicalDeviceControlSupport
+    private var support: PhysicalDeviceControlSupport
+    private var screenshotFailure: PhysicalDeviceControlError?
     private let preparedSupport: PhysicalDeviceControlSupport?
     private let preparationFailure: PhysicalDeviceControlError?
     private var callCounts = Counts()
@@ -287,12 +374,19 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
         failure: PhysicalDeviceControlError? = nil,
         support: PhysicalDeviceControlSupport = .unavailable(.mediaStreamingUnavailable),
         preparedSupport: PhysicalDeviceControlSupport? = nil,
-        preparationFailure: PhysicalDeviceControlError? = nil
+        preparationFailure: PhysicalDeviceControlError? = nil,
+        screenshotFailure: PhysicalDeviceControlError? = nil
     ) {
         self.failure = failure
         self.support = support
         self.preparedSupport = preparedSupport
         self.preparationFailure = preparationFailure
+        self.screenshotFailure = screenshotFailure
+    }
+
+    func installTooling() {
+        screenshotFailure = nil
+        support = .available(supportedMediaFeatures: 140)
     }
 
     func counts() -> Counts { callCounts }
@@ -320,6 +414,7 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
 
     func screenshot(of device: PhysicalDevice) async throws -> Data {
         callCounts.screenshots += 1
+        if let screenshotFailure { throw screenshotFailure }
         return Data(base64Encoded: Self.onePixelPNG)!
     }
 
