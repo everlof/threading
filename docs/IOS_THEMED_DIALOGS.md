@@ -623,3 +623,17 @@ These remain host-owned controls. Themes supply material; the host retains key d
 custody, preview and removal. Drawing remains constant work per existing view, and the attachment
 strip retains its eight-item bound. `ComposerChromeRenderTests` checks corner pixels, partial
 redraw geometry and thumbnail-independent close-mark pixels.
+
+
+## Decorative dashboard motion
+
+The resolved material's optional `backdropGradient` belongs to `MobileThemeBackdropView`, the
+single stationary background of the dashboard collection. A theme supplies up to eight stops,
+a CSS angle and optional bounded drift. Section plates still own row chrome; no row constructs
+a gradient or observes an animation clock. The recipe crosses the ordinary `mobileTheme(_:)`
+environment and per-Mac reconnect cache with the palette.
+
+The host owns visibility, scene activation, Reduce Motion, Low Power Mode, touch routing and
+accessibility silence. The shared `ThemeGradientAnimator` installs compositor tracks only while
+the dashboard is presented and its scene is active. A static fallback retains the same authored
+colors. Navigation, keyboard movement and scrolling remain platform behavior.

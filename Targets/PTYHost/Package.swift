@@ -21,6 +21,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Packages/ThreadingPTYHostKit"),
+        .package(path: "../../Packages/ThreadingPTYClient"),
         .package(path: "../../Packages/ThreadingDomain")
     ],
     targets: [
@@ -33,6 +34,7 @@ let package = Package(
             name: "ThreadingPTYHost",
             dependencies: [
                 .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
+                .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
                 .product(name: "ThreadingDomain", package: "ThreadingDomain"),
                 .target(name: "CPTYHostPlatform", condition: .when(platforms: [.linux]))
             ],

@@ -18,9 +18,16 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.domain = self.root / "Packages/ThreadingDomain/Sources/ThreadingDomain"
         self.application = self.root / "Sources/Threading/Application"
         self.pty_host = self.root / "Packages/ThreadingPTYHostKit/Sources/ThreadingPTYHostKit"
+        self.controller = self.root / "Packages/ThreadingController/Sources/ThreadingController"
+        self.controller_runtime = self.root / "Targets/Controller/Sources/ControllerRuntime"
         self.domain.mkdir(parents=True)
         self.application.mkdir(parents=True)
         self.pty_host.mkdir(parents=True)
+        self.controller.mkdir(parents=True)
+        self.controller_runtime.mkdir(parents=True)
+        (self.controller / "Store.swift").write_text(
+            "import Foundation\nimport CControllerSQLite\n", encoding="utf-8"
+        )
         (self.domain / "Identity.swift").write_text("import Foundation\n", encoding="utf-8")
         (self.pty_host / "Frame.swift").write_text(
             "import Foundation\nimport ThreadingDomain\n", encoding="utf-8"
@@ -81,6 +88,21 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("imports ThreadingRemoteKit", result.stderr)
         self.assertIn("ThreadingPTYHostKit allows only", result.stderr)
+
+    def test_controller_cannot_import_pty_or_app_services(self) -> None:
+        (self.controller / "Leak.swift").write_text(
+            "import ThreadingPTYClient\nimport AppKit\n", encoding="utf-8"
+        )
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("imports ThreadingPTYClient", result.stderr)
+        self.assertIn("imports AppKit", result.stderr)
+
+    def test_controller_runtime_cannot_import_the_application(self) -> None:
+        (self.controller_runtime / "Leak.swift").write_text("import Threading\n", encoding="utf-8")
+        result = self.run_checker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("imports Threading", result.stderr)
 
     def test_application_rejects_an_unapproved_project_module(self) -> None:
         (self.application / "Feature.swift").write_text(

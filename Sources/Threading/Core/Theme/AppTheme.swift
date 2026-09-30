@@ -42,11 +42,9 @@ public struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConve
 
 /// A named set of answers for the app's own chrome.
 ///
-/// What a theme deliberately does **not** carry is layout or motion. The design styles these
-/// are drawn from are briefs for marketing pages — hero splits, pricing tables, glitch
-/// animations — and Threading's layout is its product rather than its decoration. A theme that
-/// moved the sidebar would not be a theme. So the promise is the one VS Code makes: an app that
-/// *reads as* Cyberpunk, not Cyberpunk recreated.
+/// Themes own palette, material and bounded decorative backdrop motion. Layout, navigation,
+/// scrolling and interaction timing remain the host's product behavior: a theme may drift its
+/// gradient beneath the sidebar, but cannot move the sidebar itself.
 public struct AppTheme: Codable, Equatable {
 
     public let id: AppThemeID

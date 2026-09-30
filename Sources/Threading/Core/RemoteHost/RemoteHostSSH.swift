@@ -197,6 +197,7 @@ enum RemoteHostCommandError: LocalizedError, Equatable {
 ///
 /// Blocking; called only from `RemoteExecutionHosts`' worker queue, never from the main actor.
 struct SystemSSHCommandRunner: RemoteHostCommandRunning {
+    var maximumOutputBytes = RemoteHostDefaults.maximumOutputBytes
 
     func run(
         on destination: RemoteHostDestination,
@@ -268,7 +269,7 @@ struct SystemSSHCommandRunner: RemoteHostCommandRunning {
         )
         let capture = BoundedChildProcess.captureSuffix(
             from: output,
-            maximumBytes: RemoteHostDefaults.maximumOutputBytes
+            maximumBytes: maximumOutputBytes
         )
         child.waitUntilExit()
         let timedOut = deadline.complete()

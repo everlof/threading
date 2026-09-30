@@ -4999,7 +4999,7 @@ Measure each step.
 ## Typing latency in a themed field
 
 Two fields were reported as unusably slow to type in — an image-annotation note in the media
-inspector, and the opening-message field in General settings. `ThemedTextField` itself was
+inspector, and the opening-message field in General settings (now on the Chats page). `ThemedTextField` itself was
 measured first and cleared: drawing one costs **0.086 ms**, an order of magnitude *less* than a
 stock `NSTextField` at 0.826 ms, and a full keystroke through the field editor including redraw is
 0.317 ms. The component was never the cost. Both fields were slow for the same structural reason
@@ -5542,3 +5542,37 @@ The final optimized scroll passes remained flat: 30-day programmatic work p95 wa
 All three passes in each mode traversed content and returned to the top. Thus the supported
 improvement is the chart's mount cost, not a demonstrated simulator scrolling FPS increase.
 Real-shell Neo Brutalism and custom-dark evidence was inspected after the renderer change.
+
+### Automation catalogue and clock bounds
+
+The recurring automation gate is documented in [triggers.md](triggers.md#recurring-automations-and-controller-ownership).
+Local configuration is capped at 500 definitions; presentation builds 25 rows plus heading and
+navigation. `AutomationShellRenderTests` supplies the opt-in 500-definition stress fixture through
+the real window (`THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast
+-only-testing:ThreadingTests/AutomationShellRenderTests`). Store-change bursts coalesce before loading a new page. History uses a keyset
+cursor and a trigger/rowid index; active counts use a trigger/state index. Clock scans use only the
+indexed due table and reserve at most 32 local or eight controller occurrences per pass, with no
+history decoding or missed-period expansion. Remote reads have controller page/byte limits and a
+2 MiB, single-request SSH capture boundary.
+
+The mobile terminal control decoder also returns typed ended/error messages from a worker. The
+socket loop awaits each decode and rechecks its connection generation before applying it; the
+serial demo-wire lane preserves the same order. The macOS architecture/latency gate and iOS build
+passed. Focused iOS runtime tests could not launch in CoreSimulator on this machine; that runtime
+verification remains outstanding.
+
+
+## Portable theme gradient scaling contract
+
+Expected and stress theme cardinality are 2 and 8 gradient stops; malformed larger arrays are
+refused before native color conversion or sorting. The dashboard owns one stationary gradient
+layer for 20 ordinary rows and the existing 1,000-row stress catalogue. Two fixed five-keyframe
+compositor tracks animate endpoints, with zero application frame callbacks or per-frame row
+work. Layout changes resize one layer in O(1). Theme replacement sorts at most eight values;
+unchanged catalogue refreshes preserve the animation. No image bytes or asset I/O join this path.
+
+Hidden/detached Mac surfaces and non-presented/inactive iPhone dashboards remove the repeating
+animation. Reduce Motion and Low Power Mode retain a still gradient. Tests exercise the actual
+dashboard collection at both cardinalities and require one backdrop layer, fewer than 40 mounted
+native cells and zero hosted row content. Device energy and frame-tail measurements remain a
+separate verification obligation; structural bounds alone do not establish battery cost.

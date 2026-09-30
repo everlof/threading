@@ -657,3 +657,33 @@ easy to mistake for one. The mark carries weight as well as colour now.
 
 `visible` is deliberately unnoted: it reports what is already on screen, so there is nothing hidden
 to disclose.
+
+## Exact app scope and strict filtering (September 2026)
+
+The user-facing default is now **Matches only**, with **Show context** as an explicit choice.
+Typing in the filter returns to strict mode; the agent's existing focus action explicitly selects
+context mode and leaves its visible receipt. An exact process menu distinguishes an app's own
+output from system daemons merely mentioning its name. It is learned incrementally from observed
+rows and capped at 512 names, not rebuilt on each drain. Source controls and filter controls occupy
+separate fixed-height rows using existing design components.
+
+Selecting a process restarts the reader with that scope and clears the live ring. Physical-device
+readers discard other processes after decoding but **before** enqueueing or recording; the phone
+still sends its full stream. Simulator readers also pass a safely quoted predicate upstream.
+An unrelated decoded row still proves the structured transport is healthy, so a quiet selected app
+does not falsely trigger legacy fallback. Returning to All processes restores whole-device input.
+Previously recorded history remains searchable; process scope changes future collection.
+
+Strict filtering scans only incoming rows during a drain. Changing the query scans the fixed
+50,000-row snapshot off-main, checks cancellation every 128 rows, and applies only the latest
+generation. Catch-up on main is capped at 2,048 rows; falling further behind starts a new snapshot.
+Projection values and index shifts remain bounded by the ring; the table still constructs viewport
+cells only. Context folding retains the existing synchronous agent receipt contract. Device identity,
+reader lifecycle, bounds and history remain host-owned; this does not introduce extension authority.
+
+The focused app suite passed 37 tests (two opt-in hardware probes skipped). The full optimized
+plugin suite passed 92 tests (one hardware probe skipped), measuring 12,077 recorded rows/second
+and 2.6 ms worst-of-five for a 50,000-row focus layout. Earlier Debug performance runs on the
+concurrently building Mac missed the existing timing budgets; those budgets were not relaxed.
+The line reader also serializes its end notification after stdout delivery: otherwise a fast
+exit could trigger fallback before its first decoded row or make a final batch appear missing.

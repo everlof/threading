@@ -560,36 +560,43 @@ final class AppSettingDefinitionTests: XCTestCase {
             rows.sorted { $0.catalogueOrder < $1.catalogueOrder }.map(\.rowAnchor)
         }
         XCTAssertEqual(actual["general"], [
-            "New sessions use", "Name sessions after the agent's own title",
-            "Sort sessions by", "Sort direction", "Show five chats per project",
-            "Group sessions by branch", "Compact tree", "Follow the checkout's branch",
-            "Discover project icons", "Discover account avatars", "Claude sessions start in",
-            "Codex sessions start in", "Before the task you write",
-            "After the task you write",
-            "Include files outside the project",
-            "Keep the page as it was before each agent action",
             "Reopen the last session at launch", "Bring back at launch",
             "Stop idle agents after", "Keep idle agents running", "Hidden extension messages",
+            "Updates you receive", "Check for updates automatically",
+            "Keep this Mac awake while agents work"
+        ])
+        // The four pages General was split into, each in the order it draws.
+        XCTAssertEqual(actual["sidebar"], [
+            "Sort sessions by", "Sort direction", "Show five chats per project",
+            "Group sessions by branch", "Follow the checkout's branch", "Compact tree",
+            "Unhide projects when writing in their chats",
+            "Name sessions after the agent's own title", "Discover project icons",
+            "Discover account avatars"
+        ])
+        XCTAssertEqual(actual["chats"], [
+            "New sessions use", "New sessions start in", "Claude sessions start in",
+            "Codex sessions start in", "Before the task you write", "After the task you write",
+            "Include files outside the project",
+            "Keep the page as it was before each agent action"
+        ])
+        XCTAssertEqual(actual["notifications"], [
             "Notify when a session needs you", "Alert sound", "Sounds for each alert",
-            "Bell sound", "Sounds for each bell", "Silence every sound",
-            "New sessions start in", "Remote Control for new Claude sessions",
+            "Bell sound", "Sounds for each bell", "Silence every sound"
+        ])
+        XCTAssertEqual(actual["integration"], [
             "Report Claude turn and subagent activity",
             "Hide Claude's status line in Threading terminals",
-            "Scrolling in new Claude terminals", "Report Codex turn boundaries",
-            "Skip Codex hook review", "Updates you receive",
-            "Check for updates automatically",
-            "Keep this Mac awake while agents work",
-            "Unhide projects when writing in their chats"
+            "Remote Control for new Claude sessions", "Scrolling in new Claude terminals",
+            "Report Codex turn boundaries", "Skip Codex hook review"
         ])
         XCTAssertEqual(actual["keyboard"], [
             "When writing a prompt, press Return to", "Reset Shortcuts"
         ])
         XCTAssertEqual(actual["themes"], [
-            "App theme", "Custom themes", "Classic skins", "Text size", "App font",
-            "Conversation font"
+            "App theme", "Classic skins", "Text size", "App font", "Conversation font"
         ])
         XCTAssertEqual(actual["profiles"], [
-            "Font", "Style", "Blinking cursor", "Keep backgrounds in tune with the theme",
+            "Font", "Cursor style", "Blinking cursor", "Keep backgrounds in tune with the theme",
             "Lines kept", "Copy selected text to the clipboard",
             "Convert dropped images agents can't open"
         ])
@@ -630,17 +637,16 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Files & Folders", "Notifications", "Accessibility", "Screen Recording",
             "Live usage from your Claude login"
         ])
-        // The background host's rows are ordered after Start Over
-        // deliberately: the page reads as "where things are, how to start over, and what is still
-        // running when Threading is not". The two command-line-tool rows close it out, because
-        // reaching the daemon from a terminal is the last thing in that sentence. Internal builds
-        // then append the deliberately secluded developer-only service identity.
+        // Advanced reads top to bottom as what Threading sends or accepts about itself, what
+        // keeps running when it does not, where it keeps things, and last the buttons with a
+        // real blast radius. Internal builds then append the deliberately secluded
+        // developer-only service identity.
         var expectedAdvanced = [
-            "Allow paired-iPhone checkups", "Share crash & performance reports", "Settings",
-            "Projects, sessions and caches",
+            "Share crash & performance reports", "Allow paired-iPhone checkups",
+            "Background host", "Turn off the background host", "Command line tool",
+            "Tools in Threading's terminals", "Settings", "Projects, sessions and caches",
             "First-launch walkthrough", "Run at next launch", "Reset settings",
-            "Reset everything", "Background host", "Turn off the background host",
-            "Command line tool", "Tools in Threading's terminals"
+            "Reset everything"
         ]
 #if DEBUG || THREADING_INTERNAL
         expectedAdvanced.append("Hosted service")

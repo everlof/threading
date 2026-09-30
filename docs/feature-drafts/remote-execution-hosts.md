@@ -7,7 +7,8 @@
 > [The developer version](#the-developer-version-2026-09-17) and
 > [Hooks and tools, as built](#hooks-and-tools-as-built-2026-09-17)).
 > The remote-session spike (below) ran on 2026-09-17 and settles slice 2's transport, install and
-> upgrade shape. Slice 5 has not started. This is the implementation plan for slice C of
+> upgrade shape. Slice 5 includes transcript mirroring, mirrored usage, and uncommitted Git
+> Review; its remaining surfaces are described below. This is the implementation plan for slice C of
 > [SSH remote hosts and SFTP attachment sources](ssh-remote-hosts-and-sftp-attachments.md#c-remote-execution-host),
 > pulled forward and cut so its first slices do not wait on SFTP.
 
@@ -553,10 +554,43 @@ With the Mac as authority, an agent **keeps running** while the Mac sleeps — t
 daemon is for — but hooks, MCP, scheduled messages, triggers, limit recovery and curfew live in
 the Mac app and wait for it. That is the right first product.
 
-A machine that acts on its own schedule while every Mac is asleep is a different product: the
-scheduler and `threading-triggerd` would run on Linux, and the phone would reach the host directly.
-It depends on the headless-core slices of [Native Linux host and UI](linux-host-runtime.md) and is
-not part of this plan. Decide separately, with evidence of demand.
+A machine that dispatches new work while every Mac is asleep needs a host-side controller.
+The portable work/question/delivery store, owner CLI, ptyd dispatch and execution-scoped tools
+are implemented in [Autonomous host controller](../architecture/autonomous-controller.md).
+Resident queue supervision is implemented; time/event scheduling and authenticated remote control
+remain unimplemented. They can reuse the headless-core work in
+[Native Linux host and UI](linux-host-runtime.md), but need no Linux GUI and do not require
+direct phone access as a first step. Keep scheduling and session policy outside `threading-ptyd`.
+
+### Operating from the execution host, 2026-09-30
+
+The first real VPS setup adds a concrete use case: start agents from the Mac, leave them running,
+and also inspect or interact with them from a shell on the VPS. Machine provisioning belongs to
+that deployment's infrastructure repository; any session controller or CLI belongs to Threading
+and must work on an arbitrary supported host.
+
+The existing daemon and SSH transport suffice for Mac-owned sessions. The shipped daemon CLI
+offers `status`, `sessions --json`, `journal`, and `stop`. The controller
+CLI now adds `attach` and `send` using the shared `ThreadingPTYClient` package. Its input, replay,
+resize and buffering contracts live in [PTY host architecture](../architecture/pty-host.md#controlling-a-held-terminal-from-a-shell).
+These source changes are not yet installed on the VPS. The remaining needs are distinct:
+
+- **Interact with a held session.** Implemented as `attach` (live-only, read-only by default;
+  explicit `--input` and `--resize`) and bounded stdin `send [--enter]`. Detaching leaves the
+  child running. This is raw terminal control, not provider-aware turn submission or a scheduler.
+- **Start a session on the host and find it on the Mac.** This needs a durable session catalogue,
+  provider identity, project/path mapping and discovery/adoption in Threading. A bare protocol
+  spawn does not create the Mac's project/session record. Do not claim a process is an imported
+  conversation merely because the daemon lists it.
+- **Dispatch work unattended.** A persistent general controller can own queues, schedules,
+  authority and recovery, using `ptyd` for execution. Give it durable receipts and explicit
+  offline behavior for tools that currently route back to a Mac. Avoid a VPS-specific scheduler
+  or teaching the daemon about projects and policy.
+
+Connection, disconnect survival and reattach are verified on the deployed host. The controller
+CLI is verified separately against a disposable VPS daemon. The next layer is the durable
+host-side session catalogue and Mac adoption path. A daemon restart brings back the service,
+not its previous children or their tasks.
 
 ## Scaling gate
 

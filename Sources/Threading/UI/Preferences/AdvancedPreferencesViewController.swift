@@ -107,70 +107,67 @@ final class AdvancedPreferencesViewController: NSViewController {
     private func rebuild() {
         view.subviews.forEach { $0.removeFromSuperview() }
 
+        // Four sections, in the order the catalogue reports them — a settings row's order is a
+        // wire fact, and `AppSettingDefinitionTests` pins it. What Threading sends or accepts
+        // about itself comes first; then what keeps running when Threading does not; then where
+        // it keeps things; and last the one card of buttons with a real blast radius, so nobody
+        // meets Reset Everything while looking for a crash-report switch. Internal builds append
+        // their deliberately secluded developer section below.
         var sections: [NSView] = [
-            SettingsUI.note(AdvancedStrings.explanation),
             SettingsUI.section(
-                AdvancedStrings.sentryDiagnosticsSection,
-                SettingsCard(rows: sentryDiagnosticsRows())
-            ),
-            SettingsUI.section(
-                AdvancedStrings.localDiagnosticsSection,
-                SettingsCard(rows: localDiagnosticsRows())
+                AdvancedStrings.diagnosticsSection,
+                SettingsCard(rows: sentryDiagnosticsRows() + localDiagnosticsRows())
             ),
             SettingsUI.section(
                 AdvancedStrings.iphoneToolingSection,
                 SettingsCard(rows: [iphoneToolingRow()])
             ),
-            SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: locationRows())),
-            SettingsUI.section(AdvancedStrings.tourSection, SettingsCard(rows: [
-                resetRow(
-                    title: AdvancedStrings.tourTitle,
-                    detail: AdvancedStrings.tourDetail,
-                    button: AdvancedStrings.tourButton,
-                    action: #selector(showWelcomeTour)
-                ),
-                resetRow(
-                    title: AdvancedStrings.tourFlagTitle,
-                    detail: OnboardingState.isRecorded
-                        ? AdvancedStrings.tourFlagRecordedDetail
-                        : AdvancedStrings.tourFlagClearedDetail,
-                    button: AdvancedStrings.tourFlagButton,
-                    action: #selector(clearOnboardingFlag)
-                )
-            ])),
-            SettingsUI.section(AdvancedStrings.authoritySection, SettingsCard(rows: [
-                resetRow(
-                    title: AdvancedStrings.managerRolesTitle,
-                    detail: AdvancedStrings.managerRolesDetail,
-                    button: AdvancedStrings.revokeManagersButton,
-                    action: #selector(revokeAllManagerRoles)
-                )
-            ])),
-            SettingsUI.section(AdvancedStrings.resetSection, SettingsCard(rows: [
-                resetRow(
-                    title: AdvancedStrings.resetSettingsTitle,
-                    detail: AdvancedStrings.resetSettingsDetail,
-                    button: AdvancedStrings.resetSettingsButton,
-                    action: #selector(resetSettings)
-                ),
-                resetRow(
-                    title: AdvancedStrings.resetEverythingTitle,
-                    detail: AdvancedStrings.resetEverythingDetail,
-                    button: AdvancedStrings.resetEverythingButton,
-                    action: #selector(resetEverything)
-                )
-            ])),
-            // Last in the ordinary page, and in the order the catalogue reports it. A settings
-            // row's order is a wire fact — `AppSettingDefinitionTests` pins it — so a section
-            // appended to the definitions is a section appended to the page, rather than two
-            // orders to keep in step. It also reads correctly: this is the page about what
-            // Threading keeps, and this is the part of it that keeps running when Threading does
-            // not. Internal builds append their deliberately secluded developer section below.
             SettingsUI.section(
                 AdvancedStrings.backgroundSessionsSection,
                 backgroundSessionsSection()
             ),
-            SettingsUI.note(AdvancedStrings.keptNote)
+            SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: locationRows())),
+            SettingsUI.section(
+                AdvancedStrings.resetSection,
+                SettingsCard(rows: [
+                    resetRow(
+                        title: AdvancedStrings.tourTitle,
+                        detail: AdvancedStrings.tourDetail,
+                        button: AdvancedStrings.tourButton,
+                        action: #selector(showWelcomeTour)
+                    ),
+                    resetRow(
+                        title: AdvancedStrings.tourFlagTitle,
+                        detail: OnboardingState.isRecorded
+                            ? AdvancedStrings.tourFlagRecordedDetail
+                            : AdvancedStrings.tourFlagClearedDetail,
+                        button: AdvancedStrings.tourFlagButton,
+                        action: #selector(clearOnboardingFlag)
+                    ),
+                    resetRow(
+                        title: AdvancedStrings.managerRolesTitle,
+                        detail: AdvancedStrings.managerRolesDetail,
+                        button: AdvancedStrings.revokeManagersButton,
+                        action: #selector(revokeAllManagerRoles)
+                    ),
+                    resetRow(
+                        title: AdvancedStrings.resetSettingsTitle,
+                        detail: AdvancedStrings.resetSettingsDetail,
+                        button: AdvancedStrings.resetSettingsButton,
+                        action: #selector(resetSettings)
+                    ),
+                    resetRow(
+                        title: AdvancedStrings.resetEverythingTitle,
+                        detail: AdvancedStrings.resetEverythingDetail,
+                        button: AdvancedStrings.resetEverythingButton,
+                        action: #selector(resetEverything)
+                    )
+                ]),
+                help: HelpTopic(
+                    title: AdvancedStrings.resetSection,
+                    paragraphs: [AdvancedStrings.keptNote]
+                )
+            )
         ]
 #if DEBUG || THREADING_INTERNAL
         sections.append(SettingsUI.section(
@@ -179,7 +176,11 @@ final class AdvancedPreferencesViewController: NSViewController {
         ))
 #endif
 
-        let page = SettingsUI.page(title: "Advanced", sections: sections)
+        let page = SettingsUI.page(
+            title: "Advanced",
+            summary: AdvancedStrings.explanation,
+            sections: sections
+        )
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -211,8 +212,13 @@ final class AdvancedPreferencesViewController: NSViewController {
         return [
             SettingsUI.row(
                 title: AdvancedStrings.localDiagnosticsTitle,
-                subtitle: AdvancedStrings.localDiagnosticsDetail,
-                control: toggle
+                subtitle: AdvancedStrings.localDiagnosticsSummary,
+                help: HelpTopic(
+                    title: AdvancedStrings.localDiagnosticsTitle,
+                    paragraphs: [AdvancedStrings.localDiagnosticsDetail]
+                ),
+                control: toggle,
+                localizes: false
             ),
             row(
                 title: AdvancedStrings.localDiagnosticsCacheTitle,
@@ -232,8 +238,13 @@ final class AdvancedPreferencesViewController: NSViewController {
         return [
             SettingsUI.row(
                 title: AdvancedStrings.sentryDiagnosticsTitle,
-                subtitle: AdvancedStrings.sentryDiagnosticsDetail,
-                control: toggle
+                subtitle: AdvancedStrings.sentryDiagnosticsSummary,
+                help: HelpTopic(
+                    title: AdvancedStrings.sentryDiagnosticsTitle,
+                    paragraphs: [AdvancedStrings.sentryDiagnosticsDetail]
+                ),
+                control: toggle,
+                localizes: false
             )
         ]
     }
@@ -344,19 +355,33 @@ final class AdvancedPreferencesViewController: NSViewController {
         let card = SettingsCard(rows: [
             SettingsUI.row(
                 title: AdvancedStrings.backgroundHostTitle,
-                subtitle: AdvancedStrings.backgroundHostDetail,
-                control: backgroundHostToggle()
+                subtitle: AdvancedStrings.backgroundHostSummary,
+                help: HelpTopic(
+                    title: AdvancedStrings.backgroundHostTitle,
+                    paragraphs: [AdvancedStrings.backgroundHostDetail]
+                ),
+                control: backgroundHostToggle(),
+                localizes: false
             ),
             row(
                 title: AdvancedStrings.backgroundHostOffTitle,
-                detail: backgroundHostRemoval ?? AdvancedStrings.backgroundHostOffDetail,
+                detail: backgroundHostRemoval ?? AdvancedStrings.backgroundHostOffSummary,
+                help: HelpTopic(
+                    title: AdvancedStrings.backgroundHostOffTitle,
+                    paragraphs: [AdvancedStrings.backgroundHostOffDetail]
+                ),
                 button: backgroundHostOffButton()
             ),
             commandLineToolRow(),
             SettingsUI.row(
                 title: AdvancedStrings.commandLineToolsPATHTitle,
-                subtitle: AdvancedStrings.commandLineToolsPATHDetail,
-                control: commandLineToolsPATHToggle()
+                subtitle: AdvancedStrings.commandLineToolsPATHSummary,
+                help: HelpTopic(
+                    title: AdvancedStrings.commandLineToolsPATHTitle,
+                    paragraphs: [AdvancedStrings.commandLineToolsPATHDetail]
+                ),
+                control: commandLineToolsPATHToggle(),
+                localizes: false
             )
         ])
 
@@ -519,38 +544,22 @@ final class AdvancedPreferencesViewController: NSViewController {
         )
     }
 
+    /// The page's rows with a button, through the shared kit so they wrap, adapt to a narrow
+    /// pane and carry a "?" exactly as every other settings row does. The strings arrive
+    /// already localized from `AdvancedStrings` or are paths, hence `localizes: false`.
     private func row(
         title: String,
         detail: String,
+        help: HelpTopic? = nil,
         button: ThemedButton
     ) -> NSView {
-        let titleField = NSTextField(labelWithString: title)
-        titleField.applyFont(.body)
-        titleField.textColor = Design.Text.label
-
-        let detailField = NSTextField(wrappingLabelWithString: detail)
-        detailField.applyFont(.subheading)
-        detailField.textColor = Design.Text.secondary
-
-        let labels = NSStackView(views: [titleField, detailField])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let content = NSStackView(views: [labels, button])
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.distribution = .fill
-        content.spacing = Design.Spacing.medium
-
-        let container = SettingsUI.fullRow(content)
-        // Hand-built rather than `SettingsUI.row`, so the search anchor is stated here.
-        SettingsRowAnchor.tag(container, title: title)
-        return container
+        SettingsUI.row(
+            title: title,
+            subtitle: detail,
+            help: help,
+            control: button,
+            localizes: false
+        )
     }
 
     /// `~` rather than `/Users/<name>`, which is both shorter and the form a user can paste.
@@ -794,12 +803,15 @@ final class AdvancedPreferencesViewController: NSViewController {
 enum AdvancedStrings {
     static var title: String { L10n.string("Advanced") }
     static var explanation: String {
-        L10n.string("Where Threading keeps your settings and your work, and how to start over.")
+        L10n.string("Diagnostics, background sessions, where your data lives, and how to start over.")
     }
 
-    static var sentryDiagnosticsSection: String { L10n.string("App Diagnostics") }
+    static var diagnosticsSection: String { L10n.string("Diagnostics") }
     static var sentryDiagnosticsTitle: String {
         L10n.string("Share crash & performance reports")
+    }
+    static var sentryDiagnosticsSummary: String {
+        L10n.string("Crashes, hangs and traces go to Sentry — never prompts, output or paths.")
     }
     static var sentryDiagnosticsDetail: String {
         L10n.string(
@@ -809,9 +821,11 @@ enum AdvancedStrings {
         )
     }
 
-    static var localDiagnosticsSection: String { L10n.string("Local Diagnostics") }
     static var localDiagnosticsTitle: String {
         L10n.string("Allow paired-iPhone checkups")
+    }
+    static var localDiagnosticsSummary: String {
+        L10n.string("Accepts connection evidence from your paired iPhone.")
     }
     static var localDiagnosticsDetail: String {
         L10n.string(
@@ -890,6 +904,9 @@ enum AdvancedStrings {
 
     static var backgroundSessionsSection: String { L10n.string("Background Sessions") }
     static var backgroundHostTitle: String { L10n.string("Background host") }
+    static var backgroundHostSummary: String {
+        L10n.string("Keeps agents running while Threading is closed. Still experimental.")
+    }
     static var backgroundHostDetail: String {
         L10n.string(
             "Runs each agent's terminal in a helper that keeps working while Threading is closed, "
@@ -898,6 +915,9 @@ enum AdvancedStrings {
         )
     }
     static var backgroundHostOffTitle: String { L10n.string("Turn off the background host") }
+    static var backgroundHostOffSummary: String {
+        L10n.string("Stops using the helper and removes it from Login Items.")
+    }
     static var backgroundHostOffDetail: String {
         L10n.string(
             "Stops using the helper and removes it from Login Items. Sessions it is still holding "
@@ -975,6 +995,9 @@ enum AdvancedStrings {
     static var commandLineToolRemoveButton: String { L10n.string("Remove") }
 
     static var commandLineToolsPATHTitle: String { L10n.string("Tools in Threading's terminals") }
+    static var commandLineToolsPATHSummary: String {
+        L10n.string("Puts threading-ptyd on the PATH of terminals Threading starts.")
+    }
     static var commandLineToolsPATHDetail: String {
         L10n.string(
             "Puts Threading's command line tools on the PATH of every terminal and agent it "
@@ -983,7 +1006,6 @@ enum AdvancedStrings {
         )
     }
 
-    static var tourSection: String { L10n.string("Welcome Tour") }
     static var tourTitle: String { L10n.string("First-launch walkthrough") }
     static var tourDetail: String {
         L10n.string(
@@ -1005,7 +1027,6 @@ enum AdvancedStrings {
     }
     static var tourFlagButton: String { L10n.string("Clear Flag") }
 
-    static var authoritySection: String { L10n.string("Agent Authority") }
     static var managerRolesTitle: String { L10n.string("Manager roles") }
     static var managerRolesDetail: String {
         L10n.string(

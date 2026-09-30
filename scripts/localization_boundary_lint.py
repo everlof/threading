@@ -64,6 +64,7 @@ LOCALIZING_CALLS: dict[str, tuple[str | int, ...]] = {
     "SettingsUI.button": (0,),
     "SettingsUI.row": ("title", "subtitle"),
     "SettingsUI.detailRow": ("title", "detail"),
+    "SettingsUI.help": tuple(range(8)),
 }
 
 # Component Gallery is developer-facing UI, but still ships in the app. Its local helpers apply

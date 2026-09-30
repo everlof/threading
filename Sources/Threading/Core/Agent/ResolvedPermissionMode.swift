@@ -22,7 +22,7 @@ struct ResolvedPermissionMode: Equatable {
     /// differently: two of them are settings the user can go and change, and two are reports
     /// about what happened, which may not describe the next launch.
     enum Source: Equatable {
-        /// Threading's own Settings ▸ General default, which becomes `--permission-mode` on the
+        /// Threading's own Settings ▸ Chats default, which becomes `--permission-mode` on the
         /// launch line and therefore outranks anything the runtime would have chosen.
         case appDefault
         /// The runtime's own configuration: Claude's `permissions.defaultMode` across its

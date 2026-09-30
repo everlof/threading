@@ -104,53 +104,56 @@ final class ProfilePreferencesViewController: NSViewController {
     // MARK: - Setup
 
     private func setupLayout() {
-        let text = SettingsCard(rows: [
-            SettingsUI.row(title: "Font", control: fontButton)
-        ])
-
-        let cursor = SettingsCard(rows: [
-            SettingsUI.row(title: "Style", control: cursorStylePopup),
-            SettingsUI.row(title: "Blinking cursor", control: cursorBlinkToggle)
-        ])
-
-        let scrollback = SettingsCard(rows: [
-            SettingsUI.row(title: "Lines kept",
-                           subtitle: "Number of output lines retained above the visible screen.",
-                           control: scrollbackField)
-        ])
-
-        let colour = SettingsCard(rows: [
+        // Two cards rather than a caption per row: how the terminal's text looks, and what it
+        // does with what you select, drop and scroll past. Seven one-row sections made the
+        // captions outnumber the settings.
+        let textAndColour = SettingsCard(rows: [
+            SettingsUI.row(title: "Font", control: fontButton),
+            SettingsUI.row(title: "Cursor style", control: cursorStylePopup),
+            SettingsUI.row(title: "Blinking cursor", control: cursorBlinkToggle),
             SettingsUI.row(
                 title: "Keep backgrounds in tune with the theme",
-                subtitle: "Programs that paint their own 24-bit backgrounds — an agent's diff, "
-                    + "for one — pick colours for a generic terminal. This eases them toward "
-                    + "the palette without changing how light they are, so their text stays "
-                    + "exactly as readable.",
+                subtitle: "Eases programs' own backgrounds toward the palette.",
+                help: SettingsUI.help(
+                    "Keep backgrounds in tune with the theme",
+                    "Programs that paint their own 24-bit backgrounds — an agent's diff, for one "
+                        + "— pick colours for a generic terminal. This eases them toward the "
+                        + "palette without changing how light they are, so their text stays "
+                        + "exactly as readable."
+                ),
                 control: backgroundHarmonyToggle
             )
         ])
 
-        let drops = SettingsCard(rows: [
-            SettingsUI.row(
-                title: "Convert dropped images agents can't open",
-                subtitle: "A photo out of Finder is a HEIC and a scan is often a TIFF, and "
-                    + "neither agent reads either — so one is written out as a PNG first, "
-                    + "keeping its name, and the agent is handed that. Turn this off to give "
-                    + "the agent the file itself, which is what you want when the format is "
-                    + "the thing you are working on. The shell drawer never converts.",
-                control: droppedImageToggle
-            )
-        ])
-
-        let selection = SettingsCard(rows: [
+        let behaviour = SettingsCard(rows: [
+            SettingsUI.row(title: "Lines kept",
+                           subtitle: "Number of output lines retained above the visible screen.",
+                           control: scrollbackField),
             SettingsUI.row(
                 title: "Copy selected text to the clipboard",
-                subtitle: "Selecting with the mouse copies, the way it does in a Linux "
-                    + "terminal — no ⌘C afterwards. macOS keeps one clipboard rather than a "
-                    + "separate selection, so this replaces what you copied last, which is why "
-                    + "it is off until you ask for it. Selecting nothing changes nothing, and "
-                    + "programs that track the mouse themselves keep taking the drag.",
+                subtitle: "Selecting with the mouse copies, as in a Linux terminal.",
+                help: SettingsUI.help(
+                    "Copy selected text to the clipboard",
+                    "No ⌘C afterwards. macOS keeps one clipboard rather than a separate "
+                        + "selection, so this replaces what you copied last, which is why it is "
+                        + "off until you ask for it. Selecting nothing changes nothing, and "
+                        + "programs that track the mouse themselves keep taking the drag."
+                ),
                 control: copyOnSelectToggle
+            ),
+            SettingsUI.row(
+                title: "Convert dropped images agents can't open",
+                subtitle: "HEIC and TIFF are handed over as PNG.",
+                help: SettingsUI.help(
+                    "Convert dropped images agents can't open",
+                    "A photo out of Finder is a HEIC and a scan is often a TIFF, and neither "
+                        + "agent reads either — so one is written out as a PNG first, keeping its "
+                        + "name, and the agent is handed that.",
+                    "Turn this off to give the agent the file itself, which is what you want "
+                        + "when the format is the thing you are working on. The shell drawer "
+                        + "never converts."
+                ),
+                control: droppedImageToggle
             )
         ])
 
@@ -159,12 +162,8 @@ final class ProfilePreferencesViewController: NSViewController {
         ])
 
         let page = SettingsUI.page(title: "Profiles", sections: [
-            SettingsUI.section("Text", text),
-            SettingsUI.section("Cursor", cursor),
-            SettingsUI.section("Colour", colour),
-            SettingsUI.section("Scrollback", scrollback),
-            SettingsUI.section("Selection", selection),
-            SettingsUI.section("Dropped files", drops),
+            SettingsUI.section("Text & Colour", textAndColour),
+            SettingsUI.section("Behaviour", behaviour),
             SettingsUI.section("Preview", preview)
         ], hostPage: .profiles)
 

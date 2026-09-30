@@ -424,6 +424,83 @@ final class ThemeSettingsRenderTests: XCTestCase {
         XCTAssertTrue(accent.isEditable, "the duplicate did not unlock the editor")
     }
 
+    /// The duplicate and trash buttons act on the theme the picker names, so they sit on its row
+    /// and their Help Tags name it. On a row of their own, under a sentence about duplicating
+    /// built-ins, they read as page-wide actions and nothing said what the trash would delete.
+    @MainActor
+    func testAppThemeActionsSitBesideThePickerAndNameItsTheme() throws {
+        let previous = AppThemeLibrary.current
+        let custom = try AppThemeLibrary.duplicate(
+            AppThemeStyles.dracula,
+            name: "Actions Fixture \(UUID().uuidString.prefix(8))"
+        )
+        defer {
+            AppThemeLibrary.apply(previous)
+            _ = AppThemeLibrary.delete(custom)
+        }
+
+        AppThemeLibrary.apply(custom)
+        let controller = ThemePreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth, height: Render.height)
+
+        let duplicate = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.themes.duplicate-app-theme"
+            ) as? ThemedButton
+        )
+        let delete = try XCTUnwrap(
+            descendant(
+                in: controller.view,
+                accessibilityIdentifier: "settings.themes.delete-app-theme"
+            ) as? ThemedButton
+        )
+        let group = try XCTUnwrap(delete.superview as? NSStackView)
+        XCTAssertTrue(group.arrangedSubviews.first is ThemedPopUp, "the actions left the picker's row")
+        XCTAssertTrue(group.arrangedSubviews.contains(duplicate))
+        XCTAssertEqual(controller.selectedAppThemeIDForTesting, custom.id)
+
+        XCTAssertTrue(delete.isEnabled, "a custom theme could not be deleted")
+        XCTAssertEqual(delete.toolTip, L10n.format("Delete “%@”", custom.name))
+        XCTAssertEqual(duplicate.toolTip, L10n.format("Duplicate “%@”", custom.name))
+        XCTAssertEqual(
+            delete.accessibilityLabel(),
+            L10n.string("Delete App Theme"),
+            "the Help Tag renamed the button for VoiceOver"
+        )
+
+        AppThemeLibrary.apply(AppThemeStyles.dracula)
+        XCTAssertEqual(controller.selectedAppThemeIDForTesting, AppThemeStyles.dracula.id)
+        XCTAssertFalse(delete.isEnabled, "a built-in theme offered to be deleted")
+        XCTAssertEqual(duplicate.toolTip, L10n.format("Duplicate “%@”", AppThemeStyles.dracula.name))
+    }
+
+    /// The confirmation used to promise System while deletion switched to the product default.
+    /// Read the sentence, delete, and check the app is wearing the theme the sentence named.
+    @MainActor
+    func testDeletingAnAppThemeLandsOnTheThemeItsConfirmationNames() throws {
+        let previous = AppThemeLibrary.current
+        let custom = try AppThemeLibrary.duplicate(
+            AppThemeStyles.dracula,
+            name: "Delete Fixture \(UUID().uuidString.prefix(8))"
+        )
+        defer {
+            AppThemeLibrary.apply(previous)
+            if AppThemeLibrary.isCustom(custom) { _ = AppThemeLibrary.delete(custom) }
+        }
+
+        AppThemeLibrary.apply(custom)
+        let request = ThemePreferencesViewController.deleteAppThemeRequest(for: custom)
+
+        XCTAssertTrue(AppThemeLibrary.delete(custom))
+        XCTAssertNotEqual(AppThemeLibrary.current.id, custom.id)
+        XCTAssertEqual(
+            request.message,
+            L10n.format("The app will switch to the %@ theme.", AppThemeLibrary.current.name),
+            "the confirmation named a theme the app did not switch to"
+        )
+    }
+
     @MainActor
     func testAColorEditAppliesToTheActiveThemeImmediately() throws {
         let previous = AppThemeLibrary.current

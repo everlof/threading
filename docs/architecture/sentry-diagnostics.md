@@ -93,7 +93,8 @@ belong in the CI secret store, never source control. The shipping contract is:
   commit range and uploads the same archive's dSYMs plus developer source context;
 - `scripts/publish_release.sh` records the deploy only after the GitHub release and Sparkle feed
   are live (`production`, `beta` or `nightly`); and
-- `SENTRY_AUTH_TOKEN` comes from the release machine or GitHub Actions secret store. The release
+- Local release credentials come from the ignored repository `.sentryclirc` or this Mac's
+  login Keychain. Existing CI lanes use their injected `SENTRY_AUTH_TOKEN`. The release
   fails loudly if the token, CLI, dSYM or server-side processing is missing.
 
 `scripts/sentry-release.sh` is the shared implementation for local and GitHub release lanes.
@@ -108,6 +109,22 @@ Before creating remote state, the script lists the configured organization and r
 selected project to be visible. It rejects credentials that `sentry-cli` reports as bound to a
 different organization, so an ambient token for another product cannot silently publish a
 Threading release elsewhere.
+
+Local invocations prefer this checkout's `.sentryclirc` over an ambient `SENTRY_AUTH_TOKEN`.
+The CLI reads the file from the repository root with the inherited token, URL and properties-file
+overrides removed only in its child process. This keeps another product's global credentials
+from shadowing Threading's token without changing the developer's shell. Keep the file untracked
+and owner-only (0600). Without that file, the script reads the login Keychain item with service
+`codes.threading.release.sentry` and account `threading`, and binds its token to
+`https://sentry.io`. That machine-level copy survives fresh clones and lost checkout-local
+configuration. An injected token is the final fallback, and the only source under `CI=true`.
+The login Keychain must be unlocked; a revoked token still needs replacement. To rotate the local
+credential, validate the replacement in `.sentryclirc`, then update that named Keychain item.
+Local release setup does not copy the token to GitHub. The trusted Mac builds and notarizes the
+app, and the publisher uploads the resulting artifacts.
+`scripts/sentry-release.sh check` verifies organization/project access without creating a release
+or uploading anything. The local publisher runs it during credential preflight and again before
+moving any public ref.
 
 A release is not verified until:
 

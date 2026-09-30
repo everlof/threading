@@ -34,6 +34,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     private let decor = NSView()
     private let gradientLayer = CAGradientLayer()
     private let imageLayer = CALayer()
+    private var motionView: ThemeBackdropMotionView?
     private let appEvents = AppEventObservations()
 
     // MARK: - Initialization
@@ -118,6 +119,8 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
 
     private func applyGradient(_ gradient: SidebarAppearance.Background.Gradient?) {
         guard let gradient else {
+            motionView?.stop()
+            motionView = nil
             gradientLayer.isHidden = true
             return
         }
@@ -132,6 +135,15 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         let direction = CGPoint(x: sin(radians) / 2, y: cos(radians) / 2)
         gradientLayer.startPoint = CGPoint(x: 0.5 - direction.x, y: 0.5 - direction.y)
         gradientLayer.endPoint = CGPoint(x: 0.5 + direction.x, y: 0.5 + direction.y)
+        if let drift = gradient.drift, drift.isValid {
+            let observer = motionView ?? ThemeBackdropMotionView(gradient: gradientLayer)
+            if observer.superview !== decor { decor.addSubview(observer) }
+            motionView = observer
+            observer.configure(angleDegrees: Double(gradient.angleDegrees), drift: drift)
+        } else {
+            motionView?.stop()
+            motionView = nil
+        }
     }
 
     private func applyImage(_ layer: SidebarAppearance.Background.ImageLayer?) {

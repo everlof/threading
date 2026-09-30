@@ -28,9 +28,10 @@ extension ConversationViewController {
         questionCards[request.id] = card
         questionOrder.append(request.id)
         refreshDecisionStatus()
-        transcript.append(PresentationItem(
-            id: .surface(.retained(request.id)), content: .surface(.retained(card))
-        ))
+        transcript.append(
+            PresentationItem(id: .surface(.retained(request.id)), content: .surface(.retained(card))),
+            arriving: true
+        )
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
         delegate?.conversationDidChangeActivity(self)
         // Use the same follow policy as incoming prose; a reader inspecting older work keeps

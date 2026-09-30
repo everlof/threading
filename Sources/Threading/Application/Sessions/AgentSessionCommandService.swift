@@ -221,7 +221,7 @@ final class AgentSessionCommandService {
             return .success("""
                 Named “\(name)”. The sidebar is set to ignore agent titles, so the row still \
                 reads “\(session.displayTitle)” until that is turned back on under \
-                Settings ▸ General.
+                Settings ▸ Sidebar.
                 """)
         }
 

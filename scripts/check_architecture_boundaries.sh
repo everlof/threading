@@ -624,14 +624,14 @@ fi
 # binary) and `CPTYHostPlatform`, its small C shim; those are the platform's spelling of
 # `Darwin`, not a new dependency. Its SwiftPM manifest and test target are the build, not the
 # daemon, and are not held to the list.
-if rg -n --pcre2 '^\s*(?:@[A-Za-z_]+\s+)?import\s+(?!(?:Foundation|Darwin|Glibc|Musl|CPTYHostPlatform|Dispatch|ThreadingPTYHostKit)\s*$)' \
+if rg -n --pcre2 '^\s*(?:@[A-Za-z_]+\s+)?import\s+(?!(?:Foundation|Darwin|Glibc|Musl|CPTYHostPlatform|Dispatch|ThreadingPTYHostKit|ThreadingPTYClient)\s*$)' \
   "${repository_directory}/Targets/PTYHost" \
   --glob '*.swift' \
   --glob '!Package.swift' \
   --glob '!**/Tests/**'; then
   echo "architecture-boundary: threading-ptyd may import only Foundation, Darwin (or Glibc, Musl" >&2
-  echo "  and CPTYHostPlatform on Linux), Dispatch and ThreadingPTYHostKit — the wire contract is" >&2
-  echo "  the only thing it shares with the app" >&2
+  echo "  and CPTYHostPlatform on Linux), Dispatch, ThreadingPTYHostKit and ThreadingPTYClient — only" >&2
+  echo "  wire values and transport are shared with the app" >&2
   failed=1
 fi
 

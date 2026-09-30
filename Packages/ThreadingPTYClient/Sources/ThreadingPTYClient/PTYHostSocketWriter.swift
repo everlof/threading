@@ -1,7 +1,11 @@
 #if os(Linux)
 import Dispatch
 import Foundation
+#if canImport(Glibc)
 import Glibc
+#else
+import Musl
+#endif
 
 /// Linux's socket-local SIGPIPE policy cannot be expressed through DispatchIO.write. Keep
 /// DispatchIO's read pump and serialize MSG_NOSIGNAL writes on a separate worker. The client

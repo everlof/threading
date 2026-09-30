@@ -176,6 +176,15 @@ final class MobileThemeCacheStore {
             }
 
             let material = record.theme.material
+            // A backdrop is optional decoration the renderer checks for itself
+            // (`hasValidGeometry`, `ThemeGradientDrift.isValid`) and simply does not draw when it
+            // cannot. A Mac on a newer build may state a range this one does not know, and that
+            // is not a corrupt archive: refusing it here stopped the whole theme being cached and
+            // told the user their saved themes had outgrown their storage. Its strings still count
+            // toward the archive's byte budget, which is what bounds it.
+            if let gradient = material.backdropGradient {
+                for stop in gradient.stops { try count(stop.color) }
+            }
             try validateGeometry(material.panelRadius)
             try validateGeometry(material.controlRadius)
             try validateGeometry(material.borderWidth)

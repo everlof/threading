@@ -154,9 +154,6 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         appEvents.observe(TriggerAssessmentDidFinish.self) { [weak self] event in
             self?.triggerAssessmentDidFinish(event)
         }
-        appEvents.observe(TriggerFixDidFinish.self) { [weak self] event in
-            self?.triggerFixDidFinish(event)
-        }
         appEvents.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.triggerRuntimeDidChange(event)
         }

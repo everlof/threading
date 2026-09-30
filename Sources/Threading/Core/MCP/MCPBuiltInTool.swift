@@ -86,6 +86,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case proposeStorageCleanup
   case proposeConversationRepair
   case listTriggerSources
+  case manageAutomation
   case listTriggers
   case listTriggerRuns
   case createTriggerDraft

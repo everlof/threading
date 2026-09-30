@@ -121,6 +121,11 @@ final class PrivacyPreferencesTests: XCTestCase {
             .compactMap { ($0 as? NSTextField)?.stringValue }
     }
 
+    private func helpText(in view: NSView) -> [String] {
+        ([view] + descendants(in: view))
+            .compactMap { ($0 as? HelpPopoverButton)?.topic.spokenSummary }
+    }
+
     // MARK: - The Model
 
     func testEveryGrantNamesTheSettingsPaneThatOwnsIt() {
@@ -389,8 +394,11 @@ final class PrivacyPreferencesTests: XCTestCase {
         )
     }
 
+    /// The full disclosure is each row's "?" — read from the button, which is also exactly
+    /// what VoiceOver speaks — so the inventory is asserted across both halves.
     func testTheEgressInventoryNamesAutomaticIconAndAvatarTraffic() {
-        let copy = labels(in: page(reader()).view).joined(separator: "\n")
+        let view = page(reader()).view
+        let copy = (labels(in: view) + helpText(in: view)).joined(separator: "\n")
 
         XCTAssertTrue(copy.contains("Project icon discovery reaches GitHub"))
         XCTAssertTrue(copy.contains("never follows a package.json homepage automatically"))
@@ -416,7 +424,10 @@ final class PrivacyPreferencesTests: XCTestCase {
         for card in cards {
             let details = descendants(in: card)
                 .compactMap { $0 as? NSTextField }
-                .filter { $0.stringValue.count > 80 }
+                // Rows now state their fact in one short line, so "wrapping text" is any wrapping
+                // label long enough to have a width worth claiming. A title is not one: beside
+                // its "?" it hugs its own words on purpose, so the mark sits after the last glyph.
+                .filter { $0.cell?.wraps == true && $0.stringValue.count > 40 }
 
             for field in details {
                 measured += 1

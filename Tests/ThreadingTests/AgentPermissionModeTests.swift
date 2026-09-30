@@ -344,7 +344,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
         AppSettings.shared.defaultAgentKind = .codex
         AppSettings.shared.defaultPermissionMode = .auto
 
-        let controller = GeneralPreferencesViewController()
+        let controller = ChatsPreferencesViewController()
         _ = controller.view
         let permissionPopUp = try XCTUnwrap(
             Self.descendants(of: controller.view)

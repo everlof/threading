@@ -11,6 +11,25 @@ import ThreadingDesignKit
 /// A picture is where that is noticed; the assertions below are what it turned into.
 @MainActor
 final class DeviceLogPaneRenderTests: XCTestCase {
+    func testProcessPickerAndTypingUseStrictFilteringUntilContextIsRequested() async throws {
+        let controller = pane()
+        controller.installRowsForTesting([
+            DeviceLogRow(time: "", level: "Info", process: "kernel", subsystem: nil, message: "Ananke connected"),
+            DeviceLogRow(time: "", level: "Info", process: "Ananke", subsystem: nil, message: "connected"),
+            DeviceLogRow(time: "", level: "Debug", process: "Ananke", subsystem: nil, message: "routine"),
+        ])
+        controller.selectProcessForTesting("Ananke")
+        controller.simulateUserFilterEditForTesting("connected")
+        for _ in 0..<200 where controller.isProjectingForTesting {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(controller.isProjectingForTesting)
+        XCTAssertEqual(controller.focusSummary.shown, 1)
+        XCTAssertEqual(controller.focusSummary.folded, 0)
+        XCTAssertEqual(controller.visibleRowsForTools(limit: 20).map(\.process), ["Ananke"])
+        controller.applyFocus(pattern: "connected", minimumSeverity: 0)
+        XCTAssertEqual(controller.focusSummary.shown, 3, "Agent context remains an explicit mode")
+    }
 
     private func fixtureRows() -> [DeviceLogRow] {
         (0..<24).map { index in

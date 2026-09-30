@@ -33,6 +33,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         /// How long a source may produce nothing before the pane says so rather than showing a
         /// bare zero. Long enough that an ordinarily quiet moment does not read as a fault.
         static let silenceGrace: TimeInterval = 6
+        static let maximumProcessChoices = 512
+        static let maximumProjectionCatchUp = 2048
+        static let maximumProcessControlWidth: CGFloat = 200
     }
 
     private enum Columns {
@@ -57,6 +60,8 @@ public final class DeviceLogPaneViewController: NSViewController {
     private let sourcePopUp = ThemedPopUp()
     private let routePopUp = ThemedPopUp()
     private let levelPopUp = ThemedPopUp()
+    private let processPopUp = ThemedPopUp()
+    private let contextPopUp = ThemedPopUp()
     private let filterField = ThemedTextField()
     private let statusLabel = NSTextField(labelWithString: "")
     /// The opaque ground the Resume button stands on while it floats over the rows.
@@ -96,6 +101,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     private var options: [DeviceLogSourceOption] = []
     private var source: DeviceLogRowSource?
+    private var sourceGeneration = 0
     private var runningSourceTitle: String?
     private var route: DeviceLogSourceOption.Route = .appLog
     private var rows: [DeviceLogRow] = []
@@ -119,6 +125,13 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var agentHits: Set<Int> = []
     private var filter = ""
     private var minimumSeverity = 0
+    private var selectedProcess: String?
+    private var processChoices: [String] = []
+    private var knownProcesses: Set<String> = []
+    private var showingContext = false
+    private var projectionGeneration = 0
+    private var projectionTask: Task<Void, Never>?
+    private var rowOffset = 0
 
     /// The controls, as the fold layout reads them. Built rather than stored so the two cannot
     /// drift: the filter field and the level chooser *are* the focus.
@@ -126,7 +139,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         LogFocus(
             pattern: filter,
             minimumSeverity: minimumSeverity,
-            context: DeviceLogLimits.foldContext
+            context: DeviceLogLimits.foldContext,
+            process: selectedProcess
         )
     }
     private var drainTimer: Timer?
@@ -182,6 +196,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     public required init?(coder: NSCoder) { nil }
 
     deinit {
+        projectionTask?.cancel()
         if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
         // Timers and the child process must not outlive the pane. `source` is stopped on the main
         // actor by `viewWillDisappear`; this is the belt for a controller released another way.
@@ -222,6 +237,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
+        sourceGeneration += 1
         // A hidden tab must not keep a child process reading a firehose.
         //
         // `runningSourceTitle` deliberately survives. It records *which* source the rows on screen
@@ -343,6 +359,17 @@ public final class DeviceLogPaneViewController: NSViewController {
         filterField.placeholderString = L10n.string("Filter log lines")
         filterField.delegate = self
 
+        processPopUp.addItem(withTitle: L10n.string("All processes"))
+        processPopUp.target = self
+        processPopUp.action = #selector(processChanged)
+        processPopUp.setAccessibilityIdentifier("device-log-process")
+        processPopUp.widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumProcessControlWidth).isActive = true
+        contextPopUp.addItem(withTitle: L10n.string("Matches only"))
+        contextPopUp.addItem(withTitle: L10n.string("Show context"))
+        contextPopUp.target = self
+        contextPopUp.action = #selector(contextChanged)
+        contextPopUp.setAccessibilityIdentifier("device-log-context")
+
         let rescan = ThemedButton(
             title: L10n.string("Rescan"),
             target: self,
@@ -362,7 +389,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         statusLabel.font = Design.Typography.compactCode()
         statusLabel.textColor = Design.Text.secondary
 
-        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, rescan, levelPopUp, filterField, clear])
+        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, rescan, clear])
         bar.orientation = .horizontal
         bar.spacing = Design.Spacing.small
         bar.alignment = .centerY
@@ -372,7 +399,12 @@ public final class DeviceLogPaneViewController: NSViewController {
             bottom: Design.Spacing.small,
             right: Design.Spacing.medium
         )
-        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp] as [NSView] + [rescan, clear, filterField] {
+        let filters = NSStackView(views: [processPopUp, levelPopUp, filterField, contextPopUp])
+        filters.orientation = .horizontal
+        filters.spacing = Design.Spacing.small
+        filters.alignment = .centerY
+        filters.edgeInsets = bar.edgeInsets
+        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, contextPopUp] as [NSView] + [rescan, clear, filterField] {
             control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         }
 
@@ -387,7 +419,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         )
 
         guard let scroll else { return }
-        let stack = NSStackView(views: [bar, scroll, footer])
+        let stack = NSStackView(views: [bar, filters, scroll, footer])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -589,6 +621,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         // machine tells them apart. A bare title would make switching between them look like
         // staying put, and the pane would never restart the reader.
         let identity = "\(option.machine.id)/\(option.title)" + (isApp ? "#\(route.rawValue)" : "")
+            + (selectedProcess.map { "#process=\($0)" } ?? "")
         // Already reading this one: restarting would throw away every row read so far.
         guard identity != runningSourceTitle || source == nil else { return }
         // Resuming the same source after the pane was hidden keeps what is on screen. Only a
@@ -601,18 +634,18 @@ public final class DeviceLogPaneViewController: NSViewController {
         Recents.rememberMachine(option.machine.id)
         Recents.rememberSource(option.title, forMachine: option.machine.id)
 
+        sourceGeneration += 1
+        let generation = sourceGeneration
         source?.stop()
         if !isSameSource {
-            rows.removeAll(keepingCapacity: true)
-            entries.removeAll(keepingCapacity: true)
-            expandedGaps.removeAll()
+            clearRows()
             received = 0
             lastCount = 0
             table.reloadData()
         }
 
         endedReason = nil
-        guard let started = option.makeSource(predicate: nil, route: route) else {
+        guard let started = option.makeSource(predicate: nil, route: route, processName: selectedProcess) else {
             source = nil
             endedReason = L10n.string("this source has no reader on this Mac")
             updateStatus()
@@ -623,7 +656,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         started.onStreamEnded = { [weak self] reason in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let self else { return }
+                    guard let self, self.sourceGeneration == generation else { return }
                     self.endedReason = reason
                     self.updateStatus()
                 }
@@ -661,7 +694,42 @@ public final class DeviceLogPaneViewController: NSViewController {
         updateStatus()
     }
 
+    @objc private func processChanged() {
+        let index = processPopUp.indexOfSelectedItem - 1
+        selectedProcess = processChoices.indices.contains(index) ? processChoices[index] : nil
+        expandedGaps.removeAll()
+        clearAgentNote()
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+        // Scope the reader before its bounded queue and recording, not just the visible table.
+        // A quiet app must not lose its retained history to thousands of unrelated system rows.
+        if source != nil { startSelectedSource() }
+    }
+
+    @objc private func contextChanged() {
+        showingContext = contextPopUp.indexOfSelectedItem == 1
+        expandedGaps.removeAll()
+        clearAgentNote()
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+    }
+
+    /// Incremental, capped discovery; never rebuild a menu for every log tick.
+    private func discoverProcesses(in batch: [DeviceLogRow]) {
+        for row in batch where processChoices.count < Metrics.maximumProcessChoices {
+            guard !row.process.isEmpty, knownProcesses.insert(row.process).inserted else { continue }
+            processChoices.append(row.process)
+            processPopUp.addItem(withTitle: row.process)
+        }
+    }
+
     @objc private func clearRows() {
+        projectionGeneration += 1
+        projectionTask?.cancel()
+        projectionTask = nil
+        rowOffset = 0
         rows.removeAll(keepingCapacity: true)
         entries.removeAll(keepingCapacity: true)
         expandedGaps.removeAll()
@@ -675,9 +743,10 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// its header sat *on top of* the first rows for a whole build because nothing drew it.
     public func installRowsForTesting(_ fixture: [DeviceLogRow], focusing pattern: String = "") {
         rows = fixture
+        discoverProcesses(in: fixture)
         filter = pattern
         filterField.stringValue = pattern
-        recomputeVisible()
+        entries = LogFocusLayout.entries(rows: rows, focus: focus, showingContext: showingContext)
         table.reloadData()
         updateStatus()
     }
@@ -690,6 +759,8 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// filter field disagrees with what it is showing is a pane nobody can reason about, and the
     /// user has to be able to see what the agent did and undo it.
     public func applyFocus(pattern: String, minimumSeverity: Int) {
+        showingContext = true
+        contextPopUp.selectItem(at: 1)
         filter = pattern
         filterField.stringValue = pattern
         self.minimumSeverity = minimumSeverity
@@ -750,6 +821,11 @@ public final class DeviceLogPaneViewController: NSViewController {
     public var agentNoteForTesting: String? { agentNote }
     public var agentHitsForTesting: Set<Int> { agentHits }
     public var statusTextForTesting: String { statusLabel.stringValue }
+    public var isProjectingForTesting: Bool { projectionTask != nil }
+    public func selectProcessForTesting(_ process: String?) {
+        processPopUp.selectItem(at: process.flatMap { processChoices.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
+        processChanged()
+    }
 
     /// Drives the same path a keystroke in the filter field takes.
     public func simulateUserFilterEditForTesting(_ text: String) {
@@ -760,7 +836,11 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// What is on screen right now, for a tool that has to answer for it.
     public var focusSummary: (shown: Int, folded: Int, total: Int) {
         let folded = entries.reduce(0) { $0 + $1.hiddenCount }
-        return (rows.count - folded, folded, rows.count)
+        let shown = entries.reduce(0) { count, entry in
+            if case .row = entry { return count + 1 }
+            return count
+        }
+        return (shown, folded, rows.count)
     }
 
     /// The rows currently visible, newest last, for a tool asked what is on screen.
@@ -773,18 +853,55 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     // MARK: Filtering
 
-    private var isFiltering: Bool { !filter.isEmpty || minimumSeverity > 0 }
-
-    private func matches(_ row: DeviceLogRow) -> Bool {
-        guard row.severity >= minimumSeverity else { return false }
-        guard !filter.isEmpty else { return true }
-        return row.message.lowercased().contains(filter)
-            || row.process.lowercased().contains(filter)
-            || (row.subsystem?.lowercased().contains(filter) ?? false)
-    }
+    private var isFiltering: Bool { focus.isActive }
 
     private func recomputeVisible() {
-        entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
+        projectionGeneration += 1
+        let generation = projectionGeneration
+        projectionTask?.cancel()
+        projectionTask = nil
+        // The legacy agent focus keeps its synchronous receipt contract. User filtering scans
+        // the fixed 50k ring off-main; ordinary streaming below tests only incoming rows.
+        if showingContext {
+            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
+            return
+        }
+        let snapshot = rows
+        let selectedFocus = focus
+        let offset = rowOffset
+        projectionTask = Task { [weak self] in
+            let worker = Task.detached(priority: .userInitiated) {
+                var result: [LogDisplayEntry] = []
+                for index in snapshot.indices {
+                    if index % 128 == 0, Task.isCancelled { return result }
+                    if selectedFocus.matches(snapshot[index]) { result.append(.row(index)) }
+                }
+                return result
+            }
+            let projected = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard let self, !Task.isCancelled, self.projectionGeneration == generation else { return }
+            let removed = self.rowOffset - offset
+            let tailStart = max(0, snapshot.count - removed)
+            // If the worker fell far behind, take a new snapshot instead of moving a large scan
+            // onto the main actor. A normal 100ms batch is hundreds of rows, not the whole ring.
+            guard self.rows.count - tailStart <= Metrics.maximumProjectionCatchUp else { self.recomputeVisible(); return }
+            self.entries = projected.compactMap { entry in
+                guard case .row(let index) = entry, index >= removed else { return nil }
+                return .row(index - removed)
+            }
+            if tailStart < self.rows.count {
+                for index in tailStart..<self.rows.count where selectedFocus.matches(self.rows[index]) {
+                    self.entries.append(.row(index))
+                }
+            }
+            self.projectionTask = nil
+            self.table.reloadData()
+            self.updateStatus()
+        }
     }
 
     // MARK: Streaming
@@ -796,20 +913,32 @@ public final class DeviceLogPaneViewController: NSViewController {
         let incoming = source.drain()
         guard !incoming.isEmpty else { return }
         received += incoming.count
+        discoverProcesses(in: incoming)
         // On disk as well as on screen: the ring is what the table can hold, the store is what a
         // question can reach back through once the ring has moved on.
         recorder?.record(incoming)
 
+        let previousCount = rows.count
         rows.append(contentsOf: incoming)
+        let removedCount = max(0, rows.count - DeviceLogLimits.ringCapacity)
+        rowOffset += removedCount
         if rows.count > DeviceLogLimits.ringCapacity {
             rows.removeFirst(rows.count - DeviceLogLimits.ringCapacity)
         }
 
-        if isFiltering {
-            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
-            if false {
-                entries.removeFirst(0)
+        if !showingContext {
+            // Strict mode tests new rows only. Old matches shift with the ring; a whole-ring
+            // text scan at every 100 ms tick would make a quieter view cost more CPU.
+            entries = entries.compactMap { entry in
+                guard case .row(let index) = entry, index >= removedCount else { return nil }
+                return .row(index - removedCount)
             }
+            let selectedFocus = focus
+            for index in max(0, previousCount - removedCount)..<rows.count where selectedFocus.matches(rows[index]) {
+                entries.append(.row(index))
+            }
+        } else if isFiltering {
+            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
         } else {
             entries = rows.indices.map { .row($0) }
         }
@@ -892,7 +1021,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         }
         statusLabel.textColor = Design.Text.secondary
         let folded = entries.reduce(0) { $0 + $1.hiddenCount }
-        var parts = [isFiltering ? "\(rows.count - folded)/\(rows.count)" : "\(rows.count)"]
+        let shown = focusSummary.shown
+        var parts = [isFiltering ? "\(shown)/\(rows.count)" : "\(rows.count)"]
         if folded > 0 { parts.append("\(folded) folded") }
         parts.append("\(rate)/s")
         if let dropped = source?.dropped, dropped > 0 { parts.append("⚠︎ \(dropped)") }
@@ -907,6 +1037,8 @@ extension DeviceLogPaneViewController: NSTextFieldDelegate {
     public func controlTextDidChange(_ notification: Notification) {
         // The person is driving again, so the agent's note stops describing what they are seeing.
         clearAgentNote()
+        showingContext = false
+        contextPopUp.selectItem(at: 0)
         filter = filterField.stringValue.lowercased()
         recomputeVisible()
         table.reloadData()

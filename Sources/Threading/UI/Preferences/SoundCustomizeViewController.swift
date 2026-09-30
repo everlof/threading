@@ -359,7 +359,7 @@ final class SoundCustomizeViewController: NSViewController {
     /// Whether this row has an outermost item at all.
     ///
     /// Every row does except the app scope's two kind rows: those **are** the pickers on the
-    /// General page — the same two preferences, read and written here — and there is nothing
+    /// Notifications page — the same two preferences, read and written here — and there is nothing
     /// beyond them to fall back to. Their *macOS Alert Sound* item is the default, so a *Default
     /// (…)* item above it would be a second way to choose the item below it.
     private func offersInherit(_ level: SoundResolution.Level) -> Bool {

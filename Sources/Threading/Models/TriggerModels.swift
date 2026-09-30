@@ -247,6 +247,10 @@ enum TriggerMatcher {
 enum TriggerExecutionMode: String, Codable, CaseIterable, Sendable {
     case assessOnly
     case assessThenFix
+    case taskReadOnly
+    case taskLocalEdits
+
+    var isTask: Bool { self == .taskReadOnly || self == .taskLocalEdits }
 }
 
 enum TriggerCheckoutPolicy: String, Codable, CaseIterable, Sendable {
@@ -315,6 +319,7 @@ struct TriggerRevision: Codable, Equatable, Sendable {
     var allowSourceResources: Bool
     var proposedBySessionID: SessionID?
     let createdAt: Date
+    var automation: AutomationOptions? = nil
 }
 
 struct TriggerDefinition: Codable, Equatable, Sendable {
@@ -340,6 +345,8 @@ enum TriggerRunState: String, Codable, CaseIterable, Sendable {
     case completed
     case failed
     case cancelled
+    case running
+    case finishing
 }
 
 enum TriggerRunHoldReason: String, Codable, Sendable {
@@ -355,6 +362,7 @@ enum TriggerAssessmentDisposition: String, Codable, CaseIterable, Sendable {
     case fixed
     case needsHuman
     case failed
+    case succeeded
 }
 
 struct TriggerRunResult: Codable, Equatable, Sendable {
@@ -378,6 +386,16 @@ struct TriggerRun: Codable, Equatable, Sendable {
     var holdReason: TriggerRunHoldReason?
     var result: TriggerRunResult?
     var boundedDiagnostic: String?
+    /// Host-authored admission authority; never inferred from an external event identifier.
+    var initiatedManually: Bool? = nil
+
+    /// Whether a run held before launch may wait in the queue for a later release. Only a
+    /// source event has that path — the queue re-offers it while its trigger and source stay
+    /// active. A schedule occurrence or an explicit run has none, and starting it later would
+    /// be the backlog a schedule promises never to build, so it is settled where it can be seen.
+    func canWaitForRelease(under revision: TriggerRevision) -> Bool {
+        initiatedManually != true && revision.automation?.schedule == nil
+    }
 }
 
 extension Notification.Name {

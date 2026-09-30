@@ -104,6 +104,8 @@ Captures are rendered by Threading from its own AppKit window rather than read b
 display, so a successful result neither retains pixels from unrelated applications nor needs the
 macOS Screen Recording grant. A small JSON attachment beside each PNG carries its journey name,
 checkpoint order, title and description; the report never has to infer meaning from a filename.
+When a sheet is attached, capture follows it to the active sheet window: AppKit's parent-window
+bitmap contains only the dimmed background, not the separate sheet receiving the interaction.
 
 Every UI run gets a unique result bundle and a static HTML gallery under
 `.build/ui-test-reports/`. The runner prints the exact `index.html` path and an `open` command.
@@ -492,6 +494,13 @@ clean machine; until then `scripts/test.sh ui` is the explicit local gate and mu
 as ordinary CI coverage.
 
 ## Implemented journeys
+
+### Recurring automations
+
+`AutomationJourneyUITests` opens Automations in the shipping shell, creates a daily task in the
+real editor, saves it paused and verifies the same task after relaunch into the isolated home.
+The editor and its schedule/archive controls have separate sheet captures. This journey starts
+no agent; execution and owner-RPC behavior are covered by the controller and trigger suites.
 
 ### File change and relaunch recovery
 

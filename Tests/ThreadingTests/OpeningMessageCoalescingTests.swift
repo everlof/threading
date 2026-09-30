@@ -28,7 +28,7 @@ final class OpeningMessageCoalescingTests: XCTestCase {
     }
 
     func testTypingDoesNotWriteOrBroadcastPerCharacter() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = ChatsPreferencesViewController()
         _ = controller.view
         let field = try openingMessageField(in: controller)
 
@@ -72,7 +72,7 @@ final class OpeningMessageCoalescingTests: XCTestCase {
 
     /// Closing Settings without leaving the field first is the other way out of this row.
     func testLeavingThePageSettlesWhatWasTyped() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = ChatsPreferencesViewController()
         _ = controller.view
         let field = try openingMessageField(in: controller)
 
@@ -93,11 +93,11 @@ final class OpeningMessageCoalescingTests: XCTestCase {
     /// The prefix is the same field with the same coalescing, and the settle writes only the
     /// half that changed — a prefix typed while the suffix stands must leave the suffix alone.
     func testThePrefixCoalescesAndSettlesWithoutDisturbingTheSuffix() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = ChatsPreferencesViewController()
         _ = controller.view
         let prefix = try openingMessageField(
             in: controller,
-            identifier: "settings.general.new-chat-opening-prefix"
+            identifier: "settings.chats.new-chat-opening-prefix"
         )
 
         AppSettings.shared.newChatOpeningPrefix = ""
@@ -136,8 +136,8 @@ final class OpeningMessageCoalescingTests: XCTestCase {
     }
 
     private func openingMessageField(
-        in controller: GeneralPreferencesViewController,
-        identifier: String = "settings.general.new-chat-opening-suffix"
+        in controller: ChatsPreferencesViewController,
+        identifier: String = "settings.chats.new-chat-opening-suffix"
     ) throws -> ThemedTextField {
         let field = descendants(of: controller.view)
             .compactMap { $0 as? ThemedTextField }

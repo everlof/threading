@@ -1084,11 +1084,23 @@ struct AppThemeGradientStopArguments: Codable, Sendable {
 struct AppThemeGradientArguments: Codable, Sendable {
   let angleDegrees: Double?
   let stops: [AppThemeGradientStopArguments]?
+  let drift: AppThemeGradientDriftArguments?
+
+  init(angleDegrees: Double?, stops: [AppThemeGradientStopArguments]?, drift: AppThemeGradientDriftArguments? = nil) {
+    self.angleDegrees = angleDegrees
+    self.stops = stops
+    self.drift = drift
+  }
 
   private enum CodingKeys: String, CodingKey {
     case angleDegrees = "angle_degrees"
-    case stops
+    case stops, drift
   }
+}
+
+struct AppThemeGradientDriftArguments: Codable, Sendable {
+  let duration: Double?
+  let distance: Double?
 }
 
 struct AppThemeSidebarImageArguments: Codable, Sendable {
@@ -2575,6 +2587,7 @@ struct MCPArrayItemSchema: Encodable, Sendable {
 }
 
 enum MCPPropertyType: Encodable, Sendable {
+  case integer
   case string
   case number
   case boolean
@@ -2590,6 +2603,8 @@ enum MCPPropertyType: Encodable, Sendable {
   func encode(to encoder: Encoder) throws {
     var container = encoder.singleValueContainer()
     switch self {
+    case .integer:
+      try container.encode("integer")
     case .string:
       try container.encode("string")
     case .number:
@@ -8198,6 +8213,36 @@ enum MCPTools {
         inputSchema: MCPInputSchema(properties: [:], required: [])
       ),
       MCPToolDefinition(
+        tool: .manageAutomation,
+        name: "manage_automation",
+        groupID: "triggers",
+        family: .triggers,
+        annotations: MCPToolAnnotations(readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true),
+        title: "Manage automations",
+        detail: "Configure schedules and inspect runs on this Mac or a remote controller.",
+        symbol: "bolt.badge.clock",
+        decodeArguments: { container in try container.decode(AutomationToolArguments.self, forKey: .arguments) },
+        observesPanel: false,
+        executeArguments: { handler, arguments, sessionID, completion in
+          handler.manageAutomation(arguments, for: sessionID, completion: completion)
+        },
+        description: """
+          First-class automation management for humans through their agent. Inspect with list/get/runs.
+          Configure, enable, pause, delete, or run only when the user requests that action.
+          Configuration writes an immutable revision and pauses it. enable and run show the user the
+          exact revision in a Threading approval sheet and wait for their answer; a refusal is final.
+          Never put credentials in instructions. Automated runs cannot mutate automations.
+          Local taskReadOnly/taskLocalEdits run ordinary instructions; assess modes retain the two-stage workflow.
+          For a VPS first use hosts to discover configured connections and workers to discover the target worker IDs.
+          Pass remote with the host ID only; Threading uses the controller paths the user connected on the
+          Automations ▸ Remote page, and refuses a host that has none.
+          Remote schedules run on that VPS's supervisor even while this Mac is offline. An existing
+          worker owns execution permissions; configuring a schedule never enables or changes its recipe.
+          On a lost response inspect state; run uses a stable requestKey for safe retries.
+          """,
+        inputSchema: AutomationToolSchema.input
+      ),
+      MCPToolDefinition(
         tool: .listTriggers,
         name: "list_triggers",
         groupID: "triggers",
@@ -8448,7 +8493,7 @@ enum MCPTools {
           openWorldHint: false
         ),
         title: "Report trigger result",
-        detail: "Settle the fix stage bound to this conversation with verification evidence.",
+        detail: "Report the saved task or fix outcome with verification evidence.",
         symbol: "checkmark.seal",
         decodeArguments: { container in
           try container.decodeIfPresent(ReportTriggerResultArguments.self, forKey: .arguments)
@@ -8465,8 +8510,8 @@ enum MCPTools {
           handler.reportTriggerResult(arguments, for: sessionID, completion: completion)
         },
         description: """
-          Report the final outcome of this conversation's trigger fix stage. Threading refuses \
-          a run owned by another session or not currently fixing. disposition is fixed, \
+          Report the final outcome of this conversation's automation task or trigger fix stage. Threading refuses \
+          a run owned by another session or not currently running/fixing. disposition is succeeded, fixed, \
           noChangeNeeded, needsHuman, or failed. changed_paths and tests are bounded evidence shown to the user; \
           this tool never pushes, deploys, opens a review, or writes to the source.
           """,
@@ -8475,7 +8520,7 @@ enum MCPTools {
             "run_id": MCPPropertySchema(type: .string, description: "Run id from the fix brief."),
             "disposition": MCPPropertySchema(
               type: .string,
-              description: "fixed, noChangeNeeded, needsHuman, or failed."
+              description: "succeeded, fixed, noChangeNeeded, needsHuman, or failed."
             ),
             "summary": MCPPropertySchema(type: .string, description: "Concise final result."),
             "changed_paths": MCPPropertySchema(
@@ -8620,6 +8665,7 @@ enum MCPTools {
           terminal.
           """,
         properties: [
+          "drift": appThemeGradientDriftSchema,
           "angle_degrees": MCPPropertySchema(
             type: .number,
             description: "CSS convention: the direction the gradient flows toward, "
@@ -8811,13 +8857,15 @@ enum MCPTools {
           + "background in the variant's `sidebar` block, in the same vocabulary. Each "
           + "gradient stop must keep the theme's label at 3:1 against the ground. A picture "
           + "is not gated — check it against real text in both variants, and wash "
-          + "photographs well below 0.4 opacity.",
+          + "photographs well below 0.4 opacity. The gradient, including optional drift, also "
+          + "reaches the iPhone dashboard; pictures remain on the Mac.",
         properties: [
           "gradient": MCPPropertySchema(
             type: .object,
             description: "A wash drawn over the ground, CSS angle convention: 0 flows toward "
               + "the top, 90 toward the trailing edge, 180 toward the bottom.",
             properties: [
+              "drift": appThemeGradientDriftSchema,
               "angle_degrees": MCPPropertySchema(
                 type: .number,
                 description: "Direction the gradient flows toward; default 180."
@@ -9331,6 +9379,26 @@ enum MCPTools {
         description: "True removes the base theme's bevel, returning flat borders."
       ),
     ]
+  }
+
+  /// One portable drift vocabulary for the material and sidebar gradient authoring tools.
+  private static var appThemeGradientDriftSchema: MCPPropertySchema {
+    MCPPropertySchema(
+      type: .object,
+      description: "Optional slow decorative drift, rendered locally on Mac and iPhone. "
+        + "Omit it when replacing a gradient to restore a still wash. Reduce Motion, Low "
+        + "Power Mode and hidden surfaces stop the animation. Layout and controls never move.",
+      properties: [
+        "duration": MCPPropertySchema(
+          type: .number,
+          description: "Full cycle in seconds, 8–120; default 24."
+        ),
+        "distance": MCPPropertySchema(
+          type: .number,
+          description: "Travel as a fraction of the gradient, 0.02–0.25; default 0.12."
+        ),
+      ]
+    )
   }
 
   /// The chrome block's schema, shared by create and update so the two cannot drift.

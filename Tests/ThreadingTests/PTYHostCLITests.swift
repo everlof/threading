@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
@@ -154,6 +158,9 @@ final class PTYHostCLITests: XCTestCase {
     /// The real label is never asked: it is the developer's own login item, so an assertion about
     /// it would be an assertion about their machine's state rather than about this parser.
     func testStatusReadsARegisteredLaunchctlAnswer() throws {
+        #if os(Linux)
+        try XCTSkipIf(true, "launchd is macOS-only")
+        #endif
         let helper = try helperURL()
         let daemon = try startDaemon(helper)
         let answer = try run(
@@ -174,6 +181,9 @@ final class PTYHostCLITests: XCTestCase {
 
     /// "Could not find service" is not registered, whatever the exit status was.
     func testStatusReadsAMissingServiceAsNotRegistered() throws {
+        #if os(Linux)
+        try XCTSkipIf(true, "launchd is macOS-only")
+        #endif
         let helper = try helperURL()
         let daemon = try startDaemon(helper)
         let answer = try run(
@@ -195,6 +205,9 @@ final class PTYHostCLITests: XCTestCase {
     /// An answer this build cannot read is its own finding: "I could not tell" and "it is not
     /// there" would send somebody looking in two different places.
     func testStatusReportsAnUnreadableLaunchctlAnswerAsItsOwnFinding() throws {
+        #if os(Linux)
+        try XCTSkipIf(true, "launchd is macOS-only")
+        #endif
         let helper = try helperURL()
         let daemon = try startDaemon(helper)
         let answer = try run(
@@ -302,7 +315,7 @@ final class PTYHostCLITests: XCTestCase {
         let daemon = try startDaemon(helper)
         let identity = Self.identity(Fixture.firstIdentifier)
         let spawned = try spawn(on: daemon, id: identity, script: "sleep 300")
-        XCTAssertEqual(Darwin.kill(spawned.pid, 0), 0, "the child is running before the stop")
+        XCTAssertEqual(CLIPlatform.kill(spawned.pid, 0), 0, "the child is running before the stop")
 
         let answer = try run(
             helper,
@@ -317,7 +330,7 @@ final class PTYHostCLITests: XCTestCase {
         // The pid is the assertion rather than the frame: a tool that sent the right frames and
         // left the child running would pass every text check above.
         try waitUntil(timeout: Fixture.deathTimeout, "the child is gone") {
-            Darwin.kill(spawned.pid, 0) != 0 && errno == ESRCH
+            CLIPlatform.kill(spawned.pid, 0) != 0 && errno == ESRCH
         }
     }
 
@@ -347,8 +360,8 @@ final class PTYHostCLITests: XCTestCase {
             "the refusal counts them: \(answer.error)"
         )
         XCTAssertTrue(answer.output.isEmpty, "a refusal says nothing on standard output")
-        XCTAssertEqual(Darwin.kill(first.pid, 0), 0, "neither child was picked")
-        XCTAssertEqual(Darwin.kill(second.pid, 0), 0, "neither child was picked")
+        XCTAssertEqual(CLIPlatform.kill(first.pid, 0), 0, "neither child was picked")
+        XCTAssertEqual(CLIPlatform.kill(second.pid, 0), 0, "neither child was picked")
     }
 
     func testStopRefusesAnUnknownPrefix() throws {
@@ -437,6 +450,199 @@ final class PTYHostCLITests: XCTestCase {
         XCTAssertTrue(answer.error.contains("usage: threading-ptyd"), answer.error)
     }
 
+    // MARK: - Shell control
+
+    func testSendPreservesBytesAndOnlySubmitsWhenEnterIsRequested() throws {
+        let helper = try helperURL()
+        let daemon = try startDaemon(helper)
+        let result = directory.appendingPathComponent("received")
+        let id = Self.identity(Fixture.firstIdentifier)
+        try spawn(on: daemon, id: id, script: "IFS= read -r line; printf '%s' \"$line\" > '\(result.path)'; sleep 30")
+        let first = try run(helper, ["send", id.description] + daemon.locationArguments, input: Data("hello agent".utf8))
+        XCTAssertEqual(first.status, 0, first.error)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: result.path), "send must not append a newline implicitly")
+        let submit = try run(helper, ["send", id.description, "--enter"] + daemon.locationArguments, input: Data())
+        XCTAssertEqual(submit.status, 0, submit.error)
+        try waitUntil(timeout: Fixture.replyTimeout, "the child received the line") { FileManager.default.fileExists(atPath: result.path) }
+        XCTAssertEqual(try String(contentsOf: result), "hello agent")
+        _ = try run(helper, ["stop", id.description] + daemon.locationArguments)
+    }
+
+    func testOversizeSendIsRefusedBeforeAnyBytesReachTheChild() throws {
+        let helper = try helperURL()
+        let daemon = try startDaemon(helper)
+        let result = directory.appendingPathComponent("received")
+        let id = Self.identity(Fixture.firstIdentifier)
+        try spawn(on: daemon, id: id, script: "IFS= read -r line; printf '%s' \"$line\" > '\(result.path)'; sleep 30")
+        let refused = try run(helper, ["send", id.description] + daemon.locationArguments, input: Data(repeating: 65, count: 65_537))
+        XCTAssertEqual(refused.status, 1)
+        XCTAssertTrue(refused.error.contains("exceeds 64 KiB"), refused.error)
+        let submit = try run(helper, ["send", id.description, "--enter"] + daemon.locationArguments, input: Data("intact".utf8))
+        XCTAssertEqual(submit.status, 0, submit.error)
+        try waitUntil(timeout: Fixture.replyTimeout, "the child received the intact line") { FileManager.default.fileExists(atPath: result.path) }
+        XCTAssertEqual(try String(contentsOf: result), "intact")
+        _ = try run(helper, ["stop", id.description] + daemon.locationArguments)
+    }
+
+    func testControlRefusesAmbiguousPrefixesAndProtocolPipes() throws {
+        let helper = try helperURL()
+        let daemon = try startDaemon(helper)
+        let client = try CLIWireClient(socketPath: daemon.socketPath)
+        wireClients.append(client)
+        try client.greet(timeout: Fixture.replyTimeout)
+        let first = Self.identity(Fixture.firstIdentifier)
+        let second = Self.identity(Fixture.secondIdentifier)
+        _ = try client.spawn(id: first, script: "sleep 30", timeout: Fixture.replyTimeout, channel: .pipes)
+        try spawn(on: daemon, id: second, script: "sleep 30")
+        for verb in ["send", "attach"] {
+            let ambiguous = try run(helper, [verb, Fixture.sharedPrefix] + daemon.locationArguments, input: Data("test".utf8))
+            XCTAssertEqual(ambiguous.status, 1)
+            XCTAssertTrue(ambiguous.error.contains("name more"), ambiguous.error)
+            let pipes = try run(helper, [verb, first.description] + daemon.locationArguments, input: Data("test".utf8))
+            XCTAssertEqual(pipes.status, 1)
+            XCTAssertTrue(pipes.error.contains("protocol pipes"), pipes.error)
+        }
+        _ = try run(helper, ["stop", first.description] + daemon.locationArguments)
+        _ = try run(helper, ["stop", second.description] + daemon.locationArguments)
+    }
+
+    func testAttachSkipsHistoryAndStreamsLiveOutputWithoutChangingTheGrid() throws {
+        let helper = try helperURL()
+        let daemon = try startDaemon(helper)
+        let ready = directory.appendingPathComponent("ready")
+        let go = directory.appendingPathComponent("go")
+        let id = Self.identity(Fixture.firstIdentifier)
+        try spawn(on: daemon, id: id, script: "printf 'HISTORICAL_QUERY\\033[6n'; touch '\(ready.path)'; while [ ! -f '\(go.path)' ]; do sleep 0.05; done; printf LIVE_OUTPUT; exit 0")
+        try waitUntil(timeout: Fixture.replyTimeout, "history exists") { FileManager.default.fileExists(atPath: ready.path) }
+        let controller = try launchController(helper, arguments: ["attach", id.description] + daemon.locationArguments)
+        defer { controller.stop() }
+        try waitUntil(timeout: Fixture.replyTimeout, "attach is ready") { controller.error.contains("Attached") }
+        // A list is also a synchronization barrier after the CLI's attach request.
+        let listed = try run(helper, ["sessions", "--json"] + daemon.locationArguments)
+        let rows = try JSONSerialization.jsonObject(with: Data(listed.output.utf8)) as? [[String: Any]]
+        XCTAssertEqual(rows?.first?["cols"] as? Int, 80)
+        try Data().write(to: go)
+        try waitUntil(timeout: Fixture.replyTimeout, "the live attachment exits") { !controller.process.isRunning }
+        XCTAssertEqual(controller.process.terminationStatus, 0, controller.error)
+        XCTAssertTrue(controller.output.contains("LIVE_OUTPUT"), controller.output)
+        XCTAssertFalse(controller.output.contains("HISTORICAL_QUERY"), controller.output)
+        XCTAssertFalse(controller.output.contains("\u{1b}[6n"), "never display historical queries on a physical terminal")
+    }
+
+    func testInteractiveDetachRestoresTermiosAndLeavesTheChildRunning() throws {
+        try exerciseTerminalAttachment(input: true, terminate: false)
+    }
+
+    func testReadOnlyDetachDropsKeyboardInputAndLeavesTheChildRunning() throws {
+        try exerciseTerminalAttachment(input: false, terminate: false)
+    }
+
+    func testSignalRestoresTermiosAndLeavesTheChildRunning() throws {
+        try exerciseTerminalAttachment(input: true, terminate: true)
+    }
+
+    /// Expected output bursts are 64 KiB; stress is 32 MiB into a consumer that never reads.
+    /// The controller must exit within its IO bound while the daemon and child remain usable.
+    func testStalledOutputConsumerDoesNotHoldOrKillTheAgent() throws {
+        let helper = try helperURL()
+        let daemon = try startDaemon(helper)
+        let go = directory.appendingPathComponent("flood")
+        let id = Self.identity(Fixture.firstIdentifier)
+        let child = try spawn(on: daemon, id: id, script: "while [ ! -f '\(go.path)' ]; do sleep 0.05; done; dd if=/dev/zero bs=65536 count=512 2>/dev/null; sleep 30")
+        let output = Pipe()
+        let controller = try launchController(helper, arguments: ["attach", id.description] + daemon.locationArguments, output: output.fileHandleForWriting)
+        defer { controller.stop() }
+        try waitUntil(timeout: Fixture.replyTimeout, "attach is ready") { controller.error.contains("Attached") }
+        try Data().write(to: go)
+        try waitUntil(timeout: Fixture.replyTimeout, "the stalled consumer is disconnected") { !controller.process.isRunning }
+        XCTAssertEqual(controller.process.terminationStatus, 1, controller.error)
+        XCTAssertTrue(controller.error.contains("stalled") || controller.error.contains("buffer"), controller.error)
+        XCTAssertEqual(CLIPlatform.kill(child.pid, 0), 0, "a slow observer must not kill the agent")
+        let stopped = try run(helper, ["stop", id.description] + daemon.locationArguments)
+        XCTAssertEqual(stopped.status, 0, stopped.error)
+    }
+
+    func testControlOptionScopesAndTerminalRequirement() throws {
+        let helper = try helperURL()
+        for args in [["attach", "abc", "--resize"], ["send", "abc", "--input"], ["attach", "abc", "--enter"], ["status", "--input"], ["attach"], ["send", ""]] {
+            XCTAssertEqual(try run(helper, args).status, 64, args.joined(separator: " "))
+        }
+        let refused = try run(helper, ["attach", "abc", "--input"])
+        XCTAssertEqual(refused.status, 1)
+        XCTAssertTrue(refused.error.contains("needs a terminal"), refused.error)
+    }
+
+    private func exerciseTerminalAttachment(input: Bool, terminate: Bool) throws {
+        let helper = try helperURL()
+        let daemon = try startDaemon(helper)
+        let result = directory.appendingPathComponent("typed")
+        let id = Self.identity(Fixture.firstIdentifier)
+        let child = try spawn(on: daemon, id: id, script: "IFS= read -r line; printf '%s' \"$line\" > '\(result.path)'; sleep 30")
+        var master: Int32 = -1
+        var slave: Int32 = -1
+        var size = winsize(ws_row: 31, ws_col: 97, ws_xpixel: 0, ws_ypixel: 0)
+        guard openpty(&master, &slave, nil, nil, &size) == 0 else { throw PTYHostCLITestFailure("openpty failed") }
+        defer { CLIPlatform.close(master); CLIPlatform.close(slave) }
+        var before = termios()
+        XCTAssertEqual(tcgetattr(slave, &before), 0)
+        let terminal = FileHandle(fileDescriptor: slave, closeOnDealloc: false)
+        let originalFlags = fcntl(slave, F_GETFL, 0)
+        let args = ["attach", id.description] + (input ? ["--input", "--resize"] : []) + daemon.locationArguments
+        let controller = try launchController(helper, arguments: args, terminal: terminal)
+        defer { controller.stop() }
+        try waitUntil(timeout: Fixture.replyTimeout, "the local terminal is attached") { controller.error.contains("Attached") }
+        if input {
+            try waitUntil(timeout: Fixture.replyTimeout, "the explicit resize reaches the host") {
+                let listed = try self.run(helper, ["sessions", "--json"] + daemon.locationArguments)
+                let rows = try JSONSerialization.jsonObject(with: Data(listed.output.utf8)) as? [[String: Any]]
+                return rows?.first?["cols"] as? Int == 97
+            }
+        }
+        if terminate {
+            CLIPlatform.kill(controller.process.processIdentifier, SIGTERM)
+        } else {
+            // FileHandle writes to PTYs (the socket-only send wrapper would reject this on Linux).
+            try FileHandle(fileDescriptor: master, closeOnDealloc: false).write(contentsOf: Data("typed line\r\u{1d}".utf8))
+        }
+        try waitUntil(timeout: Fixture.replyTimeout, "the attachment detaches") { !controller.process.isRunning }
+        XCTAssertEqual(controller.process.terminationStatus, terminate ? 128 + SIGTERM : 0, controller.error)
+        var after = termios()
+        XCTAssertEqual(tcgetattr(slave, &after), 0)
+        // PENDIN is kernel-maintained retype state after changing canonical mode.
+        XCTAssertEqual(after.c_lflag & ~tcflag_t(PENDIN), before.c_lflag & ~tcflag_t(PENDIN))
+        XCTAssertEqual(after.c_iflag, before.c_iflag)
+        XCTAssertEqual(after.c_oflag, before.c_oflag)
+        // Compare configurable flags, not Darwin's kernel-only FWASWRITTEN bookkeeping.
+        // https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/fcntl.h
+        let mutableFlags = O_NONBLOCK | O_APPEND | O_ASYNC | O_SYNC | O_DSYNC
+        XCTAssertEqual(fcntl(slave, F_GETFL, 0) & mutableFlags, originalFlags & mutableFlags)
+        XCTAssertEqual(CLIPlatform.kill(child.pid, 0), 0, "detaching must not terminate the child")
+        if input && !terminate {
+            try waitUntil(timeout: Fixture.replyTimeout, "input arrives") { FileManager.default.fileExists(atPath: result.path) }
+            XCTAssertEqual(try String(contentsOf: result), "typed line")
+        } else {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: result.path))
+        }
+        _ = try run(helper, ["stop", id.description] + daemon.locationArguments)
+    }
+
+    private func launchController(_ helper: URL, arguments: [String], terminal: FileHandle? = nil, output: FileHandle? = nil) throws -> RunningController {
+        let stamp = UUID().uuidString
+        let outputURL = directory.appendingPathComponent("control-out-\(stamp)")
+        let error = directory.appendingPathComponent("control-err-\(stamp)")
+        _ = FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: error.path, contents: nil)
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardInput = terminal ?? FileHandle.nullDevice
+        process.standardOutput = try output ?? terminal ?? FileHandle(forWritingTo: outputURL)
+        process.standardError = try FileHandle(forWritingTo: error)
+        try process.run()
+        return RunningController(process: process, outputURL: outputURL, errorURL: error)
+    }
+
     // MARK: - Helpers
 
     private static func identity(_ uuid: String) -> PTYHostSessionIdentity {
@@ -444,6 +650,16 @@ final class PTYHostCLITests: XCTestCase {
     }
 
     private func helperURL() throws -> URL {
+        #if SWIFT_PACKAGE
+        if let override = ProcessInfo.processInfo.environment["THREADING_PTYD_EXECUTABLE"] {
+            return URL(fileURLWithPath: override)
+        }
+        #if canImport(Darwin)
+        return Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent(Fixture.helperName)
+        #else
+        return URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(Fixture.helperName)
+        #endif
+        #else
         let url = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers", isDirectory: true)
             .appendingPathComponent(Fixture.helperName, isDirectory: false)
@@ -453,6 +669,7 @@ final class PTYHostCLITests: XCTestCase {
                 + "it through the Embed Extension Helpers phase, and run the hosted test target"
         )
         return url
+        #endif
     }
 
     @discardableResult
@@ -517,20 +734,27 @@ final class PTYHostCLITests: XCTestCase {
         _ helper: URL,
         _ arguments: [String],
         launchctl: String? = nil,
+        input: Data? = nil,
         timeout: TimeInterval = Fixture.commandTimeout
     ) throws -> CLIAnswer {
         let stamp = UInt32.random(in: 0..<0xFFFF_FFFF)
         let outURL = directory.appendingPathComponent("out-\(stamp)")
         let errURL = directory.appendingPathComponent("err-\(stamp)")
-        FileManager.default.createFile(atPath: outURL.path, contents: nil)
-        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: errURL.path, contents: nil)
 
         let process = Process()
         process.executableURL = helper
         process.arguments = arguments
         process.standardOutput = try FileHandle(forWritingTo: outURL)
         process.standardError = try FileHandle(forWritingTo: errURL)
-        process.standardInput = FileHandle.nullDevice
+        if let input {
+            let inputURL = directory.appendingPathComponent("in-\(stamp)")
+            try input.write(to: inputURL)
+            process.standardInput = try FileHandle(forReadingFrom: inputURL)
+        } else {
+            process.standardInput = FileHandle.nullDevice
+        }
         // Somewhere writable: the test host's own working directory is `/`, and a coverage build
         // that cannot place `default.profraw` says so on the child's standard error, which is
         // one of the things being asserted about.
@@ -675,7 +899,7 @@ private final class CLIDaemon: @unchecked Sendable {
 
     func terminate() {
         if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
+            CLIPlatform.kill(process.processIdentifier, SIGKILL)
         }
         diagnostics.fileHandleForReading.readabilityHandler = nil
     }
@@ -718,11 +942,16 @@ private final class CLIWireClient: @unchecked Sendable {
     // MARK: - Initialization
 
     init(socketPath: String) throws {
+        #if canImport(Darwin)
         descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        #else
+        descriptor = socket(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0)
+        #endif
         guard descriptor >= 0 else { throw PTYHostCLITestFailure("socket() failed") }
 
         // Without this a write to a socket the daemon has already closed would raise `SIGPIPE`
         // in the *test host*, which is a crash rather than a failure.
+        #if canImport(Darwin)
         var suppress: Int32 = 1
         _ = setsockopt(
             descriptor,
@@ -732,13 +961,16 @@ private final class CLIWireClient: @unchecked Sendable {
             socklen_t(MemoryLayout<Int32>.size)
         )
 
+        #endif
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
+        #if canImport(Darwin)
         address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
         let bytes = Array(socketPath.utf8)
         let capacity = MemoryLayout.size(ofValue: address.sun_path)
         guard bytes.count < capacity else {
-            Darwin.close(descriptor)
+            CLIPlatform.close(descriptor)
             throw PTYHostCLITestFailure("socket path is \(bytes.count) bytes, too long")
         }
         withUnsafeMutablePointer(to: &address.sun_path) { tuple in
@@ -751,11 +983,11 @@ private final class CLIWireClient: @unchecked Sendable {
         }
         let connected = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                Darwin.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
+                CLIPlatform.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
         guard connected == 0 else {
-            Darwin.close(descriptor)
+            CLIPlatform.close(descriptor)
             throw PTYHostCLITestFailure("connect() failed: \(String(cString: strerror(errno)))")
         }
 
@@ -775,11 +1007,12 @@ private final class CLIWireClient: @unchecked Sendable {
     func spawn(
         id: PTYHostSessionIdentity,
         script: String,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        channel: PTYHostChannel = .pty(grid: PTYHostGrid(cols: 80, rows: 24))
     ) throws -> PTYHostSpawned {
         send(.spawn(PTYHostSpawnRequest(
             id: id,
-            channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24)),
+            channel: channel,
             executable: "/bin/sh",
             arguments: ["-c", script],
             environment: Self.childEnvironment,
@@ -803,7 +1036,7 @@ private final class CLIWireClient: @unchecked Sendable {
         condition.broadcast()
         condition.unlock()
         guard !alreadyClosed else { return }
-        _ = shutdown(descriptor, SHUT_RDWR)
+        CLIPlatform.shutdownReadWrite(descriptor)
     }
 
     // MARK: - Private Methods
@@ -837,14 +1070,14 @@ private final class CLIWireClient: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         while true {
             let count = buffer.withUnsafeMutableBytes {
-                Darwin.read(descriptor, $0.baseAddress, $0.count)
+                CLIPlatform.read(descriptor, $0.baseAddress, $0.count)
             }
             guard count > 0 else {
                 condition.lock()
                 closed = true
                 condition.broadcast()
                 condition.unlock()
-                Darwin.close(descriptor)
+                CLIPlatform.close(descriptor)
                 return
             }
             let incoming = Data(buffer[0..<count])
@@ -872,7 +1105,7 @@ private final class CLIWireClient: @unchecked Sendable {
             guard let base = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(descriptor, base + offset, raw.count - offset)
+                let written = CLIPlatform.write(descriptor, base + offset, raw.count - offset)
                 if written > 0 {
                     offset += written
                     continue
@@ -881,5 +1114,85 @@ private final class CLIWireClient: @unchecked Sendable {
                 return
             }
         }
+    }
+}
+
+
+private enum CLIPlatform {
+
+    @discardableResult
+    static func kill(_ pid: pid_t, _ signal: Int32) -> Int32 {
+        #if canImport(Darwin)
+        return Darwin.kill(pid, signal)
+        #else
+        return Glibc.kill(pid, signal)
+        #endif
+    }
+
+    static func close(_ descriptor: Int32) {
+        #if canImport(Darwin)
+        _ = Darwin.close(descriptor)
+        #else
+        _ = Glibc.close(descriptor)
+        #endif
+    }
+
+    static func read(_ descriptor: Int32, _ buffer: UnsafeMutableRawPointer?, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        return Darwin.read(descriptor, buffer, count)
+        #else
+        return Glibc.read(descriptor, buffer, count)
+        #endif
+    }
+
+    static func connect(
+        _ descriptor: Int32,
+        _ address: UnsafePointer<sockaddr>,
+        _ length: socklen_t
+    ) -> Int32 {
+        #if canImport(Darwin)
+        return Darwin.connect(descriptor, address, length)
+        #else
+        return Glibc.connect(descriptor, address, length)
+        #endif
+    }
+
+    /// A write that cannot raise `SIGPIPE`: the socket option covers it on Darwin, and on Linux
+    /// the flag has to be named on every call.
+    static func write(_ descriptor: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        return Darwin.write(descriptor, buffer, count)
+        #else
+        return Glibc.send(descriptor, buffer, count, Int32(MSG_NOSIGNAL))
+        #endif
+    }
+
+    /// `shutdown(SHUT_RDWR)`. Glibc imports the constant as `Int`.
+    static func shutdownReadWrite(_ descriptor: Int32) {
+        #if canImport(Darwin)
+        _ = Darwin.shutdown(descriptor, SHUT_RDWR)
+        #else
+        _ = shutdown(descriptor, Int32(SHUT_RDWR))
+        #endif
+    }
+
+    static var streamSocketType: Int32 {
+        #if canImport(Darwin)
+        return SOCK_STREAM
+        #else
+        return Int32(SOCK_STREAM.rawValue)
+        #endif
+    }
+}
+
+private struct RunningController {
+    let process: Process
+    let outputURL: URL
+    let errorURL: URL
+    var output: String { (try? String(contentsOf: outputURL)) ?? "" }
+    var error: String { (try? String(contentsOf: errorURL)) ?? "" }
+    func stop() {
+        if process.isRunning { CLIPlatform.kill(process.processIdentifier, SIGKILL) }
+        process.waitUntilExit()
     }
 }

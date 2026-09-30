@@ -143,9 +143,9 @@ final class ProjectSidebarViewController: NSViewController {
         return button
     }()
     private lazy var triggersButton: ThemedIconButton = {
-        let button = ThemedIconButton(symbolName: "bolt.badge.clock", accessibility: L10n.string("Triggers"),
+        let button = ThemedIconButton(symbolName: "bolt.badge.clock", accessibility: L10n.string("Automations"),
                                       target: .inline, inkSource: .chrome)
-        button.toolTip = L10n.string("Triggers")
+        button.toolTip = L10n.string("Automations")
         button.onPress = { (NSApp.delegate as? AppDelegate)?.invokePanelCommand(AppCommands.ID.triggers) }
         return button
     }()

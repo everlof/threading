@@ -94,28 +94,42 @@ row, name, directory, branch and theme survive relaunch; its process and scrollb
 **Account** — a distinct agent login. If you have more than one, each is offered separately
 when creating a session. See [Accounts](#accounts).
 
-### Triggers
+### Automations
 
-**Triggers** in the sidebar is Threading's event-automation center. A trigger listens to one
-connected source and starts an ordinary agent session when typed conditions match. The source
-supplies facts; the saved trigger supplies the project, agent and instructions.
+**Automations** in the sidebar runs saved tasks on a schedule or when a connected event arrives.
+Choose **New automation**, give the task a name and instructions, select its project, agent and
+permissions, and choose daily, selected weekdays, weekly or an interval. The named time zone
+stays with the schedule across daylight-saving changes. Saving leaves it paused; review and
+activate it when ready. **Manage…** provides editing, run now and deletion.
 
-The destination has three pages. **Triggers** shows active rules and disabled drafts, **Activity**
-shows durable queued/running/completed receipts, and **Sources** connects or pauses event feeds.
-The first source adapter reads Sonda review-required events through a scoped API key. The key is
-entered in the source sheet, stored in Keychain and never shown to agents.
+Choose **Skip missed runs** or **Run once on return** for offline periods. A schedule never replays
+a backlog, and another occurrence is skipped while its previous run is active. A run that cannot
+start — for example because its project has left the sidebar — is shown as needing attention
+rather than started later. Local schedules
+can ask the background listener to open Threading while the Mac is awake and logged in. A
+sleeping Mac cannot run work; its saved missed-run policy applies when it returns.
 
-Agents can list this setup and create a disabled draft when you ask. A draft does nothing until
-you review the exact event, project, instructions, agent, checkout policy and authority and press
-**Activate**. Assessment always begins read-only. If the saved mode allows it and the agent reports
-a straightforward fix, Threading may begin a separate local-edit stage in a clean checkout or an
-isolated managed worktree. It can edit and test locally; it cannot push, deploy, open a change
-request or write back to the source. The completion notice tells you what to verify.
+**Archive successful runs** files the conversation away after a successful report and completion
+of the agent's turn. Its result remains in **Activity**. Failures and requests for your attention
+stay visible. Deleting an automation stops future scheduling and preserves its history.
 
-The source listener is a separate per-user background process. It can receive events and wake
-Threading while the app is closed, as long as the Mac is awake and logged in. A sleeping or
-offline Mac catches up from the provider cursor when it returns. Questions, replies and images
-use the resulting session's normal notification, iPhone conversation and attachment paths.
+Tasks can be read-only or permit local edits and tests. Event rules also retain **Assess only**
+and **Assess, then fix if straightforward**. Local edits use a clean project checkout or an
+isolated worktree. Automation permission does not include pushing, deployment or source write-back.
+**Sources** connects the Sonda review-required feed with a scoped API key held in Keychain.
+
+Agents can use **manage_automation** to list, inspect, create, edit, enable, pause, run, delete and
+read results when you ask. Enabling or running always shows you the exact settings first and
+waits for your approval. Changes name the current revision so an old editor or agent cannot
+overwrite newer instructions. Automated runs themselves cannot reconfigure automations.
+
+**Remote** connects to an already installed controller on a configured SSH host. Enter its
+absolute executable and database paths. Remote tasks name a worker already configured on that
+host, and the VPS supervisor owns the schedule and execution even when your Mac is offline.
+The same agent tool supports these remote operations once you have connected the host here; it
+always uses the paths you saved. **Enable**, **Run now** and **Delete** ask before acting.
+Connecting does not install a controller or start its supervisor. A remote run is archived only after work completes, result delivery is
+confirmed and its process has stopped; its history remains available.
 
 ### Manager sessions
 
@@ -173,7 +187,7 @@ nothing you write there is lost track of. Files an agent writes land in a folder
 Finder rather than inside the app's storage.
 
 The folder is deliberately **outside** Threading's own storage: Reset Everything does not touch
-it. Move it under **Settings ▸ General ▸ Scratchpad** — *Choose…* picks the folder to keep it in
+it. Move it under **Settings ▸ Chats ▸ Scratchpad** — *Choose…* picks the folder to keep it in
 (the scratchpad itself is always named `Scratchpad` inside your choice) and *Use Default* puts it
 back. Moving it takes your chats with it; the sidebar row is the same row afterwards.
 
@@ -268,7 +282,7 @@ Each session remembers the branch of the checkout it runs in: recorded when the 
 created, updated each time it finishes working, and — by default — **kept in step while the
 session sits idle**. Switch the checkout's branch anywhere — in another session, in the
 shell drawer, in a terminal outside Threading — and every session standing in that checkout
-follows, because that is the branch any of them would resume onto. **Settings > General >
+follows, because that is the branch any of them would resume onto. **Settings > Sidebar >
 Follow the checkout's branch** turns this off; sessions then keep the branch they last ran
 on until they next run, filing old conversations under the branch they actually happened
 on. Either way, the hover popover shows the session's recorded branch.
@@ -286,7 +300,7 @@ The grouping can be toggled from wherever you notice it, not only from Settings:
 - **Right-click a project row or a branch heading** — the same toggles sit in the context
   menu, with checkmarks showing the current state. A branch heading's menu leads with
   **Copy Branch Name**, which puts the branch's name on the clipboard
-- **Settings > General > Group sessions by branch** — the persistent home of the setting
+- **Settings > Sidebar > Group sessions by branch** — the persistent home of the setting
 
 ### The sidebar's top and bottom
 The band at the top of the sidebar carries the app's brand at its left — the Threading mark,
@@ -310,7 +324,7 @@ every sound Threading makes — notification alerts and the terminal bell alike 
 click gives both back exactly what they were set to, since the switch changes no sound
 setting. The ordinary speaker becomes slashed while it holds, and the button is filled rather
 than quiet, so a silent app always says so on screen. It is the same state as **Settings ▸
-General ▸ Silence** and the **Threading ▸
+Notifications ▸ Silence** and the **Threading ▸
 Silence Sounds** menu item (⇧⌘S); all three follow each other, and the choice survives a
 relaunch. See [Notifications](#notifications) for what it does and does not silence.
 
@@ -349,7 +363,7 @@ First** for Order Added, **Most Recent First** or **Least Recent First** for Rec
 direction, and Type offers **Chats First** or **Terminals First**. A reversal made about names is
 not inherited by a sort about dates or row kinds.
 
-The order and its direction are also in **Settings > General > Sort sessions by** and **Sort
+The order and its direction are also in **Settings > Sidebar > Sort sessions by** and **Sort
 direction**. To put the newest chats on top under Order Added, pick **Newest First**.
 
 A pinned session carries a filled pin beside its title and leads the list under every order and
@@ -364,7 +378,7 @@ begins is said vertically instead: extra air above each project and a subtle rul
 them, while the type keeps carrying the levels the way it already does. Nothing else
 changes — grouping, sorting, expansion and every row action work the same. Toggle it from
 the arrangement menu, **View ▸ Compact Tree** (rebindable in Settings ▸ Keyboard), or
-**Settings > General > Compact tree**.
+**Settings > Sidebar > Compact tree**.
 
 **Show Five Chats per Project** (on by default) keeps a long project short, the way the iPhone
 app's dashboard does: each project lists its first five chats in the current order, then a
@@ -375,7 +389,7 @@ also says how many of them need attention or are working. The chat you have open
 away: selecting a chat further down — from a notification, search or the palette — opens the
 project just far enough to show it. Terminals always show. The Snoozed list is never shortened.
 Every project starts folded to five when Threading opens. Turn it off from the arrangement menu,
-**View ▸ Show Five Chats per Project** (rebindable in Settings ▸ Keyboard), or **Settings > General
+**View ▸ Show Five Chats per Project** (rebindable in Settings ▸ Keyboard), or **Settings > Sidebar
 > Show five chats per project**.
 
 Whichever tree you keep, the list tightens as you narrow the column. Drag the divider in from
@@ -422,7 +436,7 @@ no agent involved, no usage spent — by looking, in order, at:
 
 Discovery runs in the background for projects that have no icon yet, and only ever fills an
 empty slot. The network sources contact only hosts the project itself points at, and the
-whole thing can be switched off with **Settings > General > Discover project icons**.
+whole thing can be switched off with **Settings > Sidebar > Discover project icons**.
 
 An icon whose tone would vanish against the sidebar — a dark mark in dark mode, a light one
 in light mode — is drawn on a small rounded **backplate** of the opposite tone, decided from
@@ -675,7 +689,7 @@ The button sits at the right end of the row under the box; **Import _n_ conversa
 at its left end when this project has conversations it could adopt.
 
 To give every new chat the same standing instruction, fill in an **Opening Message** under
-**Settings ▸ General**. There are two fields, one on each side of the task you write, and either
+**Settings ▸ Chats**. There are two fields, one on each side of the task you write, and either
 can be left empty:
 
 - **Before the task you write** — standing context the agent reads first, framing how the work
@@ -919,7 +933,7 @@ are the cue. A notification is withdrawn on its own the moment it stops being tr
 question is answered, the session is opened, or the agent starts working again — so
 Notification Center holds only things still waiting for you.
 
-Turn it off with **Notify when a session needs you** in General settings. macOS's own
+Turn it off with **Notify when a session needs you** in Notifications settings. macOS's own
 notification permission also applies; it is requested the first time there is something to
 say. Sessions that report their own turn boundaries (Claude, and Codex with hooks enabled)
 notify on finished turns; plain shells never do.
@@ -976,7 +990,7 @@ than two — when a bell has just rung for a session, the notification that foll
 silently, while still appearing as a banner and in Notification Center. The bell itself is never
 held back: if you heard nothing, the notification keeps its sound.
 
-**Silencing everything at once.** The speaker at the sidebar's foot, **Settings ▸ General ▸
+**Silencing everything at once.** The speaker at the sidebar's foot, **Settings ▸ Notifications ▸
 Silence**, and **Threading ▸ Silence Sounds** (⇧⌘S) are one switch with three faces. It holds
 every sound the app can make — both cards above, and every sound a later release adds — and it
 changes none of them: switching it back on gives the alert sound and the bell exactly what they
@@ -1012,7 +1026,7 @@ The narrowest level wins, and it inherits by default:
 | Session | The session row's `⋯` menu, or right-click ▸ **Sounds** | That conversation's notifications and bell |
 | Standalone terminal | The terminal row's `⋯` menu, or right-click ▸ **Sounds** | That terminal's bell |
 | Project | The project row's `⋯` menu ▸ **Sounds** | Every chat and terminal in it that has no sound of its own |
-| Default | Settings ▸ General ▸ **Notifications** and **Terminal Bell** | Everything else |
+| Default | Settings ▸ Notifications ▸ **Alerts** and **Terminal Bell** | Everything else |
 
 The first item is **Inherit**, and it names what it falls back to — "Inherit (Purr)" means
 clearing this choice leaves the scope on Purr. It reads plain **Inherit** when the levels above
@@ -1043,7 +1057,7 @@ notifications**, which paints that whole half of the app.
 The sheet is the same at every scope and names which one it is editing in its title. Each row's
 first item says what that row falls back to if you clear it — "Inherit (Basso)" means this row
 is currently reading Basso from somewhere further out, and the three rows that have never made a
-sound read **Inherit (Silent)** until you give them one here. At **Settings ▸ General**, where
+sound read **Inherit (Silent)** until you give them one here. At **Settings ▸ Notifications**, where
 both sound cards carry a **Customize Events…** button, the same item reads **Default (…)**
 instead, because there is nothing beyond the app to inherit from; the two group rows there are
 the page's own **Alert sound** and **Bell sound** pickers, so changing one changes the other.
@@ -1056,7 +1070,7 @@ rather than a checkmark: the sheet is where clearing happens, with what is being
 screen. A standalone terminal has no *Customize…* item, because nothing there can say why a bell
 rang.
 
-**Finding what is overriding.** **Settings ▸ General ▸ Custom Sounds** lists every chat,
+**Finding what is overriding.** **Settings ▸ Notifications ▸ Custom Sounds** lists every chat,
 checkout and terminal carrying a sound of its own — what it is, where it lives, and what it
 amounts to ("Submarine", or "3 events"). **Customize…** on a row opens that scope's sheet and
 **Reset** puts it back to what it inherits; **Reset All** does that for every row at once,
@@ -1150,7 +1164,7 @@ showing a different, empty one. So Cursor sessions are always Chat, and the surf
 choice for them. Everything else about Cursor is its own CLI and your own Cursor login.
 
 **Sessions come back on their own, and you choose which ones.** **Bring back at launch**
-(Settings ▸ General ▸ Session Processes) offers three answers:
+(Settings ▸ General ▸ Startup) offers three answers:
 
 - **Running at last quit** (the default) brings back what still had a live agent after idle
   housekeeping ran at quit. Unfinished and otherwise protected work remains in that set.
@@ -1441,7 +1455,7 @@ Renaming a session in Threading pins your own name instead, and it stops followi
 The rename sheet's **Use Agent's Name** button hands it back — it appears only when you have
 given the session a name of your own, since that is the only time there is anything to undo.
 Turn the follow behaviour off entirely under
-**Settings > General > Name sessions after the agent's own title** — sessions then keep their
+**Settings > Sidebar > Name sessions after the agent's own title** — sessions then keep their
 first-prompt names.
 
 Rename with **Project > Rename Session…** (**Cmd+R**), via right-click in the sidebar, or by
@@ -1601,12 +1615,12 @@ Set it in three places:
 - The **mode chip** in the composer, on the row inside the prompt box beside the model, when
   starting a chat.
 - A single chat's **⋯** menu has a **Permission Mode** submenu. A mode that comes from a
-  *setting* — Settings ▸ General, or the agent's own configuration — is marked *(default)* where
+  *setting* — Settings ▸ Chats, or the agent's own configuration — is marked *(default)* where
   it stands in the list rather than repeated above it, and choosing it keeps the chat inheriting.
   A mode merely *seen* being used is marked *(last used)* and is an ordinary choice: picking it
   pins it to this chat, because nothing would apply it on its own. The submenu then opens with
   **Use Agent's Setting**, which is also what you get when nothing can name a mode at all.
-- **Settings > General > Permission Mode** sets what new chats use. *Agent's Setting* is the
+- **Settings > Chats > New sessions start in** sets what new chats use. *Agent's Setting* is the
   default and changes nothing — Claude's own `permissions.defaultMode` and Codex's `config.toml`
   still decide. Threading reads both, so the chip and the menu can still name the mode you will
   get: Claude's four settings layers (a managed policy, the project's `.claude/settings.local.json`
@@ -1626,7 +1640,8 @@ Grok accepts all six postures directly; Manual is sent using Grok's spelling, `d
 
 ### Conversation speed
 
-**Settings > General > Conversation Speed** chooses how Claude and Codex sessions start,
+**Settings > Chats > Claude sessions start in** and **Codex sessions start in** choose how
+Claude and Codex sessions start,
 independently:
 
 - **Agent's Setting** leaves the decision to Claude Code or Codex. This is the default, so an
@@ -1641,9 +1656,9 @@ independently:
 The choice applies to both **Terminal** and **Native** sessions on their next launch or resume.
 The speed chip in both the **new-session draft** and a **Native reply box** offers **Follow General
 Setting**, **Standard**, and **Fast**. Standard or Fast is saved for that chat and takes precedence
-over General; Follow General remains linked to the provider-specific choice above rather than
+over the Chats setting; Follow General remains linked to the provider-specific choice above rather than
 copying its current value. A scheduled draft freezes that choice with the rest of its session
-options. If General is Agent's Setting, returning a running Native chat to Follow General takes
+options. If the Chats setting is Agent's Setting, returning a running Native chat to Follow General takes
 effect the next time it starts because there is no generic live command that restores a
 provider-owned setting. For Claude, a known non-Opus model stays Standard even when the app
 default is Fast, because a speed preference must not silently replace an explicit model choice.
@@ -1660,7 +1675,7 @@ conversation lands in Threading's own scrollback, where all three can reach it.
 
 Claude's own default is the alternate screen. Threading's is the main screen:
 
-- **Settings ▸ General ▸ Claude Terminal ▸ Scrolling in new Claude terminals** sets what new
+- **Settings ▸ Integration ▸ Claude Code ▸ Scrolling in new Claude terminals** sets what new
   Claude terminals do. *Terminal's own scrolling* is the default. *Claude's fullscreen
   renderer* asks for the alternate screen instead, and *Follow Claude's setting* states
   nothing at all, leaving Claude's `/tui` choice — and anything it has decided for itself on
@@ -1686,7 +1701,7 @@ the two are separate, and a session can use either, both, or neither.
 Claude normally decides this account-wide, in its own `/config`. Threading lets you set it per
 chat instead:
 
-- **Settings > General > Claude Remote Control** sets what new Claude sessions do. *Follow
+- **Settings > Integration > Remote Control for new Claude sessions** sets what new Claude sessions do. *Follow
   Claude's setting* is the default and changes nothing — the account's `/config` still
   decides. *Always on* and *Always off* override it.
 - A single chat's **⋯** menu has a **Session Options ▸ Claude Remote Control** submenu:
@@ -2074,7 +2089,7 @@ continue to use the phone's original rendering. The iPhone's local **Account ini
 continues to control whether the session action disc shows its account badge.
 
 Automatic avatars use Gravatar, then GitHub accounts whose public profile email matches.
-**Settings > General > Discover account avatars** controls these lookups. Chosen images work
+**Settings > Sidebar > Discover account avatars** controls these lookups. Chosen images work
 independently of automatic discovery.
 
 Clearing the full-name field restores the automatically resolved name. **Restore this surface**
@@ -2241,7 +2256,7 @@ notification naming 60%, not two. A later line on the same window replaces the e
 notification rather than stacking under it.
 
 **Tell me when I reach my own limits** is the switch above the list, and it is separate from the
-session notifications under **Settings ▸ General**: silencing your sessions does not silence your
+session notifications under **Settings ▸ Notifications**: silencing your sessions does not silence your
 quota, and the reverse. Switching it off takes down anything it had already posted.
 
 **Where a limit shows.** Open the usage pill's popover and a window you have drawn a line on has
@@ -2377,8 +2392,8 @@ offers one, and the conversation **speed**. The context meter and the send sit a
 that same row. The speed menu offers **Follow General Setting**, **Standard**, and **Fast**, just
 like the new-session draft. Changing the model, the effort or an explicit speed applies from your
 next message onward: Claude takes it without restarting, Codex takes it with the next turn. Until
-a chat chooses its own speed, the chip reflects the provider-specific startup choice in General
-settings. Returning to Follow General while General says Agent's Setting is recorded for the next
+a chat chooses its own speed, the chip reflects the provider-specific startup choice in Chats
+settings. Returning to Follow General while that setting says Agent's Setting is recorded for the next
 start; the running agent keeps its current speed and the chat says so.
 
 The **permission mode** chip is the same choice as Permission Mode in a session's **…** menu, and
@@ -2429,8 +2444,11 @@ than reporting a failure, because nothing failed. Whatever you had queued stays 
 
 ### Referencing and commenting
 
-Use the **…** beside one of your messages or an agent response to **Add … to chat** or
-**Comment…** on it. The reference lands above the reply box as a small receipt instead of pasting
+Point at one of your messages or an agent response and its actions appear underneath it: **Copy**
+puts the whole message on the clipboard (the button shows a checkmark for a moment to say it
+did), and the **…** offers **Add … to chat** or **Comment…**. At rest a message shows no actions,
+so the conversation reads as an exchange rather than a list of records; the line they sit on is
+kept, so nothing moves when they appear. The reference lands above the reply box as a small receipt instead of pasting
 a long quote into your text. You can type an accompanying message, send the receipt by itself, or
 open its menu to add a comment or remove it. After sending, the same receipt stays with your message
 so it is clear what the agent was answering.
@@ -2480,7 +2498,10 @@ it folds when you send the next message, labelled "Stopped after" rather than "W
 Reopened sessions fold their past turns the same way, timed from the transcript's own clock.
 
 While the agent works, the view no longer chases the newest line. Sending a message lifts it
-toward the top and holds it there while the reply streams in below; scrolling up releases the
+toward the top: the reply stays in view as it arrives, pushing your message upward until it
+reaches the top, where it holds while the rest of the reply fills in below. New messages, tool
+calls and cards rise gently into place as they arrive (instantly, with **Reduce motion** on in
+System Settings ▸ Accessibility ▸ Display). Scrolling up releases the
 view to you and nothing moves it until you scroll back near the bottom, which resumes
 following. A floating **↓** appears whenever you are away from the latest message; click it to
 jump back and resume following. The scrollbar and mouse wheel always win over the stream.
@@ -3509,8 +3530,8 @@ trail. The same style is drawn in the pane, in the presenter window and in recor
 sized relative to the screen, so a finger in the saved movie is the size it was on screen.
 
 **Presenter window, for Meet, Zoom and screen recordings.** The window button opens the device alone
-in a window of its own, sized to the device and titled with its name (for example "iPhone 17 Pro
-Simulator"), so it is the obvious choice in a share picker. It mirrors the pane: touches show there
+in a window of its own, sized to the device and titled with its name (for example "Threading:
+iPhone 17 Pro"), so it is the obvious choice in a share picker. It mirrors the pane: touches show there
 when they are on, and you can click, drag, scroll and type on it as on the pane, including the
 Simulator shortcuts. It keeps a live picture even when you switch to another session. Right-click
 it for capture, recording, touch style, **Keep on Top**, and **Close Presenter Window**; ⌘W closes it
@@ -3633,6 +3654,13 @@ asked again on every screen click; press the crossed-out hand button to retry ex
 first control version does not type text or send Home, Lock or volume-button presses, and agents
 cannot use your visible-pane grant to operate the phone.
 
+Modern iPhones keep their preview connection open rather than launching a command for every
+frame. The preview is capped at four frames per second, not full-motion video; initial connection
+setup can still take several seconds. Control has its own persistent connection, and the pane
+waits for it before accepting input. Drags follow pointer movement instead of replaying after
+release. A disconnect or a change in image dimensions revokes control; approve it again after
+the preview recovers.
+
 The second status line explains what Threading found. **Media streaming unavailable** means the
 developer service reports no usable media features; because its media session authenticates
 touch, input cannot work in that state either. **Touch surface unavailable** means the phone did
@@ -3670,6 +3698,13 @@ Use **Settings → Advanced → iPhone Tooling → Install Latest** if a recent 
 tunnel. Rows include process, severity, message, and the real `subsystem / category` label, so the
 existing filter, level chooser, folds and recorded-history tools work on physical-device logs too.
 Private unified-log values remain `<private>`.
+
+To watch one app, select its exact name in **All processes** (for example, **Ananke**).
+This scopes new buffered and recorded rows to that process, including when other system services
+mention the app in their messages. Changing process starts a new live buffer. **Matches only** is
+the default for text and level filtering: unrelated rows and fold markers are not shown.
+Choose **Show context** when you want neighbouring rows and expandable folds within that scope.
+The process menu is populated from observed logs, so an app appears after it emits a log line.
 
 Threading does not bundle `pymobiledevice3`; installation is an explicit download into Threading's
 data folder and updates occur only when you press **Update**. If it is absent, too old, or the
@@ -4023,12 +4058,12 @@ setting would change *this* list, so a session that never names one never mentio
 them lists them and copies each into Threading, so a paired phone still only fetches files
 Threading itself holds; **Hide** puts the list back to the project's own files without deleting
 the copies, so the choice is reversible. The same switch is
-**Settings ▸ General ▸ Attachments ▸ Include files outside the project**, and it applies to every
+**Settings ▸ Chats ▸ Attachments ▸ Include files outside the project**, and it applies to every
 session. Images you attach and ones the agent shows are unaffected either way — those were handed
 over on purpose.
 
 Automatic detection is an opt-out feature and is enabled separately for both agents by default.
-Use **Settings > General > Attachments** to turn **Detect attachments from Claude Code** or
+Use **Settings > Chats > Attachments** to turn **Detect attachments from Claude Code** or
 **Detect attachments from Codex** off independently if a future CLI version changes how it
 renders file paths. Turning detection off stops the *scanning* of that agent's terminal and Chat
 replies. Images you attach, and ones the agent shows in the panel, still appear — those are handed
@@ -4154,7 +4189,7 @@ taken, so scrolling away says so in the badge rather than pretending the missing
 Nothing about the overlay reaches the page, so a screenshot taken while it is up is of the page and
 not of the overlay.
 
-**Settings ▸ General ▸ Keep the page as it was before each agent action.** Off until you turn it on.
+**Settings ▸ Chats ▸ Attachments ▸ Keep the page as it was before each agent action.** Off until you turn it on.
 With it on, Threading photographs the page just before each thing the agent does to it, so the agent
 can ask what its own click changed rather than guessing. Those pictures live in memory for the chat
 only and never join your baselines. It sees the agent's actions and nothing else: your own clicks, a
@@ -4791,6 +4826,11 @@ mode, navy in dark mode, and the native macOS title bar in both. It follows the 
 appearance automatically. **System** remains the unstyled macOS-colour option in the picker, and
 an explicit choice you already made is never replaced by the new default.
 
+In **Settings ▸ Themes**, the two buttons beside the **App theme** picker act on the theme it
+names: the first duplicates it into an editable custom copy and switches to that copy, and the
+trash deletes it. Only custom themes can be deleted; deleting the one you are using switches the
+app back to Threading.
+
 Open **View ▸ Current Theme**, or pick **Current Theme** from the `+` in the display panel beside
 a conversation, to inspect the app chrome that is active now. It opens in that panel and stays
 open as you move between conversations — it belongs to the app, not to one chat. The page shows
@@ -4806,6 +4846,15 @@ the terminal and the sidebar keep their own grounds; the sidebar has its own gra
 set separately. An agent sets it through the same tools as everything else in a theme
 (`material.backdrop`), and every stop of a wash has to keep the theme's text readable, so a
 theme cannot wallpaper you out of the app.
+
+A custom gradient can also drift slowly. Ask your agent to add
+`gradient.drift: {"duration": 24, "distance": 0.12}` to the theme's `material.backdrop`;
+the same gradient and movement reach the iPhone dashboard. The Mac sidebar can use its own
+`sidebar.gradient.drift`. Duration is a full cycle in seconds (8–120), and distance is the
+fraction of the gradient it travels (0.02–0.25). Replacing the gradient without `drift` makes it
+still. Reduce Motion and Low Power Mode keep the colors but stop the movement, and hidden
+screens stop animating. Background pictures remain on the Mac.
+
 
 The page stays live while an agent works too. You can say, for example, “Use Threading's
 app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect
@@ -5069,7 +5118,7 @@ Leaving Settings drops the query too: a search is a question about the visit tha
 the next **Cmd+,** opens on the whole page list rather than on a filter you typed some time ago.
 
 The sidebar filters immediately while you type and shows the results with their paths:
-searching *mute*, for example, keeps the **General** row and lists **Silence every sound**
+searching *mute*, for example, keeps the **Notifications** row and lists **Silence every sound**
 beneath it with its section as a quiet second line. Clicking a page row opens the page as
 always; clicking a *setting* opens its page, scrolls straight to that row, and briefly marks
 it with the same highlight the search results use, so the answer is the row itself rather
@@ -5084,7 +5133,7 @@ you *mean* may use different ones. Clicking it runs a short one-off agent turn o
 enabled account that is still signed in (Claude Code first, then Codex; the button is absent
 without a configured account). The run reads only the
 catalogue of Settings pages and their settings, and answers in the right pane with up to four
-suggestions, each named by its full path — *General › Notifications › Alert sound* — with one
+suggestions, each named by its full path — *Notifications › Alerts › Alert sound* — with one
 sentence on why and an **Open** button. Opening a suggestion that names a setting scrolls to
 and marks that row, exactly like the keyword results. The run uses your own agent login and
 spends a small amount of its usage, which is why it only ever happens on the click — typing
@@ -5096,11 +5145,17 @@ returns to the suggestions exactly as you left them. Clicking **Ask AI** again w
 query does the same thing — a held answer is re-shown, never re-bought; only a changed query
 starts a new run.
 
-The page list is grouped under six quiet captions — **App** (General, Keyboard), **Appearance**
-(Themes, Profiles, Motion), **Agents** (Accounts, Tools, Usage), **Access** (Remote Access,
+The page list is grouped under six quiet captions — **App** (General, Sidebar, Chats,
+Notifications, Keyboard), **Appearance** (Themes, Profiles, Motion), **Agents** (Agents &
+Accounts, Integration, Tools, Usage, Usage Windows), **Access** (Remote Access, Remote Hosts,
 GitHub, Privacy), **Data** (Storage, Archived, Advanced), and **Extensions**, which also holds
 any page an extension contributes. While a search is typed the captions stand down: a result's
 geography is the page row above it, not the sidebar's sections.
+
+Every setting says what it does in **one short line** under its name, so a page can be read at a
+glance. Where there is more to know — the caveats, how it works, what it sends where — a **?**
+beside the setting's name, or beside a section's caption, opens the rest in a small panel.
+VoiceOver reads the full explanation from the **?** button without opening it.
 
 Every page keeps its title, a one-line summary and its page-wide actions in a **fixed header**
 above the scroll, so where you are — and, on Storage, how much is reclaimable — stays on screen
@@ -5124,33 +5179,72 @@ requests; a missing extension translation falls back to that extension's base st
 than borrowing an unrelated app translation.
 
 ### General
-- **New sessions use** — the agent the composer opens on; any other can be picked there, and a
-  successfully started session makes its chosen agent the new value
-- **Conversation Speed** — choose Agent's Setting, Standard, or Fast independently for Claude
-  and Codex; applies to Terminal and Native sessions on their next launch
-- **Opening Message** — optional standing text sent once with every new chat's first turn,
-  before the task, after it, or both; see [Creating](#creating)
-- **Name sessions after the agent's own title** — see [Names](#names)
-- **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
-- **Follow the checkout's branch** — an idle session's recorded branch tracks its checkout,
-  however the switch was made; off, it keeps the branch it last ran on — see
-  [Grouping sessions by branch](#grouping-sessions-by-branch)
-- **Discover project icons** — see [Project icons](#project-icons)
-- **Discover account avatars** — see [Icons and names](#icons-and-names)
-- **Reopen the last session at launch**
-- **Bring back at launch** — nothing, the sessions that were running at the last quit, or the
-  ones used recently; whatever comes back resumes in the background, one at a time, so each is
-  already running when you open it; see [Resuming](#resuming)
-- **Stop idle agents after** and **Keep idle agents running** — the age window and warm-process
-  ceiling used while Threading is open and by the **Recently used** launch choice; unfinished,
-  unsafe-to-resume, visible, and remotely viewed work is protected
+
+How the app itself behaves.
+
+- **Startup** — **Reopen the last session at launch**, and **Bring back at launch**: nothing,
+  the sessions that were running at the last quit, or the ones used recently; whatever comes back
+  resumes in the background, one at a time, so each is already running when you open it; see
+  [Resuming](#resuming)
+- **Idle Agents** — **Stop idle agents after** and **Keep idle agents running**, the age window
+  and warm-process ceiling used while Threading is open and by the **Recently used** launch
+  choice; unfinished, unsafe-to-resume, visible, and remotely viewed work is protected
 - **Confirmations** — one switch per prompt, plus **Hidden extension messages ▸ Show All**;
   see [Confirmations](#confirmations)
-- **Report Claude turn and subagent activity** — see [Agent hooks](#agent-hooks)
-- **Hide Claude's status line in Threading terminals** — see [Agent hooks](#agent-hooks)
-- **Report Codex turn boundaries** — see [Codex hooks](#codex-hooks)
-- **Skip Codex hook review** — see [Codex hooks](#codex-hooks)
-- **Shell path** — used by the shell drawer (⌃`); agents always launch via your login shell
+- **Software Updates** — which builds you receive, and whether Threading checks once a day
+- **This Mac** — **Keep this Mac awake while agents work**, and **Shell path**, used by the shell
+  drawer (⌃`); agents always launch via your login shell
+
+### Sidebar
+
+What the project list shows and how it orders it.
+
+- **Order** — **Sort sessions by** and **Sort direction**, the same two choices as the sidebar's
+  Sort menu; pinned chats stay on top
+- **Layout** — **Show five chats per project**, **Group sessions by branch** (see
+  [Grouping sessions by branch](#grouping-sessions-by-branch)), **Follow the checkout's branch**
+  (an idle session's recorded branch tracks its checkout, however the switch was made; off, it
+  keeps the branch it last ran on), **Compact tree**, and **Unhide projects when writing in their
+  chats**
+- **Names & Icons** — **Name sessions after the agent's own title** (see [Names](#names)),
+  **Discover project icons** (see [Project icons](#project-icons)) and **Discover account
+  avatars** (see [Icons and names](#icons-and-names))
+
+### Chats
+
+What a new chat starts as.
+
+- **New Chats** — **New sessions use** (the agent the composer opens on; any other can be picked
+  there, and a successfully started session makes its chosen agent the new value), **New sessions
+  start in** (the permission mode; see [Permission modes](#permission-modes)), and **Claude
+  sessions start in** / **Codex sessions start in** (Agent's Setting, Standard, or Fast,
+  independently; applies to Terminal and Native sessions on their next launch)
+- **Opening Message** — optional standing text sent once with every new chat's first turn,
+  before the task, after it, or both; see [Creating](#creating)
+- **Attachments** — one **Detect attachments from …** switch per agent, **Include files outside
+  the project**, and **Keep the page as it was before each agent action**
+- **Scratchpad** — where chats about no project live; **Choose…** and **Use Default**
+
+### Notifications
+
+What Threading makes you hear or see when you are not looking — see
+[Notifications](#notifications).
+
+- **Alerts** — **Notify when a session needs you**, one switch per kind of alert, **Alert sound**
+  and **Sounds for each alert**
+- **Terminal Bell** — **Bell sound** and **Sounds for each bell**
+- **Silence** — **Silence every sound**, the same switch as the speaker at the sidebar's foot
+- **Custom Sounds** — every chat, checkout or terminal given a sound of its own, with **Reset**
+
+### Integration
+
+How Threading plugs into each agent CLI's own configuration. Under **Agents** in the sidebar.
+
+- **Claude Code** — **Report Claude turn and subagent activity** and **Hide Claude's status line
+  in Threading terminals** (see [Agent hooks](#agent-hooks)), **Remote Control for new Claude
+  sessions**, and **Scrolling in new Claude terminals**
+- **Codex** — **Report Codex turn boundaries** and **Skip Codex hook review** (see
+  [Codex hooks](#codex-hooks))
 
 ### Motion
 
@@ -5248,7 +5342,7 @@ and says so plainly for the one that cannot.
 | Grant | What it covers | How it is asked for |
 |---|---|---|
 | **Files & Folders** | Reading and editing the files in a project | macOS asks the first time a project in Desktop, Documents or Downloads — or on an external or network volume — is read. A project anywhere else needs no grant at all. |
-| **Notifications** | Turn-finished and needs-you alerts | Threading asks the first time a session has something to say. Off in General settings means it is never used. |
+| **Notifications** | Turn-finished and needs-you alerts | Threading asks the first time a session has something to say. Off in Notifications settings means it is never used. |
 | **Accessibility** | An extension companion that drives the pointer or keyboard | You allow Threading in System Settings, then reload the extension. Threading itself never asks. |
 | **Screen Recording** | An extension companion that captures the screen | The same. Inspect Mode draws from Threading's own view tree and needs nothing. |
 
@@ -5331,7 +5425,7 @@ it lands and is versioned by its date, which is a higher number than any release
 replace itself with one. You join nightly by installing a nightly build, and you leave it by
 downloading a stable build yourself and replacing the app.
 
-**Keeping the Mac awake.** **Settings ▸ General ▸ Power ▸ Keep this Mac awake while agents work**
+**Keeping the Mac awake.** **Settings ▸ General ▸ This Mac ▸ Keep this Mac awake while agents work**
 prevents automatic system sleep while at least one agent turn is working or waiting for your
 answer. It is off by default and does nothing merely because an agent is open at its prompt. The
 display may still turn off, and closing a MacBook's lid can still put it to sleep; the switch does
@@ -5644,10 +5738,29 @@ for. `threading-ptyd stop <id>` ends one session, named by the first few charact
 refuses rather than guessing when those characters reach more than one. `threading-ptyd help`
 lists all of it.
 
-It answers 0 when the helper replied, 1 when nothing did, and 64 when the command line was wrong.
-There is no follow mode: the log is an ordinary file, and `status` prints its path so you can
-`tail -f` it. It cannot start a session, because a session belongs to a conversation Threading
-owns and one started from a shell would be one no window could ever show. It never stands the
+`threading-ptyd attach <id>` follows **live output**, read-only. It skips buffered history, so the
+screen can initially be blank. Add `--input` to type into the agent, and `--resize` to also use
+your terminal's size. Input and size are shared with any connected Mac; there is no exclusive
+owner. Press **Ctrl-]** to detach and leave the agent running. Interactive input requires a local
+terminal, and attachment requires a host new enough to report the replay boundary.
+
+To send bytes from a script, pipe a message to `threading-ptyd send <id> --enter`. For example:
+
+```sh
+printf '%s' 'Continue with the tests' | threading-ptyd send <id> --enter
+```
+
+Replace `<id>` with an unambiguous session ID prefix. `--enter` appends Return; omit it to send
+exactly the supplied bytes. Input is limited to 64 KiB and must finish within five seconds.
+Success confirms delivery to the host, not that the agent accepted or completed the request.
+Both commands work only with running terminal sessions, not native conversation protocol pipes.
+Use `--socket <path>` and `--state <dir>` when controlling a separately configured host.
+
+Commands return 0 on success, 1 on failure, and 64 for an invalid command line. External signals
+ending an attachment return 128 plus the signal number. There is no journal follow mode: the log
+is an ordinary file, and `status` prints its path so you can `tail -f` it. It cannot start a
+session, because a session belongs to a conversation Threading owns and one started from a shell
+would be one no window could ever show. It never stands the
 helper down either; that is Threading's own upgrade step, and doing it by hand would interrupt
 agents that are still working.
 
@@ -5836,7 +5949,7 @@ shown by menus and **Settings ▸ Keyboard**.
 **Every setting is in the palette too.** Each Settings page, and each row on it, is a result of its
 own: type "alert sound", "tailnet" or "compact tree" and press Return to open Settings on that page
 with the row scrolled to and briefly marked. A setting row shows where it lives underneath its name
-("General › Notifications"); a page shows the group holding it ("Settings › App"). Rows also answer
+("Notifications › Alerts"); a page shows the group holding it ("Settings › App"). Rows also answer
 to words they do not print — "beep" finds the terminal bell — and when a command and a setting match
 equally well, the command that *does* the thing is listed first. Settings results carry no shortcut,
 because there is nothing for a key to run.
@@ -6007,10 +6120,10 @@ On iPhone, use the **…** beside a project heading for **Hide Project** or **Sh
 Under the dashboard’s **… → Sessions**, toggle **Show Hidden Projects** to include them again.
 Project visibility is shared with the Mac; the Show Hidden Projects display toggle is local to
 each device. Direct chat links and search remain available while a project is hidden.
-In **Settings → General → Sessions**, enable **Unhide projects when writing in their chats** to
+In **Settings → Sidebar → Layout**, enable **Unhide projects when writing in their chats** to
 restore a hidden project when you type in one of its chats (off by default).
 
-The sidebar footer keeps **Settings** on the left and the icon-only **Triggers**, mute and
+The sidebar footer keeps **Settings** on the left and the icon-only **Automations**, mute and
 hidden-project controls on the right.
 
 ### Face ID approvals (keyvault)
@@ -6033,3 +6146,56 @@ minutes. **Forget iPhone** on the Mac, or **Forget this iPhone** on the phone, e
 can be turned off under the iPhone's notification settings. See
 [Remote access](docs/REMOTE_ACCESS.md#face-id-approvals).
 
+## Experimental autonomous controller CLI
+
+The standalone `threading-controller` source target stores autonomous work on its host:
+workers, queued assignments, execution checkpoints, asynchronous questions, versioned worker
+memory, and delivery receipts. It is not yet installed with Threading or connected to the app's
+UI. The controller can launch work through `threading-ptyd`, which holds the process after the
+controller command exits.
+
+Build and test it with `bash scripts/test-controller.sh /absolute/scratch/directory`, then run
+`/absolute/scratch/directory/cli/debug/threading-controller --help`. Commands require an explicit
+`--database PATH` whose containing directory already exists and is private to its owner (0700).
+Text input uses UTF-8 files capped at 32 KiB; output is JSON. The CLI has its Unix account's
+authority and is intended for trusted local administration, including over SSH.
+
+A worker can save a question for one or more people/groups and yield its execution. Answering
+makes that work eligible for a new execution using the saved checkpoint; it does not require the
+original process to remain open. The owner CLI attests the answering person's identity and group
+membership. It is not a multi-user login service. Completing work queues its result for a
+destination adapter; an external receipt separately confirms delivery. Uncertain delivery is
+held for reconciliation instead of being automatically sent again.
+
+`launch WORKER_UUID RECIPE_JSON_FILE` starts queued work using an owner-configured executable,
+environment, directory, question recipients and result destination. `launch-status EXECUTION_UUID`
+observes it; `launch-stop EXECUTION_UUID` stops it and records the exit receipt. `launches WORK_UUID`
+finds its executions after reconnecting. A continuation waits until the previous launch is
+confirmed stopped. Missing process inventory remains unresolved and never starts a duplicate.
+
+Launched agents can use the scoped `agent` command or `agent-mcp` stdio tools to read their work,
+save progress and worker memory, leave a question or submit a result. They cannot answer their
+own questions or choose new destination grants through these tools. Agents sharing one Unix
+account still share its filesystem authority; these tools do not create an OS sandbox.
+
+To run eligible work automatically, save a worker recipe with `worker-configure WORKER_UUID
+EXPECTED_REVISION MAX_CONCURRENT RECIPE_JSON_FILE` (revision `0` for a new configuration), then
+`worker-enable WORKER_UUID REVISION`. Run `supervise` against that database. It observes exits
+and starts queued assignments and answered continuations. `worker-pause` stops future starts
+while current processes can finish. A definite spawn refusal pauses that worker for inspection.
+`worker-policy` and `active-launches` show configuration status and occupied process slots.
+Stopping the supervisor leaves ptyd-owned agents running; restarting it does not duplicate them.
+
+Time/event scheduling, remote login/recipient authentication, operational UI and external
+email/database delivery are subsequent integrations. Live model execution is not yet verified.
+See [Autonomous host controller](docs/architecture/autonomous-controller.md) for recipes and recovery.
+
+
+The experimental controller also supports owner-granted shared knowledge spaces and a bounded
+`owner-rpc` transport over authenticated SSH. Rindabox's separate Operations page can inspect
+work/results, answer questions, pause/resume starts and stop or retry executions; its consumers
+can save local or PostgreSQL drafts. The owner transport also supports revision-checked worker
+configuration, allowing a trusted application to provision named workers remotely. Rindabox owns
+its agent mailboxes and one-off email-task UI; mailbox credentials never become controller tools.
+These additions do not create a native Threading controller
+dashboard. See [autonomous-controller.md](docs/architecture/autonomous-controller.md).

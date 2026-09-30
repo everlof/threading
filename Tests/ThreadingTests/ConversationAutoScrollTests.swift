@@ -68,6 +68,42 @@ final class ConversationAutoScrollTests: XCTestCase {
         XCTAssertEqual(scroll.mode, .free)
     }
 
+    func testAnAnchoredViewRisesWithTheReplyUntilTheMessageReachesTheTop() {
+        // Short content: the sent row's top is out of reach, so the view goes as far as the
+        // content allows — the reply growing under it is what makes room.
+        XCTAssertEqual(
+            ConversationAutoScroll.anchoredLanding(
+                anchorOffset: 900,
+                currentOffset: 400,
+                maximumOffset: 520
+            ),
+            520
+        )
+        // Enough reply to lift the row all the way: it stops at the top rather than following.
+        XCTAssertEqual(
+            ConversationAutoScroll.anchoredLanding(
+                anchorOffset: 900,
+                currentOffset: 520,
+                maximumOffset: 2_000
+            ),
+            900
+        )
+    }
+
+    func testAnAnchoredViewNeverMovesBackUp() {
+        // Already at the anchor, or past it after a settled turn folded its work away.
+        XCTAssertNil(ConversationAutoScroll.anchoredLanding(
+            anchorOffset: 900,
+            currentOffset: 900,
+            maximumOffset: 2_000
+        ))
+        XCTAssertNil(ConversationAutoScroll.anchoredLanding(
+            anchorOffset: 900,
+            currentOffset: 950,
+            maximumOffset: 700
+        ))
+    }
+
     func testAFinishedReplayResumesFollowing() {
         var scroll = ConversationAutoScroll()
         scroll.noteUserScrolled(nearBottom: false)
@@ -123,6 +159,78 @@ final class ConversationAutoScrollLayoutTests: XCTestCase {
         XCTAssertTrue(
             rowRect.intersects(visibleRect),
             "The newly sent message \(rowRect) remained outside \(visibleRect)"
+        )
+    }
+
+    /// The reported bug: a reply that arrives in one piece, at the end of a long conversation,
+    /// drew entirely below the viewport. The send's anchor clamps to the bottom — nothing exists
+    /// under the new message yet — and the anchor then held that origin while the reply landed
+    /// under it.
+    func testAWholeReplyUnderANewMessageIsBroughtIntoView() throws {
+        let controller = makeDeepConversationController()
+        let sentIndex = sendMessage("hi", to: controller)
+
+        let replyIndex = controller.timeline.rows.count
+        for change in controller.timeline.apply(.assistantMessage(
+            blocks: [.text("Hi! What's on your mind?")]
+        )) {
+            controller.apply(change)
+        }
+        settle(controller)
+
+        let visible = controller.scrollView.contentView.documentVisibleRect
+        let reply = try rect(ofTimelineRow: replyIndex, in: controller)
+        XCTAssertGreaterThanOrEqual(
+            visible.intersection(reply).height,
+            reply.height - 1,
+            "the reply \(reply) arrived outside the viewport \(visible)"
+        )
+        XCTAssertTrue(visible.intersects(try rect(ofTimelineRow: sentIndex, in: controller)))
+        XCTAssertEqual(controller.autoScroll.mode, .anchored)
+    }
+
+    /// A reply longer than the pane lifts the question to the top and stops there, so the
+    /// reader starts the answer from its first line rather than from wherever it ended.
+    func testALongReplyLiftsTheSentMessageToTheTopAndHoldsIt() throws {
+        let controller = makeDeepConversationController()
+        let sentIndex = sendMessage("Explain it all", to: controller)
+
+        for paragraph in 0..<3 {
+            for change in controller.timeline.apply(.assistantMessage(
+                blocks: [.text(String(repeating: "Paragraph \(paragraph) of the answer. ", count: 60))]
+            )) {
+                controller.apply(change)
+            }
+            settle(controller)
+        }
+
+        let origin = controller.scrollView.contentView.bounds.origin.y
+        let sent = try rect(ofTimelineRow: sentIndex, in: controller)
+        XCTAssertEqual(origin, sent.minY - Design.Spacing.large, accuracy: 1)
+        XCTAssertLessThan(
+            origin,
+            controller.maximumConversationScrollOffsetY() - 1,
+            "the anchor followed the reply to its end instead of holding the question"
+        )
+    }
+
+    /// Following was only ever asked by streamed text and tool results. A message, tool call or
+    /// notice appended in one piece left a reader at the bottom looking at the row before it.
+    func testAWholeRowAppendedAtTheBottomIsFollowed() {
+        let controller = makeDeepConversationController()
+        XCTAssertTrue(controller.autoScroll.followsNewContent)
+
+        for change in controller.timeline.apply(.assistantMessage(
+            blocks: [.text(String(repeating: "A late addition. ", count: 40))]
+        )) {
+            controller.apply(change)
+        }
+        settle(controller)
+
+        XCTAssertEqual(
+            controller.scrollView.contentView.bounds.origin.y,
+            controller.maximumConversationScrollOffsetY(),
+            accuracy: 0.5
         )
     }
 
@@ -203,6 +311,33 @@ final class ConversationAutoScrollLayoutTests: XCTestCase {
         )
         XCTAssertFalse(controller.autoScroll.isUserScrolling)
         XCTAssertTrue(controller.autoScroll.followsNewContent)
+    }
+
+    /// Sends the way `recordSentTurn` does — anchor first, then the echo — and answers the row.
+    private func sendMessage(_ text: String, to controller: ConversationViewController) -> Int {
+        controller.autoScroll.noteMessageSent()
+        let index = controller.timeline.rows.count
+        controller.apply(controller.timeline.appendUserMessage(
+            ConversationUserMessage(text: text)
+        ))
+        controller.anchorSentMessage(at: index)
+        settle(controller)
+        return index
+    }
+
+    private func settle(_ controller: ConversationViewController) {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        controller.view.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        controller.view.layoutSubtreeIfNeeded()
+    }
+
+    private func rect(
+        ofTimelineRow index: Int,
+        in controller: ConversationViewController
+    ) throws -> NSRect {
+        let row = try XCTUnwrap(controller.presentationRow(forTimelineIndex: index))
+        return controller.tableView.rect(ofRow: row)
     }
 
     private func makeDeepConversationController() -> ConversationViewController {

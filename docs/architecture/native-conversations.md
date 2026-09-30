@@ -1196,8 +1196,7 @@ and streaming delta — is what this replaced, and it is the version t3code ship
 filed a bug against themselves (#3925): programmatic scrolls indistinguishable from gestures,
 so the pin fought the reader. Three modes: *following* (new content scrolls into view),
 *anchored* (entered on every send — the sent bubble scrolls toward the top and holds while the
-reply streams in below; no blank space is reserved under short content, the clip view's own
-clamp does the work), and *free* (entered only by the user's hand). Gesture detection needs no
+reply streams in below), and *free* (entered only by the user's hand). Gesture detection needs no
 generation counter here: AppKit routes only real gestures through `scrollWheel` (the
 `ThemedScrollView.onUserScroll` seam) and brackets gesture scrolls and scroller tracking with
 live-scroll notifications, so our own `setBoundsOrigin` can never release the pin. A bounds
@@ -1215,6 +1214,47 @@ Whenever the viewport is away from the live end, the shared floating down-arrow 
 way back: it lands on AppKit's constrained terminal offset and enters *following* again. Streaming
 coalesces that control's visibility refresh with the existing follow pass, so a token does not
 add another main-queue job or a walk over the transcript.
+
+**The anchor rises; it does not merely hold.** No blank space is reserved under short content,
+so at the end of a long conversation the send's landing is clamped to the bottom — nothing
+exists under the new message yet — and the bubble sits at the *foot* of the pane. The anchor
+used to hold that origin, so the reply drew entirely below the viewport: reported as "it didn't
+even scroll to the answer". Every content-growth request in anchored mode now runs
+`ConversationAutoScroll.anchoredLanding`: lift the sent row toward its top-of-pane offset as far
+as the content allows, never back up. The reply stays in view as it grows, and the question
+stops at the top once the answer is long enough to put it there. The send's own landing is
+scheduled before any reply can ask, so on the main queue it always lands first.
+
+**Every live append asks to follow**, not only streamed text and tool results. When the
+transcript became a virtual table, `.appended` stopped routing through the old `addRow`, which
+had carried the request, so a reply delivered in one piece, a tool call, a turn outcome and the
+streaming placeholder's first appearance all arrived without moving a reader who was at the
+bottom. The sent message is the one exception: its anchor already owns the next landing.
+
+**A landing measures what it reveals** (`landMeasuringWhatItReveals`). A row appended below the
+viewport carries `estimatedRowHeight` until a host shows it, so a single scroll to the bottom
+stopped short by however much the row grew once it was measured — a whole reply ended several
+lines under the pane's edge. Both the follow and the anchor passes land, let the table lay out
+the rows that landing revealed, and land once more. Two passes, not a loop on layout: the first
+has already materialized the destination. `ConversationAutoScrollLayoutTests` pins the rising
+anchor, the held anchor and the followed append on a real controller.
+
+**A live row makes an entrance** (`ConversationVirtualRowHost.playArrival`,
+`Design.Motion.transcriptArrive`): its picture fades in while rising `Design.Chat.arrivalRise`
+on `lift`. It is presentation only — a layer animation from a stated start to the model values
+Auto Layout already set — so heights, the follow landing and exact navigation are final from the
+first frame, and recycling a host mid-flight discards it. The table records an arrival only for
+an append the surface marks live, spends it the first time a host shows that item, and drops it
+after `arrivalWindow`, so a row appended while the reader was scrolled away does not announce
+itself as new when they return, and nothing replayed, reloaded or rebuilt ever moves. The
+finished form of a streamed reply takes its placeholder's place in silence: animating it would
+blink the reply out and fade it back at the moment it completes. Reduce Motion plays nothing.
+
+**Message actions are quiet until relevant** (`ConversationMessageContextView`): Copy and the
+… menu keep their line under the message, so nothing reflows, but draw only under the pointer,
+while their menu is open, or while a copy is being confirmed. Drawn permanently, an ellipsis
+under every message was the most repeated mark in the transcript and made it read as a list of
+records. They are hidden by alpha rather than `isHidden`, so VoiceOver still reaches them.
 
 ### iOS conversation boundary
 

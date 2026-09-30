@@ -299,6 +299,12 @@
       "reason": "The collection plate glow shares the border's UIKit refresh path: plateTheme restates it on every mounted decoration and reused decorations restate it from layout attributes."
     },
     {
+      "path": "Sources/Threading/UI/Design/ThemeGradientAnimator.swift",
+      "kind": "motionDuration",
+      "symbol": "duration",
+      "reason": "A theme-authored decorative cycle is bounded to 8–120 seconds. Platform lifecycle owners remove it under Reduce Motion, Low Power Mode, and while hidden; the adapter constructs no animation while inactive or frozen."
+    },
+    {
       "path": "Sources/Threading/UI/Design/ThemedIndicators.swift",
       "kind": "motionDuration",
       "symbol": "duration",

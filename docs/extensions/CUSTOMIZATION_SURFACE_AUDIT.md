@@ -38,6 +38,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence, mobile three-chat and Mac five-chat preview/disclosure (the Mac's staged by `SidebarChatPreview`, published to navigators only as the `chat-preview` option), hidden activity counts and scroll return | Host-only |
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
+| Automations editor and remote controller page | — | host-only | execution owner, schedule/revision identity, permissions, SSH trust, activation, archive eligibility and durable run results; themes customize shared controls | Host-only |
 | Remote hosts settings (machine list, state, setup) | — | host-only | ssh destination validity and trust (the person's own `known_hosts`), component digests and download, host preparation/upgrade truth, which projects a removal moves back to this Mac | Host-only |
 | Chat checkout move controls (session menu, Tools policy, agent approval) | — | host-only | canonical checkout identity, durable ownership transaction, turn/input fence, authority audit and runtime resume | Host-only |
 | Native project visibility and footer controls | — | host-only | hidden project identity and persistence, show-hidden filtering, human-input unhide policy, command routing and shortcut ownership; replacement navigators keep their own presentation | Host-only |
@@ -220,6 +221,13 @@ palette rows automatically through the existing settings contract — the extens
 descriptions and options, and the host owns the catalogue projection, the identity, the ranking
 against real commands, and the reveal. There is no new seam here and no new declaration to make: an
 extension that can already put a field on a settings page can already be found by its name.
+
+Splitting General into Sidebar, Chats, Notifications and Integration (2026-09-29) added no host
+page to that contract. `ExtensionHostSettingsPage` is a stable, versioned list, and an extension
+field already appended to General keeps appearing there; the four new pages declare no `hostPage`,
+because none is a subject an extension needs a field on — the sidebar's order, a new chat's
+defaults, Threading's own sounds, and what Threading writes into a CLI's configuration are all
+host policy. Opening one of them to extensions is a separate decision with its own entry here.
 
 The mobile terminal key bar is host-only even though its key order, top-or-bottom row placement
 and solo Direct/Compose choice are deliberately customizable by the person using that phone. Its
@@ -614,3 +622,15 @@ switch, enrollment, the local client socket, the request's meaning and bounds, t
 chain the kernel reports, signature verification, one-use consumption, expiry and revocation.
 Extensions cannot replace the approval controls, add requests, or name a requester; themes style
 the native settings components only. Apple owns the Face ID prompt.
+
+
+## Portable theme backdrop motion
+
+The durable surfaces are the Mac's existing opted-in broad grounds and sidebar, and the iPhone's
+session dashboard ground. Decoration is authored through the existing theme material and sidebar
+properties, including extension-contributed themes. This adds no public component or new host
+data. Rendering and lifecycle are deliberately host-owned: Threading retains layering below
+content, the stop/geometry budget, visibility and power gates, Reduce Motion, accessibility
+silence, hit testing, navigation and exact scroll position. A missing/invalid recipe draws the
+ordinary ground or still gradient. The existing `sidebar.backdrop@1` extension hook remains a
+separate Mac surface and does not grant a phone shader renderer.

@@ -77,9 +77,9 @@ final class SimulatorPresenterWindowController: ThemedWindowController {
 
     // MARK: - Public
 
-    /// The picker row: "iPhone 17 Pro Simulator" rather than the app's name.
+    /// The picker row identifies both the app and the device: "Threading: iPhone 17 Pro".
     func setDeviceName(_ name: String) {
-        window?.title = L10n.format("%@ Simulator", name)
+        window?.title = L10n.format("Threading: %@", name)
     }
 
     /// Size the window to the device the first time a frame says what shape it is, then leave the

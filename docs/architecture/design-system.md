@@ -3853,3 +3853,51 @@ cannot lie over the × it uncovered. It moves the row minimally, and not at all 
 in view. It does not re-reveal on the other updates: a browser retitling its tab re-renders the
 strip constantly, and a row that snapped back on each would undo every scroll the person made.
 `TabStripSelectionRevealTests` pins all three.
+
+## 2026-09-29 — A settings row is one line; the rest is its "?"
+
+Settings had become hard to scan. General ran to twenty-two captions and about sixty rows — the
+sidebar, new-chat defaults, every sound, Claude's and Codex's hooks, updates, power and the shell
+— and nearly every row carried two or three lines of explanation at the same weight as the rest of
+the page, so the titles and controls were the hardest thing on it to find. Floating
+`SettingsUI.note` paragraphs between sections belonged to neither neighbour, and a caption plus a
+card for a single row made chrome outnumber content (Profiles had seven sections for seven rows).
+
+Asked how a row should read, the owner chose **one short line under the title, with anything
+longer behind the row's "?"** over both "titles only" and "keep every word but quieter". So:
+
+- **A row's subtitle is one sentence** that says what the setting does or its current value.
+  Caveats, mechanics, provenance and "applies from the next launch" go in a `HelpTopic`, built
+  with `SettingsUI.help(_:_:)` so its English source strings are localized and linted like a
+  row's. `HelpPopoverButton` still speaks the whole topic to VoiceOver, which is what makes moving
+  a sentence behind the press honest. A test about that copy reads the button's
+  `topic.spokenSummary` beside the page's labels.
+- **What is true of a whole card is the section's "?"** — `SettingsUI.section(_:_:help:)` puts the
+  mark beside the caption. A `note` between two sections is the thing this replaces.
+- **A page names one subject.** General is how the app itself behaves (startup, idle agents,
+  confirmations, updates, this Mac). The sidebar, new-chat defaults, notifications and each CLI's
+  integration are their own pages — `SidebarPreferencesViewController`,
+  `ChatsPreferencesViewController`, `NotificationsPreferencesViewController`,
+  `IntegrationPreferencesViewController` — and a new setting goes on the page whose subject it is.
+  General's page ID and its `ExtensionHostSettingsPage.general` door are unchanged; the new pages
+  take no extension contributions.
+- **No caption for a lone row.** Group related single rows into one card (Profiles is now *Text &
+  Colour* and *Behaviour*; Advanced is *Diagnostics*, *Background Sessions*, *Locations* and
+  *Start Over*).
+- **A caveat that decides whether to switch something on stays visible.** The usage-window poke
+  still says, on its own switch, that it raises no limit and is paid from the weekly cap; the rest
+  of that footnote is the Schedule section's "?".
+
+`GeneralSettingsRenderTests` renders all five pages that were General, and `AppSettingDefinitionTests`
+pins every page's row order, so a row that drifts back onto General shows up in both.
+
+
+## Portable decorative gradient motion
+
+A backdrop gradient may state bounded `drift` through the theme model. `ThemeGradientAnimator`
+shares the normalized path and compositor tracks across AppKit/UIKit; it receives resolved
+geometry and an explicit host-owned active state. `ThemeBackdropMotionView` supplies Mac window,
+ancestor visibility, accessibility and power lifecycle without drawing, hit testing or replacing
+content. `MobileThemeBackdropView` owns the equivalent dashboard ground. Neither installs a
+frame callback into the product tree. The policy and wire compatibility live in
+[themes.md](themes.md#portable-gradient-drift).

@@ -82,7 +82,7 @@ final class SettingsAnchorResolutionTests: XCTestCase {
 
     func testRevealScrollsToTheRowAndStandsTheWashOnIt() throws {
         let title = L10n.string("Silence every sound")
-        let controller = GeneralPreferencesViewController()
+        let controller = NotificationsPreferencesViewController()
         let host = fixture(holding: controller.view)
 
         SettingsRowReveal.reveal(title: title, in: controller.view)

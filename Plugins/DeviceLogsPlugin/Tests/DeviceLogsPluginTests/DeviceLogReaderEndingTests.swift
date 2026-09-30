@@ -9,6 +9,24 @@ import XCTest
 /// locked device, an app that was not installed and a launch that simply failed all arrived as
 /// silence under a pane that looked like it was listening.
 final class DeviceLogReaderEndingTests: XCTestCase {
+    func testEndingFollowsTheLastLineEvenWhenParsingIsSlow() {
+        let reader = DeviceLogLineReader(label: "test-final-line")
+        let ended = expectation(description: "ended after lines")
+        var lines = 0
+        reader.run(
+            executable: "/bin/sh",
+            arguments: ["-c", "printf 'one\ntwo\n'"],
+            onLine: { _ in
+                Thread.sleep(forTimeInterval: 0.05)
+                lines += 1
+            },
+            onEnd: { _ in
+                XCTAssertEqual(lines, 2, "EOF notification raced the final stdout lines")
+                ended.fulfill()
+            }
+        )
+        wait(for: [ended], timeout: 5)
+    }
 
     /// The reason comes from the child rather than from us, so it says the useful thing.
     func testAFailingCommandReportsItsOwnDiagnosticRatherThanGoingQuiet() {

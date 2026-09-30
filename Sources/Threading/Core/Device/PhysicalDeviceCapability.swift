@@ -20,6 +20,9 @@ enum PhysicalDeviceControlLimitation: Equatable, Sendable {
 enum PhysicalDeviceInput: Equatable, Sendable {
     case tap(x: Double, y: Double)
     case drag(fromX: Double, fromY: Double, toX: Double, toY: Double)
+    case touchDown(x: Double, y: Double)
+    case touchMove(x: Double, y: Double)
+    case touchUp(x: Double, y: Double)
 }
 
 /// Pure parsing for the bounded `pymobiledevice3` probe outputs.

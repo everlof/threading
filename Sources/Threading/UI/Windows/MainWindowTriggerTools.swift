@@ -313,6 +313,7 @@ enum TriggerToolActions {
                 TriggerAssessmentDisposition.init(rawValue:)
               ),
               disposition != .fixed,
+              disposition != .succeeded,
               let summary = Self.boundedTriggerText(arguments.summary, maximum: 4_096) else {
             completion(.failure("run_id, disposition, and a bounded summary are required."))
             return
@@ -339,8 +340,8 @@ enum TriggerToolActions {
                 run.state = disposition == .straightforwardFix
                     && revision.executionMode == .assessThenFix
                     ? .fixQueued
-                    : Self.settledState(disposition)
-                if run.state != .fixQueued { run.settledAt = Date() }
+                    : .finishing
+                run.settledAt = nil
                 try await TriggerStore.shared.updateRun(run)
                 NotificationCenter.default.post(TriggerAssessmentDidFinish(
                     run: run,
@@ -380,7 +381,7 @@ enum TriggerToolActions {
             do {
                 guard var run = try await TriggerStore.shared.run(id: runID),
                       run.sessionID == sessionID,
-                      run.state == .fixing else {
+                      (run.state == .fixing || run.state == .running) else {
                     completion(.failure(
                         "This trigger run does not belong to the calling fix session."
                     ))
@@ -394,10 +395,10 @@ enum TriggerToolActions {
                     changedPaths: paths,
                     tests: tests
                 )
-                run.state = Self.settledState(disposition)
-                run.settledAt = Date()
+                run.state = .finishing
+                run.settledAt = nil
                 try await TriggerStore.shared.updateRun(run)
-                NotificationCenter.default.post(TriggerFixDidFinish(run: run))
+                // The authoritative turn-end edge settles the run and notifies the user.
                 completion(.success("Trigger result recorded. The user will be notified."))
                 try? await TriggerRuntime.shared.releaseQueue()
             } catch {
@@ -427,7 +428,7 @@ enum TriggerToolActions {
         _ disposition: TriggerAssessmentDisposition
     ) -> TriggerRunState {
         switch disposition {
-        case .noChangeNeeded, .fixed: return .completed
+        case .noChangeNeeded, .fixed, .succeeded: return .completed
         case .straightforwardFix: return .needsAttention
         case .needsHuman: return .needsAttention
         case .failed: return .failed

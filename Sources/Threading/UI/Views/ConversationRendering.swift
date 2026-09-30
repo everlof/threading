@@ -31,13 +31,25 @@ extension ConversationViewController {
                 foldTurn(startingAt: pending.startIndex, outcome: pending.outcome)
             }
 
-            transcript.appendTimelineRow(at: index)
+            // A live row arrives with motion, except the finished form of a reply the reader
+            // already watched stream in, which takes its placeholder's place in silence.
+            var arrives = !isReplaying
+            if startsTurn { assistantRowReplacesStreaming = false }
+            if case .assistant = row, assistantRowReplacesStreaming {
+                assistantRowReplacesStreaming = false
+                arrives = false
+            }
+            transcript.appendTimelineRow(at: index, arriving: arrives)
 
             // A live user row advances the rail by one; settlement later fills that mark's
             // answer and duration without rebuilding its historical prefix.
             if case .userMessage = row, !isReplaying {
                 noteMinimapTurnStarted(at: index)
             }
+
+            // The sent message is placed by `anchorSentMessage`, which already owns the next
+            // landing; everything else that arrives is content growing at the live end.
+            if !startsTurn { scrollToBottom() }
 
         case .resultAttached(let index):
             guard case .toolCall(let call) = timeline.rows[index],
@@ -54,7 +66,10 @@ extension ConversationViewController {
             scrollToBottom()
 
         case .streaming(let text):
-            guard let text else { return clearStreaming() }
+            guard let text else {
+                assistantRowReplacesStreaming = streamingLabel != nil
+                return clearStreaming()
+            }
             showStreaming(text)
 
         case .status(let status):
@@ -303,7 +318,8 @@ extension ConversationViewController {
 
         transcript.insert(
             [PresentationItem(id: cardID, content: .surface(.retained(card)))],
-            after: anchor
+            after: anchor,
+            arriving: true
         )
         scrollToBottom()
     }
@@ -432,11 +448,16 @@ extension ConversationViewController {
     private func showStreaming(_ text: String) {
         guard let streamingLabel else {
             let label = ConversationRowView.streaming(text)
-            transcript.append(PresentationItem(
-                id: .surface(.streaming),
-                content: .surface(.streaming(label))
-            ))
+            transcript.append(
+                PresentationItem(
+                    id: .surface(.streaming),
+                    content: .surface(.streaming(label))
+                ),
+                arriving: true
+            )
             self.streamingLabel = label
+            assistantRowReplacesStreaming = false
+            scrollToBottom()
             return
         }
 
@@ -476,16 +497,15 @@ extension ConversationViewController {
         contextLabel.isHidden = false
     }
 
+    /// Content grew at the live end: bring it into view as far as the scroll mode allows.
+    ///
+    /// Following is a mode, not a reflex: while the user reads elsewhere (`free`) nothing moves,
+    /// and while their sent message holds the top (`anchored`) the view moves only as far as it
+    /// takes to lift that message there. Every live append asks — a whole message, a tool call,
+    /// a card — not only streamed text; when the transcript became a virtual table, appended
+    /// rows stopped asking, and a reply delivered in one piece arrived below the viewport.
     func scrollToBottom() {
-        // Following is a mode, not a reflex: while the user reads elsewhere (`free`) or their
-        // sent message holds the top (`anchored`), new content must not move the view.
-        guard !isReplaying else { return }
-
-        // The sent-row anchor already owns the next main-queue landing. Scheduling a visibility
-        // pass ahead of it adds a competing layout turn exactly when the virtual table is still
-        // measuring the new row. Reply growth will drive `viewDidLayout`, which refreshes the
-        // arrow without putting another task in front of the anchor.
-        guard autoScroll.mode != .anchored, !pendingScrollToBottom else { return }
+        guard !isReplaying, !pendingScrollToBottom else { return }
 
         // AppKit owns the position for the whole gesture, its momentum, and the elastic return.
         // Preserve the following mode and remember one catch-up, but do not replace the native
@@ -499,14 +519,16 @@ extension ConversationViewController {
         // After layout, or the scroll targets the table height from before this message. The
         // work still runs while not following so a growing reply can reveal the return arrow,
         // but the mode is checked at landing time so it never moves a reader who scrolled away.
+        // A send schedules its own anchor landing before any reply can ask for this pass, so on
+        // the main queue the anchor always lands first and this pass only continues its rise.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.pendingScrollToBottom = false
 
-            if self.autoScroll.claimFollowRequest(),
-               let documentView = self.scrollView.documentView {
-                let overflow = documentView.bounds.height - self.scrollView.contentSize.height
-                documentView.scroll(NSPoint(x: 0, y: max(0, overflow)))
+            if self.autoScroll.mode == .anchored {
+                self.advanceSentMessageAnchor()
+            } else if self.autoScroll.claimFollowRequest() {
+                self.landAtLiveEnd()
             }
             self.updateScrollToEndControl()
         }
@@ -664,10 +686,13 @@ extension ConversationViewController {
         let target = ExtensionComponentTarget.conversationPermissionCard(
             sessionID: sessionID.uuidString.lowercased()
         )
-        transcript.append(PresentationItem(
-            id: cardID,
-            content: .surface(.retained(customizeConversationRow(card, target: target)))
-        ))
+        transcript.append(
+            PresentationItem(
+                id: cardID,
+                content: .surface(.retained(customizeConversationRow(card, target: target)))
+            ),
+            arriving: true
+        )
         scrollToBottom()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
     }

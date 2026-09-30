@@ -1,7 +1,9 @@
-#if os(Linux)
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
 import Glibc
 #else
-import Darwin
+import Musl
 #endif
 import Dispatch
 import Foundation
@@ -113,6 +115,7 @@ public final class PTYHostClient: @unchecked Sendable {
     public typealias Journal = @Sendable (String, [String: String]) -> Void
     private let journal: Journal
     private let diagnostic: @Sendable (PTYHostClientDiagnostic) -> Void
+    private let retiresOlderDaemon: Bool
     private let connectTimeout: TimeInterval
     private let helloTimeout: TimeInterval
     private let maximumQueuedWriteBytes: Int
@@ -141,6 +144,8 @@ public final class PTYHostClient: @unchecked Sendable {
 
     // MARK: - Initialization
 
+    /// App hosts keep retire-on-upgrade behavior. Observer/controller clients set
+    /// `retiresOlderDaemon` to false: a shell invocation does not own daemon upgrade policy.
     public init(
         socketPath: String,
         build: String,
@@ -150,8 +155,10 @@ public final class PTYHostClient: @unchecked Sendable {
         queue: DispatchQueue? = nil,
         connectTimeout: TimeInterval = PTYHostClientDefaults.connectTimeout,
         helloTimeout: TimeInterval = PTYHostClientDefaults.helloTimeout,
-        maximumQueuedWriteBytes: Int = PTYHostClientDefaults.maximumQueuedWriteBytes
+        maximumQueuedWriteBytes: Int = PTYHostClientDefaults.maximumQueuedWriteBytes,
+        retiresOlderDaemon: Bool = true
     ) {
+        self.retiresOlderDaemon = retiresOlderDaemon
         self.socketPath = socketPath
         self.build = build
         self.events = events
@@ -399,6 +406,10 @@ public final class PTYHostClient: @unchecked Sendable {
             // The daemon is behind. Ask it to retire: it unlinks the socket immediately so the
             // new binary can bind, keeps serving what is already attached, and exits when its
             // last session ends. Killing it instead would be killing working agents.
+            guard retiresOlderDaemon else {
+                journalMismatch(peer, compatibility: compatibility, retired: false)
+                throw PTYHostClientError.incompatible(compatibility)
+            }
             if let retirement = try? PTYHostFraming.framed(
                 kind: .control,
                 payload: try encode(.retire)

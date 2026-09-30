@@ -402,13 +402,21 @@ enum SettingsUI {
     }
 
     /// A titled section: a quiet caption above a card. Pass nil to omit the caption.
+    ///
+    /// `help` puts a "?" beside the caption for what is true of the whole card — the sentence
+    /// that used to stand as a `note` between two sections, where it read as part of neither and
+    /// made every page it sat on longer to scan.
     static func section(
         _ title: String?,
         _ content: NSView,
+        help: HelpTopic? = nil,
         localizesTitle: Bool = true
     ) -> NSView {
         var views: [NSView] = []
-        if let title { views.append(caption(title, localizes: localizesTitle)) }
+        if let title {
+            let label = caption(title, localizes: localizesTitle)
+            views.append(help.map { titleLine(label, help: $0) } ?? label)
+        }
         views.append(content)
 
         let stack = NSStackView(views: views)
@@ -436,6 +444,16 @@ enum SettingsUI {
         label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         return label
+    }
+
+    /// What a row's or a section's "?" explains, from English source strings.
+    ///
+    /// Settings rows keep **one short line** under their title so a page can be read at a
+    /// glance; the caveats, mechanics and provenance that used to run on for three lines go
+    /// here. `HelpPopoverButton` still speaks every word to VoiceOver, so moving a sentence
+    /// behind the press hides it from nobody.
+    static func help(_ title: String, _ paragraphs: String...) -> HelpTopic {
+        HelpTopic(title: L10n.string(title), paragraphs: paragraphs.map { L10n.string($0) })
     }
 
     /// Explanatory text beneath a card, in the secondary colour.

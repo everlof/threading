@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        A07000010000000000000001 /* ThreadingController in Frameworks */ = {isa = PBXBuildFile; productRef = A07000010000000000000003 /* ThreadingController */; };
+		7C000008000000000000A005 /* PTYHostCLIControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000008000000000000B005 /* PTYHostCLIControl.swift */; };
+		D7C100010000000000000003 /* ThreadingPTYClient in PTYHost Frameworks */ = {isa = PBXBuildFile; productRef = D7C100010000000000000014 /* ThreadingPTYClient */; };
 		D4F83001A8124C5BA937FE10 /* MobilePairingRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F83001A8124C5BA937FE11 /* MobilePairingRecoveryTests.swift */; };
 		F10A00010000000000000001 /* MobileConversationQuestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10A00010000000000000002 /* MobileConversationQuestionTests.swift */; };
 		F10B00010000000000000001 /* RemoteWireEncodingLaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10B00010000000000000002 /* RemoteWireEncodingLaneTests.swift */; };
@@ -329,6 +332,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		7C000008000000000000B005 /* PTYHostCLIControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PTYHostCLIControl.swift; sourceTree = "<group>"; };
 		D4F83001A8124C5BA937FE11 /* MobilePairingRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobilePairingRecoveryTests.swift; sourceTree = "<group>"; };
 		F10A00010000000000000002 /* MobileConversationQuestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileConversationQuestionTests.swift; sourceTree = "<group>"; };
 		F10B00010000000000000002 /* RemoteWireEncodingLaneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteWireEncodingLaneTests.swift; sourceTree = "<group>"; };
@@ -534,6 +538,8 @@
 				ThreadingMobile/MobileUsageScrollBenchmark.swift,
 				ThreadingMobile/MobileThemeCacheStore.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
+				ThreadingMobile/MobileThemeBackdrop.swift,
+				ThreadingMobile/ThemeGradientAnimator.swift,
 				ThreadingMobile/MobileThemedPopoverChrome.swift,
 				ThreadingMobile/MobileUniversalSearchView.swift,
 				ThreadingMobile/MobileWorkingOrbView.swift,
@@ -646,6 +652,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7C000005000000000000A010 /* ThreadingPTYHostKit in Frameworks */,
+				D7C100010000000000000003 /* ThreadingPTYClient in PTYHost Frameworks */,
 				7C000005000000000000A011 /* ThreadingDomain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -713,6 +720,7 @@
 				F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */,
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
+                A07000010000000000000001 /* ThreadingController in Frameworks */,
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
 				D7C100010000000000000001 /* ThreadingPTYClient in Frameworks */,
 				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
@@ -789,6 +797,7 @@
 				7C000008000000000000B002 /* PTYHostCLIClient.swift */,
 				7C000008000000000000B003 /* PTYHostCLIFormatting.swift */,
 				7C000008000000000000B004 /* PTYHostPlatform.swift */,
+				7C000008000000000000B005 /* PTYHostCLIControl.swift */,
 				7C000005000000000000B009 /* Info.plist */,
 				7C000005000000000000B010 /* threading-ptyd.entitlements */,
 				7C000006000000000000B001 /* codes.threading.ptyd.plist */,
@@ -1126,6 +1135,7 @@
 			name = ThreadingPTYHost;
 			packageProductDependencies = (
 				7C000005000000000000C010 /* ThreadingPTYHostKit */,
+				D7C100010000000000000014 /* ThreadingPTYClient */,
 				D0A100010000000000000003 /* ThreadingDomain */,
 			);
 			productName = ThreadingPTYHost;
@@ -1327,6 +1337,7 @@
 				D0A100010000000000000003 /* ThreadingDomain */,
 				7C000004000000000000000C /* ThreadingPTYHostKit */,
 				D7C100010000000000000012 /* ThreadingPTYClient */,
+                A07000010000000000000003 /* ThreadingController */,
 				7C000007000000000000C011 /* ThreadingSimulatorKit */,
 				7C000007000000000000C0F0 /* ThreadingPluginKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
@@ -1405,6 +1416,7 @@
 				F4000001000000000000008 /* XCLocalSwiftPackageReference "Packages/ThreadingExtensionKit" */,
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
+                A07000010000000000000002 /* ThreadingController */,
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
 				D7C100010000000000000011 /* XCLocalSwiftPackageReference "Packages/ThreadingPTYClient" */,
 				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
@@ -1687,6 +1699,7 @@
 				7C000008000000000000A002 /* PTYHostCLIClient.swift in Sources */,
 				7C000008000000000000A003 /* PTYHostCLIFormatting.swift in Sources */,
 				7C000008000000000000A004 /* PTYHostPlatform.swift in Sources */,
+				7C000008000000000000A005 /* PTYHostCLIControl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3012,6 +3025,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+        A07000010000000000000002 /* ThreadingController */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ThreadingController; };
 		7A0000010000000000000090 /* XCLocalSwiftPackageReference "Packages/ThreadingWasmRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingWasmRuntime;
@@ -3103,6 +3117,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+        A07000010000000000000003 /* ThreadingController */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingController; };
+		D7C100010000000000000014 /* ThreadingPTYClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPTYClient;
+		};
 		E50000010000000000000001 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = E50000010000000000000020 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;

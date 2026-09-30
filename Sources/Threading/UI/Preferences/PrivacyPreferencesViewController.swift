@@ -162,21 +162,36 @@ final class PrivacyPreferencesViewController: NSViewController {
     // MARK: - Construction
 
     private func buildPage() {
-        let page = SettingsUI.page(title: "Privacy", sections: [
-            SettingsUI.note(
-                "Threading runs without the App Sandbox — a terminal that cannot open a pseudo-"
-                    + "terminal or launch your shell is not a terminal. These are the grants it "
-                    + "asks macOS for, and none of them is taken silently."
-            ),
-            SettingsUI.section("System Permissions", permissionsCard()),
-            SettingsUI.section("Who Uses These Grants", attributionCard()),
-            SettingsUI.section("Stored Credentials", credentialsCard()),
-            SettingsUI.section("Leaving This Mac", egressCard()),
-            SettingsUI.note(
-                "Agents reach the network on their own account, under their own logins. "
-                    + "Threading does not watch what they do there."
-            )
-        ])
+        // Every row states its fact in one line; the full disclosure is on its "?", where
+        // VoiceOver reads it too. The two paragraphs that bracketed the page are the "?" of the
+        // section each one is about.
+        let page = SettingsUI.page(
+            title: "Privacy",
+            summary: "The grants Threading asks macOS for, and what leaves this Mac.",
+            sections: [
+                SettingsUI.section(
+                    "System Permissions",
+                    permissionsCard(),
+                    help: SettingsUI.help(
+                        "System Permissions",
+                        "Threading runs without the App Sandbox — a terminal that cannot open a "
+                            + "pseudo-terminal or launch your shell is not a terminal. These are "
+                            + "the grants it asks macOS for, and none of them is taken silently."
+                    )
+                ),
+                SettingsUI.section("Who Uses These Grants", attributionCard()),
+                SettingsUI.section("Stored Credentials", credentialsCard()),
+                SettingsUI.section(
+                    "Leaving This Mac",
+                    egressCard(),
+                    help: SettingsUI.help(
+                        "Leaving This Mac",
+                        "Agents reach the network on their own account, under their own logins. "
+                            + "Threading does not watch what they do there."
+                    )
+                )
+            ]
+        )
         page.setAccessibilityIdentifier("settings.privacy.page")
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -295,10 +310,14 @@ final class PrivacyPreferencesViewController: NSViewController {
             SettingsUI.detailRow(
                 symbol: "network",
                 title: "Remote Access binds only the ways in you turn on",
-                detail: "The listener always binds 127.0.0.1, and binds a network address only "
-                    + "for a way in you switched on. Each of those presents this Mac’s own "
-                    + "certificate, which your paired phone pins; nothing else terminates the "
-                    + "traffic."
+                detail: "Always 127.0.0.1, plus the ways in you switched on.",
+                help: SettingsUI.help(
+                    "Remote Access binds only the ways in you turn on",
+                    "The listener always binds 127.0.0.1, and binds a network address only for a "
+                        + "way in you switched on. Each of those presents this Mac’s own "
+                        + "certificate, which your paired phone pins; nothing else terminates "
+                        + "the traffic."
+                )
             ),
         ]
     }
@@ -313,10 +332,14 @@ final class PrivacyPreferencesViewController: NSViewController {
             SettingsUI.detailRow(
                 symbol: "bell.badge",
                 title: "Notification titles reach Apple",
-                detail: "To arrive on your iPhone, a notification travels through Apple's push "
-                    + "service, and its title is the chat's name — usually the one the agent "
-                    + "chose. Tool arguments, paths and diffs are deliberately left out. This "
-                    + "happens only while Remote Access is on."
+                detail: "Only the chat's name, and only while Remote Access is on.",
+                help: SettingsUI.help(
+                    "Notification titles reach Apple",
+                    "To arrive on your iPhone, a notification travels through Apple's push "
+                        + "service, and its title is the chat's name — usually the one the agent "
+                        + "chose. Tool arguments, paths and diffs are deliberately left out. This "
+                        + "happens only while Remote Access is on."
+                )
             ),
         ]
     }
@@ -326,17 +349,25 @@ final class PrivacyPreferencesViewController: NSViewController {
             SettingsUI.detailRow(
                 symbol: "arrow.turn.down.right",
                 title: "Agents inherit what you grant Threading",
-                detail: "macOS attributes a directly launched child process to the app that "
-                    + "launched it. Claude and Codex run inside Threading, so the files they "
-                    + "read are approved against Threading's grant — and the prompt names "
-                    + "Threading, whichever agent asked."
+                detail: "Files an agent reads are approved against Threading's grant.",
+                help: SettingsUI.help(
+                    "Agents inherit what you grant Threading",
+                    "macOS attributes a directly launched child process to the app that launched "
+                        + "it. Claude and Codex run inside Threading, so the files they read are "
+                        + "approved against Threading's grant — and the prompt names Threading, "
+                        + "whichever agent asked."
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "shippingbox",
                 title: "Extensions are separate",
-                detail: "A safe extension is sandboxed and Foundation-only. A companion "
-                    + "executable must declare each capability it wants, and Threading requests "
-                    + "only the grants that its reviewed capabilities cover."
+                detail: "Sandboxed, or limited to the capabilities you reviewed.",
+                help: SettingsUI.help(
+                    "Extensions are separate",
+                    "A safe extension is sandboxed and Foundation-only. A companion executable "
+                        + "must declare each capability it wants, and Threading requests only the "
+                        + "grants that its reviewed capabilities cover."
+                )
             ),
         ] + remoteAccessAttributionRows)
     }
@@ -354,6 +385,16 @@ final class PrivacyPreferencesViewController: NSViewController {
         let liveUsageRow = SettingsUI.row(
             title: "Live usage from your Claude login",
             subtitle: keychainSubtitle(status: nil),
+            help: SettingsUI.help(
+                "Live usage from your Claude login",
+                "Reads the sign-in the Claude CLI keeps in your macOS keychain and asks Anthropic "
+                    + "for the account's rate limits — the numbers in the toolbar's usage pill. "
+                    + "The token goes to Anthropic and nowhere else; Threading never stores, "
+                    + "refreshes, or logs it.",
+                "macOS asks once per login — choose Always Allow to not be asked again. When "
+                    + "this is off, usage comes from caches the CLI leaves on disk, which can be "
+                    + "hours old or missing."
+            ),
             control: toggle,
             subtitleField: &subtitleField
         )
@@ -369,10 +410,13 @@ final class PrivacyPreferencesViewController: NSViewController {
             SettingsUI.detailRow(
                 symbol: "person.crop.circle",
                 title: "Agent logins stay with the agent",
-                detail: "Threading reads which accounts exist under ~/.claude and ~/.codex so "
-                    + "it can route a session to one. It reads a credential only for the "
-                    + "live-usage switch below, and only after you allow it in the keychain "
-                    + "prompt."
+                detail: "Threading lists accounts; it reads a credential only if you allow it.",
+                help: SettingsUI.help(
+                    "Agent logins stay with the agent",
+                    "Threading reads which accounts exist under ~/.claude and ~/.codex so it can "
+                        + "route a session to one. It reads a credential only for the live-usage "
+                        + "switch below, and only after you allow it in the keychain prompt."
+                )
             ),
             liveUsageRow
         ])
@@ -380,17 +424,13 @@ final class PrivacyPreferencesViewController: NSViewController {
 
     // MARK: - Claude Keychain Row
 
-    /// The row's whole story in one place: what is read, where it goes, what saying no costs.
-    /// The dynamic status is appended rather than shown in its own label so the paragraph and
-    /// the fact never sit in different type styles arguing about which is the truth.
+    /// The row's one line — what is read and why — with the dynamic status appended rather than
+    /// shown in its own label, so the sentence and the fact never sit in different type styles
+    /// arguing about which is the truth. Where the token goes and what saying no costs are on
+    /// the row's "?".
     private func keychainSubtitle(status: String?) -> String {
         let explanation = L10n.string(
-            "Reads the sign-in the Claude CLI keeps in your macOS keychain and asks Anthropic "
-                + "for the account's rate limits — the numbers in the toolbar's usage pill. The "
-                + "token goes to Anthropic and nowhere else; Threading never stores, refreshes, "
-                + "or logs it. macOS asks once per login — choose Always Allow to not be asked "
-                + "again. When this is off, usage comes from caches the CLI leaves on disk, "
-                + "which can be hours old or missing."
+            "Reads the Claude CLI's keychain sign-in to show live rate limits."
         )
         guard let status else { return explanation }
         return explanation + "\n" + status
@@ -487,52 +527,76 @@ final class PrivacyPreferencesViewController: NSViewController {
             SettingsUI.detailRow(
                 symbol: "chart.bar.xaxis",
                 title: "No analytics",
-                detail: "Threading has no usage tracking and no identifier for this install. "
-                    + "The network requests its product features make are described below; "
-                    + "none of them is analytics."
+                detail: "No usage tracking, and no identifier for this install.",
+                help: SettingsUI.help(
+                    "No analytics",
+                    "Threading has no usage tracking and no identifier for this install. The "
+                        + "network requests its product features make are described below; none of "
+                        + "them is analytics."
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "arrow.triangle.pull",
                 title: "Status card checks reach your code host",
-                detail: "While the session status card is on, Threading asks GitHub or GitLab "
-                    + "for the branch's open change request and checks. GitHub uses your "
-                    + "available connection, or anonymous access for a public repository; "
-                    + "GitLab uses glab. Turning off the card stops these lookups."
+                detail: "GitHub or GitLab, for the branch's change request and checks.",
+                help: SettingsUI.help(
+                    "Status card checks reach your code host",
+                    "While the session status card is on, Threading asks GitHub or GitLab for "
+                        + "the branch's open change request and checks. GitHub uses your available "
+                        + "connection, or anonymous access for a public repository; GitLab uses "
+                        + "glab. Turning off the card stops these lookups."
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "photo.badge.magnifyingglass",
                 title: "Project icon discovery reaches GitHub",
-                detail: "When on, Threading may ask GitHub whether the owner in a project's "
-                    + "origin remote is an organization and download that organization's "
-                    + "avatar. It never follows a package.json homepage automatically; Use "
-                    + "Website Favicon… contacts only the address you enter. Turn it off in "
-                    + "General to stop automatic lookups."
+                detail: "For an organization's avatar. Turn it off in Sidebar settings.",
+                help: SettingsUI.help(
+                    "Project icon discovery reaches GitHub",
+                    "When on, Threading may ask GitHub whether the owner in a project's origin "
+                        + "remote is an organization and download that organization's avatar. It "
+                        + "never follows a package.json homepage automatically; Use Website "
+                        + "Favicon… contacts only the address you enter. Turn it off in Sidebar "
+                        + "settings to stop automatic lookups."
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "person.crop.circle.badge.questionmark",
                 title: "Account avatar discovery uses the login email",
-                detail: "When on, Threading sends a SHA-256 hash of the login email to "
-                    + "Gravatar. If no avatar is found, it sends the email to GitHub's public-"
-                    + "user search and may download the returned avatar. A chosen emoji still "
-                    + "wins. Turn it off in General to stop the lookups."
+                detail: "A hash goes to Gravatar, then the email to GitHub.",
+                help: SettingsUI.help(
+                    "Account avatar discovery uses the login email",
+                    "When on, Threading sends a SHA-256 hash of the login email to Gravatar. If "
+                        + "no avatar is found, it sends the email to GitHub's public-user search "
+                        + "and may download the returned avatar. A chosen emoji still wins. Turn "
+                        + "it off in Sidebar settings to stop the lookups."
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "arrow.down.circle",
                 title: "Update checks reach release sources",
-                detail: "Once a day, Threading asks GitHub about the app, npm about installed "
-                    + "Claude, Codex, Grok and OpenCode tools, and cursor.com about installed "
-                    + "Cursor. The app request carries the version you are on and your macOS "
-                    + "version, the way any download does. The agent requests include no "
-                    + "account, project, session or installed version. Neither carries an "
-                    + "identifier or anything about your projects. Turn the check off in "
-                    + "General and nothing is asked."
+                detail: "Once a day, with no account, project or identifier.",
+                help: SettingsUI.help(
+                    "Update checks reach release sources",
+                    "Once a day, Threading asks GitHub about the app, npm about installed Claude, "
+                        + "Codex, Grok and OpenCode tools, and cursor.com about installed Cursor. "
+                        + "The app request carries the version you are on and your macOS version, "
+                        + "the way any download does. The agent requests include no account, "
+                        + "project, session or installed version. Neither carries an identifier "
+                        + "or anything about your projects. Turn the check off in General and "
+                        + "nothing is asked."
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "lifepreserver",
                 title: "Support reports are yours to send",
-                detail: "Help ▸ Create Remote Support Report… writes a file of versions, "
-                    + "counts and grant states — no names, paths or prompts — and reveals it in "
-                    + "the Finder. Threading never uploads it; sending it is your decision."
+                detail: "Written to a file on this Mac. Threading never uploads it.",
+                help: SettingsUI.help(
+                    "Support reports are yours to send",
+                    "Help ▸ Create Remote Support Report… writes a file of versions, counts and "
+                        + "grant states — no names, paths or prompts — and reveals it in the "
+                        + "Finder. Threading never uploads it; sending it is your decision."
+                )
             )
         ] + remoteAccessEgressRows)
     }

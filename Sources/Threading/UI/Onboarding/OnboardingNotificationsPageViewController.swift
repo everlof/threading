@@ -194,7 +194,7 @@ final class OnboardingNotificationsPageViewController: NSViewController, Onboard
         case .authorized, .provisional:
             enableButton.isHidden = true
             statusLabel.stringValue = L10n.string(
-                "Notifications are on. Change any of this later in Settings ▸ General."
+                "Notifications are on. Change any of this later in Settings ▸ Notifications."
             )
         case .denied:
             enableButton.isHidden = false

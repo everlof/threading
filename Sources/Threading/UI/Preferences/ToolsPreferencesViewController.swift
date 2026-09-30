@@ -760,10 +760,13 @@ final class ToolsPreferencesViewController: NSViewController {
             action: #selector(revokeWebsiteAccess(_:))
         )
         revoke.tag = index
+        // The origin alone. Every row in this run means the same thing — agents may use this
+        // origin in the signed-in browser — and the caption already says it; a list of sites
+        // is read by scanning their names, which a repeated second line under each one hid.
         return SettingsUI.row(
             title: persistentOriginKeys[index],
-            subtitle: "Agents may use this origin in Threading's signed-in browser.",
-            control: revoke
+            control: revoke,
+            localizes: false
         )
     }
 

@@ -363,7 +363,11 @@ enum AppThemeLibrary {
         // The document owned files too: sidebar assets die with the theme that referenced
         // them, or Application Support accumulates folders no document can reach.
         ThemeAssetStore.removeAll(for: theme.id)
-        if current.id == theme.id {
+        // The stored choice as well as what is on screen: in recovery the two differ, and Settings
+        // deletes the theme its picker names. Leaving the choice pointing at nothing would let
+        // the picker fall back to recovery's System while the next launch fell back to the
+        // default, and the confirmation names the default.
+        if current.id == theme.id || storedThemeID == theme.id {
             apply(defaultTheme)
         }
         ThreadingLogger.theme.info(

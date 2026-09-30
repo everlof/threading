@@ -1963,6 +1963,16 @@ public enum Design {
         public static var turnDivider: NSColor { AppThemePalette.color(.divider) }
 
         public static let turnDividerHeight: CGFloat = 1
+
+        /// How far a newly arrived row rises into its place — see `Motion.transcriptArrive`.
+        /// One `medium` step: enough to read as coming *up* from the reply box, short enough
+        /// that the paragraph above it does not appear to move.
+        public static let arrivalRise: CGFloat = Design.Spacing.medium
+
+        /// How long after it was appended a row may still make its entrance. A row appended
+        /// off screen — the reader scrolled up — materializes whenever they return, and arriving
+        /// *then* would announce as new something that has been sitting there all along.
+        public static let arrivalWindow: TimeInterval = 0.6
     }
 
     // MARK: - Syntax
@@ -2037,6 +2047,17 @@ public enum Design {
         /// reads as a pop; a toast carries a whole card up over the pane's edge and needs
         /// `travel`'s length to stay readable, which on a single 40pt button reads as slow.
         public static var floatingTargetArrive: TimeInterval { reducesMotion ? 0 : 0.22 }
+
+        /// A row arriving at the live end of a conversation — the message just sent, a reply
+        /// beginning, a tool call, a card — fading in as it rises `Chat.arrivalRise` on `lift`.
+        ///
+        /// A touch longer than `floatingTargetArrive`: that is one button over a still
+        /// transcript, while this happens *inside* the text being read and is followed by the
+        /// scroll that brings it into view, so a shorter one finishes before the eye gets there.
+        /// Rows appearing all at once was the transcript's whole character before this — every
+        /// answer, card and call simply present — which is the difference between a log that
+        /// updated and a conversation that replied.
+        public static var transcriptArrive: TimeInterval { reducesMotion ? 0 : 0.26 }
 
         /// One beat of a menu's confirmation blink — the chosen row flickering once before
         /// the panel fades, the acknowledgement every platform menu gives.
@@ -2538,6 +2559,7 @@ public final class ThemeBackdropDressingLayer: CALayer {
 
     private let gradient = CAGradientLayer()
     private let picture = CALayer()
+    private var motionView: ThemeBackdropMotionView?
 
     override init() {
         super.init()
@@ -2567,7 +2589,8 @@ public final class ThemeBackdropDressingLayer: CALayer {
     /// Whether a picture is showing.
     public var showsPicture: Bool { !picture.isHidden }
 
-    func apply(_ resolved: ThemeBackdropAppearance.Resolved) {
+    @MainActor
+    func apply(_ resolved: ThemeBackdropAppearance.Resolved, in owner: NSView) {
         picture.contentsScale = contentsScale
         if let stated = resolved.gradient {
             gradient.isHidden = false
@@ -2579,7 +2602,16 @@ public final class ThemeBackdropDressingLayer: CALayer {
             let direction = CGPoint(x: sin(radians) / 2, y: cos(radians) / 2)
             gradient.startPoint = CGPoint(x: 0.5 - direction.x, y: 0.5 - direction.y)
             gradient.endPoint = CGPoint(x: 0.5 + direction.x, y: 0.5 + direction.y)
+            if let drift = stated.drift, drift.isValid {
+                let observer = motionView ?? ThemeBackdropMotionView(gradient: gradient)
+                if observer.superview !== owner { owner.addSubview(observer) }
+                motionView = observer
+                observer.configure(angleDegrees: Double(stated.angleDegrees), drift: drift)
+            } else {
+                stopMotion()
+            }
         } else {
+            stopMotion()
             gradient.isHidden = true
             gradient.colors = nil
         }
@@ -2607,6 +2639,12 @@ public final class ThemeBackdropDressingLayer: CALayer {
             picture.backgroundColor = nil
         }
         setNeedsLayout()
+    }
+
+    @MainActor
+    func stopMotion() {
+        motionView?.stop()
+        motionView = nil
     }
 }
 
@@ -3050,6 +3088,7 @@ extension NSView {
         guard participates,
               let layer,
               let resolved = ThemeBackdropAppearance.material(for: effectiveAppearance) else {
+            (existing as? ThemeBackdropDressingLayer)?.stopMotion()
             existing?.removeFromSuperlayer()
             return
         }
@@ -3069,7 +3108,7 @@ extension NSView {
         dressing.contentsScale = window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
-        dressing.apply(resolved)
+        dressing.apply(resolved, in: self)
     }
 
     private func applyThemeBackdropPattern(_ participates: Bool, radius: CGFloat) {

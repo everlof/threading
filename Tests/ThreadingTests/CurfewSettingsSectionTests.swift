@@ -50,12 +50,14 @@ final class CurfewSettingsSectionTests: XCTestCase {
     /// The explanation is load-bearing copy rather than decoration: everything below it is a
     /// margin around a deadline the reader has not met yet, and a page of margins for an unnamed
     /// thing explains nothing. The two sentences asserted are the two that name where a curfew is
-    /// chosen and what the standing window does.
+    /// chosen and what the standing window does. They are the section's "?", beside its caption
+    /// and read by VoiceOver from the button, so the caption and the help are both read here.
     func testTheSectionExplainsWhatACurfewIsBeforeOfferingMargins() {
         let controller = UsageWindowPreferencesViewController()
         laidOut(controller.view)
 
-        let text = Self.labels(in: controller.view).joined(separator: "\n")
+        let text = (Array(Self.labels(in: controller.view)) + Self.helpText(in: controller.view))
+            .joined(separator: "\n")
 
         XCTAssertTrue(
             text.contains(L10n.string("Quiet Hours & Curfews").localizedUppercase),
@@ -618,6 +620,17 @@ final class CurfewSettingsSectionTests: XCTestCase {
         if let field = view as? NSTextField { found.insert(field.stringValue) }
         for subview in view.subviews {
             found.formUnion(labels(in: subview))
+        }
+        return found
+    }
+
+    /// What the page's "?" buttons explain, as VoiceOver hears them.
+    @MainActor
+    private static func helpText(in view: NSView) -> [String] {
+        var found: [String] = []
+        if let button = view as? HelpPopoverButton { found.append(button.topic.spokenSummary) }
+        for subview in view.subviews {
+            found += helpText(in: subview)
         }
         return found
     }

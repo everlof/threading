@@ -75,7 +75,7 @@ enum PTYHostPOSIX {
         }
     }
 
-    private static func rawWrite(
+    static func rawWrite(
         _ descriptor: Int32,
         _ buffer: UnsafeRawPointer,
         _ count: Int
@@ -258,6 +258,16 @@ enum PTYHostPOSIX {
         #else
         return ioctl(master, TIOCSWINSZ, &size) == 0
         #endif
+    }
+
+    static func windowSize(on terminal: Int32) -> winsize? {
+        var size = winsize()
+        #if os(Linux)
+        guard threading_get_window_size(terminal, &size) == 0 else { return nil }
+        #else
+        guard ioctl(terminal, TIOCGWINSZ, &size) == 0 else { return nil }
+        #endif
+        return size
     }
 
     // MARK: - Ownership

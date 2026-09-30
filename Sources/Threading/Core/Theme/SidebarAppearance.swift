@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 // MARK: - Sidebar Appearance
 
@@ -57,6 +58,7 @@ public enum SidebarAppearance {
             public let locations: [CGFloat]
             /// CSS convention, as authored: degrees clockwise from "toward the top".
             public let angleDegrees: CGFloat
+            public var drift: ThemeGradientDrift? = nil
         }
 
         public struct ImageLayer: Equatable {
@@ -174,12 +176,16 @@ public enum ThemeBackdropAppearance {
 
         var resolved = Resolved()
 
-        if let gradient = stated.gradient, gradient.stops.count >= 2 {
+        if let gradient = stated.gradient,
+           (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count),
+           gradient.angleDegrees.isFinite,
+           gradient.stops.allSatisfy({ (0...1).contains($0.position) }) {
             let ordered = gradient.stops.sorted { $0.position < $1.position }
             resolved.gradient = Resolved.Gradient(
                 colors: ordered.map(\.color),
                 locations: ordered.map { CGFloat($0.position) },
-                angleDegrees: CGFloat(gradient.angleDegrees)
+                angleDegrees: CGFloat(gradient.angleDegrees),
+                drift: gradient.drift
             )
         }
 

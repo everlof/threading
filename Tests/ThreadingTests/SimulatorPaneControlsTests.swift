@@ -256,7 +256,7 @@ final class SimulatorPaneControlsTests: XCTestCase {
         let presenter = try XCTUnwrap(shownPresenters.first)
         XCTAssertTrue(controller.isPresenterWindowOpen)
         XCTAssertTrue(controller.presenterButtonForTesting.isSelected)
-        XCTAssertEqual(presenter.window?.title, L10n.format("%@ Simulator", simulatorRecoveryFirstDevice.name))
+        XCTAssertEqual(presenter.window?.title, L10n.format("Threading: %@", simulatorRecoveryFirstDevice.name))
         XCTAssertEqual(presenter.window?.sharingType, .readOnly)
         try await eventually { presenter.screenView.image != nil }
 

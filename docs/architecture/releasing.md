@@ -27,15 +27,21 @@ exact commit check; direct `release.sh` and `publish_release.sh` runs remain fai
 already exists under account `mjukis-threading`; [Keys](#keys--threadings-own-one-manual-step-from-real)
 records its custody requirements.
 
-The same shipping lane owns Sentry's release half. Every notarized archive requires an
-organization-scoped `SENTRY_AUTH_TOKEN`: `scripts/sentry-release.sh` derives Cocoa's exact
+The same shipping lane owns Sentry's release half. Every notarized archive requires
+organization-scoped Sentry credentials: `scripts/sentry-release.sh` derives Cocoa's exact
 `codes.threading@<version>+<build>` identity from the exported app, creates the release, uploads
 the dSYMs from that archive with source context, associates commits from the full checkout, and
 finalizes it. Publication records the deploy only after the GitHub release and feed exist.
 Stable, beta and nightly events use `production`, `beta` and `nightly` environments respectively.
 Dry-run, non-notarized archives create no remote Sentry state. GitHub Actions stores the token as
-`SENTRY_AUTH_TOKEN`; local release machines provide it in the environment or their secret store,
-never a tracked `.sentryclirc`, `sentry.properties` or env file. The iOS companion has no shipping
+`SENTRY_AUTH_TOKEN`; local release machines prefer the repository's ignored, owner-only
+`.sentryclirc` over an ambient token for another product, falling back to the environment when
+neither that file nor the local Keychain credential is available. The login Keychain item uses
+service `codes.threading.release.sentry` and account `threading`, so a new checkout can release
+without copying secrets between folders. Local releases use the trusted Mac; their credential
+setup does not upload tokens to GitHub. Never track `.sentryclirc`, `sentry.properties` or an env file.
+`scripts/sentry-release.sh check` verifies access without publishing; the local driver runs it
+before the quality gate and again before any public ref moves. The iOS companion has no shipping
 archive lane here, so its App Store pipeline must perform the same upload from the archive Apple
 receives rather than reusing the Mac dSYMs.
 

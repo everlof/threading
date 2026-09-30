@@ -1812,7 +1812,11 @@ final class RemoteSessionConnection: ObservableObject {
 #endif
                     applyTerminalOutput(data)
                 case .string(let text):
-                    handle(text)
+                    let control = await Task.detached(priority: .userInitiated) {
+                        Self.decodeTerminalControl(text)
+                    }.value
+                    guard !stopped, connectionGeneration == generation, self.task === task else { return }
+                    handle(text, terminalControl: control)
                 @unknown default:
                     continue
                 }
@@ -1873,13 +1877,16 @@ final class RemoteSessionConnection: ObservableObject {
                 // Submitting them to the main queue from here preserves their socket order all
                 // the way through state application, rather than relying on unstructured Task
                 // scheduling to happen to retain it.
+                let control: TerminalControl
+                if case .success(let text) = result { control = Self.decodeTerminalControl(text) }
+                else { control = .other }
                 DispatchQueue.main.async { [weak self] in
                     MainActor.assumeIsolated {
                         guard let self, self.demoScript != nil,
                               self.connectionGeneration == generation else { return }
                         switch result {
                         case .success(let text):
-                            self.handle(text)
+                            self.handle(text, terminalControl: control)
                         case .failure(let error):
                             self.fail(
                                 with: RemoteConnectionFailure.transport(
@@ -1905,7 +1912,7 @@ final class RemoteSessionConnection: ObservableObject {
 
     /// Feeds one server frame through the same handler a real socket frame reaches.
     func receiveServerTextForTesting(_ text: String) {
-        handle(text)
+        handle(text, terminalControl: Self.decodeTerminalControl(text))
     }
 #endif
 
@@ -1985,7 +1992,26 @@ final class RemoteSessionConnection: ObservableObject {
     }
 #endif
 
-    private func handle(_ text: String) {
+    private enum TerminalControl: Sendable {
+        case ended(RemoteEndedDTO?)
+        case error(RemoteErrorDTO?)
+        case other
+    }
+
+    /// Socket frames await this worker before applying state; demo frames decode on the serial
+    /// wire lane. Both retain message ordering and recheck the connection generation on return.
+    private nonisolated static func decodeTerminalControl(_ text: String) -> TerminalControl {
+        let data = Data(text.utf8)
+        let decoder = JSONDecoder()
+        guard let envelope = try? decoder.decode(RemoteSessionServerEnvelope.self, from: data) else { return .other }
+        switch envelope.type {
+        case "ended": return .ended(try? decoder.decode(RemoteEndedDTO.self, from: data))
+        case "error": return .error(try? decoder.decode(RemoteErrorDTO.self, from: data))
+        default: return .other
+        }
+    }
+
+    private func handle(_ text: String, terminalControl: TerminalControl) {
         let data = Data(text.utf8)
         guard let envelope = try? JSONDecoder().decode(
             RemoteSessionServerEnvelope.self,
@@ -2298,7 +2324,7 @@ final class RemoteSessionConnection: ObservableObject {
                 result: result.accepted ? "accepted" : "refused"
             )
         case "ended":
-            let ended = try? JSONDecoder().decode(RemoteEndedDTO.self, from: data)
+            guard case .ended(let ended) = terminalControl else { return }
             if isOwnedByConnectionPool {
                 invalidatePooledConnection()
                 return
@@ -2334,7 +2360,7 @@ final class RemoteSessionConnection: ObservableObject {
             ]) { current, _ in current })
             endOpeningForEndedConnection(reason: ended?.reason)
         case "error":
-            let error = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
+            guard case .error(let error) = terminalControl else { return }
             if isOwnedByConnectionPool {
                 invalidatePooledConnection()
                 return

@@ -10,7 +10,7 @@ import TimberLineParser
 /// Externally sized content never becomes a view until the table asks for the row that holds it,
 /// which is the whole reason this is a value and the pane is a table. See
 /// [`device-and-simulator-logs.md`](../../../../docs/feature-drafts/device-and-simulator-logs.md).
-public struct DeviceLogRow {
+public struct DeviceLogRow: Sendable {
     public let time: String
     public let level: String
     public let process: String
@@ -180,13 +180,17 @@ public final class DeviceLogLineReader {
             }
         }
         let ending = onEnd.map(DeviceLogEndCallback.init)
+        let deliveryQueue = queue
         task.terminationHandler = { finished in
             errors.fileHandleForReading.readabilityHandler = nil
             guard let ending else { return }
             let reason = diagnostics.text()
-            ending.call(reason.isEmpty
+            let message = reason.isEmpty
                 ? "the reader exited with status \(finished.terminationStatus)"
-                : reason)
+                : reason
+            // EOF/exit races the stdout reader. Deliver the ending after all queued line
+            // callbacks, or the structured route can fall back before seeing its first row.
+            deliveryQueue.async { ending.call(message) }
         }
         process = task
 
@@ -500,12 +504,14 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
 ///
 /// The tool is libimobiledevice's, never bundled, resolved on the user's `PATH`.
 public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
+    private let processName: String?
     private let reader = DeviceLogLineReader(label: "device")
     private let udid: String
     private let overNetwork: Bool
     private let toolPath: String
 
-    public init(udid: String, overNetwork: Bool, toolPath: String) {
+    public init(udid: String, overNetwork: Bool, toolPath: String, processName: String? = nil) {
+        self.processName = processName
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
@@ -521,7 +527,8 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
             executable: toolPath,
             arguments: arguments,
             onLine: { [weak self] line in
-                if let row = DeviceLogDecoding.syslog(line) { self?.enqueue(row) }
+                if let self, let row = DeviceLogDecoding.syslog(line),
+                   self.processName == nil || row.process == self.processName { self.enqueue(row) }
             },
             onEnd: { [weak self] reason in self?.onStreamEnded?(reason) }
         )
@@ -542,6 +549,7 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
 /// rows. In that case this source starts the existing `idevicesyslog` reader automatically rather
 /// than turning an installed optional tool into a regression.
 public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked Sendable {
+    private let processName: String?
     private let structuredReader = DeviceLogLineReader(label: "device-structured")
     private let fallbackReader = DeviceLogLineReader(label: "device-fallback")
     private let lifecycle = DispatchQueue(label: "codes.threading.devicelog.device-lifecycle")
@@ -561,13 +569,15 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         overNetwork: Bool,
         toolPath: String,
         fallbackToolPath: String?,
-        structuredStartupDeadline: TimeInterval = 6
+        structuredStartupDeadline: TimeInterval = 6,
+        processName: String? = nil
     ) {
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
         self.fallbackToolPath = fallbackToolPath
         self.structuredStartupDeadline = structuredStartupDeadline
+        self.processName = processName
     }
 
     public override func start() {
@@ -608,7 +618,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
             onLine: { [weak self] line in
                 guard let self, let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
                 let isFirstStructuredRow = self.markDecodedStructuredRow()
-                self.enqueue(row)
+                if self.processName == nil || row.process == self.processName { self.enqueue(row) }
                 if isFirstStructuredRow {
                     self.lifecycle.async { [weak self] in self?.cancelFallbackTimer() }
                 }
@@ -670,7 +680,8 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
             executable: toolPath,
             arguments: arguments,
             onLine: { [weak self] line in
-                if let row = DeviceLogDecoding.syslog(line) { self?.enqueue(row) }
+                if let self, let row = DeviceLogDecoding.syslog(line),
+                   self.processName == nil || row.process == self.processName { self.enqueue(row) }
             },
             onEnd: { [weak self] fallbackReason in
                 self?.onStreamEnded?(fallbackReason)
@@ -1181,19 +1192,22 @@ public struct DeviceLogSourceOption: Equatable {
         }
     }
 
-    public func makeSource(predicate: String?, route: Route = .appLog) -> DeviceLogRowSource? {
+    public func makeSource(predicate: String?, route: Route = .appLog, processName: String? = nil) -> DeviceLogRowSource? {
         switch kind {
         case .simulator(let udid):
-            return SimulatorLogRowSource(udid: udid, predicate: predicate)
+            let processPredicate = processName.map { NSPredicate(format: "process == %@", $0).predicateFormat }
+            let clauses = [predicate, processPredicate].compactMap { $0 }.filter { !$0.isEmpty }
+            return SimulatorLogRowSource(udid: udid, predicate: clauses.isEmpty ? nil : clauses.map { "(\($0))" }.joined(separator: " AND "))
         case .device(let udid, let overNetwork):
             guard let tool = DeviceLogSourceCatalog.syslogToolPath else { return nil }
-            return PairedDeviceLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: tool)
+            return PairedDeviceLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: tool, processName: processName)
         case .structuredDevice(let udid, let overNetwork, let tool, let fallbackTool):
             return StructuredPairedDeviceLogRowSource(
                 udid: udid,
                 overNetwork: overNetwork,
                 toolPath: tool,
-                fallbackToolPath: fallbackTool
+                fallbackToolPath: fallbackTool,
+                processName: processName
             )
         case .app(let deviceID, let bundleID, let appName):
             switch route {

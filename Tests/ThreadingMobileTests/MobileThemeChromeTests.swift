@@ -4,6 +4,94 @@ import UIKit
 import XCTest
 @testable import ThreadingMobile
 
+@MainActor
+final class MobileThemeBackdropTests: XCTestCase {
+    func testCompleteMovingThemeSurvivesTheReconnectCache() throws {
+        let suite = "backdrop-cache-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MobileThemeCacheStore(defaults: defaults)
+        let source = try XCTUnwrap(theme(drift: .init()).source)
+        XCTAssertTrue(store.remember(source, for: "paired-mac"))
+        XCTAssertEqual(MobileThemeCacheStore(defaults: defaults).theme(for: "paired-mac"), source)
+    }
+
+    /// A newer Mac may state a drift or a stop count this build does not accept. The renderer
+    /// already declines to draw it; the cache must still keep the theme rather than calling the
+    /// archive corrupt and reporting that saved themes outgrew their storage.
+    func testADecorationFromANewerMacIsStillCached() throws {
+        let suite = "backdrop-cache-newer-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MobileThemeCacheStore(defaults: defaults)
+        let wider = try XCTUnwrap(theme(drift: .init(duration: 400, distance: 0.6), count: 12).source)
+        XCTAssertTrue(store.remember(wider, for: "paired-mac"))
+        XCTAssertNil(store.recoveryMessage)
+        XCTAssertEqual(MobileThemeCacheStore(defaults: defaults).theme(for: "paired-mac"), wider)
+
+        let backdrop = MobileThemeBackdropView()
+        backdrop.apply(RemoteThemePalette(wider))
+        XCTAssertFalse(backdrop.isAnimating, "what this build cannot draw it does not animate")
+    }
+
+    func testRecipeChangesAndLifecycleLeaveAStaticLegibleFallback() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let backdrop = MobileThemeBackdropView(frame: window.bounds)
+        backdrop.permitsMotion = { true }
+        backdrop.sceneIsActive = { _ in true }
+        window.addSubview(backdrop)
+        backdrop.isPresentationActive = true
+        backdrop.apply(theme(drift: .init()))
+        XCTAssertTrue(backdrop.showsGradient)
+        XCTAssertTrue(backdrop.isAnimating)
+        XCTAssertFalse(backdrop.isUserInteractionEnabled)
+        XCTAssertTrue(backdrop.accessibilityElementsHidden)
+        backdrop.isPresentationActive = false
+        XCTAssertFalse(backdrop.isAnimating)
+        backdrop.isPresentationActive = true
+        XCTAssertTrue(backdrop.isAnimating)
+        backdrop.permitsMotion = { false }
+        backdrop.refreshMotion()
+        XCTAssertFalse(backdrop.isAnimating)
+        XCTAssertTrue(backdrop.showsGradient)
+        backdrop.permitsMotion = { true }
+        backdrop.refreshMotion()
+        XCTAssertTrue(backdrop.isAnimating)
+        backdrop.apply(theme(drift: nil))
+        XCTAssertFalse(backdrop.isAnimating)
+        XCTAssertTrue(backdrop.showsGradient)
+        backdrop.apply(theme(drift: .init()), frozenPhase: 0.25)
+        XCTAssertFalse(backdrop.isAnimating)
+        backdrop.apply(RemoteThemePalette(nil))
+        XCTAssertFalse(backdrop.isAnimating)
+        XCTAssertFalse(backdrop.showsGradient)
+        backdrop.apply(theme(drift: .init()))
+        backdrop.removeFromSuperview()
+        XCTAssertFalse(backdrop.isAnimating)
+    }
+
+    func testInvalidDecorationDoesNotReplaceThePaletteOrStartAnAnimation() {
+        let backdrop = MobileThemeBackdropView()
+        backdrop.apply(theme(drift: .init(duration: 0)))
+        XCTAssertTrue(backdrop.showsGradient)
+        XCTAssertFalse(backdrop.isAnimating)
+        backdrop.apply(theme(drift: .init(), count: 1000))
+        XCTAssertFalse(backdrop.showsGradient)
+        XCTAssertEqual(backdrop.layer.sublayers?.count, 1)
+    }
+
+    private func theme(drift: ThemeGradientDrift?, count: Int = 2) -> RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(
+            id: "backdrop-test", name: "Backdrop test", mode: .dark,
+            colors: ["ground": "#101020", "label": "#FFFFFF"],
+            material: .init(panelRadius: 10, controlRadius: 5, borderWidth: 1,
+                backdropGradient: .init(stops: (0..<count).map {
+                    .init(color: $0 == 0 ? "#101020" : "#203040", position: Double($0) / Double(count - 1))
+                }, angleDegrees: 135, drift: drift))
+        ))
+    }
+}
+
 final class MobileFloatingSurfaceTests: XCTestCase {
     private struct ColorComponents: Equatable {
         let red: CGFloat

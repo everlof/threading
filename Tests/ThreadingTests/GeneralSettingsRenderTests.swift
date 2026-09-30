@@ -2,16 +2,18 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// Draws the General settings page and writes it out, light and dark.
+/// Draws General and the four pages split out of it — Sidebar, Chats, Notifications and
+/// Integration — and writes them out, light and dark.
 ///
-/// General is the longest page in the app and the one that grows: every behavioural setting
-/// lands here as another card, and a card reads as part of the page or as a pile depending on
-/// things no assertion is written for — whether a refinement row sits *under* the switch it
-/// refines, whether a disabled toggle still looks like a control that is waiting rather than
-/// one that is broken, whether four rows of second lines turn a card into a wall.
+/// General was the longest page in the app and the one that grew: every behavioural setting
+/// landed there as another card until it ran to twenty-two captions. The split holds only while
+/// each page stays something a reader can take in at a glance, and that is decided by things no
+/// assertion is written for — whether a refinement row sits *under* the switch it refines,
+/// whether a disabled toggle still looks like a control that is waiting rather than one that is
+/// broken, whether a card's second lines have crept back into a wall.
 ///
-/// The assertions catch what an image cannot: a card that measures nothing, and refinement
-/// rows that outlive the switch they belong to.
+/// The assertions catch what an image cannot: a card that measures nothing, refinement rows that
+/// outlive the switch they belong to, and explanations that moved behind a "?" and went missing.
 final class GeneralSettingsRenderTests: XCTestCase {
 
     private enum Render {
@@ -19,15 +21,10 @@ final class GeneralSettingsRenderTests: XCTestCase {
         /// rows carry the longest second lines on the page, so they wrap first.
         static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
 
-        /// The page is a scroll view, so it has no height of its own to be sized to. This tall
-        /// overview keeps the upper and middle cards together — especially Confirmations,
-        /// which turned one row into six — while the focused viewport below covers the end.
-        static let height: CGFloat = 3600
-
-        /// A second, ordinary-height viewport is pinned to the bottom of the real settings
-        /// scroll view. General has outgrown even the tall overview at constrained widths, and
-        /// settings added near the end of the page otherwise have no rendered evidence at all.
-        static let bottomHeight: CGFloat = 1600
+        /// The page is a scroll view, so it has no height of its own to be sized to. Tall
+        /// enough for the longest of the five at the squeezed width, so every card has rendered
+        /// evidence without a second, bottom-pinned viewport.
+        static let height: CGFloat = 2400
 
         static var directory: URL {
             if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
@@ -46,7 +43,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// what holds that: a fourth case with no row would silently notify forever.
     @MainActor
     func testEveryAlertKindHasARowAndSoDoesTheSound() {
-        let controller = GeneralPreferencesViewController()
+        let controller = NotificationsPreferencesViewController()
         laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
 
         let labels = Self.labels(in: controller.view)
@@ -54,7 +51,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
         for alert in AttentionAlert.allCases {
             XCTAssertTrue(
                 labels.contains(alert.settingsTitle),
-                "\(alert.rawValue) has no row on the General page"
+                "\(alert.rawValue) has no row on the Notifications page"
             )
             XCTAssertTrue(
                 labels.contains { $0.contains(alert.body) },
@@ -78,11 +75,11 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// this list, an install that had alerts switched off has no way to say so again.
     @MainActor
     func testTheAlertSoundPickerOffersTheDefaultEveryInstalledSoundAndAWayToAddOne() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = NotificationsPreferencesViewController()
         laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
 
         let popUp = try XCTUnwrap(
-            Self.view(in: controller.view, identifiedBy: "settings.general.alert-sound")
+            Self.view(in: controller.view, identifiedBy: "settings.notifications.alert-sound")
                 as? ThemedPopUp,
             "the notification card has no reachable alert sound control"
         )
@@ -122,11 +119,11 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// means reaching for silence.
     @MainActor
     func testTheBellPickerLeadsWithOffAndOffersTheSameSounds() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = NotificationsPreferencesViewController()
         laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
 
         let popUp = try XCTUnwrap(
-            Self.view(in: controller.view, identifiedBy: "settings.general.bell-sound")
+            Self.view(in: controller.view, identifiedBy: "settings.notifications.bell-sound")
                 as? ThemedPopUp,
             "the terminal bell card has no reachable sound control"
         )
@@ -154,8 +151,8 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// The other half of the register, and the half a type cannot enforce: a prompt whose alert
     /// offers "Don't ask again" must have a row that turns it back on, or ticking that box is a
     /// one-way door. Built from `ConfirmationPrompt.suppressible` for exactly that reason, and
-    /// held to it here. The note is asserted too — six toggles cannot say by themselves that
-    /// everything destructive is deliberately absent.
+    /// held to it here. The section's "?" is asserted too — six toggles cannot say by
+    /// themselves that everything destructive is deliberately absent.
     @MainActor
     func testEverySuppressiblePromptHasARowAndTheNoteSaysWhatIsMissing() {
         let controller = GeneralPreferencesViewController()
@@ -179,9 +176,10 @@ final class GeneralSettingsRenderTests: XCTestCase {
 
         // Section captions are drawn uppercased.
         XCTAssertTrue(labels.contains(L10n.string("Confirmations").localizedUppercase))
+        let help = Self.helpText(in: controller.view)
         XCTAssertTrue(
-            labels.contains { $0.contains("always asks") },
-            "the card has to say why the destructive prompts are not on this list"
+            help.contains { $0.contains("always asks") },
+            "the section has to say why the destructive prompts are not on this list"
         )
 
         // The notice register's half of the same invariant: its keys are dynamic, so instead
@@ -192,7 +190,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
             "notices can be hidden with no control to bring them back"
         )
         XCTAssertTrue(
-            labels.contains { $0.contains("failures always show") },
+            help.contains { $0.contains("failures always show") },
             "the row has to say that errors cannot be hidden"
         )
     }
@@ -202,12 +200,12 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// two identical three-row pop-ups cannot otherwise be distinguished by automation.
     @MainActor
     func testClaudeAndCodexStartupSpeedRowsOfferEveryState() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = ChatsPreferencesViewController()
         laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
 
         for (kind, identifier) in [
-            (AgentKind.claude, "settings.general.claude-startup-speed"),
-            (AgentKind.codex, "settings.general.codex-startup-speed")
+            (AgentKind.claude, "settings.chats.claude-startup-speed"),
+            (AgentKind.codex, "settings.chats.codex-startup-speed")
         ] {
             let popUp = try XCTUnwrap(
                 Self.view(in: controller.view, identifiedBy: identifier) as? ThemedPopUp,
@@ -234,7 +232,8 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// Read-only on purpose, for the reason the sound pickers are: the bundle is hosted in the
     /// app, so writing a choice here would change which builds the developer's own copy accepts.
     ///
-    /// The copy is asserted because it carries the part the control cannot. Nightly is
+    /// The copy is asserted — on the row's "?", where the long answer lives — because it
+    /// carries the part the control cannot. Nightly is
     /// deliberately not an option — its date version outranks every release, so choosing stable
     /// again would strand the user — and a channel a person can be on with no mention on the
     /// page is a channel they cannot reason about. The row must name it and say how to leave.
@@ -261,7 +260,9 @@ final class GeneralSettingsRenderTests: XCTestCase {
         let labels = Self.labels(in: controller.view)
         XCTAssertTrue(labels.contains(L10n.string("Updates you receive")))
         XCTAssertTrue(
-            labels.contains { $0.contains("Nightly") && $0.contains("stable build yourself") },
+            Self.helpText(in: controller.view).contains {
+                $0.contains("Nightly") && $0.contains("stable build yourself")
+            },
             "the row has to name nightly and say that leaving it is a manual download"
         )
     }
@@ -270,7 +271,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
     /// set or a new runtime can tell the user to change a switch that does not exist.
     @MainActor
     func testEveryAgentKindHasAnAttachmentDetectionRow() throws {
-        let controller = GeneralPreferencesViewController()
+        let controller = ChatsPreferencesViewController()
         laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
         let labels = Self.labels(in: controller.view)
 
@@ -279,7 +280,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
                 labels.contains("Detect attachments from \(kind.displayName)"),
                 "\(kind.displayName) has no attachment detection row"
             )
-            let identifier = "settings.general.\(kind.rawValue)-attachment-detection"
+            let identifier = "settings.chats.\(kind.rawValue)-attachment-detection"
             let toggle = try XCTUnwrap(
                 Self.view(in: controller.view, identifiedBy: identifier) as? ThemedToggle,
                 "\(kind.displayName) has no reachable attachment detection control"
@@ -291,7 +292,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
         }
     }
 
-    /// The power setting states its exact boundary on the page: this is idle sleep only, not a
+    /// The power setting states its exact boundary on its "?": this is idle sleep only, not a
     /// promise that Threading can override a MacBook lid closure or keep the display lit.
     @MainActor
     func testPowerSettingIsReachableAndExplainsTheLidBoundary() throws {
@@ -312,7 +313,7 @@ final class GeneralSettingsRenderTests: XCTestCase {
         let labels = Self.labels(in: controller.view)
         XCTAssertTrue(labels.contains(L10n.string("Keep this Mac awake while agents work")))
         XCTAssertTrue(
-            labels.contains { $0.contains("MacBook") },
+            Self.helpText(in: controller.view).contains { $0.contains("MacBook") },
             "the setting must not imply that an idle-sleep assertion overrides lid closure"
         )
     }
@@ -323,6 +324,18 @@ final class GeneralSettingsRenderTests: XCTestCase {
         if let field = view as? NSTextField { found.insert(field.stringValue) }
         for subview in view.subviews {
             found.formUnion(labels(in: subview))
+        }
+        return found
+    }
+
+    /// Everything the page's "?" buttons explain, as VoiceOver hears it. The long half of a
+    /// row's copy moved behind the press, and this is where an assertion about it now looks.
+    @MainActor
+    private static func helpText(in view: NSView) -> [String] {
+        var found: [String] = []
+        if let button = view as? HelpPopoverButton { found.append(button.topic.spokenSummary) }
+        for subview in view.subviews {
+            found += helpText(in: subview)
         }
         return found
     }
@@ -340,86 +353,79 @@ final class GeneralSettingsRenderTests: XCTestCase {
 
     @MainActor
     func testRendersGeneralSettingsToImages() throws {
+        try render("general") { GeneralPreferencesViewController() }
+    }
+
+    @MainActor
+    func testRendersSidebarSettingsToImages() throws {
+        try render("sidebar") { SidebarPreferencesViewController() }
+    }
+
+    @MainActor
+    func testRendersChatsSettingsToImages() throws {
+        try render("chats") { ChatsPreferencesViewController() }
+    }
+
+    @MainActor
+    func testRendersNotificationsSettingsToImages() throws {
+        try render("notifications") { NotificationsPreferencesViewController() }
+    }
+
+    @MainActor
+    func testRendersIntegrationSettingsToImages() throws {
+        try render("integration") { IntegrationPreferencesViewController() }
+    }
+
+    /// One page at both widths, light and dark, named `<page>-<width>-<appearance>.png` so each
+    /// page's UI-evidence entry can glob its own images.
+    @MainActor
+    private func render(
+        _ page: String,
+        _ make: @escaping () -> NSViewController
+    ) throws {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         var written: [String] = []
-
         for width in Render.widths {
             for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-                let url = directory.appendingPathComponent("general-\(Int(width))-\(name).png")
+                let url = directory.appendingPathComponent("\(page)-\(Int(width))-\(name).png")
                 let data = try XCTUnwrap(
-                    pageImage(width: width, height: Render.height, appearance: appearance),
-                    "Failed to render the general page at \(width)pt in \(name)"
+                    pageImage(make, width: width, appearance: appearance),
+                    "Failed to render the \(page) page at \(width)pt in \(name)"
                 )
                 try data.write(to: url)
                 written.append(url.lastPathComponent)
-
-                let bottomURL = directory.appendingPathComponent(
-                    "general-bottom-\(Int(width))-\(name).png"
-                )
-                let bottomData = try XCTUnwrap(
-                    pageImage(
-                        width: width,
-                        height: Render.bottomHeight,
-                        appearance: appearance,
-                        scrollToBottom: true
-                    ),
-                    "Failed to render the bottom of General at \(width)pt in \(name)"
-                )
-                try bottomData.write(to: bottomURL)
-                written.append(bottomURL.lastPathComponent)
             }
         }
 
-        print("Rendered \(written.count) general pages to \(directory.path)")
-        XCTAssertEqual(written.count, Render.widths.count * 4)
+        print("Rendered \(written.count) \(page) pages to \(directory.path)")
+        XCTAssertEqual(written.count, Render.widths.count * 2)
     }
 
     // MARK: - Helpers
 
     @MainActor
     private func pageImage(
+        _ make: @escaping () -> NSViewController,
         width: CGFloat,
-        height: CGFloat,
-        appearance name: NSAppearance.Name,
-        scrollToBottom: Bool = false
+        appearance name: NSAppearance.Name
     ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render = {
-            let controller = GeneralPreferencesViewController()
-            let host = self.laidOut(controller.view, width: width, height: height)
+            let controller = make()
+            let host = self.laidOut(controller.view, width: width, height: Render.height)
             host.appearance = appearance
             controller.view.appearance = appearance
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()
-            if scrollToBottom,
-               let scrollView = Self.scrollView(in: controller.view),
-               let document = scrollView.documentView {
-                let bottom = max(
-                    document.bounds.minY,
-                    document.bounds.maxY - scrollView.contentView.bounds.height
-                )
-                scrollView.contentView.scroll(to: NSPoint(x: document.bounds.minX, y: bottom))
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-                host.layoutSubtreeIfNeeded()
-            }
             data = self.png(of: host)
         }
 
         appearance?.performAsCurrentDrawingAppearance(render)
         return data
-    }
-
-    @MainActor
-    private static func scrollView(in root: NSView) -> NSScrollView? {
-        if let scrollView = root as? NSScrollView { return scrollView }
-        for subview in root.subviews {
-            if let found = scrollView(in: subview) { return found }
-        }
-        return nil
     }
 
     /// The page is a scroll view and has no fitting height, so the host states one and the

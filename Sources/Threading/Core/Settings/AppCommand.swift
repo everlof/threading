@@ -415,7 +415,7 @@ enum AppCommands {
                    defaultShortcut: nil, isEditable: true, scope: .project),
         AppCommand(id: ID.projectRemoteHost, group: .view, title: "Remote Host…",
                    defaultShortcut: nil, isEditable: true, scope: .project),
-        AppCommand(id: ID.triggers, group: .view, title: "Triggers",
+        AppCommand(id: ID.triggers, group: .view, title: "Automations",
                    defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.currentTheme, group: .view, title: "Current Theme",
                    defaultShortcut: nil, isEditable: true, scope: .session),

@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 import XCTest
 @testable import Threading
 
@@ -62,6 +63,27 @@ final class ThemeBackdropTests: XCTestCase {
     }
 
     // MARK: - Wire forms
+
+    func testDriftSurvivesThemeStorageResolutionAndThePhoneProjection() throws {
+        let backdrop = ThemeBackdrop(gradient: .init(stops: [
+            .init(color: NSColor(hex: "#101020")!, position: 0),
+            .init(color: NSColor(hex: "#202040")!, position: 1)
+        ], angleDegrees: 135, drift: .init(duration: 32, distance: 0.2)))
+        let theme = try themed(backdrop)
+        let restored = try JSONDecoder().decode(AppTheme.self, from: JSONEncoder().encode(theme))
+        XCTAssertEqual(restored.material.backdrop, backdrop)
+        let resolved = try XCTUnwrap(ThemeBackdropAppearance.resolve(backdrop, themeID: theme.id))
+        XCTAssertEqual(resolved.gradient?.drift, backdrop.gradient?.drift)
+        let remote = try XCTUnwrap(RemoteThemeBridge.appTheme(restored).material.backdropGradient)
+        XCTAssertEqual(remote.drift, backdrop.gradient?.drift)
+        XCTAssertEqual(remote.angleDegrees, 135)
+        XCTAssertEqual(remote.stops.map(\.color), ["#101020", "#202040"])
+        for drift in [ThemeGradientDrift(duration: 0), ThemeGradientDrift(distance: 1)] {
+            var invalid = backdrop
+            invalid.gradient?.drift = drift
+            XCTAssertThrowsError(try themed(invalid))
+        }
+    }
 
     func testAMaterialBackdropRoundTripsThroughItsDocumentForm() throws {
         var material = AppTheme.Material()

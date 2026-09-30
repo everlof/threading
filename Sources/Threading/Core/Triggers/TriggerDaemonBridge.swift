@@ -15,6 +15,7 @@ struct TriggerDaemonConfiguration: Codable, Equatable, Sendable {
     let schemaVersion: Int
     let generation: UUID
     let sources: [TriggerDaemonSourceConfiguration]
+    var nextScheduleUnixTime: Double? = nil
 }
 
 enum TriggerDaemonLocations {
@@ -48,7 +49,7 @@ enum TriggerDaemonConfigurationStore {
     }
 
     @discardableResult
-    static func publish(_ installations: [TriggerSourceInstallation]) throws -> Bool {
+    static func publish(_ installations: [TriggerSourceInstallation], nextScheduleAt: Date? = nil) throws -> Bool {
         let sources = try installations.compactMap { source -> TriggerDaemonSourceConfiguration? in
             guard source.enabled, supportedSourceTypes.contains(source.sourceType) else { return nil }
             guard case .string(let rawURL)? = source.configuration["base_url"],
@@ -69,7 +70,8 @@ enum TriggerDaemonConfigurationStore {
         let payload = TriggerDaemonConfiguration(
             schemaVersion: 1,
             generation: UUID(),
-            sources: sources
+            sources: sources,
+            nextScheduleUnixTime: nextScheduleAt?.timeIntervalSince1970
         )
         try FileManager.default.createDirectory(
             at: TriggerDaemonLocations.directory,
@@ -84,7 +86,7 @@ enum TriggerDaemonConfigurationStore {
             [.posixPermissions: 0o600],
             ofItemAtPath: TriggerDaemonLocations.configuration.path
         )
-        return !sources.isEmpty
+        return !sources.isEmpty || nextScheduleAt != nil
     }
 }
 
@@ -282,7 +284,7 @@ final class TriggerDaemonRegistrationCoordinator {
     }
 
     func reconcile(shouldRun: Bool) {
-        guard !StateManager.isHostedTest, !RecoveryMode.isActive else { return }
+        guard !AutomatedRun.isUnderway, !RecoveryMode.isActive else { return }
         let helper = Self.helperURL
         guard FileManager.default.isExecutableFile(atPath: helper.path) else {
             ThreadingLogger.app.notice("Trigger daemon helper is not present in this bundle")

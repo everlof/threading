@@ -7,6 +7,21 @@ protocol PhysicalDeviceControlling: Sendable {
     func prepareControl(of device: PhysicalDevice) async throws
     func sendInput(_ input: PhysicalDeviceInput, to device: PhysicalDevice) async throws
     func screenshot(of device: PhysicalDevice) async throws -> Data
+    var supportsLiveTouch: Bool { get }
+    var frameInterval: Duration { get }
+    func stopPreview()
+    func stopInput()
+    func preparePreview(of device: PhysicalDevice) async throws
+    func beginInput(of device: PhysicalDevice) async throws
+}
+
+extension PhysicalDeviceControlling {
+    var supportsLiveTouch: Bool { false }
+    var frameInterval: Duration { .seconds(1) }
+    func stopPreview() {}
+    func stopInput() {}
+    func preparePreview(of device: PhysicalDevice) async throws {}
+    func beginInput(of device: PhysicalDevice) async throws {}
 }
 
 enum PhysicalDeviceControlError: LocalizedError, Equatable, Sendable {
@@ -56,6 +71,7 @@ enum PhysicalDeviceDefaults {
     static let maximumDeviceCount = 128
     static let maximumCommandOutputBytes = 64 * 1024
     static let maximumScreenshotBytes = 32 * 1024 * 1024
+    static let maximumScreenshotPixels = 16 * 1024 * 1024
     static let discoveryTimeout: TimeInterval = 12
     static let screenshotTimeout: TimeInterval = 12
     static let developerServicesTimeout: TimeInterval = 30
@@ -353,6 +369,17 @@ final class DevicectlPhysicalDeviceControl: PhysicalDeviceControlling, @unchecke
         }
     }
 
+    func preparePreview(of device: PhysicalDevice) async throws {
+        try await perform { [environment, preparedDeviceIDs] runner, cancellation in
+            try Self.prepareDeveloperServicesIfNeeded(for: device.id, preparedDeviceIDs: preparedDeviceIDs,
+                runner: runner, environment: environment, cancellation: cancellation)
+        }
+    }
+
+    func stopPreview() {
+        preparedDeviceIDs.withLock { $0.removeAll() }
+    }
+
     func screenshot(of device: PhysicalDevice) async throws -> Data {
         let modernExecutable = capabilityProbeExecutable()
         guard screenshotExecutable != nil || modernExecutable != nil else {
@@ -622,6 +649,8 @@ final class DevicectlPhysicalDeviceControl: PhysicalDeviceControlling, @unchecke
             "--no-color", "developer", "core-device", "universal-hid-service",
         ]
         switch input {
+        case .touchDown, .touchMove, .touchUp:
+            throw PhysicalDeviceControlError.invalidInput
         case .tap(let x, let y):
             return prefix + [
                 "tap", try hidCoordinate(x), try hidCoordinate(y), "--native",

@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 final class TriggerCenterViewController: NSViewController {
-    private enum Page: Int { case triggers, activity, sources }
+    private enum Page: Int { case triggers, activity, sources, remote }
 
     private enum Layout {
         /// The page's column, centred in whatever pane it is given.
@@ -17,7 +17,7 @@ final class TriggerCenterViewController: NSViewController {
             Design.Size.readableWidth + Design.Spacing.inset * 2
 
         /// Three one- or two-word choices — the shared settings measure for exactly that run.
-        static let pagesWidth: CGFloat = SettingsUIDefaults.compactSegmentedControlWidth
+        static let pagesWidth: CGFloat = SettingsUIDefaults.compactSegmentedControlWidth + Design.Spacing.pane * 2
     }
 
     private let store: TriggerStore
@@ -28,6 +28,11 @@ final class TriggerCenterViewController: NSViewController {
     private let column = NSView()
     private let events = AppEventObservations()
     private var page: Page = .triggers
+    private var pageOffset = 0
+    private var reloadTask: Task<Void, Never>?
+    private var historyCursors: [Int64] = [Int64.max]
+    private var nextHistoryCursor: Int64?
+    private var remoteController: RemoteAutomationsViewController?
 
     init(store: TriggerStore = .shared) {
         self.store = store
@@ -47,12 +52,12 @@ final class TriggerCenterViewController: NSViewController {
     }
 
     private func build() {
-        let title = NSTextField(labelWithString: L10n.string("Triggers"))
+        let title = NSTextField(labelWithString: L10n.string("Automations"))
         title.applyFont(.heading)
         title.textColor = Design.Text.label
 
         let subtitle = NSTextField(labelWithString: L10n.string(
-            "Listen for events, assess them with an agent, and fix only the straightforward ones."
+            "Run saved tasks on a schedule or when an event arrives."
         ))
         subtitle.applyFont(.subheading)
         subtitle.textColor = Design.Text.secondary
@@ -63,16 +68,20 @@ final class TriggerCenterViewController: NSViewController {
         status.alignment = .natural
 
         pages.configure(titles: [
-            L10n.string("Triggers"),
+            L10n.string("Automations"),
             L10n.string("Activity"),
             L10n.string("Sources"),
+            L10n.string("Remote"),
         ])
         pages.onSelect = { [weak self] index in
             guard let self, let page = Page(rawValue: index) else { return }
             self.page = page
+            self.pageOffset = 0
+            self.historyCursors = [Int64.max]
             self.reload()
         }
 
+        primaryAction.setAccessibilityIdentifier("automation.new")
         primaryAction.title = L10n.string("Connect Source")
         primaryAction.emphasis = .primary
         primaryAction.target = self
@@ -86,7 +95,7 @@ final class TriggerCenterViewController: NSViewController {
         heading.translatesAutoresizingMaskIntoConstraints = false
 
         // The count stands next to the tabs it counts rather than at the far end of the title
-        // line: "No triggers" is about the page you are on, and at the other end of a wide window
+        // line: "No automations" is about the page you are on, and at the other end of a wide window
         // it read as an unrelated word in the opposite corner.
         let controls = NSStackView(views: [pages, status, NSView(), primaryAction])
         controls.orientation = .horizontal
@@ -134,17 +143,28 @@ final class TriggerCenterViewController: NSViewController {
 
     private func reload() {
         status.stringValue = L10n.string("Updating…")
-        primaryAction.isHidden = page != .sources
-        Task { @MainActor [weak self] in
-            guard let self else { return }
+        primaryAction.isHidden = page == .activity || page == .remote
+        primaryAction.title = page == .sources ? L10n.string("Connect Source") : L10n.string("New automation")
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor [weak self] in
+            // A store transaction can publish several receipts together. Project its final
+            // state once rather than queueing a catalogue read for every notification.
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled, let self else { return }
             do {
                 switch page {
-                case .triggers: renderTriggers(try await store.triggers())
+                case .triggers:
+                    let pairs = try await store.triggers()
+                    let dates = try await loadNextDates(pairs)
+                    guard !Task.isCancelled else { return }
+                    renderTriggers(pairs, nextDates: dates)
+                case .remote: renderRemote()
                 case .activity:
-                    renderRuns(
-                        try await store.runs(limit: 250),
-                        triggers: try await store.triggers()
-                    )
+                    let result = try await store.runPage(before: historyCursors.last)
+                    let pairs = try await store.triggers()
+                    guard !Task.isCancelled else { return }
+                    nextHistoryCursor = result.next
+                    renderRuns(result.items, triggers: pairs)
                 case .sources:
                     let sources = try await store.sources()
                     let daemonStatusTask = Task.detached(priority: .utility) {
@@ -154,13 +174,12 @@ final class TriggerCenterViewController: NSViewController {
                         TriggerDaemonRegistrationCoordinator.currentStatus()
                     }
                     let daemonStatuses = (try? await daemonStatusTask.value) ?? [:]
-                    renderSources(
-                        sources,
-                        daemonStatuses: daemonStatuses,
-                        registrationStatus: await registrationTask.value
-                    )
+                    let registration = await registrationTask.value
+                    guard !Task.isCancelled else { return }
+                    renderSources(sources, daemonStatuses: daemonStatuses, registrationStatus: registration)
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 list.clear()
                 list.addNote(error.localizedDescription)
                 status.stringValue = L10n.string("Unavailable")
@@ -176,19 +195,26 @@ final class TriggerCenterViewController: NSViewController {
     static var expectedColumnWidth: CGFloat { Layout.contentWidth }
     var drawnPagesWidth: CGFloat { pages.frame.width }
     var drawnColumnWidth: CGFloat { column.frame.width }
+    var drawnRowCount: Int { list.rows.count }
 
     /// Deterministic render-test seam: the shipping segmented control owns the same selection,
     /// while the evidence test awaits the async store projection before capturing pixels.
     func prepareEvidencePage(index: Int) async throws {
         guard let page = Page(rawValue: index) else { return }
+        reloadTask?.cancel()
         self.page = page
         pages.selectedIndex = index
-        primaryAction.isHidden = page != .sources
+        primaryAction.isHidden = page == .activity || page == .remote
+        primaryAction.title = page == .sources ? L10n.string("Connect Source") : L10n.string("New automation")
         switch page {
+        case .remote: renderRemote()
         case .triggers:
-            renderTriggers(try await store.triggers())
+            let pairs = try await store.triggers()
+            renderTriggers(pairs, nextDates: try await loadNextDates(pairs))
         case .activity:
-            renderRuns(try await store.runs(limit: 250), triggers: try await store.triggers())
+            let result = try await store.runPage()
+            nextHistoryCursor = result.next
+            renderRuns(result.items, triggers: try await store.triggers())
         case .sources:
             renderSources(
                 try await store.sources(),
@@ -199,27 +225,38 @@ final class TriggerCenterViewController: NSViewController {
     }
     #endif
 
+    private func loadNextDates(_ pairs: [(definition: TriggerDefinition, revision: TriggerRevision)]) async throws -> [TriggerID: Date] {
+        var dates: [TriggerID: Date] = [:]
+        for pair in pairs.dropFirst(pageOffset).prefix(25) {
+            dates[pair.definition.id] = try await store.nextAutomationDate(pair.definition.id)
+        }
+        return dates
+    }
+
     private func renderTriggers(
-        _ pairs: [(definition: TriggerDefinition, revision: TriggerRevision)]
+        _ pairs: [(definition: TriggerDefinition, revision: TriggerRevision)], nextDates: [TriggerID: Date]
     ) {
         list.clear()
         status.stringValue = pairs.isEmpty
-            ? L10n.string("No triggers")
+            ? L10n.string("No automations")
             : L10n.format("%lld configured", Int64(pairs.count))
-        list.addSection(L10n.string("Configured triggers"))
+        list.addSection(L10n.string("Configured automations"))
         guard !pairs.isEmpty else {
             list.addNote(L10n.string(
-                "Ask an agent to create a disabled draft, or connect a source first. Nothing listens until you activate an exact revision."
+                "Create an automation here or ask an agent to set one up. Choose a schedule, task, and what happens after success."
             ))
             return
         }
-        for pair in pairs {
+        for pair in pairs.dropFirst(pageOffset).prefix(25) {
             let isDraft = pair.definition.draftRevisionID == pair.revision.id
             let state = isDraft
                 ? L10n.string("Draft — not listening")
                 : (pair.definition.enabled ? L10n.string("Listening") : L10n.string("Paused"))
-            let detail = "\(pair.revision.eventKind)  ·  \(state)  ·  "
+            var detail = "\(pair.revision.automation?.schedule?.summary ?? pair.revision.eventKind)  ·  \(state)  ·  "
                 + pair.revision.executionMode.displayTitle
+            if let date = nextDates[pair.definition.id] {
+                detail += "\n" + L10n.format("Next run: %@", date.formatted(date: .abbreviated, time: .shortened))
+            }
             let action: String
             if isDraft {
                 action = L10n.string("Review & Activate")
@@ -233,9 +270,16 @@ final class TriggerCenterViewController: NSViewController {
                 detail: detail,
                 actionTitle: action,
                 onAction: { [weak self] in self?.act(on: pair) },
-                secondaryActionTitle: nil,
-                onSecondaryAction: nil
+                secondaryActionTitle: L10n.string("Manage…"),
+                onSecondaryAction: { [weak self] in self?.manage(pair) }
             ))
+        }
+        if pageOffset > 0 || pageOffset + 25 < pairs.count {
+            list.addRow(TriggerCenterRowView(title: L10n.string("More automations"), detail: "",
+                actionTitle: pageOffset + 25 < pairs.count ? L10n.string("Next") : nil,
+                onAction: { [weak self] in self?.pageOffset += 25; self?.reload() },
+                secondaryActionTitle: pageOffset > 0 ? L10n.string("Previous") : nil,
+                onSecondaryAction: { [weak self] in self?.pageOffset = max(0, (self?.pageOffset ?? 0) - 25); self?.reload() }))
         }
     }
 
@@ -264,12 +308,38 @@ final class TriggerCenterViewController: NSViewController {
             list.addRow(TriggerCenterRowView(
                 title: triggerNames[run.triggerID] ?? run.id.uuidString,
                 detail: detail,
-                actionTitle: nil,
-                onAction: nil,
+                actionTitle: L10n.string("Details"),
+                onAction: { [weak self] in self?.showRun(run) },
                 secondaryActionTitle: nil,
                 onSecondaryAction: nil
             ))
         }
+        if historyCursors.count > 1 || nextHistoryCursor != nil {
+            list.addRow(TriggerCenterRowView(title: L10n.string("Activity"), detail: "",
+                actionTitle: nextHistoryCursor == nil ? nil : L10n.string("Next"),
+                onAction: { [weak self] in
+                    guard let self, let nextHistoryCursor else { return }
+                    historyCursors.append(nextHistoryCursor); reload()
+                },
+                secondaryActionTitle: historyCursors.count > 1 ? L10n.string("Previous") : nil,
+                onSecondaryAction: { [weak self] in
+                    guard let self, historyCursors.count > 1 else { return }
+                    historyCursors.removeLast(); reload()
+                }))
+        }
+    }
+
+    private func showRun(_ run: TriggerRun) {
+        let detail = ThemedTextView.scrolling()
+        detail.textView.isEditable = false
+        detail.textView.string = [run.result?.summary ?? run.boundedDiagnostic ?? run.state.displayTitle,
+            run.result?.changedPaths.joined(separator: "\n"), run.result?.tests.joined(separator: "\n")]
+            .compactMap { $0 }.joined(separator: "\n\n")
+        detail.widthAnchor.constraint(equalToConstant: Design.Size.readableWidth).isActive = true
+        detail.heightAnchor.constraint(equalToConstant: 320).isActive = true
+        let alert = ThemedAlert(); alert.messageText = run.state.displayTitle
+        alert.accessoryView = detail; alert.addButton(withTitle: L10n.string("OK"))
+        if let window = view.window { alert.beginSheetModal(for: window) }
     }
 
     private func renderSources(
@@ -283,13 +353,6 @@ final class TriggerCenterViewController: NSViewController {
             : (sources.count == 1
                 ? L10n.string("1 source")
                 : L10n.format("%lld sources", Int64(sources.count)))
-        guard !sources.isEmpty else {
-            list.addSection(L10n.string("Event sources"))
-            list.addNote(L10n.string(
-                "Sources run through Threading’s background listener, so events can wake the app even when its window is closed."
-            ))
-            return
-        }
         list.addSection(L10n.string("Background listener"))
         list.addRow(TriggerCenterRowView(
             title: L10n.string("Runs while Threading is closed"),
@@ -309,6 +372,13 @@ final class TriggerCenterViewController: NSViewController {
             secondaryActionTitle: nil,
             onSecondaryAction: nil
         ))
+        guard !sources.isEmpty else {
+            list.addSection(L10n.string("Event sources"))
+            list.addNote(L10n.string(
+                "Sources run through Threading’s background listener, so events can wake the app even when its window is closed."
+            ))
+            return
+        }
         list.addSection(L10n.string("Event sources"))
         for source in sources {
             let daemonStatus = daemonStatuses[source.id].flatMap {
@@ -342,7 +412,64 @@ final class TriggerCenterViewController: NSViewController {
     }
 
     @objc private func connectSourcePressed() {
-        connectSource(replacing: nil)
+        if page == .sources { connectSource(replacing: nil) }
+        else { editAutomation(nil) }
+    }
+
+    private func renderRemote() {
+        list.clear()
+        let controller = remoteController ?? RemoteAutomationsViewController()
+        if remoteController == nil {
+            addChild(controller); remoteController = controller
+            controller.view.heightAnchor.constraint(equalToConstant: 540).isActive = true
+        }
+        list.addRow(controller.view)
+        controller.refreshHosts()
+        status.stringValue = ""
+    }
+
+    private func editAutomation(_ pair: (definition: TriggerDefinition, revision: TriggerRevision)?) {
+        let config = pair.map { AutomationConfiguration(definition: $0.definition, revision: $0.revision) }
+        let automationID = pair?.definition.id ?? TriggerID()
+        Task { @MainActor in
+        let sources = (try? await store.sources()) ?? []
+        let editor = AutomationEditorViewController(configuration: config, sources: sources)
+        editor.onSave = { [weak self] config, _ in
+            guard let self, let config else { return }
+            _ = try await AutomationCommands.execute(.init(operation: "configure", id: automationID.uuidString,
+                expectedRevision: pair?.revision.id.uuidString, configuration: config), store: store)
+            reload()
+        }
+        presentAsSheet(editor)
+        }
+    }
+
+    private func manage(_ pair: (definition: TriggerDefinition, revision: TriggerRevision)) {
+        let menu = ThemedPopUp()
+        // The sheet exposes ordinary keyboard-accessible actions and the frozen task.
+        let detail = ThemedTextView.scrolling()
+        detail.textView.string = pair.revision.instructions
+        detail.textView.isEditable = false
+        detail.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        detail.widthAnchor.constraint(equalToConstant: Design.Size.readableWidth).isActive = true
+        for title in ["Edit…", "Run now", "Delete"] { menu.addItem(withTitle: L10n.string(title)) }
+        let stack = NSStackView(views: [detail, menu]); stack.orientation = .vertical
+        let request = ConfirmationRequest(prompt: .approveTriggerActivation, title: pair.definition.name,
+            message: pair.revision.automation?.schedule?.summary ?? pair.revision.eventKind,
+            confirmTitle: L10n.string("Continue"), accessory: stack)
+        ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
+            guard approved, let self else { return }
+            if menu.indexOfSelectedItem == 0 { editAutomation(pair); return }
+            let operation = menu.indexOfSelectedItem == 1 ? "run" : "delete"
+            Task { @MainActor in
+                do {
+                    _ = try await AutomationCommands.execute(.init(operation: operation,
+                        id: pair.definition.id.uuidString, expectedRevision: pair.revision.id.uuidString,
+                        requestKey: UUID().uuidString), store: self.store)
+                    self.reload()
+                } catch { self.presentSourceFailure(error.localizedDescription) }
+            }
+        }
     }
 
     private func connectSource(replacing existing: TriggerSourceInstallation?) {
@@ -530,10 +657,10 @@ final class TriggerCenterViewController: NSViewController {
                 prompt: .approveTriggerActivation,
                 title: L10n.format("Activate “%@”?", pair.definition.name),
                 message: L10n.string(
-                    "Review the exact listener, project, instructions, and authority below. The first stage is read-only; local fixes use a separate permission stage. Threading will not push, deploy, open a review, or write back to the source."
+                    "Review the schedule or event, project, instructions, and permissions below. Enabling permits future runs with these settings."
                 ),
                 confirmTitle: L10n.string("Activate"),
-                accessory: triggerReviewAccessory(pair.revision)
+                accessory: Self.reviewAccessory(for: pair.revision)
             )
             ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
                 guard approved else { return }
@@ -550,12 +677,15 @@ final class TriggerCenterViewController: NSViewController {
         Task { @MainActor [weak self] in
             try? await self?.store.setEnabled(
                 !pair.definition.enabled,
-                triggerID: pair.definition.id
+                triggerID: pair.definition.id,
+                expectedRevision: pair.revision.id
             )
         }
     }
 
-    private func triggerReviewAccessory(_ revision: TriggerRevision) -> NSView {
+    /// The exact revision under review: shared by the Activate sheet and the sheet an agent's
+    /// enable or run request raises, so both show the same facts before anything runs.
+    static func reviewAccessory(for revision: TriggerRevision) -> NSView {
         let facts = NSTextField(wrappingLabelWithString: L10n.format(
             "Source: %@\nEvent: %@\nProject: %@\nAgent: %@\nMode: %@\nCheckout: %@\nMaximum concurrent runs: %lld",
             revision.sourceInstallationID.uuidString,
@@ -566,6 +696,10 @@ final class TriggerCenterViewController: NSViewController {
             revision.checkoutPolicy.displayTitle,
             Int64(revision.limits.maximumConcurrentRuns)
         ))
+        if let options = revision.automation {
+            let timing = options.schedule?.summary ?? revision.eventKind
+            facts.stringValue += "\n" + timing + "\n" + L10n.string(options.archiveOnSuccess ? "Archive successful runs" : "Keep successful runs visible")
+        }
         facts.applyFont(.detail())
         facts.textColor = Design.Text.secondary
 
@@ -710,6 +844,8 @@ private final class TriggerCenterRowView: NSView {
 private extension TriggerExecutionMode {
     var displayTitle: String {
         switch self {
+        case .taskReadOnly: return L10n.string("Read-only task")
+        case .taskLocalEdits: return L10n.string("Task with local edits")
         case .assessOnly: return L10n.string("Assess only")
         case .assessThenFix: return L10n.string("Assess, then fix if straightforward")
         }
@@ -745,6 +881,8 @@ private extension TriggerRunState {
         case .assessing: return L10n.string("Assessing")
         case .fixQueued: return L10n.string("Queued")
         case .fixing: return L10n.string("Fixing")
+        case .running: return L10n.string("Running")
+        case .finishing: return L10n.string("Finishing")
         case .needsAttention: return L10n.string("Needs attention")
         case .completed: return L10n.string("Ready to verify")
         case .failed: return L10n.string("Failed")

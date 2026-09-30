@@ -70,6 +70,41 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
 #endif
     }
 
+    func testHostedServiceChoiceUsesTheIsolatedPreferenceStore() throws {
+        let choiceSuite = "RemoteHostedServiceChoiceTests.\(UUID().uuidString)"
+        let choices = try XCTUnwrap(UserDefaults(suiteName: choiceSuite))
+        defer { choices.removePersistentDomain(forName: choiceSuite) }
+        let key = AppSettingDefinitions.remoteHostedServiceEnvironment.persistenceKey
+        defaults.set("development", forKey: key)
+        let settings = AppSettings(defaults: defaults, userChoiceDefaults: choices)
+
+        // A render test must neither inherit nor overwrite the running app's service.
+        XCTAssertEqual(settings.remoteHostedServiceEnvironment, .production)
+        settings.remoteHostedServiceEnvironment = .development
+#if DEBUG || THREADING_INTERNAL
+        XCTAssertEqual(choices.string(forKey: key), "development")
+        XCTAssertEqual(settings.remoteHostedServiceEnvironment, .development)
+#endif
+        settings.remoteHostedServiceEnvironment = .production
+        XCTAssertEqual(defaults.string(forKey: key), "development")
+        XCTAssertEqual(choices.string(forKey: key), "production")
+    }
+
+    func testSharedSettingsDoNotWriteTheRealHostedServiceChoice() {
+        XCTAssertTrue(PreferenceStore.isRedirected)
+        let key = AppSettingDefinitions.remoteHostedServiceEnvironment.persistenceKey
+        let original = UserDefaults.standard.string(forKey: key)
+        let previous = AppSettings.shared.remoteHostedServiceEnvironment
+        defer { AppSettings.shared.remoteHostedServiceEnvironment = previous }
+
+        // Exercise the same singleton setter as AdvancedSettingsRenderTests, checking while
+        // the temporary choice is active: restoring it afterwards cannot prevent interference.
+        AppSettings.shared.remoteHostedServiceEnvironment = .development
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), original)
+        AppSettings.shared.remoteHostedServiceEnvironment = .production
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), original)
+    }
+
     func testUIScenarioCannotResolveAHostedEndpointOrStartBrowserAuthentication() {
         for override in [nil, "https://dev.remote.threading.codes", "http://localhost:8787"] {
             var environment = ["THREADING_UI_SCENARIO_HOME": "/tmp/scenario"]

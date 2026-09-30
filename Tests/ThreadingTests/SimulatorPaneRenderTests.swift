@@ -305,6 +305,51 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
     }
 
+    func testRendersDeviceLogsFiltersInProductShell() throws {
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        for (name, theme, appearance) in [
+            ("system-dark", AppTheme.system, NSAppearance.Name.darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, NSAppearance.Name.darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, NSAppearance.Name.aqua),
+        ] {
+            AppThemePalette.set(theme)
+            let fixture = try makePhysicalDeviceFixture(appearance: appearance, deviceFrame: makeDeviceFramePNG())
+            defer { fixture.tearDown() }
+            let logs = try XCTUnwrap(fixture.panel.activateDeviceLog(for: fixture.sessionID))
+            eventually { logs.loaded != nil || logs.refusal != nil }
+            XCTAssertNil(logs.refusal)
+            XCTAssertNotNil(logs.loaded)
+            // The same shipping panel may occupy the bottom drawer or a wider side split.
+            let split = try XCTUnwrap(fixture.panel.parent as? NSSplitViewController)
+            split.splitView.setPosition(split.splitView.bounds.width - 700 - split.splitView.dividerThickness, ofDividerAt: 0)
+            settle(fixture.window)
+            func find(_ id: String, in view: NSView) -> NSView? {
+                if view.accessibilityIdentifier() == id { return view }
+                return view.subviews.lazy.compactMap { find(id, in: $0) }.first
+            }
+            for id in ["device-log-process", "device-log-context"] {
+                let control = try XCTUnwrap(find(id, in: logs.view))
+                XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
+                XCTAssertTrue(logs.view.bounds.contains(control.convert(control.bounds, to: logs.view)))
+            }
+            // cacheDisplay omitted the layer-backed chrome and plugin controls while every
+            // geometry assertion above passed. Capture only this test-owned window, as the
+            // sheet render tests do, so the evidence includes its actual composited controls.
+            settle(fixture.window)
+            let image = try XCTUnwrap(CGWindowListCreateImage(
+                .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                [.boundsIgnoreFraming, .nominalResolution]
+            ))
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            XCTAssertGreaterThan(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.alphaComponent ?? 0, 0.9)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("device-log-shell-\(name).png")
+            )
+        }
+    }
+
     func testRendersBootFailureInTheRightPanel() throws {
         try FileManager.default.createDirectory(
             at: Render.directory,

@@ -1506,7 +1506,7 @@ substituting sentinel values to see which were echoed; against a bridge that wou
 Threading's own fiction and fed it back as the account's usage. Anything that runs the user's
 status line passes only truth.
 
-**The line can be suppressed** (`suppressesClaudeStatusLine`, off by default, on the General page
+**The line can be suppressed** (`suppressesClaudeStatusLine`, off by default, on the Integration settings page
 beside the hook switches). The override rides the same per-session `--settings` file as the hooks,
 which was *verified* to outrank every writable layer for this key — and it must be shaped
 `type: "command"`, because `type: "none"` fails the CLI's schema and a failing settings file is

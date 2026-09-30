@@ -574,14 +574,14 @@ final class ClaudeRemoteControlTests: XCTestCase {
     /// The page is built rather than assumed: the control reaches the user through a row on
     /// General, and a setting whose pop-up never made it onto the page is indistinguishable
     /// from one nobody set.
-    func testTheGeneralPageOffersEveryStateAndShowsTheCurrentOne() throws {
+    func testTheIntegrationPageOffersEveryStateAndShowsTheCurrentOne() throws {
         AppSettings.shared.claudeRemoteControl = .disabled
 
-        let controller = GeneralPreferencesViewController()
+        let controller = IntegrationPreferencesViewController()
         let host = laidOut(controller.view)
         let popUp = try XCTUnwrap(
             remoteControlPopUp(in: host),
-            "the Claude Remote Control row is not on the General page"
+            "the Claude Remote Control row is not on the Integration page"
         )
 
         XCTAssertEqual(
@@ -591,7 +591,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
         XCTAssertEqual(popUp.selectedItem?.representedValue as? ClaudeRemoteControl, .disabled)
         XCTAssertTrue(
             labels(in: host).contains("Report Claude turn and subagent activity"),
-            "the Claude lifecycle opt-out is not on the General page"
+            "the Claude lifecycle opt-out is not on the Integration page"
         )
         XCTAssertGreaterThan(controller.view.frame.height, 200, "the page collapsed")
 

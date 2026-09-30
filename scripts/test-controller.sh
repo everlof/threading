@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Standalone shipping path for the experimental Linux/macOS controller. The macOS app is
+# still built only by Xcode; this target is not embedded in it yet.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+controller_scratch="${1:?usage: scripts/test-controller.sh ABSOLUTE_SCRATCH_DIRECTORY}"
+case "$controller_scratch" in /*) ;; *) echo 'scratch directory must be absolute' >&2; exit 2 ;; esac
+swift test --package-path "$repo_root/Packages/ThreadingController" --scratch-path "$controller_scratch/tests"
+swift build --package-path "$repo_root/Targets/Controller" --scratch-path "$controller_scratch/cli"
+python3 "$repo_root/scripts/tests/test_controller_cli.py" "$controller_scratch/cli/debug/threading-controller"
+python3 "$repo_root/scripts/tests/test_controller_automations.py" "$controller_scratch/cli/debug/threading-controller"
+swift build --package-path "$repo_root/Targets/PTYHost" --scratch-path "$controller_scratch/ptyd"
+python3 "$repo_root/scripts/tests/test_controller_runtime.py" \
+    "$controller_scratch/cli/debug/threading-controller" "$controller_scratch/ptyd/debug/threading-ptyd"

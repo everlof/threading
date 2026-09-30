@@ -22,6 +22,9 @@ int threading_pipe_cloexec(int descriptors[2]);
 /// `ioctl(master, TIOCSWINSZ, size)`. Zero on success, -1 with `errno` otherwise.
 int threading_set_window_size(int master, const struct winsize *size);
 
+/// `ioctl(terminal, TIOCGWINSZ, size)`, for the CLI's explicit resize option.
+int threading_get_window_size(int terminal, struct winsize *size);
+
 /// `pidfd_open(pid, 0)` through `syscall(2)`. The descriptor is always close-on-exec.
 /// -1 with `errno` (`ENOSYS` before Linux 5.3) otherwise.
 int threading_pidfd_open(pid_t pid);

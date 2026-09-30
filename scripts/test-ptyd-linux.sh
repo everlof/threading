@@ -83,7 +83,7 @@ bundle_version="${CURRENT_PROJECT_VERSION:-0.0.0}"
 if [[ -n "${THREADING_SOURCE_REVISION+set}" ]]; then
   source_revision="${THREADING_SOURCE_REVISION}"
 else
-  daemon_sources=(Targets/PTYHost Packages/ThreadingPTYHostKit Packages/ThreadingDomain)
+  daemon_sources=(Targets/PTYHost Packages/ThreadingPTYHostKit Packages/ThreadingPTYClient Packages/ThreadingDomain)
   if git -C "${repository_directory}" diff --quiet HEAD -- "${daemon_sources[@]}" \
     && [[ -z "$(git -C "${repository_directory}" ls-files --others --exclude-standard -- "${daemon_sources[@]}")" ]]; then
     source_revision="$(git -C "${repository_directory}" rev-parse HEAD)"
@@ -176,7 +176,7 @@ run_architecture() {
           MARKETING_VERSION="${GENERATION_SHORT_VERSION}" \
           CURRENT_PROJECT_VERSION="${GENERATION_BUNDLE_VERSION}" \
           THREADING_SOURCE_REVISION="${GENERATION_SOURCE_REVISION}" \
-          "${watchdog}" "${tests}" ThreadingPTYHostTests.PTYHostDaemonTests
+          "${watchdog}" "${tests}" ThreadingPTYHostTests.PTYHostDaemonTests ThreadingPTYHostTests.PTYHostCLITests
         echo "--- generation ${GENERATION_SHORT_VERSION} (${GENERATION_BUNDLE_VERSION})${GENERATION_SOURCE_REVISION:+ @${GENERATION_SOURCE_REVISION}}, asserted by testHelloCarriesTheGenerationTheBuildWasGiven"
         ls -l /out/threading-ptyd
 

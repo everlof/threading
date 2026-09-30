@@ -57,6 +57,7 @@ enum ConversationTranscriptDefaults {
     static let markdownBlockCacheLimit = 64
     static let columnIdentifier = "ConversationTranscriptContent"
     static let rowReuseIdentifier = "ConversationTranscriptRow"
+    static let arrivalAnimationKey = "conversationArrival"
 }
 
 #if DEBUG
@@ -190,6 +191,26 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
 
     private var isRebuilding = false
 
+    /// Items appended at the live end that have not yet made their entrance, with when each
+    /// arrived. A row plays its arrival the first time a host materializes it, within
+    /// `Design.Chat.arrivalWindow`; the entry is spent either way, so recycling a row never
+    /// replays it. Only recent entries survive a prune, which bounds this by the arrival rate.
+    private var arrivals: [ItemID: TimeInterval] = [:]
+
+    /// Whether the append in progress is a live arrival. Scoped to one call, so the tool-run
+    /// reduction's several append paths need not each carry the flag.
+    private var recordsArrivals = false
+
+    /// What arrivals are timed against. A seam, so a test is not at the mercy of whatever else
+    /// the hosted app does on the main thread between an append and the row appearing.
+    var arrivalClock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+
+#if DEBUG
+    /// Entrances actually played, for tests: a Core Animation animation is gone from its layer
+    /// once it finishes, so its presence is a question about timing rather than behaviour.
+    private(set) var arrivalsPlayed = 0
+#endif
+
     private struct CachedMarkdownBlock {
         let source: String
         let block: MarkdownBlock
@@ -283,7 +304,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
 
     /// Appends an item of the surface's own. Ends any tool run at the tail: whatever follows a
     /// card or a placeholder is no longer adjacent to the calls before it.
-    func append(_ item: Item) {
+    func append(_ item: Item, arriving: Bool = false) {
+        recordsArrivals = arriving
+        defer { recordsArrivals = false }
         appendItem(item, endsToolRun: true)
     }
 
@@ -293,11 +316,14 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         activeToolGroupIndices.removeAll(keepingCapacity: true)
     }
 
-    func insert(_ newItems: [Item], at position: Int) {
+    func insert(_ newItems: [Item], at position: Int, arriving: Bool = false) {
         guard !newItems.isEmpty else { return }
         let position = min(max(0, position), items.count)
         let appendsAtTail = position == items.count
         items.insert(contentsOf: newItems, at: position)
+        if arriving, notifies {
+            for item in newItems { recordArrival(of: item.id) }
+        }
         if !suspendsUpdates, !isRebuilding {
             if appendsAtTail {
                 for (offset, item) in newItems.enumerated() {
@@ -319,9 +345,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     /// Inserts directly after the item with `anchor`, or at the end when it is gone. The
     /// position is remembered as an identity rather than an index because the caller may have
     /// been waiting on a diff while the conversation moved on underneath it.
-    func insert(_ newItems: [Item], after anchor: ItemID?) {
+    func insert(_ newItems: [Item], after anchor: ItemID?, arriving: Bool = false) {
         let position = anchor.flatMap { index(of: $0) }.map { $0 + 1 } ?? items.count
-        insert(newItems, at: position)
+        insert(newItems, at: position, arriving: arriving)
     }
 
     func remove(at positions: IndexSet) {
@@ -357,6 +383,8 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         rowViews.removeAll(keepingCapacity: true)
         pendingToolViews.removeAll(keepingCapacity: true)
         materializedItemIDs.removeAll(keepingCapacity: true)
+        // A reload redraws what is already there; nothing in it is arriving.
+        arrivals.removeAll()
 #if DEBUG
         rowMaterializationDurations = ConversationTranscriptMaterializationDurations()
 #endif
@@ -371,7 +399,22 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             rowsByTimelineIndex[index] = position
         }
         guard notifies else { return }
+        if recordsArrivals { recordArrival(of: item.id) }
         tableView.insertRows(at: IndexSet(integer: position), withAnimation: [])
+    }
+
+    private func recordArrival(of id: ItemID) {
+        let now = arrivalClock()
+        if !arrivals.isEmpty {
+            arrivals = arrivals.filter { now - $0.value <= Design.Chat.arrivalWindow }
+        }
+        arrivals[id] = now
+    }
+
+    /// Spends an item's pending entrance, answering whether it is still fresh enough to play.
+    private func takeArrival(of id: ItemID) -> Bool {
+        guard let arrivedAt = arrivals.removeValue(forKey: id) else { return false }
+        return arrivalClock() - arrivedAt <= Design.Chat.arrivalWindow
     }
 
     private func replaceItem(at position: Int, with item: Item) {
@@ -460,8 +503,13 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     /// share: a rule before every exchange but the first, a lone tool call as its own row, a
     /// second adjacent call turning the pair into one disclosure that later calls extend in
     /// O(1), and — when the surface asks — an answer split at its block boundaries.
-    func appendTimelineRow(at index: Int) {
+    ///
+    /// `arriving` marks a live row, which makes its entrance when a host first shows it; replay,
+    /// rebuilds and restorations present rows that were already there and pass nothing.
+    func appendTimelineRow(at index: Int, arriving: Bool = false) {
         guard let rows = surface?.transcriptRows else { return }
+        recordsArrivals = arriving
+        defer { recordsArrivals = false }
         appendTimelineRow(at: index, rows: rows)
     }
 
@@ -707,6 +755,11 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             bottomInset: bottomInset,
             onRelease: releaseHandler(for: item, content: content)
         )
+        if !arrivals.isEmpty, takeArrival(of: item.id), host.playArrival() {
+#if DEBUG
+            arrivalsPlayed += 1
+#endif
+        }
 #if DEBUG
         let installEnded = DispatchTime.now().uptimeNanoseconds
         rowMaterializationDurations.count += 1
@@ -1033,6 +1086,37 @@ final class ConversationVirtualRowHost: NSTableCellView {
             content.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
             paneWidth
         ])
+    }
+
+    /// The entrance of a row that has just arrived at the live end: its picture fades in while
+    /// rising `Design.Chat.arrivalRise` into place.
+    ///
+    /// Presentation only. The animation runs on the content's layer from a stated start to the
+    /// model values Auto Layout already put there, so the row's frame, the table's measured
+    /// height and the scroll that brings the row into view are all final from the first frame;
+    /// nothing waits for the movement, and recycling the host mid-flight simply discards it.
+    /// Under Reduce Motion there is no entrance at all.
+    @discardableResult
+    func playArrival() -> Bool {
+        guard !Design.Motion.reducesMotion, let content = subviews.first else { return false }
+        content.wantsLayer = true
+        guard let layer = content.layer else { return false }
+        // Toward the reply box: down the screen, whichever way this host's y axis runs.
+        let below = isFlipped ? Design.Chat.arrivalRise : -Design.Chat.arrivalRise
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        let rise = CABasicAnimation(keyPath: "transform.translation.y")
+        rise.fromValue = below
+        rise.toValue = 0
+
+        let arrival = CAAnimationGroup()
+        arrival.animations = [fade, rise]
+        arrival.duration = Design.Motion.transcriptArrive
+        arrival.timingFunction = Design.Motion.lift
+        layer.add(arrival, forKey: ConversationTranscriptDefaults.arrivalAnimationKey)
+        return true
     }
 
     override func prepareForReuse() {

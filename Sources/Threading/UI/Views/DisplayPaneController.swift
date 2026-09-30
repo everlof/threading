@@ -273,7 +273,7 @@ final class DisplayPaneController: NSViewController {
   private let simulatorLeaseManager: any SimulatorLeaseManaging
   private let simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating
   private let simulatorInputAuthorizer: any SimulatorInputAuthorizing
-  private let physicalDeviceControl: any PhysicalDeviceControlling
+  private let physicalDeviceControl: (any PhysicalDeviceControlling)?
 
   /// Test and embedding seam for extension actions. Production routes through the shared
   /// provider slot when no explicit receiver is installed.
@@ -363,7 +363,7 @@ final class DisplayPaneController: NSViewController {
     simulatorControl: any SimulatorControlling = SimctlSimulatorControl(),
     simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
     simulatorInputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared,
-    physicalDeviceControl: any PhysicalDeviceControlling = DevicectlPhysicalDeviceControl()
+    physicalDeviceControl: (any PhysicalDeviceControlling)? = nil
   ) {
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
@@ -1539,7 +1539,8 @@ final class DisplayPaneController: NSViewController {
   ) -> RealDevicePaneViewController {
     let controller = RealDevicePaneViewController(
       preferredDeviceID: preferredDeviceID,
-      control: physicalDeviceControl
+      // A hidden session's teardown must never close another session's persistent pipes.
+      control: physicalDeviceControl ?? PersistentPhysicalDeviceControl()
     )
     addChild(controller)
     controller.onSelectedDeviceChange = { [weak self] _ in

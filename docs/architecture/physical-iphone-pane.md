@@ -28,12 +28,12 @@ name only for presentation order.
 
 ## Capture lifetime
 
-The pixel path has two explicit backends. iOS 27 and newer use pymobiledevice3's DVT screenshot
-API over the rootless native tunnel; Apple's old `screenshotr` service is no longer advertised
-there, so Threading does not attempt the legacy helper on those releases. Older phones prefer
-`idevicescreenshot` and can fall back to DVT. A successful choice is cached per hardware UDID so
-the one-frame-per-second loop does not repeatedly launch a known-incompatible helper. Cached
-choices are revalidated against the current OS release so an upgrade cannot retain `screenshotr`.
+`PersistentPhysicalDeviceControl` owns independent preview and input workers. Modern phones use
+one pymobiledevice3 native tunnel/DVT screenshot session for the visible preview lifetime rather
+than starting a CLI and reconnecting for every frame. The private bundled Python adapter imports
+the separately installed runtime; it does not vendor pymobiledevice3. Older phones and machines
+without the optional modern runtime retain the existing bounded command backend. Its backend
+selection still prevents iOS 27 from retrying the removed `screenshotr` service.
 Missing tooling or unavailable developer services is an in-pane failure with a retry route, not a
 launch failure and not a reason to fall back to a different phone.
 
@@ -42,16 +42,21 @@ Before the first screenshot for one hardware UDID, Apple `devicectl device info 
 cached only for the control object's lifetime. A screenshot failure evicts it so an explicit retry
 prepares services again after a disconnect instead of trusting stale state.
 
-Discovery and screenshot commands run through a bounded child-process group off the main actor.
-Each operation has a deadline and output cap. Screenshot files live in a mode-`0700` temporary
-directory, are capped at 32 MiB and must carry a PNG signature. ImageIO decodes the full frame on a
-worker before the main actor wraps its immutable `CGImage` for AppKit.
+Discovery and legacy screenshot commands run through bounded child processes off the main actor.
+The persistent adapter accepts only a small line protocol on private inherited pipes and returns
+length-prefixed replies capped at 32 MiB, checked before payload allocation. PNG dimensions are
+capped at 16 megapixels before worker-side ImageIO decoding. No listener is opened and no frame
+is written to disk by the persistent path. The legacy path retains its mode-`0700` temporary files.
+The process deadline and generation guard apply to every request; revocation interrupts a blocked
+read and cannot cancel a newer generation's child.
 
 `RealDevicePaneViewController.setPresented(_:)` is the demand boundary:
 
 - no discovery or capture starts for a restored or background-session tab;
 - presenting discovers the selected device and starts at most one screenshot loop;
-- the fallback requests no more than one frame per second and retains only its latest local frame;
+- the persistent preview requests at most four frames per second, with one request/decode in
+  flight and only the latest local frame retained; the command fallback keeps its one-fps cap;
+  both are screenshot preview, not video;
 - hiding, switching away, closing or terminating cancels discovery, the capture loop and its
   current child process;
 - selecting a hardware identity while hidden only records that preference.
@@ -139,15 +144,19 @@ in-flight input process. A denial is remembered so screen clicks cannot repeated
 user; only pressing **Retry iPhone Control** clears it and presents the sheet again. Pairing, Mac
 trust, developer mode, a healthy screenshot and a successful probe are never consent.
 
-The first slice supports clicks and drags only. The framebuffer converts the fitted, y-up AppKit
+The pane supports clicks and drags only. The framebuffer converts the fitted, y-up AppKit
 point into the phone's normalized y-down image space. The device adapter validates finite values
-inside `0...1`, rounds them into Universal HID's `0...65535` coordinate space and invokes the
-`tap` or bounded 18-step `drag` command. pymobiledevice3 opens the required DisplayService media
-session for HID authentication. Commands are serialized, only one input operation can be in flight,
-and every operation rechecks the visible pane, exact device, grant and capability before sending.
+inside `0...1` and rounds them into Universal HID's `0...65535` coordinate space. After explicit
+consent, a separate persistent `touch_session` opens the DisplayService authentication and HID
+connection. The pane stays noninteractive until its ready acknowledgement. Drag down/move/up
+phases are delivered while dragging, not replayed at mouse-up. Only adjacent unsent moves may
+coalesce; tap and contact boundaries keep their ordering. The pending queue is capped at 32 and
+overflow visibly revokes control rather than silently dropping a click. Each operation rechecks
+the visible pane, exact device, grant and generation. A preview failure or frame-size change also
+revokes control. EOF/cancellation releases any held contact and closes the session.
 
-This command-per-gesture transport proves real control but does not claim interactive streaming
-latency. Keyboard input, hardware buttons, passcode or unlock automation, lock-screen interaction
+The preview and input workers do not block each other. Keyboard input, hardware buttons, passcode
+or unlock automation, lock-screen interaction
 and agent-driven physical-device input are absent. The latter requires its own separately reviewed
 authority surface; a user grant to click in the pane must never become an agent grant implicitly.
 
@@ -155,7 +164,9 @@ authority surface; a user grant to click in the pane must never become an agent 
 
 The tab kind and optional hardware UDID use panel document format 4. Restore is lazy: it constructs
 the controller and selected identity without consulting hardware. The pane is a singleton per
-session, matching the device-ownership rule of the Simulator pane.
+session, matching the device-ownership rule of the Simulator pane. Production transport instances
+are per pane, not shared by all of `DisplayPaneController`'s retained session tabs: closing a
+hidden tab cannot close the currently presented tab's connections.
 
 The body is deliberately host-only. Threading keeps exact device identity, trust/developer-service
 truth, capture demand, input consent, normalized HID routing and transport teardown. Extensions may customize the
@@ -181,3 +192,15 @@ conversation/window/display-panel shell.
 The persistent stream slice must retain the same identity and grant boundary, then add a measured
 lease lifecycle, latest-frame replacement, hard frame/byte budget and rotation coverage before it
 can replace the screenshot fallback.
+
+### September 30, 2026 latency probe
+
+Read-only captures on the connected iPhone 16 Pro measured CLI-per-frame times of 10.8583,
+10.9139 and 7.7210 seconds (median 10.8583). Reusing a native DVT session took 9.9257 seconds for
+the first frame, then 0.1655–0.1986 seconds for seven subsequent frames (median 0.16634). These
+measure capture, not end-to-end touch latency. Cold connection remains slow; the four-fps cap is
+intentional and does not claim video smoothness. `PhysicalDeviceSessionPipeTests` covers process
+reuse, cancellation, restart, reply bounds and coordinate validation. `RealDevicePaneTests` covers
+live drag coalescing and ordered queued taps. `scripts/tests/test_physical_device_session.py`
+uses fake transports to prove exact identity and held-contact release on EOF, cancellation and
+protocol failure. Live input/rotation still requires hardware testing.

@@ -178,8 +178,8 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
 
     /// Slice 4's path back: the same tunnel forwards the host's rendezvous to a socket on this Mac,
     /// so a hook's `curl` on the host and the Linux bridge an agent spawns there both reach it. The
-    /// listener here stands in for Threading's MCP server and answers every request with a
-    /// handshake naming itself, which is what proves a reply made the whole round trip.
+    /// listener here stands in for Threading's MCP server: it acknowledges hook reports and
+    /// names itself in MCP handshakes. Recorded requests prove both reached this Mac.
     func testHooksAndTheBridgeOnTheHostReachThisMacThroughTheTunnel() throws {
         let environment = ProcessInfo.processInfo.environment
         guard let alias = environment[Key.destination], let binaries = environment[Key.binaries] else {
@@ -202,14 +202,14 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         let runner = SystemSSHCommandRunner()
         let hook = try runner.run(
             on: destination,
-            command: "curl -s --max-time 10 --unix-socket \(route.socketPath) -H 'Content-Type: application/json' "
+            command: "curl --fail --silent --show-error --max-time 10 --unix-socket \(route.socketPath) -H 'Content-Type: application/json' "
                 + "--data-binary '{}' 'http://localhost/hooks/lifecycle/live-test?event=stop'",
             input: .none,
             extraOptions: [],
             timeout: Fixture.childTimeout
         )
         XCTAssertTrue(hook.succeeded, hook.output)
-        XCTAssertTrue(hook.output.contains(FakeAppListener.serverName), "the hook's reply did not come back: \(hook.output)")
+        XCTAssertEqual(hook.output, "{}", "the hook acknowledgement did not come back")
         XCTAssertTrue(app.requestLines.contains { $0.hasPrefix("POST /hooks/lifecycle/live-test") }, "\(app.requestLines)")
 
         let handshake = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#

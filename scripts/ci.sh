@@ -160,6 +160,7 @@ python3 "${repository_directory}/scripts/tests/test_release_tag_policy.py"
 say "Testing the local release driver"
 python3 "${repository_directory}/scripts/tests/test_local_release_driver.py"
 python3 "${repository_directory}/scripts/tests/test_local_release_credentials.py"
+python3 "${repository_directory}/scripts/tests/test_sentry_release.py"
 node --test "${repository_directory}/scripts/verify_report_deployment.test.mjs"
 
 say "Installing ThreadingControlPlane test dependencies"

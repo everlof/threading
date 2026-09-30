@@ -116,8 +116,3 @@ struct TriggerAssessmentDidFinish: AppEvent {
     let run: TriggerRun
     let revision: TriggerRevision
 }
-
-struct TriggerFixDidFinish: AppEvent {
-    static let name = Notification.Name("triggerFixDidFinish")
-    let run: TriggerRun
-}

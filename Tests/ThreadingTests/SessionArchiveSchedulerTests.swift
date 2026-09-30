@@ -373,6 +373,29 @@ final class SessionArchiveSchedulerTests: XCTestCase {
         XCTAssertFalse(scheduler.isPending(sessionID: session.id))
     }
 
+    func testSuccessfulAutomationStartsGraceOnlyAtReadyPrompt() {
+        let scheduler = scheduler()
+        if case .refused = scheduler.request(sessionID: session.id, reason: "Done", successfulAutomation: true) {} else {
+            XCTFail("an open automation turn must stay visible")
+        }
+        reportActivity(.idle)
+        XCTAssertEqual(scheduler.request(sessionID: session.id, reason: "Done", successfulAutomation: true), .scheduled)
+        settle()
+        XCTAssertEqual(due.map(\.sessionID), [session.id])
+    }
+
+    func testAutomationArchiveIsCancelledByQuestionExitOrNewWork() {
+        let scheduler = scheduler()
+        for state: SessionActivity in [.awaitingUser, .dormant, .working, .limitReached, .readyWithBackgroundWork] {
+            reportActivity(.idle)
+            XCTAssertEqual(scheduler.request(sessionID: session.id, reason: "Done", successfulAutomation: true), .scheduled)
+            reportActivity(state)
+            settle()
+            XCTAssertFalse(scheduler.isPending(sessionID: session.id))
+            XCTAssertTrue(due.isEmpty)
+        }
+    }
+
     // MARK: - The reason
 
     /// The reason is agent-authored text on its way to a band in the sidebar's column, so it

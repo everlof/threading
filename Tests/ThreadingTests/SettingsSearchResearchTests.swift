@@ -121,8 +121,8 @@ final class SettingsSearchResearchTests: XCTestCase {
     func testValidationResolvesSettingsAndDegradesInventedOnes() throws {
         let silence = L10n.string("Silence every sound")
         let matches = SettingsSearchResearch.validated([
-            .init(page: SettingsPages.generalID, setting: silence.lowercased(), reason: "mute"),
-            .init(page: SettingsPages.generalID, setting: "No Such Setting", reason: "x")
+            .init(page: SettingsPages.notificationsID, setting: silence.lowercased(), reason: "mute"),
+            .init(page: SettingsPages.notificationsID, setting: "No Such Setting", reason: "x")
         ])
 
         XCTAssertEqual(matches.count, 2, "two destinations on one page are two answers")
@@ -134,7 +134,7 @@ final class SettingsSearchResearchTests: XCTestCase {
         )
         let degraded = try XCTUnwrap(matches.last)
         XCTAssertNil(degraded.settingTitle)
-        XCTAssertEqual(degraded.pageID, SettingsPages.generalID)
+        XCTAssertEqual(degraded.pageID, SettingsPages.notificationsID)
     }
 
     /// A repeated page is one suggestion, and more than four stops being an answer — the cap

@@ -4760,7 +4760,8 @@ final class RemoteAppModel: ObservableObject {
         accent: String,
         radius: Double = 10,
         borderWidth: Double = 1,
-        glow: RemoteThemeDTO.Material.Glow? = nil
+        glow: RemoteThemeDTO.Material.Glow? = nil,
+        backdropGradient: RemoteThemeGradient? = nil
     ) -> RemoteThemeDTO {
         RemoteThemeDTO(
             id: id,
@@ -4791,8 +4792,26 @@ final class RemoteAppModel: ObservableObject {
                 panelRadius: radius,
                 controlRadius: max(0, radius / 2),
                 borderWidth: borderWidth,
-                glow: glow
+                glow: glow,
+                backdropGradient: backdropGradient
             )
+        )
+    }
+
+    static func demoDriftTheme(light: Bool) -> RemoteThemeDTO {
+        demoCatalogTheme(
+            id: light ? "drift-light" : "drift-dark", name: "Drift",
+            mode: light ? .light : .dark,
+            ground: light ? "#F2F5F4" : "#101724",
+            surface: light ? "#E8EEEF" : "#151D2B",
+            panel: light ? "#FFFFFFE6" : "#182333",
+            label: light ? "#182C3A" : "#E5EEF5",
+            accent: light ? "#216E73" : "#80CBC4",
+            backdropGradient: .init(stops: [
+                .init(color: light ? "#E1EDF2" : "#101827", position: 0),
+                .init(color: light ? "#E5DEF1" : "#1E3F4C", position: 0.55),
+                .init(color: light ? "#F4E7D5" : "#352E51", position: 1)
+            ], angleDegrees: 135, drift: .init(duration: 24, distance: 0.18))
         )
     }
 
@@ -4836,6 +4855,8 @@ final class RemoteAppModel: ObservableObject {
             ground: "#120A26", surface: "#1B0E35", panel: "#261346",
             label: "#F7E8FF", accent: "#FF4FCB", radius: 12
         ),
+        demoDriftTheme(light: false),
+        demoDriftTheme(light: true),
     ]
 
     static let demoTerminalTheme = RemoteTerminalThemeDTO(

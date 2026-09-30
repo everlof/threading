@@ -691,6 +691,7 @@ final class ThemeToolTests: XCTestCase {
                     "backdrop": {
                       "gradient": {
                         "angle_degrees": 135,
+                        "drift": {"duration": 32, "distance": 0.2},
                         "stops": [
                           {"color": "\(ground)", "position": 0},
                           {"color": "\(ground)", "position": 1}
@@ -719,6 +720,8 @@ final class ThemeToolTests: XCTestCase {
 
         let stored = try XCTUnwrap(theme.variant(kind)?.material.backdrop)
         XCTAssertEqual(stored.gradient?.angleDegrees, 135)
+        XCTAssertEqual(stored.gradient?.drift?.duration, 32)
+        XCTAssertEqual(stored.gradient?.drift?.distance, 0.2)
         let assetName = try XCTUnwrap(stored.image?.asset)
         XCTAssertEqual(assetName, ThemeAssetSlot.backdrop.fileName(for: kind))
         XCTAssertEqual(stored.image?.opacity, 0.25)
@@ -740,6 +743,9 @@ final class ThemeToolTests: XCTestCase {
         let backdrop = try XCTUnwrap(material["backdrop"] as? [String: Any])
         let gradient = try XCTUnwrap(backdrop["gradient"] as? [String: Any])
         XCTAssertEqual(gradient["angle_degrees"] as? Double, 135)
+        let drift = try XCTUnwrap(gradient["drift"] as? [String: Any])
+        XCTAssertEqual(drift["duration"] as? Double, 32)
+        XCTAssertEqual(drift["distance"] as? Double, 0.2)
         let image = try XCTUnwrap(backdrop["image"] as? [String: Any])
         XCTAssertEqual(image["asset"] as? String, assetName)
         XCTAssertEqual(image["mode"] as? String, "fill")

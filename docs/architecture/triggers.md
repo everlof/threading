@@ -26,9 +26,11 @@ has been written to the inbox. The model and store do not know Sonda semantics, 
 ## Authority
 
 Activation names one exact immutable `TriggerRevision`. Agents may inspect sources and triggers,
-create disabled drafts, and propose that revision for activation through the built-in Trigger MCP
-tools. Only the host approval sheet activates it. Credentials are entered only in the Sources UI,
-stored in Keychain, and never returned through MCP or placed in prompts.
+create or edit paused drafts, and ask for that revision to be enabled or run through the built-in
+MCP tools. Only a host approval sheet showing that revision lets it start work: an agent's report
+that the user wanted it is not the authority, because a conversation can be steered by content it
+read. Credentials are entered only in the Sources UI, stored in Keychain, and never returned
+through MCP or placed in prompts.
 
 Every run has two possible stages:
 
@@ -82,8 +84,9 @@ both measures, because none of this was visible at the fixture width that shippe
 
 This destination and its approval sheets are host-only security surfaces. Extensions may observe
 only future explicitly published facts; they cannot replace credentials, authority or run-state
-presentation. The seven built-in MCP tools are the supported agent automation seam: three lists,
-disabled draft creation, host-approved activation, and session-bound assessment/final reporting.
+presentation. The built-in MCP tools are the supported agent automation seam: three lists,
+disabled draft creation, host-approved activation, `manage_automation` (whose enable and run are
+host-approved the same way), and session-bound assessment/final reporting.
 
 Questions, phone replies and images do not need a Trigger transport. A Trigger launches an
 ordinary session, so existing attention notifications, authenticated remote conversation routing
@@ -115,3 +118,88 @@ without any change: the Developer ID profile's entitlements dict already lists i
 [`releasing.md`](releasing.md#keeping-applications-on-master) — the first version of
 this entitlement broke the auto-install loop for three days because the derivation matched only
 `com.apple.developer.*`.
+
+## Recurring automations and controller ownership
+
+The destination is **Automations**. Event rules retain their existing immutable revisions and
+assess/fix behavior. A revision may instead have `AutomationOptions.schedule`, and the task modes
+`taskReadOnly` and `taskLocalEdits` run saved instructions directly. The local-edit mode checks an
+existing checkout for cleanliness or uses the managed-worktree path. A currently executing automated conversation
+cannot use the management tool to alter automations.
+
+Calendar/interval arithmetic is `ThreadingDomain.AutomationSchedule`, shared with the portable
+controller. Daily, selected weekdays, weekly and anchored intervals use an explicit IANA zone.
+Calendar rules choose the first repeated DST hour and advance a nonexistent hour within its day;
+intervals advance from the saved anchor, never from the previous execution's finishing time.
+The next calendar occurrence is searched from the start of a local day, never from the moment a
+run fired: `Calendar.nextDate(after:)` called from inside a repeated hour returns that hour's
+second copy even under `.first`, which ran a 02:30 schedule twice on the fall-back night. An
+anchor is kept to whole seconds, which is all its wire form carries.
+
+The Mac owns its local `automation_due` index in trigger schema v3. Each sweep reads at most 32
+due definitions; each one's reservation, occurrence identity and next deadline commit together in
+their own transaction, so a rule that cannot be admitted is retried five minutes later instead of
+failing every schedule in the sweep. More than 90 seconds late is missed: `skip` records a
+suppressed receipt, while `latest` admits one run, labelled with the most recent occurrence it
+stands for, and advances directly past now. An active previous run suppresses the occurrence instead of building
+an unbounded queue. Reporting a final result enters `finishing`, which still occupies the slot;
+the provider's authoritative turn-end edge settles it. Process exit without that proof remains an
+attention state. Manual run requests require a stable request key and reuse their receipt. An explicit run can
+exercise a saved draft without enabling its schedule. Its authority is a host-authored run field,
+never inferred from a source-controlled event ID. Only a source event may wait in the queue when
+its session cannot start: the queue re-offers it while its trigger and source stay active. A
+schedule occurrence or an explicit run has no such path, and starting it later would be the
+backlog a schedule promises never to build, so it settles as needing attention instead.
+
+The daemon configuration includes the next local schedule deadline. The existing listener can
+wake Threading when it arrives, while the Mac is awake and logged in. A source with no credentials
+is not invented for the local clock. The Mac remains the local execution owner. Sleep and missed
+moments follow the saved policy; the daemon does not claim to wake a sleeping machine. The file is
+a projection rewritten after every committed change, and failing to write it is logged rather
+than thrown: an error there once reported a saved configuration as failed (inviting a duplicate)
+and dropped the dispatches a sweep had just reserved.
+
+`archiveOnSuccess` requests the ordinary archive scheduler only after a successful final report
+and an authoritative transition back to a ready prompt. A process exit or blocker keeps the run
+visible. The automation request rechecks prompt readiness during the grace period and at firing;
+new work or a question cancels it. Failed and needs-human results never request archive.
+The durable run and result remain in Activity. Deleting a definition clears its editable/active
+pointers and stops scheduling while retaining immutable revisions and receipts.
+
+`manage_automation` and the editor call `AutomationCommands`, with complete replacement values
+and expected revision checks for edits. The tool covers hosts/workers/list/get/configure/enable/pause/delete/run
+and runs, with bounded catalogue and history pages. Its `enable` and `run`, local or remote, wait
+for the same host approval sheet as Activate, showing the exact revision (or the controller's
+current spec); without a window to show it they are refused. The host UI's own buttons pass no
+approver because the person is already acting. Credential entry remains outside
+agent tools. The editor and connection controls are deliberately host-only: Threading owns
+identity, permissions, revisions, routing and run truth under every theme.
+
+The **Remote** page sends those operations to the controller on an existing SSH host, with explicit
+absolute executable and database paths, saved on the host record once a connection succeeds. The
+agent tool names only the host and always uses those saved paths; it cannot choose which program
+the Mac runs over the person's SSH identity. Remote enable, run and delete confirm on the page too.
+`owner-rpc` is the transport; no shell interpolation of
+instructions and no copying of the remote database occurs. The VPS owns its schedules, worker
+queue and history, independently of the Mac. The controller must already be installed and its
+supervisor running; connecting does not install, configure a worker recipe, or start a service.
+See [autonomous-controller.md](autonomous-controller.md) for that separate execution boundary.
+
+Scaling contract: typical 5–20 definitions, stress 500 local definitions; the local catalogue has
+that explicit creation limit. The UI constructs at most 25 local rows per page, coalesces store-change bursts, and reads
+activity through a 25-row keyset cursor. Agent reads return bounded pages. Remote controller queries use
+cursor/byte bounds and indexed due reads, with eight due records per supervisor tick; SSH captures
+at most 2 MiB and has one in-flight automation request. History does not participate in clock
+scans. Tests cover DST, restart/deduplication, overlap, stale configuration, retained history, and
+controller delivery-aware archive eligibility.
+
+Verification (2026-09-30): 37 focused Mac tests passed, including the shipping-window renders in
+System, Pure and Neo Brutalism. The final 500-definition fixture prepared its records in
+2.282 s and projected, mounted and laid out one page in 126.5 ms (including actor reads), retaining
+27 list views: one heading, 25 rows and navigation. This is an interaction measurement, not an
+isolated main-thread frame duration. The controller passed 26 core tests and its CLI/owner-RPC
+lifecycle on macOS and Linux. Eleven real-PTY controller tests include a due schedule running
+through the resident supervisor without a Mac client, final result visibility, and restart without
+duplicate work. The shipping create/save/relaunch UI journey also passed, with inspected captures of the editor,
+schedule/archive controls and restored paused task. These are disposable fixtures; no production
+VPS was deployed or configured.

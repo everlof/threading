@@ -1413,7 +1413,7 @@ final class SessionComposerViewController: NSViewController {
 
         // Speed is offered only where the selected model publishes a usable Fast mechanism.
         // Standard and Fast remain per-conversation values; nil follows the provider-specific
-        // startup choice in General, and then the agent's own settings.
+        // startup choice in Settings ▸ Chats, and then the agent's own settings.
         discardUnsupportedFastMode(account: account)
         speedChip.isHidden = !AgentModels.supportsFastMode(
             kind: selectedAgent,

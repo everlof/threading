@@ -332,7 +332,7 @@ presenter redraws together.
 
 **The presenter window mirrors; it does not own.** Screen-sharing tools share one window, and the
 pane lives in the main window beside the conversation. `SimulatorPresenterWindowController` holds
-the device alone, sized and aspect-locked to the frame, titled "‹device› Simulator" so it is the
+the device alone, sized and aspect-locked to the frame, titled "Threading: ‹device›" so it is the
 obvious row in a share picker. It is deliberately a titled, ordinary-level window with
 `sharingType = .readOnly`: pickers list those, while frameless or panel-level windows are what they
 tend to skip. Keep on Top is an explicit choice, since a picker captures an occluded window anyway.

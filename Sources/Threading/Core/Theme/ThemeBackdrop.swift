@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 // MARK: - Theme Backdrop
 
@@ -48,10 +49,13 @@ public struct ThemeBackdrop: Codable, Equatable {
         /// straight up — 0 flows toward the top, 90 toward the trailing edge, 180 toward the
         /// bottom. Chosen because it is the convention every agent already knows.
         public var angleDegrees: Double
+        /// Optional decorative drift. Layout, scrolling and interaction timing remain host-owned.
+        public var drift: ThemeGradientDrift?
 
-        public init(stops: [Stop], angleDegrees: Double = 180) {
+        public init(stops: [Stop], angleDegrees: Double = 180, drift: ThemeGradientDrift? = nil) {
             self.stops = stops
             self.angleDegrees = angleDegrees
+            self.drift = drift
         }
 
         public struct Stop: Equatable {
@@ -98,19 +102,21 @@ public struct ThemeBackdrop: Codable, Equatable {
 
 extension ThemeBackdrop.Gradient: Codable {
     private enum CodingKeys: String, CodingKey {
-        case stops, angleDegrees
+        case stops, angleDegrees, drift
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         stops = try container.decode([Stop].self, forKey: .stops)
         angleDegrees = try container.decodeIfPresent(Double.self, forKey: .angleDegrees) ?? 180
+        drift = try container.decodeIfPresent(ThemeGradientDrift.self, forKey: .drift)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(stops, forKey: .stops)
         try container.encode(angleDegrees, forKey: .angleDegrees)
+        try container.encodeIfPresent(drift, forKey: .drift)
     }
 }
 

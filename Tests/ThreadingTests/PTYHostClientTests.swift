@@ -514,6 +514,35 @@ final class PTYHostClientTests: XCTestCase {
         )
     }
 
+    func testCLIRefusesAnOlderDaemonWithoutRetiringIt() throws {
+        let daemon = try makeDaemon { frame, daemon in
+            guard frame.kind == .control,
+                  let control = try? JSONDecoder().decode(PTYHostFrame.self, from: frame.payload),
+                  case .hello = control else { return }
+            daemon.send(Self.hello(protocolVersion: 0, minimum: 0))
+        }
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/threading-ptyd")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: helper.path))
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = ["sessions", "--socket", daemon.socketPath, "--state", NSTemporaryDirectory()]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        if process.isRunning { process.terminate(); XCTFail("CLI did not finish") }
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 1)
+        XCTAssertTrue(daemon.waitUntilReadingFinished())
+        XCTAssertEqual(daemon.receivedControl.count, 1, "the CLI must send only hello, never retire")
+        guard case .hello = daemon.receivedControl.first else { return XCTFail("expected hello") }
+        let error = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        XCTAssertTrue(error.contains("older protocol"), error)
+    }
+
     func testANewerDaemonIsSentNothingAfterHello() throws {
         let daemon = try makeDaemon { frame, daemon in
             guard frame.kind == .control else { return }

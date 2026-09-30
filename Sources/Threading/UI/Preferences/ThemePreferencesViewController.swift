@@ -240,21 +240,26 @@ final class ThemePreferencesViewController: NSViewController {
         let popUp = SettingsUI.popUp(target: self, action: #selector(appThemeChanged))
         appThemePopUp = popUp
 
+        // Beside the picker because they act on the theme it names. On a row of their own, under
+        // a sentence about duplicating built-ins, nothing said which theme a click would copy or
+        // delete. Their Help Tags name it; `reloadAppThemeControls` keeps those current.
         let duplicate = iconButton(
             "plus.square.on.square",
-            tooltip: "Duplicate App Theme",
+            tooltip: L10n.string("Duplicate App Theme"),
             action: #selector(duplicateAppTheme)
         )
+        duplicate.setAccessibilityIdentifier("settings.themes.duplicate-app-theme")
         let delete = iconButton(
             "trash",
-            tooltip: "Delete Custom App Theme",
+            tooltip: L10n.string("Delete App Theme"),
             action: #selector(deleteAppTheme)
         )
+        delete.setAccessibilityIdentifier("settings.themes.delete-app-theme")
         duplicateAppThemeButton = duplicate
         deleteAppThemeButton = delete
 
-        let actions = SettingsUI.controlGroup(
-            [duplicate, delete],
+        let themeControls = SettingsUI.controlGroup(
+            [popUp, duplicate, delete],
             spacing: Design.Spacing.small
         )
 
@@ -269,13 +274,8 @@ final class ThemePreferencesViewController: NSViewController {
             SettingsUI.row(
                 title: "App theme",
                 subtitle: AppThemeLibrary.current.summary,
-                control: popUp,
+                control: themeControls,
                 subtitleField: &appThemeSubtitle
-            ),
-            SettingsUI.row(
-                title: "Custom themes",
-                subtitle: "Duplicate a built-in to make an editable copy.",
-                control: actions
             ),
             SettingsUI.row(
                 title: "Classic skins",
@@ -548,10 +548,26 @@ final class ThemePreferencesViewController: NSViewController {
                 ?? popUp.indexOfFirstItem
                 ?? -1
         )
-        let selected = AppThemeLibrary.theme(withID: selectedID) ?? AppThemeLibrary.current
+        let selected = Self.selectedAppTheme
         appThemeSubtitle?.stringValue = selected.summary ?? ""
+        reloadAppThemeActions(for: selected)
+    }
+
+    /// The duplicate and delete buttons act on the theme the picker names, so their Help Tags say
+    /// which one. Their accessibility names stay fixed; see `ThemedButton.iconAccessibilityName`.
+    private func reloadAppThemeActions(for theme: AppTheme) {
+        let isCustom = AppThemeLibrary.isCustom(theme)
         duplicateAppThemeButton?.isEnabled = true
-        deleteAppThemeButton?.isEnabled = AppThemeLibrary.isCustom(AppThemeLibrary.current)
+        duplicateAppThemeButton?.toolTip = L10n.format("Duplicate “%@”", theme.name)
+        deleteAppThemeButton?.isEnabled = isCustom
+        deleteAppThemeButton?.toolTip = isCustom
+            ? L10n.format("Delete “%@”", theme.name)
+            : L10n.string("Only custom themes can be deleted. Duplicate this one to make an editable copy.")
+    }
+
+    /// The theme the picker names: the user's standing choice, which recovery does not change.
+    private static var selectedAppTheme: AppTheme {
+        AppThemeLibrary.theme(withID: selectedAppThemeID) ?? AppThemeLibrary.current
     }
 
     private func appThemeDidChange() {
@@ -570,7 +586,7 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func duplicateAppTheme() {
-        let source = AppThemeLibrary.current
+        let source = Self.selectedAppTheme
         do {
             let copy = try AppThemeLibrary.duplicate(
                 source,
@@ -586,7 +602,7 @@ final class ThemePreferencesViewController: NSViewController {
     }
 
     @objc private func deleteAppTheme() {
-        let theme = AppThemeLibrary.current
+        let theme = Self.selectedAppTheme
         guard AppThemeLibrary.isCustom(theme) else {
             presentAlert(
                 L10n.string("Cannot Delete App Theme"),
@@ -597,14 +613,23 @@ final class ThemePreferencesViewController: NSViewController {
             return
         }
 
-        let request = ConfirmationRequest(
+        guard ConfirmationAlert.ask(Self.deleteAppThemeRequest(for: theme)) else { return }
+        _ = AppThemeLibrary.delete(theme)
+    }
+
+    /// The question the trash asks. Separate so a test can read the sentence without a modal.
+    static func deleteAppThemeRequest(for theme: AppTheme) -> ConfirmationRequest {
+        ConfirmationRequest(
             prompt: .deleteAppTheme,
             title: L10n.format("Delete “%@”?", theme.name),
-            message: L10n.string("The app will return to the System theme."),
+            // Named from the library rather than written here: this sentence used to promise
+            // System while deletion switched to the product default.
+            message: L10n.format(
+                "The app will switch to the %@ theme.",
+                AppThemeLibrary.defaultTheme.name
+            ),
             confirmTitle: L10n.string("Delete")
         )
-        guard ConfirmationAlert.ask(request) else { return }
-        _ = AppThemeLibrary.delete(theme)
     }
 
     @objc private func importClassicSkin() {

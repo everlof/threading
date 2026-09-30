@@ -3,6 +3,36 @@ import XCTest
 @testable import DeviceLogsPlugin
 
 final class StructuredDeviceLogSourceTests: XCTestCase {
+    func testExactProcessScopeFiltersBeforeBufferingAndQuietAppDoesNotTriggerFallback() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-scoped-log-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let structured = directory.appendingPathComponent("pymobiledevice3")
+        let fallback = directory.appendingPathComponent("idevicesyslog")
+        try makeExecutable(at: structured, script: """
+        #!/bin/sh
+        echo '{"timestamp":"2026-09-29T15:11:04.497349","level":"NOTICE","filename":"/kernel","message":"Ananke connected"}'
+        echo '{"timestamp":"2026-09-29T15:11:04.497349","level":"NOTICE","filename":"/Apps/Ananke","message":"ready"}'
+        echo '{"timestamp":"2026-09-29T15:11:04.497349","level":"NOTICE","filename":"/Apps/AnankeHelper","message":"helper"}'
+        """)
+        try makeExecutable(at: fallback, script: "#!/bin/sh\necho 'Sep 29 15:20:01.125000 Silent[42] <Notice>: wrong fallback'\n")
+
+        for process in ["Ananke", "Silent"] {
+            let source = StructuredPairedDeviceLogRowSource(
+                udid: "PHONE", overNetwork: false, toolPath: structured.path,
+                fallbackToolPath: fallback.path, processName: process
+            )
+            let ended = expectation(description: "scoped stream ended")
+            source.onStreamEnded = { _ in ended.fulfill() }
+            source.start()
+            wait(for: [ended], timeout: 5)
+            source.stop()
+            XCTAssertTrue(source.didDecodeStructuredRow)
+            XCTAssertEqual(source.drain().map(\.process), process == "Ananke" ? ["Ananke"] : [])
+            XCTAssertEqual(source.dropped, 0)
+        }
+    }
 
     /// Installing a modern tool must not make an older or temporarily unsupported phone lose the
     /// system log it already had. The structured command exits without a row, then the legacy

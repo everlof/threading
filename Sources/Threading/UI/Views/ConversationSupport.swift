@@ -67,8 +67,9 @@ final class FlippedClipView: ThemedClipView {
 ///   tell them apart comes free.
 /// - **Sending a message** anchors the sent bubble toward the top and stops following: the
 ///   reply streams into the space below it while the question holds still. No blank space is
-///   reserved below short content — the bubble rises as far as the content allows and holds
-///   once it reaches the top, which is the same reading position without the layout cost.
+///   reserved below short content — the bubble rises as far as the content allows, and keeps
+///   rising as the reply grows (`anchoredLanding`) until it reaches the top, where it holds.
+///   That is the same reading position without the layout cost.
 /// - **A minimap jump** releases the pin: the user deliberately went somewhere.
 /// - **The floating down-arrow** returns to the live end and resumes following.
 ///
@@ -127,6 +128,25 @@ struct ConversationAutoScroll: Equatable {
 
     mutating func noteMessageSent() {
         mode = .anchored
+    }
+
+    /// Where an anchored viewport moves as the reply grows beneath the sent message, or nil
+    /// when it should stay where it is.
+    ///
+    /// The sent row rises toward `anchorOffset` (its top, less a margin) as far as the content
+    /// below it allows. At the end of a long conversation the clip view's clamp first lands the
+    /// bubble at the *bottom* of the pane, because nothing exists under it yet. Holding that
+    /// origin still, as the anchor once did, meant the reply streamed in entirely below the
+    /// viewport. The fix is to follow the reply until the bubble reaches the top, then hold.
+    /// The view never moves back up: a settled turn folding its work away shrinks the document,
+    /// and the clip view's own clamp is the only correction that needs.
+    static func anchoredLanding(
+        anchorOffset: CGFloat,
+        currentOffset: CGFloat,
+        maximumOffset: CGFloat
+    ) -> CGFloat? {
+        let target = max(0, min(anchorOffset, maximumOffset))
+        return target > currentOffset + ConversationDefaults.landingTolerance ? target : nil
     }
 
     mutating func noteJumpedToRow() {
@@ -199,6 +219,14 @@ enum ConversationDefaults {
     /// How close to the end still counts as "at the bottom" when re-pinning after a gesture.
     /// Exact-bottom comparisons fail on the fractional offsets a trackpad leaves behind.
     static let bottomTolerance: CGFloat = 40
+
+    /// Below this, a programmatic landing is a fraction of a point of layout noise and not
+    /// worth a bounds write.
+    static let landingTolerance: CGFloat = 0.5
+
+    /// One landing to reveal the destination's rows, one to land on the height they measured
+    /// at — see `ConversationViewController.landMeasuringWhatItReveals`.
+    static let measuredLandingPasses = 2
 
     /// Past either of these, a user bubble collapses behind a fade — t3code's thresholds.
     /// The check counts characters and hard newlines rather than measuring wrapped lines,

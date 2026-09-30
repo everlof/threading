@@ -4,6 +4,25 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "theme-gradient-motion",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Portable theme gradient motion",
+      "description": "The shipping sidebar and broad pane wearing one custom gradient recipe, held at two points in its compositor animation.",
+      "states": ["Rest", "Quarter-cycle", "Light", "Dark"],
+      "matrix": {
+        "themes": ["Custom drift"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["800×540-point sidebar and pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ThemeGradientMotionTests.swift",
+        "test": "ThreadingTests/ThemeGradientMotionTests/testRendersDriftInTheShippingSidebarAndPane"
+      },
+      "capture": {"glob": "theme-drift-*.png"}
+    },
+    {
       "id": "design-system-components",
       "kind": "component",
       "status": "implemented",
@@ -116,17 +135,21 @@
       "kind": "surface",
       "status": "implemented",
       "priority": "critical",
-      "title": "Trigger center",
-      "description": "The complete event-automation destination, including active authority, durable agent-run receipts, and the health and pause controls for background sources.",
+      "title": "Automations",
+      "description": "Local recurring and event automations, durable run receipts, source health, and the remote VPS controller connection in the shipping shell.",
       "states": [
         "Active trigger",
         "Completed fix receipt",
         "Healthy background source",
-        "Source pause control"
+        "Source pause control",
+        "Recurring task and next run",
+        "Remote controller connection"
       ],
       "matrix": {
         "themes": [
-          "System"
+          "System",
+          "Pure",
+          "Neo Brutalism"
         ],
         "appearances": [
           "Light",
@@ -138,7 +161,10 @@
       },
       "source": {
         "path": "Tests/ThreadingTests/TriggerCenterRenderTests.swift",
-        "test": "ThreadingTests/TriggerCenterRenderTests/testRendersConfigurationActivityAndSources"
+        "tests": [
+          "ThreadingTests/TriggerCenterRenderTests/testRendersConfigurationActivityAndSources",
+          "ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow"
+        ]
       },
       "capture": {
         "glob": "trigger-center-*.png"
@@ -337,6 +363,39 @@
       }
     },
     {
+      "id": "device-log-filters",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Device Logs filtering",
+      "description": "The bundled native log pane in the production conversation/window/display shell, with separate source and exact-process/filter controls.",
+      "states": [
+        "Exact process selector",
+        "Matches-only/context selector"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Swiss Minimalist"
+        ],
+        "appearances": [
+          "Dark",
+          "Authored theme appearance"
+        ],
+        "sizes": [
+          "700-point panel"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SimulatorPaneRenderTests.swift",
+        "test": "ThreadingTests/SimulatorPaneRenderTests/testRendersDeviceLogsFiltersInProductShell"
+      },
+      "capture": {
+        "glob": "device-log-shell-*.png"
+      }
+    },
+    {
       "id": "physical-iphone-pane",
       "kind": "surface",
       "status": "implemented",
@@ -447,12 +506,22 @@
       "status": "implemented",
       "priority": "important",
       "title": "General settings",
-      "description": "The General settings page at both supported review widths, with a tall overview plus a bottom-positioned viewport that keeps its final Power and Shell rows reviewable.",
-      "states": ["Settings overview", "Scrolled to Power and Shell"],
+      "description": "The General settings page — startup, idle agents, confirmations, software updates and this Mac — at both supported review widths.",
+      "states": [
+        "Settings overview"
+      ],
       "matrix": {
-        "themes": ["System"],
-        "appearances": ["Light", "Dark"],
-        "sizes": ["Regular", "Constrained"]
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Regular",
+          "Constrained"
+        ]
       },
       "source": {
         "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
@@ -460,6 +529,130 @@
       },
       "capture": {
         "glob": "general-*.png"
+      }
+    },
+    {
+      "id": "sidebar-settings-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Sidebar settings",
+      "description": "The Sidebar settings page — order, layout, names and icons — at both supported review widths.",
+      "states": [
+        "Settings overview"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Regular",
+          "Constrained"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
+        "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersSidebarSettingsToImages"
+      },
+      "capture": {
+        "glob": "sidebar-*.png"
+      }
+    },
+    {
+      "id": "chats-settings-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Chats settings",
+      "description": "The Chats settings page — new-chat defaults, opening message, attachment detection and the scratchpad folder — at both supported review widths.",
+      "states": [
+        "Settings overview"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Regular",
+          "Constrained"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
+        "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersChatsSettingsToImages"
+      },
+      "capture": {
+        "glob": "chats-*.png"
+      }
+    },
+    {
+      "id": "notifications-settings-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Notifications settings",
+      "description": "The Notifications settings page — alerts, the terminal bell, the silence switch and custom sounds — at both supported review widths.",
+      "states": [
+        "Settings overview"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Regular",
+          "Constrained"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
+        "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersNotificationsSettingsToImages"
+      },
+      "capture": {
+        "glob": "notifications-*.png"
+      }
+    },
+    {
+      "id": "integration-settings-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Integration settings",
+      "description": "The Integration settings page — Claude Code's hooks, status line, Remote Control and terminal scrolling, and Codex's hooks — at both supported review widths.",
+      "states": [
+        "Settings overview"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Regular",
+          "Constrained"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/GeneralSettingsRenderTests.swift",
+        "test": "ThreadingTests/GeneralSettingsRenderTests/testRendersIntegrationSettingsToImages"
+      },
+      "capture": {
+        "glob": "integration-*.png"
       }
     },
     {
@@ -1610,6 +1803,25 @@
       },
       "capture": {
         "glob": "manager-role-*.png"
+      }
+    },
+    {
+      "id": "automation-create-relaunch",
+      "kind": "journey",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Recurring automations",
+      "description": "Create a scheduled task through the shipping editor, save it paused, and recover it after relaunch.",
+      "states": ["Task editor", "Schedule and archiving", "Saved paused", "Recovered after relaunch"],
+      "matrix": {
+        "sizes": ["1400×900-point shell", "Attached editor sheet"]
+      },
+      "source": {
+        "path": "Tests/ThreadingUITests/AutomationJourneyUITests.swift",
+        "test": "ThreadingUITests/AutomationJourneyUITests/testHumanCreatesPausedAutomationAndItSurvivesRelaunch"
+      },
+      "capture": {
+        "journey": "Recurring automations"
       }
     },
     {

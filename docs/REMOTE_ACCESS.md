@@ -2335,6 +2335,13 @@ leaving the local listener, private-network connections and app process running.
 service work. Public Release builds always select production, even if installed over a developer
 build whose shared defaults domain contains `development`.
 
+The selected environment is a recorded user choice and uses `PreferenceStore` through
+`AppSettings.userChoiceDefaults`. Hosted render tests select Development in their per-process
+scratch suite, never in the running app's defaults. Temporarily writing the real choice and
+restoring it in teardown is insufficient: an overlapping launch can inherit Development, and
+a killed test host cannot restore it. `RemoteHostedServiceEnvironmentTests` checks both the
+injected-store boundary and the shared settings path used by the Advanced render fixture.
+
 A developer-enabled Mac pointed at the development origin starts a five-minute PKCE-style browser
 transaction and opens its Cloudflare Access-protected authorization path. Access allows exact
 configured email addresses—never Everyone, a whole email domain or the one-time-PIN login method

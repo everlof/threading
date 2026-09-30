@@ -1,9 +1,11 @@
 import Dispatch
 import Foundation
-#if os(Linux)
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
 import Glibc
 #else
-import Darwin
+import Musl
 #endif
 
 /// Platform socket setup shared by the GUI client and Linux host. The caller owns the returned
@@ -12,27 +14,33 @@ import Darwin
 enum PTYHostSocket {
     @discardableResult
     static func close(_ descriptor: Int32) -> Int32 {
-        #if os(Linux)
+        #if canImport(Darwin)
+        return Darwin.close(descriptor)
+        #elseif canImport(Glibc)
         return Glibc.close(descriptor)
         #else
-        return Darwin.close(descriptor)
+        return Musl.close(descriptor)
         #endif
     }
 
     @discardableResult
     static func shutdown(_ descriptor: Int32, _ how: Int32) -> Int32 {
-        #if os(Linux)
+        #if canImport(Darwin)
+        return Darwin.shutdown(descriptor, how)
+        #elseif canImport(Glibc)
         return Glibc.shutdown(descriptor, how)
         #else
-        return Darwin.shutdown(descriptor, how)
+        return Musl.shutdown(descriptor, how)
         #endif
     }
 
     static func read(_ descriptor: Int32, _ bytes: UnsafeMutableRawPointer?, _ count: Int) -> Int {
-        #if os(Linux)
+        #if canImport(Darwin)
+        return Darwin.read(descriptor, bytes, count)
+        #elseif canImport(Glibc)
         return Glibc.read(descriptor, bytes, count)
         #else
-        return Darwin.read(descriptor, bytes, count)
+        return Musl.read(descriptor, bytes, count)
         #endif
     }
 
@@ -50,9 +58,12 @@ enum PTYHostSocket {
                 let ready = poll(&event, 1, Int32(min(Double(Int32.max), (remaining * 1000).rounded(.up))))
                 if ready < 0 && errno == EINTR { continue }
                 guard ready > 0 else { throw PTYHostClientError.writeFailed(errno: ready == 0 ? ETIMEDOUT : errno) }
-                #if os(Linux)
+                #if canImport(Glibc)
                 let count = Glibc.send(descriptor, bytes.baseAddress! + offset, bytes.count - offset,
                                        Int32(MSG_DONTWAIT | MSG_NOSIGNAL))
+                #elseif canImport(Musl)
+                let count = Musl.send(descriptor, bytes.baseAddress! + offset, bytes.count - offset,
+                                      Int32(MSG_DONTWAIT | MSG_NOSIGNAL))
                 #else
                 let count = Darwin.send(descriptor, bytes.baseAddress! + offset, bytes.count - offset, MSG_DONTWAIT)
                 #endif
@@ -80,8 +91,10 @@ enum PTYHostSocket {
                 destination[bytes.count] = 0
             }
         }
-        #if os(Linux)
+        #if canImport(Glibc)
         let descriptor = socket(AF_UNIX, Int32(SOCK_STREAM.rawValue | SOCK_CLOEXEC.rawValue), 0)
+        #elseif canImport(Musl)
+        let descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)
         #else
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         #endif
@@ -104,8 +117,10 @@ enum PTYHostSocket {
             }
             let started = withUnsafePointer(to: &address) { pointer in
                 pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
-                    #if os(Linux)
+                    #if canImport(Glibc)
                     Glibc.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
+                    #elseif canImport(Musl)
+                    Musl.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
                     #else
                     Darwin.connect(descriptor, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
                     #endif
@@ -120,11 +135,7 @@ enum PTYHostSocket {
             }
             return descriptor
         } catch {
-            #if os(Linux)
-            Glibc.close(descriptor)
-            #else
-            Darwin.close(descriptor)
-            #endif
+            close(descriptor)
             throw error
         }
     }

@@ -13,6 +13,7 @@ private struct SourceConfiguration: Decodable {
 private struct DaemonConfiguration: Decodable {
     let schemaVersion: Int
     let sources: [SourceConfiguration]
+    let nextScheduleUnixTime: Double?
 }
 
 private struct SondaFeed: Decodable {
@@ -405,6 +406,9 @@ private enum TriggerDaemon {
         while !Task.isCancelled {
             do {
                 let configuration = try ConfigurationReader.read()
+                if let due = configuration.nextScheduleUnixTime, due <= Date().timeIntervalSince1970 {
+                    AppWake.notify()
+                }
                 let configuredSources = configuration.sources.filter(\.enabled)
                 var sources: [SourceConfiguration] = []
                 for source in configuredSources where await sourceBackoff.canPoll(source.id) {

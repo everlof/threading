@@ -452,17 +452,6 @@
         }
       }
     },
-    "%@ Simulator" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ Simulator"
-          }
-        }
-      }
-    },
     "%@ UI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1939,6 +1928,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld arkiverade konversationer"
+          }
+        }
+      }
+    },
+    "%lld automations on %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld automatiseringar på %@"
           }
         }
       }
@@ -4127,6 +4127,17 @@
         }
       }
     },
+    "A hash goes to Gravatar, then the email to GitHub." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En hash skickas till Gravatar och sedan adressen till GitHub."
+          }
+        }
+      }
+    },
     "A limit here is yours, ahead of the provider's. Depending on the one you pick it tells you, holds back what Threading would send on its own, or parks sessions on that account at their next turn. It never stops the keyboard: a turn you type and send goes, whatever your limits say. The percentage you are told about is always the one the window itself reads." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4221,6 +4232,17 @@
         }
       }
     },
+    "A name you give a session is always kept." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett namn du ger en konversation behålls alltid."
+          }
+        }
+      }
+    },
     "A native semantic scene supplied by an extension. Area represents installed size." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4294,6 +4316,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En telefon utanför hemmet kan inte nå den här Mac-datorn medan den är i viloläge."
+          }
+        }
+      }
+    },
+    "A photo out of Finder is a HEIC and a scan is often a TIFF, and neither agent reads either — so one is written out as a PNG first, keeping its name, and the agent is handed that." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett foto från Finder är ofta en HEIC-fil och en skanning en TIFF-fil. Agenterna kan inte läsa något av formaten, så filen skrivs först ut som PNG med samma namn och den versionen skickas till agenten."
           }
         }
       }
@@ -4696,6 +4729,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ett stopp ingen skrev — märket en session bär när kontots användningsgräns är förbrukad. Negativ- och varningsroller, och hörn tagna från temat: gör en stils paneler kantiga så blir det här kantigt med dem."
+          }
+        }
+      }
+    },
+    "A stopped session takes the branch its checkout switches to." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En stoppad konversation tar grenen som dess utcheckning byter till."
           }
         }
       }
@@ -5147,6 +5191,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tar emot begränsat anslutningsunderlag från en parkopplad ägar-iPhone via det lokala nätverket. iPhone-enheten har en egen oberoende strömbrytare."
+          }
+        }
+      }
+    },
+    "Accepts connection evidence from your paired iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tar emot anslutningsunderlag från din parkopplade iPhone."
           }
         }
       }
@@ -5757,6 +5812,17 @@
         }
       }
     },
+    "Add a remote host in Settings first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg först till en fjärrvärd i Inställningar."
+          }
+        }
+      }
+    },
     "Add a throwaway account and agents can sign in to that exact origin without you typing it. Never store a real account here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5984,6 +6050,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägger till Threadings poster i varje Codex-kontos hooks.json, så att konversationer visar exakt aktivitet i stället för att uppskatta den från utdata. Dina befintliga poster behålls."
+          }
+        }
+      }
+    },
+    "Adds Threading's entries to each account's hooks.json." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägger till Threadings poster i varje kontos hooks.json."
           }
         }
       }
@@ -6593,6 +6670,17 @@
         }
       }
     },
+    "Alerts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aviseringar"
+          }
+        }
+      }
+    },
     "All" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6688,6 +6776,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla beständiga åtkomster"
+          }
+        }
+      }
+    },
+    "All processes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla processer"
           }
         }
       }
@@ -7017,6 +7116,17 @@
         }
       }
     },
+    "Always 127.0.0.1, plus the ways in you switched on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alltid 127.0.0.1, plus de vägar in du har slagit på."
+          }
+        }
+      }
+    },
     "Always Allow This Agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7123,6 +7233,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En agent"
+          }
+        }
+      }
+    },
+    "An agent asked for this." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En agent bad om detta."
+          }
+        }
+      }
+    },
+    "An agent asking while you are away, a bell in the session you are watching, one during a launch, and one from another program can each sound different." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En agent som frågar medan du är borta, en signal i sessionen du tittar på, en under en start och en från ett annat program kan låta olika."
           }
         }
       }
@@ -7684,6 +7816,17 @@
         }
       }
     },
+    "Applies to Terminal and Native chats. Agent's Setting preserves Claude Code's own choice." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gäller för Terminal- och Native-chattar. Agentens inställning bevarar Claude Codes eget val."
+          }
+        }
+      }
+    },
     "Applies to Terminal and Native chats. Agent's Setting preserves Claude Code's own choice; Fast uses more credits and works only with supported models." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7691,6 +7834,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gäller för Terminal- och Native-chattar. Agentens inställning bevarar Claude Codes eget val; Snabb använder fler krediter och fungerar bara med modeller som stöds."
+          }
+        }
+      }
+    },
+    "Applies to Terminal and Native chats. Agent's Setting preserves Codex's own service tier." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gäller för Terminal- och Native-chattar. Agentens inställning bevarar Codex egen servicenivå."
           }
         }
       }
@@ -7846,6 +8000,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arkivera konversation"
+          }
+        }
+      }
+    },
+    "Archive successful runs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arkivera lyckade körningar"
           }
         }
       }
@@ -8605,6 +8770,61 @@
         }
       }
     },
+    "Automation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisering"
+          }
+        }
+      }
+    },
+    "Automation completed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisering slutförd"
+          }
+        }
+      }
+    },
+    "Automation failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisering misslyckades"
+          }
+        }
+      }
+    },
+    "Automation needs attention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisering behöver åtgärdas"
+          }
+        }
+      }
+    },
+    "Automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatiseringar"
+          }
+        }
+      }
+    },
     "Availability is checked when Claude Code starts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9086,6 +9306,17 @@
         }
       }
     },
+    "Behaviour" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beteende"
+          }
+        }
+      }
+    },
     "Bell sound" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9137,6 +9368,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Betaversioner och stabila utgåvor"
+          }
+        }
+      }
+    },
+    "Betas arrive earlier and may be rough." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Betaversioner kommer tidigare och kan vara ostabila."
           }
         }
       }
@@ -9484,6 +9726,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta med dina konversationer"
+          }
+        }
+      }
+    },
+    "Brings back every message you chose not to see again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tar tillbaka varje meddelande du valt att inte se igen."
           }
         }
       }
@@ -11437,6 +11690,17 @@
         }
       }
     },
+    "Choose a project that is still in the sidebar." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett projekt som fortfarande finns i sidofältet."
+          }
+        }
+      }
+    },
     "Choose a project…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11521,6 +11785,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj en app att öppna i"
+          }
+        }
+      }
+    },
+    "Choose an event source that is still connected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en händelsekälla som fortfarande är ansluten."
           }
         }
       }
@@ -12054,6 +12329,17 @@
         }
       }
     },
+    "Claude can draw its interface on the terminal's alternate screen and scroll its own transcript, or on the main screen so the transcript lands in Threading's scrollback — where this app's scrolling, find bar and a paired iPhone can reach it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude kan rita sitt gränssnitt på terminalens alternativa skärm och rulla sin egen transkribering, eller på huvudskärmen så att transkriberingen hamnar i Threadings rullningshistorik — där appens rullning, sökfält och en parkopplad iPhone kan nå den."
+          }
+        }
+      }
+    },
     "Claude can draw its interface on the terminal's alternate screen and scroll its own transcript, or on the main screen so the transcript lands in Threading's scrollback — where this app's scrolling, find bar and a paired iPhone can reach it. Following leaves the choice to Claude, which defaults to its own. A single chat can still be set from its ⋯ menu, and the choice applies from that chat's next launch." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12061,6 +12347,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude kan rita sitt gränssnitt på terminalens alternativa skärm och rulla sin egen transkribering, eller på huvudskärmen så att transkriberingen hamnar i Threadings rullningshistorik — där appens rullning, sökfält och en parkopplad iPhone kan nå den. Följ lämnar valet till Claude, som använder sin egen inställning som standard. En enskild chatt kan fortfarande ställas in från menyn ⋯, och valet gäller från chattens nästa start."
+          }
+        }
+      }
+    },
+    "Claude hooks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude-hooks"
           }
         }
       }
@@ -12127,6 +12424,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claudes egen brygga till claude.ai och Claude-appen, separat från Threadings fjärråtkomst. Följ Claude låter kontots egen /config styra. En enskild konversation kan fortfarande slås på eller av från dess ⋯-meny."
+          }
+        }
+      }
+    },
+    "Claude's own bridge to claude.ai, not Threading's Remote Access." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claudes egen brygga till claude.ai, inte Threadings fjärråtkomst."
           }
         }
       }
@@ -14086,6 +14394,17 @@
         }
       }
     },
+    "Configured automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurerade automatiseringar"
+          }
+        }
+      }
+    },
     "Configured triggers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14259,6 +14578,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut för att läsa privata kodförråd med behörigheter du valde på GitHub."
+          }
+        }
+      }
+    },
+    "Connect to the controller installed on this host. Its supervisor runs schedules even when this Mac is offline." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut till kontrollern på den här värden. Den kör scheman även när denna Mac är offline."
           }
         }
       }
@@ -14714,6 +15044,17 @@
         }
       }
     },
+    "Control interrupted. Enable control again to reconnect." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Styrningen avbröts. Aktivera styrning igen för att återansluta."
+          }
+        }
+      }
+    },
     "Control ready" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14721,6 +15062,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Styrning klar"
+          }
+        }
+      }
+    },
+    "Control services detected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Styrtjänster hittades"
           }
         }
       }
@@ -14776,6 +15128,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Styrning"
+          }
+        }
+      }
+    },
+    "Controller database" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerns databas"
+          }
+        }
+      }
+    },
+    "Controller executable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerns körbara fil"
           }
         }
       }
@@ -16046,6 +16420,17 @@
         }
       }
     },
+    "Counted from your latest turn or visit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Räknas från ditt senaste meddelande eller besök."
+          }
+        }
+      }
+    },
     "Counts appear on their own once it is." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16097,6 +16482,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Coverage-utdata"
+          }
+        }
+      }
+    },
+    "Crashes, hangs and traces go to Sentry — never prompts, output or paths." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Krascher, hängningar och spårningar skickas till Sentry — aldrig prompter, utdata eller sökvägar."
           }
         }
       }
@@ -16268,6 +16664,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skapa en tema"
+          }
+        }
+      }
+    },
+    "Create an automation here or ask an agent to set one up. Choose a schedule, task, and what happens after success." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa en automatisering här eller be en agent göra det. Välj schema, uppgift och vad som händer efter en lyckad körning."
           }
         }
       }
@@ -16591,6 +16998,17 @@
         }
       }
     },
+    "Cursor style" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markörstil"
+          }
+        }
+      }
+    },
     "Custom" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16758,17 +17176,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anpassat tema · Redigerbart. Färgändringar tillämpas direkt."
-          }
-        }
-      }
-    },
-    "Custom themes" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anpassade teman"
           }
         }
       }
@@ -16967,6 +17374,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "DEV"
+          }
+        }
+      }
+    },
+    "Daily" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagligen"
+          }
+        }
+      }
+    },
+    "Daily at %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagligen kl. %@ · %@"
           }
         }
       }
@@ -17219,6 +17648,17 @@
         }
       }
     },
+    "Delete App Theme" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radera apptema"
+          }
+        }
+      }
+    },
     "Delete Note" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17259,6 +17699,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Radera värdtjänstkontot?"
+          }
+        }
+      }
+    },
+    "Delete “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radera “%@”"
+          }
+        }
+      }
+    },
+    "Delete “%@” on %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radera ”%@” på %@?"
           }
         }
       }
@@ -17583,6 +18045,17 @@
         }
       }
     },
+    "Detected paths are normally kept to the session's own project, because a paired phone can fetch anything in the list and printed text is not a handoff. Images you attach or the agent shows are never affected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upptäckta sökvägar hålls normalt till sessionens eget projekt, eftersom en ihopparad telefon kan hämta allt i listan och utskriven text inte är en överlämning. Bilder du bifogar eller som agenten visar påverkas aldrig."
+          }
+        }
+      }
+    },
     "Detected paths are normally kept to the session's own project, because a paired phone can fetch anything in the list and printed text is not a handoff. Turn this on to list them wherever they are; Threading copies each one in. Images you attach or the agent shows are never affected." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17673,6 +18146,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enhetsloggar"
+          }
+        }
+      }
+    },
+    "Diagnostics" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostik"
+          }
+        }
+      }
+    },
+    "Diagnostics, background sessions, where your data lives, and how to start over." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostik, bakgrundssessioner, var dina data finns och hur du börjar om."
           }
         }
       }
@@ -17959,6 +18454,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "visningspanel"
+          }
+        }
+      }
+    },
+    "Display service unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skärmtjänsten är inte tillgänglig"
           }
         }
       }
@@ -18502,13 +19008,13 @@
         }
       }
     },
-    "Duplicate a built-in to make an editable copy." : {
+    "Duplicate App Theme" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Duplicera ett inbyggt tema för att skapa en redigerbar kopia."
+            "value" : "Duplicera apptema"
           }
         }
       }
@@ -18531,6 +19037,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Duplicera för att redigera"
+          }
+        }
+      }
+    },
+    "Duplicate “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duplicera “%@”"
           }
         }
       }
@@ -18586,6 +19103,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tidigare meddelanden visas inte."
+          }
+        }
+      }
+    },
+    "Eases programs' own backgrounds toward the palette." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För programs egna bakgrunder närmare paletten."
           }
         }
       }
@@ -18849,6 +19377,17 @@
         }
       }
     },
+    "Enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera"
+          }
+        }
+      }
+    },
     "Enable HTTPS certificates in the Tailscale admin console, then retry." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19016,6 +19555,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera radbrytning"
+          }
+        }
+      }
+    },
+    "Enable “%@” on %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera ”%@” på %@?"
+          }
+        }
+      }
+    },
+    "Enable “%@”?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera ”%@”?"
           }
         }
       }
@@ -19391,6 +19952,28 @@
         }
       }
     },
+    "Event kind" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelsetyp"
+          }
+        }
+      }
+    },
+    "Event source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Händelsekälla"
+          }
+        }
+      }
+    },
     "Event sources" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19457,6 +20040,17 @@
         }
       }
     },
+    "Every %lld minutes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var %lld minut"
+          }
+        }
+      }
+    },
     "Every GitHub credential Threading holds was refused." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19519,6 +20113,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla öppna sessioner stängs. Konversationerna sparas och kan återupptas vid nästa start; bara det som pågår just nu går förlorat."
+          }
+        }
+      }
+    },
+    "Every row starts at the same edge." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Varje rad börjar vid samma kant."
           }
         }
       }
@@ -20658,6 +21263,28 @@
         }
       }
     },
+    "Fast uses more credits and needs a supported model." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Snabb använder fler krediter och kräver en modell som stöds."
+          }
+        }
+      }
+    },
+    "Fast uses more credits." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Snabb använder fler krediter."
+          }
+        }
+      }
+    },
     "Feedback & separation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20830,6 +21457,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filer och mappar"
+          }
+        }
+      }
+    },
+    "Files an agent reads are approved against Threading's grant." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filer som en agent läser godkänns mot Threadings behörighet."
           }
         }
       }
@@ -21181,6 +21819,17 @@
         }
       }
     },
+    "Finding an account avatar sends a hash of its login email to Gravatar, then the email to GitHub's public-user search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När en kontoavatar söks skickas en hash av inloggningsadressen till Gravatar och sedan adressen till GitHubs offentliga användarsökning."
+          }
+        }
+      }
+    },
     "Finding an account avatar sends a hash of its login email to Gravatar, then the email to GitHub's public-user search. A chosen emoji still wins." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21330,6 +21979,17 @@
         }
       }
     },
+    "Finishing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slutför"
+          }
+        }
+      }
+    },
     "First choice" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21337,6 +21997,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Första valet"
+          }
+        }
+      }
+    },
+    "First page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Första sidan"
           }
         }
       }
@@ -21403,6 +22074,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fast mörkt"
+          }
+        }
+      }
+    },
+    "Fixed interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fast intervall"
           }
         }
       }
@@ -21616,6 +22298,28 @@
         }
       }
     },
+    "Following leaves it to the agent's own configuration. A single chat can still be set from its ⋯ menu, and the mode applies from that chat's next launch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Att följa lämnar det till agentens egen konfiguration. En enskild konversation kan fortfarande ställas in från dess ⋯-meny, och läget gäller från den konversationens nästa start."
+          }
+        }
+      }
+    },
+    "Following leaves the choice to Claude, which defaults to its own. A single chat can still be set from its ⋯ menu, and the choice applies from that chat's next launch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Följ lämnar valet till Claude, som använder sin egen inställning som standard. En enskild chatt kan fortfarande ställas in från menyn ⋯, och valet gäller från chattens nästa start."
+          }
+        }
+      }
+    },
     "Follows this chat as it happens. Cannot type, cannot send a prompt, and cannot answer a permission request." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21649,6 +22353,28 @@
         }
       }
     },
+    "For a blocked approval and an update an agent sends you." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För ett blockerat godkännande och en uppdatering som en agent skickar dig."
+          }
+        }
+      }
+    },
+    "For an organization's avatar. Turn it off in Sidebar settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För en organisations avatar. Stäng av den i inställningarna för Sidofält."
+          }
+        }
+      }
+    },
     "For example: Rename this chat to a ONE-WORD, ALL-CAPS name that represents it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21667,6 +22393,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Till exempel: Tänk igenom det innan du börjar ändra filer."
+          }
+        }
+      }
+    },
+    "For shell sessions. Agents launch through your login shell." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För skalsessioner. Agenter startas via ditt inloggningsskal."
           }
         }
       }
@@ -21848,6 +22585,17 @@
         }
       }
     },
+    "From the checkout, or the GitHub organization's avatar." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Från utcheckningen, eller GitHub-organisationens avatar."
+          }
+        }
+      }
+    },
     "From your GitHub App's settings page. Device-flow sign-in needs no client secret. Enable “Device flow” on the app, and install it on the repositories it should see." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21855,6 +22603,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Från din GitHub-apps inställningssida. Enhetsflödesinloggning behöver ingen klienthemlighet. Aktivera “Device flow” på appen och installera den på kodförråden den ska se."
+          }
+        }
+      }
+    },
+    "From your GitHub App's settings page. No secret is needed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Från GitHub-appens inställningssida. Ingen hemlighet behövs."
           }
         }
       }
@@ -22129,6 +22888,17 @@
         }
       }
     },
+    "GitHub or GitLab, for the branch's change request and checks." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub eller GitLab, för grenens ändringsförfrågan och kontroller."
+          }
+        }
+      }
+    },
     "GitHub refused the pull request (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22374,6 +23144,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ge en avisering ett eget ljud — eller tysta en — utan att ändra de övriga. Samma ark som en chatt eller en utcheckning öppnar, fast i appens eget omfång."
+          }
+        }
+      }
+    },
+    "Give one alert its own sound, or silence it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge en avisering ett eget ljud, eller tysta den."
           }
         }
       }
@@ -22759,6 +23540,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HEAD → arbetskopia · indexerade, oindexerade och ospårade"
+          }
+        }
+      }
+    },
+    "HEIC and TIFF are handed over as PNG." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HEIC och TIFF lämnas över som PNG."
           }
         }
       }
@@ -23265,6 +24057,17 @@
         }
       }
     },
+    "Holds alerts and the bell without changing what either is set to." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Håller tillbaka aviseringar och ljudsignalen utan att ändra vad någon av dem är inställd på."
+          }
+        }
+      }
+    },
     "Holds every sound Threading makes — notification alerts and the terminal bell alike — without changing what either is set to." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23513,6 +24316,17 @@
         }
       }
     },
+    "How much a session may do before it stops to ask." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hur mycket en konversation får göra innan den stannar och frågar."
+          }
+        }
+      }
+    },
     "How much a session may do before it stops to ask. Following leaves it to the agent's own configuration. A single chat can still be set from its ⋯ menu, and the mode applies from that chat's next launch." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23597,6 +24411,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inaktiv"
+          }
+        }
+      }
+    },
+    "Idle Agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inaktiva agenter"
           }
         }
       }
@@ -24630,6 +25455,17 @@
         }
       }
     },
+    "Integration" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integration"
+          }
+        }
+      }
+    },
     "Integrity failure" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24703,6 +25539,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avbruten"
+          }
+        }
+      }
+    },
+    "Interval (minutes)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Intervall (minuter)"
           }
         }
       }
@@ -25142,6 +25989,17 @@
         }
       }
     },
+    "Its schedule stops on the host. Its run history stays there and remains visible here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schemat stoppas på värden. Körhistoriken finns kvar där och syns fortfarande här."
+          }
+        }
+      }
+    },
     "Its session could not be created." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25307,6 +26165,17 @@
         }
       }
     },
+    "Keep successful runs visible" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behåll lyckade körningar synliga"
+          }
+        }
+      }
+    },
     "Keep the Original" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25380,6 +26249,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Håll användningen under procenttalet"
+          }
+        }
+      }
+    },
+    "Keeps agents running while Threading is closed. Still experimental." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Håller agenter igång medan Threading är stängt. Fortfarande experimentellt."
           }
         }
       }
@@ -25732,6 +26612,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "LaunchFailureView"
+          }
+        }
+      }
+    },
+    "Layout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Layout"
           }
         }
       }
@@ -26161,6 +27052,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låter en parkopplad iPhone hitta den här Macen efter att adressen ändrats."
+          }
+        }
+      }
+    },
+    "Lets an agent ask what its own browser click changed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låter en agent fråga vad dess eget klick i webbläsaren ändrade."
           }
         }
       }
@@ -26622,6 +27524,17 @@
         }
       }
     },
+    "Lists paths from anywhere, copying each one in." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listar sökvägar var de än ligger och kopierar in var och en."
+          }
+        }
+      }
+    },
     "Live H.264" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26941,6 +27854,17 @@
         }
       }
     },
+    "Longer projects end in Show 5 more." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Längre projekt slutar med Visa 5 till."
+          }
+        }
+      }
+    },
     "Longer projects end in Show 5 more. The chat you have open always stays in view." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26992,6 +27916,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tittar igenom dina tidigare konversationer…"
+          }
+        }
+      }
+    },
+    "Looks up Gravatar, then GitHub. A chosen emoji still wins." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Söker hos Gravatar och sedan GitHub. En vald emoji har fortfarande företräde."
           }
         }
       }
@@ -27146,6 +28081,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hantera webbläsarflikar"
+          }
+        }
+      }
+    },
+    "Manage local and remote schedules, event tasks, and run history." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera lokala scheman, fjärrscheman, händelseuppgifter och körningshistorik."
           }
         }
       }
@@ -27348,6 +28294,17 @@
         }
       }
     },
+    "Manage…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera…"
+          }
+        }
+      }
+    },
     "Manual" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27366,6 +28323,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Manuell ordning"
+          }
+        }
+      }
+    },
+    "Manual or event-driven" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manuell eller händelsestyrd"
           }
         }
       }
@@ -27447,6 +28415,17 @@
         }
       }
     },
+    "Matches only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast träffar"
+          }
+        }
+      }
+    },
     "Material" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27465,6 +28444,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Max"
+          }
+        }
+      }
+    },
+    "Maximum runtime (minutes)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maximal körtid (minuter)"
           }
         }
       }
@@ -27986,6 +28976,17 @@
         }
       }
     },
+    "More automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fler automatiseringar"
+          }
+        }
+      }
+    },
     "More matches are available — refine the query." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28487,6 +29488,17 @@
         }
       }
     },
+    "Names & Icons" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Namn och ikoner"
+          }
+        }
+      }
+    },
     "Narrow the row and the reading gives up whole windows rather than characters: everything, then one complete window, then nothing." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28784,6 +29796,17 @@
         }
       }
     },
+    "Never edits your Claude configuration. Applies on the next start." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrar aldrig din Claude-konfiguration. Gäller från nästa start."
+          }
+        }
+      }
+    },
     "Never interrupts — refuses anything that would need approval." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28819,6 +29842,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ny webbläsarflik"
+          }
+        }
+      }
+    },
+    "New Chats" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nya chattar"
           }
         }
       }
@@ -28962,6 +29996,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nytt worktree…"
+          }
+        }
+      }
+    },
+    "New automation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny automatisering"
           }
         }
       }
@@ -29208,6 +30253,17 @@
         }
       }
     },
+    "Next run: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nästa körning: %@"
+          }
+        }
+      }
+    },
     "Next.js build" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29226,6 +30282,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nattlig version"
+          }
+        }
+      }
+    },
+    "Nightly is a separate feed you join by installing a nightly build, and leave by downloading a stable build yourself, because a nightly's date version is higher than any release." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nightly är ett separat flöde som du går med i genom att installera ett nightly-bygge, och lämnar genom att själv hämta ett stabilt bygge, eftersom ett nightly-bygges datumversion är högre än någon utgåva."
           }
         }
       }
@@ -29474,6 +30541,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen auktoritativ gränshistorik ännu"
+          }
+        }
+      }
+    },
+    "No automations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga automatiseringar"
           }
         }
       }
@@ -30348,6 +31426,17 @@
         }
       }
     },
+    "No usage tracking, and no identifier for this install." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen användningsspårning och ingen identifierare för den här installationen."
+          }
+        }
+      }
+    },
     "No way in" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30388,6 +31477,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget fönster har ännu setts förbrukas på detta konto, så detta antar %@ arbete per fönster och öppnar %@ tidigt. Försprånget räknas om när det finns en mätning."
+          }
+        }
+      }
+    },
+    "No ⌘C afterwards. macOS keeps one clipboard rather than a separate selection, so this replaces what you copied last, which is why it is off until you ask for it. Selecting nothing changes nothing, and programs that track the mouse themselves keep taking the drag." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget ⌘C efteråt. macOS har ett enda urklipp snarare än en separat markering, så det här ersätter det du senast kopierade, vilket är varför det är av tills du ber om det. Att markera ingenting ändrar ingenting, och program som själva följer musen tar fortfarande draget."
           }
         }
       }
@@ -31036,6 +32136,17 @@
         }
       }
     },
+    "Notifications are on. Change any of this later in Settings ▸ Notifications." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notiser är på. Ändra detta senare i Inställningar ▸ Notifikationer."
+          }
+        }
+      }
+    },
     "Notifications cannot be sent from here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31274,6 +32385,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Av"
+          }
+        }
+      }
+    },
+    "Off by default because every page-changing tool call then costs a screenshot. It covers the agent's own actions only, not your clicks or a page updating itself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Av som standard, eftersom varje sidändrande verktygsanrop då kostar en skärmbild. Det täcker bara agentens egna åtgärder, inte dina klick eller en sida som uppdaterar sig själv."
+          }
+        }
+      }
+    },
+    "Off still marks the session in the sidebar, so a silenced bell is seen rather than missed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Av markerar fortfarande sessionen i sidofältet, så en tystad signal syns i stället för att missas."
+          }
+        }
+      }
+    },
+    "Off stops both background checks — Help ▸ Check for Updates… still checks the app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Av stoppar båda bakgrundskontrollerna — Hjälp ▸ Sök efter uppdateringar… kontrollerar fortfarande appen."
           }
         }
       }
@@ -31556,6 +32700,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En gång om dagen kontrollerar Threading GitHub för appen och den officiella utgivningskällan för varje installerad agent. Appuppdateringar använder Sparkle efter att du har godkänt; agentuppdateringar körs i en synlig terminal först när du väljer Uppdatera. Av stoppar båda bakgrundskontrollerna — Hjälp ▸ Sök efter uppdateringar… kontrollerar fortfarande appen."
+          }
+        }
+      }
+    },
+    "Once a day, for the app and each installed agent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En gång om dagen, för appen och varje installerad agent."
+          }
+        }
+      }
+    },
+    "Once a day, with no account, project or identifier." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En gång om dagen, utan konto, projekt eller identifierare."
           }
         }
       }
@@ -31891,6 +33057,17 @@
         }
       }
     },
+    "Only custom themes can be deleted. Duplicate this one to make an editable copy." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bara anpassade teman kan raderas. Duplicera det här för att skapa en redigerbar kopia."
+          }
+        }
+      }
+    },
     "Only directories git ignores and a known tool can rebuild are offered. Anything tracked in a repository is left alone, whatever it is called — and ignored files that are not build output, such as .env files, are never touched. In a temporary location a build cache is offered only when Xcode's own manifest identifies it, never an agent's working copy of a repository. Removal is immediate rather than moved to the Trash, since space in the Trash has not been reclaimed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31986,6 +33163,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bara notisen om ett väntande godkännande låter — de andra två är tysta oavsett. Av visar den utan ljudet."
+          }
+        }
+      }
+    },
+    "Only the chat's name, and only while Remote Access is on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bara chattens namn, och bara medan fjärråtkomst är på."
           }
         }
       }
@@ -32958,6 +34146,17 @@
         }
       }
     },
+    "Order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordning"
+          }
+        }
+      }
+    },
     "Order Claude Code stickers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33740,6 +34939,17 @@
         }
       }
     },
+    "Permissions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behörigheter"
+          }
+        }
+      }
+    },
     "Personal" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33846,6 +35056,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fäst"
+          }
+        }
+      }
+    },
+    "Pinned chats stay on top." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fästa chattar ligger kvar överst."
           }
         }
       }
@@ -35170,6 +36391,17 @@
         }
       }
     },
+    "Projects separate with spacing and a rule instead of indentation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekt skiljs åt med luft och en linje i stället för indrag."
+          }
+        }
+      }
+    },
     "Projects without an icon use an image in the checkout or request the GitHub organization avatar implied by the origin remote. Other websites are contacted only when you choose Use Website Favicon." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35654,6 +36886,17 @@
         }
       }
     },
+    "Puts threading-ptyd on the PATH of terminals Threading starts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägger threading-ptyd i PATH för terminaler som Threading startar."
+          }
+        }
+      }
+    },
     "PyPI returned an iPhone tooling version that Threading cannot use." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36034,6 +37277,17 @@
         }
       }
     },
+    "Raises no limit — the extra window comes out of your weekly cap." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Höjer ingen gräns — det extra fönstret dras från din veckogräns."
+          }
+        }
+      }
+    },
     "Random" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36359,6 +37613,17 @@
         }
       }
     },
+    "Read-only task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skrivskyddad uppgift"
+          }
+        }
+      }
+    },
     "Readable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36454,6 +37719,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läser och föreslår. Ändrar ingenting."
+          }
+        }
+      }
+    },
+    "Reads the Claude CLI's keychain sign-in to show live rate limits." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser Claude-CLI:ns inloggning i nyckelringen för att visa aktuella gränser."
+          }
+        }
+      }
+    },
+    "Reads the sign-in the Claude CLI keeps in your macOS keychain and asks Anthropic for the account's rate limits — the numbers in the toolbar's usage pill. The token goes to Anthropic and nowhere else; Threading never stores, refreshes, or logs it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser inloggningen som Claude-CLI:n sparar i din macOS-nyckelring och frågar Anthropic om kontots gränser — siffrorna i verktygsfältets användningspiller. Token skickas till Anthropic och ingen annanstans; Threading sparar, förnyar eller loggar den aldrig."
           }
         }
       }
@@ -36619,6 +37906,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klart. Dina inloggade enheter kan nå den här Mac-datorn."
+          }
+        }
+      }
+    },
+    "Reasoning effort" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resonemangsnivå"
           }
         }
       }
@@ -37286,6 +38584,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Påminn mig senare"
+          }
+        }
+      }
+    },
+    "Remote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärranslutning"
           }
         }
       }
@@ -37983,6 +39292,17 @@
         }
       }
     },
+    "Repeat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upprepa"
+          }
+        }
+      }
+    },
     "Repeat every percentage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38155,6 +39475,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rapporten har sparats säkert och placeras i kö för nytt försök när Threading är aktivt."
+          }
+        }
+      }
+    },
+    "Report the saved task or fix outcome with verification evidence." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapportera resultatet av den sparade uppgiften eller korrigeringen med verifieringsunderlag."
           }
         }
       }
@@ -39238,6 +40569,17 @@
         }
       }
     },
+    "Review the schedule or event, project, instructions, and permissions below. Enabling permits future runs with these settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska schemat eller händelsen, projektet, instruktionerna och behörigheterna nedan. Aktivering tillåter framtida körningar med dessa inställningar."
+          }
+        }
+      }
+    },
     "Review this action before the agent continues." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39580,6 +40922,17 @@
         }
       }
     },
+    "Run" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör"
+          }
+        }
+      }
+    },
     "Run Command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39707,6 +41060,28 @@
         }
       }
     },
+    "Run once on return" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör en gång vid återkomst"
+          }
+        }
+      }
+    },
+    "Run saved tasks on a schedule or when an event arrives." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör sparade uppgifter enligt ett schema eller när en händelse inträffar."
+          }
+        }
+      }
+    },
     "Run the rest of the line as a literal shell command" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39736,6 +41111,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör ”%@” inuti Threading?"
+          }
+        }
+      }
+    },
+    "Run “%@” now?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör ”%@” nu?"
+          }
+        }
+      }
+    },
+    "Run “%@” on %@ now?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör ”%@” på %@ nu?"
           }
         }
       }
@@ -39857,6 +41254,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kör varje agents terminal i en hjälpprocess som fortsätter arbeta medan Threading är stängt och lämnar tillbaka sessionerna vid nästa start. Avstängd medan detta ännu prövas: en agent som startats av hjälpprocessen ärver kanske inte Threadings filåtkomst."
+          }
+        }
+      }
+    },
+    "Runs every hook in the config folder unreviewed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör alla hooks i konfigurationsmappen ogranskade."
           }
         }
       }
@@ -40004,6 +41412,17 @@
         }
       }
     },
+    "Sandboxed, or limited to the capabilities you reviewed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sandlådade, eller begränsade till de förmågor du har granskat."
+          }
+        }
+      }
+    },
     "Save" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40088,6 +41507,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara som baslinje…"
+          }
+        }
+      }
+    },
+    "Save automation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara automatisering"
           }
         }
       }
@@ -40209,6 +41639,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparande är fortfarande pausat; försök återställa igen."
+          }
+        }
+      }
+    },
+    "Saving pauses the automation. Enable it when you are ready. Results remain in Activity after a successful run is archived." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När du sparar pausas automatiseringen. Aktivera den när du är redo. Resultaten finns kvar i Aktivitet efter att en lyckad körning arkiverats."
           }
         }
       }
@@ -40539,6 +41980,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kladdblock"
+          }
+        }
+      }
+    },
+    "Scratchpad folder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kladdblockets mapp"
           }
         }
       }
@@ -41325,6 +42777,17 @@
         }
       }
     },
+    "Selected weekdays" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valda veckodagar"
+          }
+        }
+      }
+    },
     "Selected, empty, disabled, and radio-group accessibility." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41332,6 +42795,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vald, tom, inaktiverad och radiogruppens hjälpmedelsstöd."
+          }
+        }
+      }
+    },
+    "Selecting with the mouse copies, as in a Linux terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Att markera med musen kopierar, som i en Linux-terminal."
           }
         }
       }
@@ -43184,6 +44658,17 @@
         }
       }
     },
+    "Show context" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa sammanhang"
+          }
+        }
+      }
+    },
     "Show context window usage and session stats" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44439,6 +45924,17 @@
         }
       }
     },
+    "Skip missed runs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hoppa över missade körningar"
+          }
+        }
+      }
+    },
     "Skipping is fine. Threading will ask the first time there is something to say." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44956,6 +46452,17 @@
         }
       }
     },
+    "Source event" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källhändelse"
+          }
+        }
+      }
+    },
     "Source-control provider" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45051,6 +46558,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kusliga tider. Frukta ingen merge-konflikt."
+          }
+        }
+      }
+    },
+    "Stable is the finished release and needs no action. Betas arrive earlier and may be rough; switching back here returns you to stable at the next release." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stabil är den färdiga utgåvan och kräver ingen åtgärd. Betaversioner kommer tidigare och kan vara ostabila; att byta tillbaka här återför dig till stabil vid nästa utgåva."
           }
         }
       }
@@ -46036,6 +47554,17 @@
         }
       }
     },
+    "Stops using the helper and removes it from Login Items." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slutar använda hjälpprocessen och tar bort den från inloggningsobjekt."
+          }
+        }
+      }
+    },
     "Stops using the helper and removes it from Login Items. Sessions it is still holding keep running; it is removed at the next launch that finds it idle." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46531,6 +48060,17 @@
         }
       }
     },
+    "Switching it off gives both back exactly what they had. Nothing is suppressed: banners still arrive and the sidebar still marks the session, quietly. The speaker at the sidebar's foot is the same switch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När det stängs av får båda tillbaka precis det de hade. Ingenting undertrycks: aviseringar kommer fortfarande fram och sidofältet markerar fortfarande sessionen, fast tyst. Högtalaren längst ned i sidofältet är samma knapp."
+          }
+        }
+      }
+    },
     "Symbol diff" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46773,6 +48313,17 @@
         }
       }
     },
+    "Task with local edits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppgift med lokala ändringar"
+          }
+        }
+      }
+    },
     "Tell me when I reach my own limits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46795,6 +48346,17 @@
         }
       }
     },
+    "Tell the reasons a bell rings apart." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skilj på anledningarna till att en ljudsignal ljuder."
+          }
+        }
+      }
+    },
     "Tell the reasons a bell rings apart: an agent asking while you are away, a bell in the session you are watching, one during a launch, and one from another program." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46813,6 +48375,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Talar om när en session avslutar en tur eller stannar på ett godkännande. Stäng av funktionen under Allmänt så används den här behörigheten aldrig."
+          }
+        }
+      }
+    },
+    "Tells you when a session finishes a turn or stops on an approval. Turn the feature off in Notifications settings and this grant is never used." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talar om när en konversation avslutar en tur eller stannar för ett godkännande. Stäng av funktionen i inställningarna för Notifikationer så används aldrig denna behörighet."
           }
         }
       }
@@ -47011,6 +48584,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Text"
+          }
+        }
+      }
+    },
+    "Text & Colour" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text och färg"
           }
         }
       }
@@ -47566,6 +49150,17 @@
         }
       }
     },
+    "The agent compares the page with a picture taken just before its action. The pictures stay in memory for the chat and are never added to your visual baselines." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten jämför sidan med en bild tagen strax före åtgärden. Bilderna finns bara i minnet för chatten och läggs aldrig till bland dina visuella baslinjer."
+          }
+        }
+      }
+    },
     "The agent created %@ and wants to continue this conversation there. Reason: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47645,6 +49240,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten lämnade ändringar som inte checkats in i sin hanterade arbetsyta."
+          }
+        }
+      }
+    },
+    "The agent reported a result but did not finish its turn at a ready prompt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten rapporterade ett resultat men avslutade inte sin tur vid en redo prompt."
           }
         }
       }
@@ -47990,13 +49596,13 @@
         }
       }
     },
-    "The app will return to the System theme." : {
+    "The app will switch to the %@ theme." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Appen kommer att återgå till Systemtema."
+            "value" : "Appen byter till temat %@."
           }
         }
       }
@@ -48085,6 +49691,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den behöriga åtgärdsagenten kunde inte startas."
+          }
+        }
+      }
+    },
+    "The automation ended without reporting a result." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatiseringen avslutades utan att rapportera ett resultat."
           }
         }
       }
@@ -48436,6 +50053,17 @@
         }
       }
     },
+    "The chat you have open always stays in view, even when it is not among the five." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten du har öppen syns alltid, även när den inte är bland de fem."
+          }
+        }
+      }
+    },
     "The chat’s name when empty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48711,6 +50339,17 @@
         }
       }
     },
+    "The credentials Threading reads GitHub with, best first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningsuppgifterna Threading läser GitHub med, den bästa först."
+          }
+        }
+      }
+    },
     "The current agent stops. A new session receives a read-only snapshot, while the original conversation stays resumable." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48850,6 +50489,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den befintliga utcheckningen ändrades efter bedömningen. Granska den innan automatiska ändringar tillåts."
+          }
+        }
+      }
+    },
+    "The existing checkout is not clean. Review it before allowing automated edits." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den befintliga arbetskopian har ändringar. Granska den innan automatiska redigeringar tillåts."
           }
         }
       }
@@ -49344,6 +50994,17 @@
         }
       }
     },
+    "The grants Threading asks macOS for, and what leaves this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behörigheterna Threading ber macOS om, och vad som lämnar den här Macen."
+          }
+        }
+      }
+    },
     "The host could not reach %@: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49373,6 +51034,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Värden sparades inte"
+          }
+        }
+      }
+    },
+    "The host's supervisor will then start its worker on this schedule, even while this Mac is offline." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens övervakare startar då dess arbetare enligt schemat, även när den här Macen är offline."
+          }
+        }
+      }
+    },
+    "The host's worker will start once, now, with these instructions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens arbetare startar en gång, nu, med de här instruktionerna."
           }
         }
       }
@@ -49769,6 +51452,17 @@
         }
       }
     },
+    "The most recently used keep running." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De senast använda fortsätter köras."
+          }
+        }
+      }
+    },
     "The movie could not be read." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49809,6 +51503,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filmens centrerade uppspelningsknapp. Starta filmen så försvinner knappen från bilden; håll pekaren över filmen för att visa Paus igen."
+          }
+        }
+      }
+    },
+    "The name or instructions are too long for a remote automation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Namnet eller instruktionerna är för långa för en fjärrautomatisering."
           }
         }
       }
@@ -49919,6 +51624,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den andra Threading håller fortfarande tillståndet, så den här avslutas i stället för att riskera att två skriver till det."
+          }
+        }
+      }
+    },
+    "The other alerts stay silent. Picking one plays it. Add a Sound copies a sound file into your Sounds folder, where macOS looks for it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Övriga aviseringar förblir tysta. Att välja ett spelar upp det. Lägg till ljud kopierar en ljudfil till din Sounds-mapp, där macOS letar efter den."
           }
         }
       }
@@ -50420,6 +52136,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Avslaget läses och sessionen markeras som stoppad; inget skrivs och inget schemaläggs."
+          }
+        }
+      }
+    },
+    "The remote automation changed. Inspect it again before retrying." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärrautomatiseringen har ändrats. Granska den igen innan du försöker på nytt."
           }
         }
       }
@@ -51150,6 +52877,17 @@
         }
       }
     },
+    "The status card and usage pill already show what it says." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Statuskortet och användningspillret visar redan det den säger."
+          }
+        }
+      }
+    },
     "The stored baseline image no longer matches its approved revision." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51427,6 +53165,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdateringen för %@ deklarerar dataversion %lld, men det installerade paketet använder redan %lld. Dataversionen får inte sänkas."
+          }
+        }
+      }
+    },
+    "The user did not approve this automation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användaren godkände inte den här automatiseringen."
           }
         }
       }
@@ -53666,6 +55415,17 @@
         }
       }
     },
+    "Threading checks GitHub for the app and each installed agent's official release source. App updates use Sparkle after you agree; agent updates run in a visible terminal only when you choose Update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kontrollerar GitHub för appen och den officiella utgivningskällan för varje installerad agent. Appuppdateringar använder Sparkle efter att du har godkänt; agentuppdateringar körs i en synlig terminal först när du väljer Uppdatera."
+          }
+        }
+      }
+    },
     "Threading chooses “Stop and wait”, schedules “continue” for the window's reset, and the session resumes on its own." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54271,6 +56031,17 @@
         }
       }
     },
+    "Threading lists accounts; it reads a credential only if you allow it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading listar konton; en inloggningsuppgift läses bara om du tillåter det."
+          }
+        }
+      }
+    },
     "Threading mints a new certificate and a new pairing code. Every paired device stops trusting this Mac and has to scan the new code before it can connect again. Use Prepare Rotation instead if this Mac’s certificate is still working." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54300,6 +56071,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading avslutades oväntat förra gången. Dess öppna sessions- och webbläsarfönster öppnades inte igen."
+          }
+        }
+      }
+    },
+    "Threading reads each agent's output for image, PDF, document, archive and diagram paths and lists them in the chat's panel. Turn an agent off here if an update changes how it prints paths." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading läser varje agents utdata efter sökvägar till bilder, PDF:er, dokument, arkiv och diagram och listar dem i chattens panel. Stäng av en agent här om en uppdatering ändrar hur den skriver ut sökvägar."
           }
         }
       }
@@ -54579,6 +56361,17 @@
         }
       }
     },
+    "Threading will start an agent with these settings once, now." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading startar en agent med de här inställningarna en gång, nu."
+          }
+        }
+      }
+    },
     "Threading will stop this listener and remove its scoped key from Keychain. Existing trigger definitions and run history stay visible, but they cannot receive new events until you reconnect the source." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54586,6 +56379,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading stoppar lyssnaren och tar bort dess begränsade nyckel från Nyckelhanteraren. Befintliga triggerdefinitioner och körningshistorik finns kvar, men de kan inte ta emot nya händelser förrän du återansluter källan."
+          }
+        }
+      }
+    },
+    "Threading will then start agents with these settings on its schedule or when its event arrives, without asking again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading startar sedan agenter med de här inställningarna enligt schemat eller när händelsen kommer, utan att fråga igen."
           }
         }
       }
@@ -54641,6 +56445,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threadings statuskort och användningspiller visar redan modell, ansträngning, gren och gränser, så raden under skrivfältet upprepar dem mest. Detta döljer den i sessioner som Threading startar — dina egna terminaler behåller den — medan ditt statusradskommando fortsätter köras med utdatan kastad, så det som det matar (t.ex. en användningscache) fortsätter fungera. Gäller från nästa start eller återupptagning."
+          }
+        }
+      }
+    },
+    "Threading: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading: %@"
           }
         }
       }
@@ -54773,6 +56588,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tid"
+          }
+        }
+      }
+    },
+    "Time (HH:mm)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tid (HH:mm)"
+          }
+        }
+      }
+    },
+    "Time zone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidszon"
           }
         }
       }
@@ -55136,6 +56973,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tryckstil"
+          }
+        }
+      }
+    },
+    "Touch service unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pektjänsten är inte tillgänglig"
           }
         }
       }
@@ -55564,6 +57412,17 @@
         }
       }
     },
+    "Turn this off to give the agent the file itself, which is what you want when the format is the thing you are working on. The shell drawer never converts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng av detta om agenten ska få originalfilen, till exempel när du arbetar med själva formatet. Skallådan konverterar aldrig filer."
+          }
+        }
+      }
+    },
     "Turning it off closes every connection and shared-chat link." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55774,6 +57633,17 @@
         }
       }
     },
+    "Typing in a hidden project's chat shows the project again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När du skriver i ett dolt projekts chatt visas projektet igen."
+          }
+        }
+      }
+    },
     "Ultra" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55825,6 +57695,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inte tillgängligt i det aktuella fönstret."
+          }
+        }
+      }
+    },
+    "Unavailable project" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otillgängligt projekt"
+          }
+        }
+      }
+    },
+    "Unavailable source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otillgänglig källa"
           }
         }
       }
@@ -57064,6 +58956,17 @@
         }
       }
     },
+    "Uses a session-only settings file. Off removes Threading's lifecycle hooks from Terminal; Native permission prompts keep working. Applies on the next start or resume." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder en inställningsfil enbart för konversationen. Av tar bort Threadings livscykel-hooks från Terminal; inbyggda behörighetsfrågor fortsätter att fungera. Ändringen gäller nästa gång konversationen startas eller fortsätts."
+          }
+        }
+      }
+    },
     "Uses a temporary encrypted HTTPS relay. Turning it off immediately revokes every pairing and shared-chat link from this launch." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57104,6 +59007,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använder valet Konversationshastighet i inställningarna under Allmänt."
+          }
+        }
+      }
+    },
+    "Uses the speed chosen in Settings ▸ Chats." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder hastigheten som valts i Inställningar ▸ Chattar."
           }
         }
       }
@@ -58199,6 +60113,17 @@
         }
       }
     },
+    "What a program's bell does. Picking one plays it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vad ett programs ljudsignal gör. Att välja en spelar upp den."
+          }
+        }
+      }
+    },
     "What a program's bell does. Picking one plays it. Off still marks the session in the sidebar, so a silenced bell is seen rather than missed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58408,6 +60333,17 @@
         }
       }
     },
+    "When a branch has more than one session." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När en gren har fler än en konversation."
+          }
+        }
+      }
+    },
     "When a conversation finishes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58441,6 +60377,28 @@
         }
       }
     },
+    "When a session is blocked or finishes while you are elsewhere." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När en konversation väntar eller blir klar medan du är någon annanstans."
+          }
+        }
+      }
+    },
+    "When offline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid offline"
+          }
+        }
+      }
+    },
     "When on, Threading may ask GitHub whether the owner in a project's origin remote is an organization and download that organization's avatar. It never follows a package.json homepage automatically; Use Website Favicon… contacts only the address you enter. Turn it off in General to stop automatic lookups." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58452,6 +60410,17 @@
         }
       }
     },
+    "When on, Threading may ask GitHub whether the owner in a project's origin remote is an organization and download that organization's avatar. It never follows a package.json homepage automatically; Use Website Favicon… contacts only the address you enter. Turn it off in Sidebar settings to stop automatic lookups." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När funktionen är på kan Threading fråga GitHub om ägaren i ett projekts origin-fjärr är en organisation och hämta organisationens avatar. En startsida i package.json följs aldrig automatiskt; Använd webbplatsens favicon… kontaktar bara adressen du anger. Stäng av funktionen i inställningarna för Sidofält för att stoppa automatiska uppslagningar."
+          }
+        }
+      }
+    },
     "When on, Threading sends a SHA-256 hash of the login email to Gravatar. If no avatar is found, it sends the email to GitHub's public-user search and may download the returned avatar. A chosen emoji still wins. Turn it off in General to stop the lookups." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58459,6 +60428,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När funktionen är på skickar Threading en SHA-256-hash av inloggningsadressen till Gravatar. Om ingen avatar hittas skickas adressen till GitHubs offentliga användarsökning och en returnerad avatar kan hämtas. En vald emoji har fortfarande företräde. Stäng av funktionen i Allmänt för att stoppa uppslagningarna."
+          }
+        }
+      }
+    },
+    "When on, Threading sends a SHA-256 hash of the login email to Gravatar. If no avatar is found, it sends the email to GitHub's public-user search and may download the returned avatar. A chosen emoji still wins. Turn it off in Sidebar settings to stop the lookups." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När funktionen är på skickar Threading en SHA-256-hash av inloggningsadressen till Gravatar. Om ingen avatar hittas skickas adressen till GitHubs offentliga användarsökning och en returnerad avatar kan hämtas. En vald emoji har fortfarande företräde. Stäng av funktionen i inställningarna för Sidofält för att stoppa uppslagningarna."
           }
         }
       }
@@ -58518,6 +60498,17 @@
         }
       }
     },
+    "Where Claude's transcript lands in a terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Var Claudes transkribering hamnar i en terminal."
+          }
+        }
+      }
+    },
     "Where Threading keeps your settings and your work, and how to start over." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58540,6 +60531,17 @@
         }
       }
     },
+    "Which sessions are running again when Threading opens." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vilka konversationer som körs igen när Threading öppnas."
+          }
+        }
+      }
+    },
     "While Remote Access is on, so a phone away from home can reach it. The display still turns off." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58547,6 +60549,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Medan fjärråtkomst är på, så att en telefon utanför hemmet kan nå den. Skärmen stängs ändå av."
+          }
+        }
+      }
+    },
+    "While a turn is running or waiting for your answer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medan en tur körs eller väntar på ditt svar."
           }
         }
       }
@@ -58855,6 +60868,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbete eller privat"
+          }
+        }
+      }
+    },
+    "Worker" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare"
+          }
+        }
+      }
+    },
+    "Worker ID" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetar-ID"
+          }
+        }
+      }
+    },
+    "Worker: %@\nTiming: %@\nRevision: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetare: %@\nTid: %@\nRevision: %lld"
           }
         }
       }
@@ -59224,6 +61270,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriver en delningssäker diagnosfil och visar den."
+          }
+        }
+      }
+    },
+    "Written to a file on this Mac. Threading never uploads it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skrivs till en fil på den här Macen. Threading laddar aldrig upp den."
           }
         }
       }
@@ -59829,6 +61886,17 @@
         }
       }
     },
+    "alternate screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "alternativ skärm"
+          }
+        }
+      }
+    },
     "animation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59972,6 +62040,17 @@
         }
       }
     },
+    "awake" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vaken"
+          }
+        }
+      }
+    },
     "backdrop gradient" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60034,6 +62113,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ljudsignal"
+          }
+        }
+      }
+    },
+    "beta" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "beta"
           }
         }
       }
@@ -60632,6 +62722,28 @@
         }
       }
     },
+    "days" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "dagar"
+          }
+        }
+      }
+    },
+    "default agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "standardagent"
+          }
+        }
+      }
+    },
     "delete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60716,6 +62828,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "klar"
+          }
+        }
+      }
+    },
+    "dormant" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vilande"
           }
         }
       }
@@ -61112,6 +63235,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "dold och i vänteläge"
+          }
+        }
+      }
+    },
+    "hidden projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "dolda projekt"
+          }
+        }
+      }
+    },
+    "hooks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hooks"
+          }
+        }
+      }
+    },
+    "hooks.json" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hooks.json"
           }
         }
       }
@@ -61667,6 +63823,17 @@
         }
       }
     },
+    "macOS asks once per login — choose Always Allow to not be asked again. When this is off, usage comes from caches the CLI leaves on disk, which can be hours old or missing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS frågar en gång per inloggning — välj Tillåt alltid för att inte tillfrågas igen. När detta är av kommer användningen från cachar som CLI:n lämnar på disk, vilka kan vara timmar gamla eller saknas."
+          }
+        }
+      }
+    },
     "macOS asks the first time a project in one of those locations is read." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62011,6 +64178,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ny rad"
+          }
+        }
+      }
+    },
+    "nightly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "nightly"
           }
         }
       }
@@ -62367,6 +64545,17 @@
         }
       }
     },
+    "order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ordning"
+          }
+        }
+      }
+    },
     "origin" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62462,6 +64651,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ljud per händelse"
+          }
+        }
+      }
+    },
+    "permission mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "behörighetsläge"
           }
         }
       }
@@ -62785,6 +64985,17 @@
         }
       }
     },
+    "recently used" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "nyligen använda"
+          }
+        }
+      }
+    },
     "reclaim" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62989,6 +65200,28 @@
         }
       }
     },
+    "restore limit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "återställningsgräns"
+          }
+        }
+      }
+    },
+    "restore window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "återställningsfönster"
+          }
+        }
+      }
+    },
     "resume automatically" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63161,6 +65394,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "schemalagd"
+          }
+        }
+      }
+    },
+    "scratchpad" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kladdblock"
           }
         }
       }
@@ -63374,6 +65618,28 @@
         }
       }
     },
+    "sleep" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vila"
+          }
+        }
+      }
+    },
+    "sort" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sortera"
+          }
+        }
+      }
+    },
     "sound" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63506,6 +65772,17 @@
         }
       }
     },
+    "status line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "statusrad"
+          }
+        }
+      }
+    },
     "stays for review" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63634,6 +65911,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "terminalteckensnitt"
+          }
+        }
+      }
+    },
+    "terminal scrolling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "terminalrullning"
           }
         }
       }
@@ -64052,6 +66340,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "osatt"
+          }
+        }
+      }
+    },
+    "updates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "uppdateringar"
           }
         }
       }

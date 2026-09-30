@@ -4,6 +4,34 @@ import XCTest
 
 @MainActor
 final class RealDevicePaneTests: HostedStoreTestCase {
+    func testLiveDragCoalescesMovesButPreservesDownUpAndQueuedTaps() async throws {
+        let control = RealDeviceControlFake(support: .available(supportedMediaFeatures: 140), liveTouch: true)
+        let authorizer = PhysicalDeviceInputAuthorizerFake(approval: true)
+        let controller = RealDevicePaneViewController(control: control, inputAuthorizer: authorizer)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.frameImageForTesting != nil && controller.controlSupportForTesting != nil }
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+        try await eventually { controller.screenInteractionStateForTesting == .ready(touch: true, keyboard: false) }
+        let screen = controller.screenViewForTesting
+        screen.onTouchBegan?(CGPoint(x: 0.1, y: 0.2))
+        for index in 0..<1000 { screen.onTouchMoved?(CGPoint(x: Double(index) / 1000, y: 0.5)) }
+        screen.onTouchEnded?(CGPoint(x: 0.9, y: 0.5))
+        screen.onTap?(CGPoint(x: 0.3, y: 0.4))
+        screen.onTap?(CGPoint(x: 0.6, y: 0.7))
+        try await eventually { await control.inputs().count == 5 }
+        let events = await control.inputs()
+        XCTAssertEqual(events, [
+            .touchDown(x: 0.1, y: 0.2), .touchMove(x: 0.999, y: 0.5), .touchUp(x: 0.9, y: 0.5),
+            .tap(x: 0.3, y: 0.4), .tap(x: 0.6, y: 0.7),
+        ])
+        controller.setPresented(false)
+        screen.onTap?(CGPoint(x: 0.5, y: 0.5))
+        await Task.yield()
+        let after = await control.inputs()
+        XCTAssertEqual(after, events)
+    }
     func testMissingToolingOffersSetupInsteadOfAnUnrelatedConnectionInstruction() async throws {
         let control = RealDeviceControlFake(
             support: .unknown(.probeToolUnavailable),
@@ -356,6 +384,7 @@ private let physicalDeviceTestFixture = PhysicalDevice(
 )
 
 private actor RealDeviceControlFake: PhysicalDeviceControlling {
+    nonisolated let supportsLiveTouch: Bool
     struct Counts: Sendable {
         var available = 0
         var screenshots = 0
@@ -375,13 +404,15 @@ private actor RealDeviceControlFake: PhysicalDeviceControlling {
         support: PhysicalDeviceControlSupport = .unavailable(.mediaStreamingUnavailable),
         preparedSupport: PhysicalDeviceControlSupport? = nil,
         preparationFailure: PhysicalDeviceControlError? = nil,
-        screenshotFailure: PhysicalDeviceControlError? = nil
+        screenshotFailure: PhysicalDeviceControlError? = nil,
+        liveTouch: Bool = false
     ) {
         self.failure = failure
         self.support = support
         self.preparedSupport = preparedSupport
         self.preparationFailure = preparationFailure
         self.screenshotFailure = screenshotFailure
+        supportsLiveTouch = liveTouch
     }
 
     func installTooling() {

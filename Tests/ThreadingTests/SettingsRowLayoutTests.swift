@@ -818,13 +818,13 @@ final class SettingsRowLayoutTests: XCTestCase {
 
     /// The catalogue's own answer, so a feature whose vocabulary stops matching is caught here
     /// rather than by a reader who searched for it and found nothing. "mute" has to surface
-    /// the actual setting — a result that only said "General" made the reader run their own
-    /// search inside the page.
+    /// the actual setting — a result that only named the page made the reader run their own
+    /// search inside it.
     func testTheCatalogueAnswersMuteWithTheSilenceSetting() throws {
-        let general = try XCTUnwrap(
-            SettingsPages.sidebarItems.first { $0.id == SettingsPages.generalID }
+        let notifications = try XCTUnwrap(
+            SettingsPages.sidebarItems.first { $0.id == SettingsPages.notificationsID }
         )
-        let hits = general.entries.filter {
+        let hits = notifications.entries.filter {
             SettingsSearch.matches(query: "mute", text: $0.searchText)
         }
         XCTAssertTrue(

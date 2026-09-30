@@ -106,34 +106,46 @@ final class GitHubPreferencesViewController: NSViewController {
         var ghField: NSTextField?
         var gitField: NSTextField?
 
-        let page = SettingsUI.page(title: "GitHub", sections: [
-            SettingsUI.note(
-                "Extensions can ask Threading to read from GitHub — check runs today. Threading "
-                    + "performs those reads itself with the best credential below; extensions "
-                    + "never receive a token."
-            ),
-            SettingsUI.section("GitHub App", appConnectionCard()),
-            SettingsUI.section("Command-Line Fallbacks", SettingsCard(rows: [
-                SettingsUI.row(
-                    title: "gh CLI",
-                    subtitle: "Checking…",
-                    control: nil,
-                    subtitleField: &ghField
+        let page = SettingsUI.page(
+            title: "GitHub",
+            summary: "The credentials Threading reads GitHub with, best first.",
+            sections: [
+                SettingsUI.section(
+                    "GitHub App",
+                    appConnectionCard(),
+                    help: SettingsUI.help(
+                        "GitHub App",
+                        "Extensions can ask Threading to read from GitHub — check runs today. "
+                            + "Threading performs those reads itself with the best credential "
+                            + "below; extensions never receive a token."
+                    )
                 ),
-                SettingsUI.row(
-                    title: "Git credential helper",
-                    subtitle: "Checking…",
-                    control: nil,
-                    subtitleField: &gitField
+                SettingsUI.section(
+                    "Command-Line Fallbacks",
+                    SettingsCard(rows: [
+                        SettingsUI.row(
+                            title: "gh CLI",
+                            subtitle: "Checking…",
+                            control: nil,
+                            subtitleField: &ghField
+                        ),
+                        SettingsUI.row(
+                            title: "Git credential helper",
+                            subtitle: "Checking…",
+                            control: nil,
+                            subtitleField: &gitField
+                        )
+                    ]),
+                    help: SettingsUI.help(
+                        "Command-Line Fallbacks",
+                        "The chain is tried top to bottom: the app connection, then gh, then the "
+                            + "credential helper, then anonymously. Reads name which credential "
+                            + "answered, so a private repository explains itself instead of "
+                            + "failing namelessly."
+                    )
                 )
-            ])),
-            SettingsUI.note(
-                "The chain is tried top to bottom: the app connection, then gh, then the "
-                    + "credential helper, then anonymously. Reads name which credential "
-                    + "answered, so a private repository explains itself instead of failing "
-                    + "namelessly."
-            )
-        ])
+            ]
+        )
         ghSubtitle = ghField
         gitSubtitle = gitField
 
@@ -152,9 +164,13 @@ final class GitHubPreferencesViewController: NSViewController {
         SettingsCard(rows: [
             SettingsUI.row(
                 title: "Client ID",
-                subtitle: "From your GitHub App's settings page. Device-flow sign-in needs "
-                    + "no client secret. Enable “Device flow” on the app, and install it on "
-                    + "the repositories it should see.",
+                subtitle: "From your GitHub App's settings page. No secret is needed.",
+                help: SettingsUI.help(
+                    "Client ID",
+                    "From your GitHub App's settings page. Device-flow sign-in needs no client "
+                        + "secret. Enable “Device flow” on the app, and install it on the "
+                        + "repositories it should see."
+                ),
                 control: clientIDField
             ),
             SettingsUI.fullRow(connectionRow())

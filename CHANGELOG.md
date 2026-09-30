@@ -16,6 +16,30 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.6.0]
+
+### Added
+
+- **Automations for recurring host work.** Create, review, approve and manage scheduled
+  automations from Threading, with durable runs and remote execution history.
+- **Physical iPhone diagnostics and control.** Prepare a paired iPhone, inspect device logs and
+  control the selected device through the bounded diagnostics path.
+- Theme backdrop motion and gradient controls now share the same design-system vocabulary on Mac
+  and iPhone.
+
+### Changed
+
+- Session rows share their identity, title and attention presentation across the sidebar and
+  remote surfaces. PTY attach and remote-session handshakes preserve process incarnation so a
+  stale host cannot silently resume.
+- Settings, trigger tooling, and the remote session dashboard use the updated command and theme
+  contracts.
+
+### Fixed
+
+- XCTest process cleanup, customization-gallery layout, device-log pane behavior, and iPhone
+  usage/session presentation are more reliable under repeated runs and reconnects.
+
 ## [0.5.0]
 
 ### Added

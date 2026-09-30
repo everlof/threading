@@ -45,6 +45,10 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         public let borderWidth: Double
         public let glow: Glow?
 
+        /// The broad-ground gradient, resolved in the same appearance as the palette. Optional
+        /// for older hosts/clients. Pictures remain Mac-local; this recipe needs no asset fetch.
+        public let backdropGradient: RemoteThemeGradient?
+
         /// The theme's multiplier for semantic app text. Optional for wire compatibility;
         /// clients receiving nil use 1. This composes with any client-side accessibility
         /// preference rather than replacing it.
@@ -69,7 +73,8 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
             glow: Glow? = nil,
             textScale: Double? = nil,
             typeface: RemoteThemeTypeface? = nil,
-            fontFamily: String? = nil
+            fontFamily: String? = nil,
+            backdropGradient: RemoteThemeGradient? = nil
         ) {
             self.panelRadius = panelRadius
             self.controlRadius = controlRadius
@@ -78,6 +83,7 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
             self.textScale = textScale
             self.typeface = typeface
             self.fontFamily = fontFamily
+            self.backdropGradient = backdropGradient
         }
     }
 

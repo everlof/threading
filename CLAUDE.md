@@ -203,6 +203,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | A scheduled end for a session: the deadline and its three moments, the wind-down message, the hold at every seam, bounded interrupts and the stop-agent escalation, quiet hours, receipts | [`curfew.md`](docs/architecture/curfew.md) |
 | An agent that would not start: the captured failure record, the launch-failure surface, the transcript preflight, and repairing a broken conversation with an agent | [`launch-failure.md`](docs/architecture/launch-failure.md) |
 | The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`send_to_session`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
+| Autonomous host work, durable questions/continuations, delivery receipts, worker memory and the portable owner CLI | [`autonomous-controller.md`](docs/architecture/autonomous-controller.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |
 | Agent marks, account chips, project icons, icon discovery and research | [`icons.md`](docs/architecture/icons.md) |

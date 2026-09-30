@@ -268,7 +268,7 @@ refusal is **reported**, which is why `updateAgentTitle` returns a `Bool` — an
 call succeeded when the name was dropped goes on to tell the user the session was renamed while
 the sidebar still says what it said before. Two further outcomes are reported as successes with
 a caveat rather than as failures, because both are the user's own settled choice: a `customTitle`
-already showing, and **Settings ▸ General** set to ignore agent titles at all.
+already showing, and **Settings ▸ Sidebar** set to ignore agent titles at all.
 
 The tool writes as **`.chosen`** where the two transports write as `.reported`
 (`AgentTitleSource`), and a reported write cannot displace a chosen name. Without that rule the
@@ -1558,7 +1558,7 @@ not detection, so turning it off does not hide the images you attach or the ones
 in the panel — which the empty state now says, because an empty pane that blames a setting for
 something the setting does not control is worse than an empty pane.
 
-The General page builds those toggles from `AgentKind.allCases`, the same closed set used by the
+The Chats settings page builds those toggles from `AgentKind.allCases`, the same closed set used by the
 stored disabled set and scanner consumers. This is load-bearing because the empty pane directs a
 user to that page by runtime name: a runtime with a setting but no row would give a precise route
 to a control that did not exist.

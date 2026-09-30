@@ -271,6 +271,8 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func listTriggerSources(
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func manageAutomation(_ arguments: AutomationToolArguments, for sessionID: SessionID,
+                        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void)
   func listTriggers(
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )

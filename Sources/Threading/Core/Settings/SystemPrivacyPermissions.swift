@@ -89,7 +89,7 @@ enum SystemPrivacyPermission: String, CaseIterable, Sendable {
         case .notifications:
             return L10n.string(
                 "Tells you when a session finishes a turn or stops on an approval. Turn the "
-                    + "feature off in General settings and this grant is never used."
+                    + "feature off in Notifications settings and this grant is never used."
             )
         case .accessibility:
             return L10n.string(

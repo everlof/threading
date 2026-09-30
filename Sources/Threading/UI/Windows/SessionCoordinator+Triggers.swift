@@ -20,7 +20,8 @@ private final class TriggerFixStageRegistry {
 extension SessionCoordinator {
     func performTriggerDispatch(_ dispatch: TriggerDispatch) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, let claimed = try? await TriggerStore.shared.claimDispatch(dispatch.run.id) else { return }
+            var run = claimed
             let triggerName = (try? await TriggerStore.shared.trigger(id: dispatch.run.triggerID))?
                 .definition.name ?? L10n.string("Automated trigger")
             let managedPlan = dispatch.revision.checkoutPolicy == .managedWorktree
@@ -29,29 +30,34 @@ extension SessionCoordinator {
             guard dispatch.revision.agentKind.supportsNativeUI,
                   dispatch.revision.agentKind.supportsPermissionModes else {
                 await holdBeforeLaunch(
-                    dispatch.run,
+                    run,
+                    revision: dispatch.revision,
                     because: L10n.string(
                         "The configured agent cannot guarantee a read-only assessment stage."
                     )
                 )
                 return
             }
-            let runtimeDeadline = Date().addingTimeInterval(
-                TimeInterval(dispatch.revision.limits.maximumRuntimeMinutes * 60)
-            )
-            var run = dispatch.run
-            if run.sessionID == nil {
-                run.sessionID = SessionID()
-                do {
-                    try await TriggerStore.shared.updateRun(run)
-                } catch {
+            if dispatch.revision.executionMode == .taskLocalEdits,
+               dispatch.revision.checkoutPolicy == .projectCheckout,
+               let project = environment.projectStore.project(withID: dispatch.revision.projectID) {
+                let path = project.folderPath
+                guard (try? await Task.detached(priority: .utility) {
+                    try ManagedGitWorkspace.existingCheckoutIsClean(path)
+                }.value) == true else {
+                    // No session was started, so the receipt must not name the reserved one.
+                    run.sessionID = nil
                     await settleNeedsAttention(
-                        dispatch.run,
-                        because: L10n.string("The assessment agent could not be started.")
+                        run,
+                        because: L10n.string("The existing checkout is not clean. Review it before allowing automated edits."),
+                        holdReason: .dirtyCheckout
                     )
                     return
                 }
             }
+            let runtimeDeadline = Date().addingTimeInterval(
+                TimeInterval(dispatch.revision.limits.maximumRuntimeMinutes * 60)
+            )
             let plan = ScheduledSessionPlan(
                 reservedSessionID: run.sessionID,
                 projectID: dispatch.revision.projectID,
@@ -61,7 +67,7 @@ extension SessionCoordinator {
                 reasoningEffort: dispatch.revision.reasoningEffort,
                 branch: nil,
                 usesNativeUI: dispatch.revision.agentKind.supportsNativeUI,
-                permissionMode: .plan,
+                permissionMode: dispatch.revision.executionMode == .taskLocalEdits ? .acceptEdits : .plan,
                 managedWorkspacePlan: managedPlan,
                 role: .chat,
                 curfew: .at(runtimeDeadline)
@@ -70,6 +76,7 @@ extension SessionCoordinator {
                 run.sessionID = nil
                 await holdBeforeLaunch(
                     run,
+                    revision: dispatch.revision,
                     because: L10n.string("The configured project or workspace is unavailable.")
                 )
                 return
@@ -83,7 +90,7 @@ extension SessionCoordinator {
                 dispatch: dispatch,
                 triggerName: triggerName
             )
-            run.state = .assessing
+            run.state = dispatch.revision.executionMode.isTask ? .running : .assessing
             run.startedAt = run.startedAt ?? Date()
             run.holdReason = nil
             run.boundedDiagnostic = nil
@@ -96,7 +103,7 @@ extension SessionCoordinator {
                     try? ManagedGitWorkspace.discardUnstarted(workspace)
                 }
                 await settleNeedsAttention(
-                    dispatch.run,
+                    run,
                     because: L10n.string("The assessment agent could not be started.")
                 )
                 return
@@ -113,7 +120,14 @@ extension SessionCoordinator {
         }
     }
 
-    private func holdBeforeLaunch(_ original: TriggerRun, because diagnostic: String) async {
+    private func holdBeforeLaunch(_ original: TriggerRun, revision: TriggerRevision, because diagnostic: String) async {
+        guard original.canWaitForRelease(under: revision) else {
+            var run = original
+            run.sessionID = nil
+            run.managedWorkspaceID = nil
+            await settleNeedsAttention(run, because: diagnostic, holdReason: .backgroundUnavailable)
+            return
+        }
         var run = original
         run.state = .queued
         run.sessionID = nil
@@ -128,7 +142,7 @@ extension SessionCoordinator {
         guard event.run.state == .fixQueued,
               event.run.result?.disposition == .straightforwardFix,
               event.revision.executionMode == .assessThenFix else {
-            presentTriggerReceipt(for: event.run)
+            if event.run.state != .finishing { presentTriggerReceipt(for: event.run) }
             return
         }
         TriggerFixStageRegistry.shared.arm(run: event.run, revision: event.revision)
@@ -152,21 +166,47 @@ extension SessionCoordinator {
         guard event.transition.completedPendingOutcome else { return }
         if let pending = TriggerFixStageRegistry.shared.take(sessionID: event.sessionID) {
             Task { @MainActor [weak self] in
-                await self?.startTriggerFix(pending.run, revision: pending.revision)
+                if event.transition.current.isPromptReady {
+                    await self?.startTriggerFix(pending.run, revision: pending.revision)
+                } else {
+                    await self?.settleNeedsAttention(pending.run, because: L10n.string("The trigger run needs review."))
+                }
             }
         } else {
             Task { @MainActor [weak self] in
-                await self?.settleUnreportedTriggerRun(sessionID: event.sessionID)
+                await self?.settleUnreportedTriggerRun(sessionID: event.sessionID, promptReady: event.transition.current.isPromptReady)
             }
         }
     }
 
-    private func settleUnreportedTriggerRun(sessionID: SessionID) async {
+    private func settleUnreportedTriggerRun(sessionID: SessionID, promptReady: Bool) async {
         guard var run = try? await TriggerStore.shared.run(sessionID: sessionID),
-              run.state == .assessing || run.state == .fixing else { return }
-        let diagnostic = run.state == .fixing
-            ? L10n.string("The fix agent ended without reporting a final result.")
-            : L10n.string("The assessment agent ended without reporting an assessment.")
+              run.state == .assessing || run.state == .fixing || run.state == .running || run.state == .finishing else { return }
+        if run.state == .finishing, promptReady, let result = run.result {
+            switch result.disposition {
+            case .succeeded, .fixed, .noChangeNeeded: run.state = .completed
+            case .failed: run.state = .failed
+            case .straightforwardFix, .needsHuman: run.state = .needsAttention
+            }
+            run.settledAt = Date()
+            do { try await TriggerStore.shared.updateRun(run) } catch { return }
+            if run.state == .completed,
+               let revision = try? await TriggerStore.shared.revision(id: run.triggerRevisionID),
+               revision.automation?.archiveOnSuccess == true {
+                _ = SessionArchiveScheduler.shared.request(sessionID: sessionID, reason: result.summary, successfulAutomation: true)
+            }
+            presentTriggerReceipt(for: run)
+            try? await TriggerRuntime.shared.releaseQueue()
+            return
+        }
+        let diagnostic: String
+        switch run.state {
+        case .fixing: diagnostic = L10n.string("The fix agent ended without reporting a final result.")
+        case .running: diagnostic = L10n.string("The automation ended without reporting a result.")
+        // The result is kept; what is missing is the ready prompt that proves the turn ended.
+        case .finishing: diagnostic = L10n.string("The agent reported a result but did not finish its turn at a ready prompt.")
+        default: diagnostic = L10n.string("The assessment agent ended without reporting an assessment.")
+        }
         run.state = .needsAttention
         run.settledAt = Date()
         run.boundedDiagnostic = diagnostic
@@ -270,10 +310,6 @@ extension SessionCoordinator {
         try? await TriggerRuntime.shared.releaseQueue()
     }
 
-    func triggerFixDidFinish(_ event: TriggerFixDidFinish) {
-        presentTriggerReceipt(for: event.run)
-    }
-
     private func presentTriggerReceipt(for run: TriggerRun) {
         let summary = run.result?.summary
             ?? run.boundedDiagnostic
@@ -281,11 +317,11 @@ extension SessionCoordinator {
         let title: String
         switch run.state {
         case .completed:
-            title = L10n.string("Trigger fix ready to verify")
+            title = L10n.string("Automation completed")
         case .failed:
-            title = L10n.string("Trigger run failed")
+            title = L10n.string("Automation failed")
         default:
-            title = L10n.string("Trigger run needs attention")
+            title = L10n.string("Automation needs attention")
         }
         toastPresenter(ToastRequest(
             message: title,

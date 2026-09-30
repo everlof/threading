@@ -80,6 +80,7 @@ assert_release_credentials() {
         || fail "the Threading Sparkle private key is unavailable"
     [[ "$shipped_key" == "$current_signing_key" ]] \
         || fail "the Sparkle private key does not match the public key shipped by the app"
+    "$ROOT/scripts/sentry-release.sh" check
 }
 
 workflow_was_disabled=0

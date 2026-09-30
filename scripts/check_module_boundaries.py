@@ -9,6 +9,14 @@ import sys
 
 
 MODULE_BOUNDARIES = {
+    "ControllerRuntime": (
+        pathlib.Path("Targets/Controller/Sources/ControllerRuntime"),
+        {"Foundation", "ThreadingController", "ThreadingDomain", "ThreadingPTYClient", "ThreadingPTYHostKit"},
+    ),
+    "ThreadingController": (
+        pathlib.Path("Packages/ThreadingController/Sources/ThreadingController"),
+        {"Foundation", "CControllerSQLite", "ThreadingDomain"},
+    ),
     "ThreadingDomain": (
         pathlib.Path("Packages/ThreadingDomain/Sources/ThreadingDomain"),
         {"Foundation"},

@@ -1314,10 +1314,12 @@ final class AppSettings {
     ///
     /// A public release installed over an internal build shares its defaults domain, so the
     /// public getter deliberately refuses to inherit a stored development endpoint.
+    /// This is a recorded user choice: hosted render tests must never switch the real app's
+    /// service, even temporarily, or its next launch can open development browser sign-in.
     var remoteHostedServiceEnvironment: RemoteHostedServiceEnvironment {
         get {
 #if DEBUG || THREADING_INTERNAL
-            let stored = AppSettingDefinitions.remoteHostedServiceEnvironment.read(from: defaults)
+            let stored = AppSettingDefinitions.remoteHostedServiceEnvironment.read(from: userChoiceDefaults)
             return stored.flatMap(RemoteHostedServiceEnvironment.init(rawValue:)) ?? .production
 #else
             return .production
@@ -1327,12 +1329,12 @@ final class AppSettings {
 #if DEBUG || THREADING_INTERNAL
             AppSettingDefinitions.remoteHostedServiceEnvironment.write(
                 newValue.rawValue,
-                to: defaults
+                to: userChoiceDefaults
             )
 #else
             AppSettingDefinitions.remoteHostedServiceEnvironment.write(
                 RemoteHostedServiceEnvironment.production.rawValue,
-                to: defaults
+                to: userChoiceDefaults
             )
 #endif
         }

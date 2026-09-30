@@ -1973,8 +1973,9 @@ the coordinator's authority ratchet (`check_architecture_boundaries.sh`) is a ce
 allowance: the sidebar's helpers had been counted against it since they were written, and moving
 them out left the coordinator fifteen lines *lighter* than before this work.
 
-Not projected by `RemoteThemeBridge`, like chrome and bevel: the phone has neither the panes
-nor a decoder for the bytes, and the roles ride the resolved colour map anyway.
+The image remains Mac-local. The gradient is now projected by `RemoteThemeBridge` to the phone's
+dashboard through `RemoteThemeDTO.Material.backdropGradient`, including the optional drift recipe
+described below. The sidebar's separately authored gradient remains scoped to the Mac sidebar.
 
 ### `sidebar.backdrop@1` — content beneath the host's, as a contract
 
@@ -2070,3 +2071,47 @@ ask for 24 fps.
 | The host's signal set pinned to the SDK's, each reading, and the window-installed account reading | `ExtensionHostSignalsTests` |
 | Every SDK signal accepted at publication and an unknown one refused | `ExtensionRendererTests` |
 | The contract's shape, the role's opt-in, `overlayTop`'s own coherence rule, the enumerated signals, the catalogue count | `ExtensionContractTests` (SDK) |
+
+
+## Portable gradient drift
+
+`ThemeBackdrop.Gradient.drift` adds optional decorative movement to an existing gradient. Its
+`duration` is a complete 8–120 second cycle (default 24); `distance` is 0.02–0.25 of the gradient's
+unit axis (default 0.12). The tools expose the same `gradient.drift` object for material backdrops
+and sidebar backgrounds; replacing a gradient without it restores a still wash. Title-bar
+gradients reject drift. Existing themes omit the field and retain their static appearance.
+
+`ThemeGradientDrift` and `ThemeGradientGeometry` live with the portable theme contract in
+ThreadingRemoteKit. `ThemeGradientAnimator` is one shared source compiled by the Mac, iPhone and
+ThreadingDesignKit. Two five-keyframe Core Animation tracks move the gradient's endpoints along
+its own axis without changing its colors, span, layout or hit area. CSS angles mirror between
+AppKit and UIKit. The platform lifecycle owners build no repeating animation while hidden,
+detached, in Reduce Motion or Low Power Mode. Ordinary theme/catalogue refreshes preserve the
+animation when its recipe is unchanged. There is no display link, SwiftUI timeline, file access,
+network request or session traversal per frame.
+
+The bridge resolves the material gradient in the same appearance as the semantic palette and
+sends at most eight stops, an angle and optional drift. Images and the Mac-only sidebar override
+are not projected. The new wire field is optional: old clients ignore it, old hosts send no
+backdrop, and the existing per-Mac theme cache retains the complete new recipe through reconnect.
+The mobile cache checks its geometry and aggregate color-string budget. Renderers bound the
+stop count before sorting or decoding; invalid optional decoration falls back to the plain ground
+or a still gradient, while the palette stays usable.
+
+The iPhone dashboard installs `MobileThemeBackdropView` as the collection's stationary background.
+Its existing section plates retain their ownership of row chrome. Navigation visibility and scene
+activation gate motion; return from a cancelled navigation resumes it. Mac broad surfaces keep the
+existing dressing layer; a non-drawing `ThemeBackdropMotionView` receives attach/detach and
+ancestor-hide callbacks without reparenting their content. The sidebar uses the same lifecycle
+and animation owners.
+
+This deliberately expands theme decoration, not interaction policy. The host retains layout,
+scrolling, keyboard/navigation transitions, input, accessibility and power policy. No new
+extension component or arbitrary shader delivery is introduced. Workload-driven effects, image
+transfer and themed interaction presets remain separate future work.
+
+`RemoteThemeGradientTests`, `ThemeGradientMotionTests`, `ThemeBackdropTests`, `ThemeToolTests`,
+`MobileThemeBackdropTests` and the dashboard's 20/1,000-row mount contract cover the shipping
+path. The evidence catalogue includes the actual Mac sidebar/pane and iPhone dashboard in both
+appearances at rest and quarter-cycle. Evidence holds the compositor geometry at a fixed phase;
+normal builds use their local animation clock.

@@ -32,6 +32,20 @@ final class SessionDashboardTests: XCTestCase {
     }
 
     @MainActor
+    func testMovingThemeAddsOneBackdropAtBothDashboardCardinalities() {
+        for rows in [20, 1_000] {
+            let metrics = MobileDashboardCollectionPerformanceProbe.exercise(
+                rowCount: rows, theme: RemoteThemePalette(RemoteAppModel.demoDriftTheme(light: false))
+            )
+            XCTAssertEqual(metrics.snapshotItemCount, rows)
+            XCTAssertEqual(metrics.backdropLayerCount, 1)
+            XCTAssertTrue(metrics.showsBackdropGradient)
+            XCTAssertLessThan(metrics.mountedCellCount, 40)
+            XCTAssertEqual(metrics.hostedContentCount, 0)
+        }
+    }
+
+    @MainActor
     func testDashboardUpdatesWorkingStatusInTheSamePublicationAsRowMoves() {
         // Expected: idle, working beside a move, settled during a move, working without a
         // move, cached (unknown), then live again, followed by prepared cells stopping/starting

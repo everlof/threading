@@ -1,0 +1,115 @@
+"""Threading's private pipe adapter for the separately installed pymobiledevice3.
+
+One exact device and one service per process. No listener, clipboard, keyboard, or
+agent input. The host opens the control lane only after its visible-device grant.
+Requests are bounded ASCII lines; replies are length-prefixed status + bytes.
+"""
+import argparse
+import asyncio
+import signal
+import struct
+import sys
+
+MAX_FRAME = 32 * 1024 * 1024
+MAX_COMMAND = 128
+
+
+def reply(payload=b"", failed=False):
+    if len(payload) > MAX_FRAME:
+        raise ValueError("frame exceeds limit")
+    packet = bytes([int(failed)]) + payload
+    sys.stdout.buffer.write(struct.pack(">I", len(packet)))
+    sys.stdout.buffer.write(packet)
+    sys.stdout.buffer.flush()
+
+
+async def requests():
+    reader = asyncio.StreamReader(limit=MAX_COMMAND)
+    protocol = asyncio.StreamReaderProtocol(reader)
+    transport, _ = await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+    try:
+        while True:
+            line = await reader.readline()
+            if not line:
+                return
+            if len(line) > MAX_COMMAND:
+                raise ValueError("command exceeds limit")
+            yield line.decode("ascii").strip().split()
+    finally:
+        transport.close()
+
+
+def point(parts):
+    if len(parts) != 3:
+        raise ValueError("invalid touch command")
+    x, y = int(parts[1]), int(parts[2])
+    if not (0 <= x <= 65535 and 0 <= y <= 65535):
+        raise ValueError("invalid coordinates")
+    return x, y
+
+
+async def run(device, lane):
+    from pymobiledevice3.remote.native_tunnel import NativeRemotedTunnel
+
+    async with NativeRemotedTunnel(serial=device) as rsd:
+        if rsd.udid != device:
+            raise ValueError("device identity mismatch")
+        if lane == "preview":
+            from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
+            from pymobiledevice3.services.dvt.instruments.screenshot import Screenshot
+
+            async with DvtProvider(rsd) as dvt, Screenshot(dvt) as screenshots:
+                async for command in requests():
+                    if command != ["frame"]:
+                        raise ValueError("invalid preview command")
+                    reply(await asyncio.wait_for(screenshots.get_screenshot(), timeout=10))
+        else:
+            from pymobiledevice3.remote.core_device.hid_service import (
+                touch_session, TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE,
+            )
+
+            async with touch_session(rsd) as hid:
+                touching = False
+                last = (0, 0)
+                try:
+                    async for command in requests():
+                        if command == ["ready"]:
+                            reply()
+                            continue
+                        x, y = point(command)
+                        op = command[0]
+                        if op == "down" and not touching:
+                            touching = True
+                        elif op not in ("move", "up") or not touching:
+                            raise ValueError("invalid touch sequence")
+                        last = (x, y)
+                        state = TOUCHSCREEN_STATE_RELEASE if op == "up" else TOUCHSCREEN_STATE_CONTACT
+                        await hid.send_touchscreen(state, x, y)
+                        if op == "up":
+                            touching = False
+                        reply()
+                finally:
+                    if touching:
+                        await hid.send_touchscreen(TOUCHSCREEN_STATE_RELEASE, *last)
+
+
+async def main(device, lane):
+    task = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, task.cancel)
+    try:
+        await run(device, lane)
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        # No device identity, coordinates, screen bytes or device exception text in diagnostics.
+        reply(b"Device session ended. Unlock the iPhone and retry.", failed=True)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", required=True)
+    parser.add_argument("--lane", choices=("preview", "control"), required=True)
+    options = parser.parse_args()
+    asyncio.run(main(options.device, options.lane))

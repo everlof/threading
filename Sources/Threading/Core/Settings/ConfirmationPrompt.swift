@@ -79,6 +79,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case deleteArchivedSession
     case deleteAppTheme
     case deleteTerminalTheme
+    case deleteAutomation
     case removeBrowserBaseline
     case removeReclaimableDirectories
     case approveAgentStorageCleanup
@@ -254,6 +255,9 @@ enum ConfirmationPrompt: String, CaseIterable {
              .deleteArchivedSession,
              .deleteAppTheme,
              .deleteTerminalTheme,
+             // History stays, but a deleted automation cannot be restored or its identity reused;
+             // bringing it back means configuring and approving a new one.
+             .deleteAutomation,
              .removeBrowserBaseline,
              .removeReclaimableDirectories,
              .approveAgentStorageCleanup,

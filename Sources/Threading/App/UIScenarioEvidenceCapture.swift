@@ -142,8 +142,13 @@ final class UIScenarioEvidenceCapture {
     }
 
     private func captureVisibleWindow() throws -> Data {
-        guard let window = NSApp.mainWindow ?? NSApp.windows.first(where: \.isVisible),
-              let contentView = window.contentView else {
+        guard var window = NSApp.mainWindow ?? NSApp.windows.first(where: \.isVisible) else {
+            throw CaptureError.windowUnavailable
+        }
+        // A sheet is a separate AppKit window. Capturing its parent only records the dimmed
+        // background, so follow the attached sheet to the surface receiving the interaction.
+        while let sheet = window.attachedSheet { window = sheet }
+        guard let contentView = window.contentView else {
             throw CaptureError.windowUnavailable
         }
 

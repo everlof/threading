@@ -202,6 +202,9 @@ extension AgentCommand {
   static func listTriggerSources(_ value: EmptyToolArguments = .init()) -> Self {
     builtIn(.listTriggerSources, value)
   }
+  static func manageAutomation(_ value: AutomationToolArguments) -> Self {
+    builtIn(.manageAutomation, value)
+  }
   static func listTriggers(_ value: EmptyToolArguments = .init()) -> Self {
     builtIn(.listTriggers, value)
   }

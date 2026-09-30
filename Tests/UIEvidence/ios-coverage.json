@@ -14,7 +14,9 @@
     "art-deco",
     "neo-brutalism",
     "claymorphism",
-    "vaporwave"
+    "vaporwave",
+    "drift-dark",
+    "drift-light"
   ],
   "themeAppearances": {
     "custom": "dark",
@@ -28,7 +30,9 @@
     "art-deco": "dark",
     "neo-brutalism": "light",
     "claymorphism": "light",
-    "vaporwave": "dark"
+    "vaporwave": "dark",
+    "drift-dark": "dark",
+    "drift-light": "light"
   },
   "captures": [
     {"id": "secret-approvals-enroll-custom-dark", "entryID": "ios-secret-approval", "demo": "secret-approvals-enroll", "appearance": "dark", "theme": "custom"},
@@ -53,6 +57,10 @@
     {"id": "session-dashboard-preview-accessibility-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light", "contentSize": "accessibility-extra-large", "captureMode": "stable-display"},
     {"id": "session-dashboard-show-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Project options for AnotherTerminal", "waitForAccessibilityLabels": ["Show Project"]}, "assertions": ["hostInteractionPrepared"]},
     {"id": "session-dashboard-hide-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Project options for AnotherTerminal", "waitForAccessibilityLabels": ["Hide Project"]}, "assertions": ["hostInteractionPrepared"]},
+    {"id": "session-dashboard-drift-rest-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "drift-dark"},
+    {"id": "session-dashboard-drift-quarter-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "drift-dark"},
+    {"id": "session-dashboard-drift-rest-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "drift-light"},
+    {"id": "session-dashboard-drift-quarter-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "drift-light"},
     {"id": "session-dashboard-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "session-dashboard-pressed-neo-brutalism-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "neo-brutalism", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Review the new remote access", "pressDuration": 0.8, "waitForAccessibilityLabels": ["Rename", "Archive"]}, "assertions": ["hostInteractionPrepared"]},
     {"id": "session-dashboard-pressed-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Review the new remote access", "pressDuration": 0.8, "waitForAccessibilityLabels": ["Rename", "Archive"]}, "assertions": ["hostInteractionPrepared"]},
@@ -336,7 +344,7 @@
       "priority": "critical",
       "title": "Session dashboard",
       "description": "The paired owner dashboard and project-scoped chat list, with host switching in navigation chrome, project-aware session creation, named multi-route connection progress and actionable recovery.",
-      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Collapsed project after disclosure tap", "Three-chat preview with hidden activity", "Expanded preview after Show more tap", "Project-scoped chat list", "Multi-route connection progress", "Offline recovery with saved routes and identity"],
+      "states": ["Drifting gradient at rest and quarter-cycle in light and dark", "Paired owner", "Mixed session activity", "Project grouping", "Collapsed project after disclosure tap", "Three-chat preview with hidden activity", "Expanded preview after Show more tap", "Project-scoped chat list", "Multi-route connection progress", "Offline recovery with saved routes and identity"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-dashboard-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}

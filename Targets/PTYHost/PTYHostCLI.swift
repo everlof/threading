@@ -121,6 +121,8 @@ enum PTYHostCLIVerb: String, CaseIterable {
     case sessions
     case journal
     case stop
+    case attach
+    case send
     case help
 }
 
@@ -134,6 +136,9 @@ struct PTYHostCLIInvocation: Equatable {
     let wantsJSON: Bool
     /// Whatever followed the verb and was not a flag.
     let positional: [String]
+    var inputEnabled = false
+    var resizeEnabled = false
+    var appendEnter = false
 }
 
 /// What a command line turned out to be.
@@ -158,8 +163,8 @@ enum PTYHostCLIParse: Equatable {
 /// **What it will not do.** It never sends `retire`: retirement is the app's upgrade policy, it
 /// unlinks the socket, and the sessions being drained are somebody's working agents. It never
 /// sends `spawn`: a session belongs to a conversation the app owns, and a child spawned from a
-/// shell would be one no surface could ever show. `stop` is the one thing here that changes
-/// anything, and it is the Background Sessions list's own attach-then-kill.
+/// shell would be one no surface could ever show. Input and resize are explicit CLI choices;
+/// `stop` uses the Background Sessions list's own attach-then-kill.
 enum PTYHostCLI {
 
     // MARK: - Usage
@@ -179,16 +184,24 @@ enum PTYHostCLI {
           journal [N]         the last N journal lines (default \
         \(PTYHostCLIDefaults.defaultJournalLines)), bounded by the daemon's own cap
           stop <id-prefix>    attach to one held session and end it
+          attach <id-prefix>  live terminal output; Ctrl-] detaches without ending the child
+                              --input allows shared keyboard input; --resize also changes its grid
+          send <id-prefix>    send stdin bytes (at most 64 KiB); --enter appends a Return
           help                this text
 
         Options:
           --socket <path>     the rendezvous to speak to, instead of the one the app uses
           --state <dir>       the daemon's state directory, instead of the one the app uses
 
-        There is no follow mode. The journal is an ordinary file under the state directory, one
+        Attach skips buffered history and needs a host that reports replayByteCount. Without
+        --resize, the existing grid stays unchanged. Input requires a local terminal; send takes
+        a pipe or file. Both refuse pipes-mode sessions. Input and resizing are shared with any
+        other attached clients. Send reports socket delivery, not agent acceptance or completion.
+
+        There is no journal follow mode. The journal is an ordinary file under the state directory, one
         JSON object per line, and `threading-ptyd status` prints its path; tail that.
 
-        Exit codes: 0 a daemon answered, 1 none did or the session could not be ended, \
+        Exit codes: 0 a daemon answered, 1 a request failed, \
         \(PTYHostCLIDefaults.usageExitCode) this usage.
 
         Running the daemon itself:
@@ -217,6 +230,9 @@ enum PTYHostCLI {
         var stateDirectory: String?
         var wantsJSON = false
         var positional: [String] = []
+        var inputEnabled = false
+        var resizeEnabled = false
+        var appendEnter = false
 
         var index = arguments.index(after: arguments.startIndex)
         while index < arguments.endIndex {
@@ -249,6 +265,16 @@ enum PTYHostCLI {
                 }
                 wantsJSON = true
                 index = arguments.index(after: index)
+            case "--input", "--resize", "--enter":
+                guard (verb == .attach && token != "--enter") || (verb == .send && token == "--enter") else {
+                    return .usage("threading-ptyd: \(token) is not valid for \(verb.rawValue).")
+                }
+                switch token {
+                case "--input": inputEnabled = true
+                case "--resize": resizeEnabled = true
+                default: appendEnter = true
+                }
+                index = arguments.index(after: index)
             case "-f", "--follow":
                 return .usage(
                     "threading-ptyd: there is no follow mode; `threading-ptyd status` prints the "
@@ -275,18 +301,24 @@ enum PTYHostCLI {
             if let raw = positional.first, Int(raw).map({ $0 <= 0 }) ?? true {
                 return .usage("threading-ptyd: \(raw) is not a line count.")
             }
-        case .stop:
-            guard positional.count == 1 else {
-                return .usage("threading-ptyd: stop takes one session id prefix.")
+        case .stop, .attach, .send:
+            guard positional.count == 1, positional[0].isEmpty == false else {
+                return .usage("threading-ptyd: \(verb.rawValue) takes one session id prefix.")
             }
         }
 
+        guard !resizeEnabled || inputEnabled else {
+            return .usage("threading-ptyd: --resize requires --input; it changes the shared terminal.")
+        }
         return .run(PTYHostCLIInvocation(
             verb: verb,
             socketPath: socketPath,
             stateDirectory: stateDirectory,
             wantsJSON: wantsJSON,
-            positional: positional
+            positional: positional,
+            inputEnabled: inputEnabled,
+            resizeEnabled: resizeEnabled,
+            appendEnter: appendEnter
         ))
     }
 
@@ -330,6 +362,8 @@ enum PTYHostCLI {
             return journal(locations, build: build, lines: lines)
         case .stop:
             return stop(locations, build: build, prefix: invocation.positional[0])
+        case .attach, .send:
+            return PTYHostCLIControl.run(invocation, socketPath: locations.socketPath, build: build)
         case .help:
             return PTYHostCLIDefaults.answeredExitCode
         }

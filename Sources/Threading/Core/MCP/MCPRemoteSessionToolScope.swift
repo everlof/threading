@@ -70,7 +70,7 @@ enum MCPRemoteSessionToolScope {
              .proposeConversationRepair:
             return false
 
-        case .listTriggerSources, .listTriggers, .listTriggerRuns, .createTriggerDraft,
+        case .manageAutomation, .listTriggerSources, .listTriggers, .listTriggerRuns, .createTriggerDraft,
              .proposeTriggerActivation, .reportTriggerAssessment, .reportTriggerResult:
             return false
 

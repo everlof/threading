@@ -88,7 +88,11 @@ final class KeyboardPreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
+        let root = KeyboardSettingsRootView()
+        root.onReveal = { [weak self] title in
+            self?.prepareToRevealSettingsRow(title) ?? false
+        }
+        view = root
         let page = SettingsUI.listPage(title: "Keyboard", body: scrollView)
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -264,6 +268,26 @@ final class KeyboardPreferencesViewController: NSViewController {
         returnKeyDetail?.stringValue = value.settingsDetail
     }
 
+    /// A settings search naming one of this page's fixed rows — the Return-key choice, Reset
+    /// Shortcuts — lands on a virtual table that only builds the rows on screen, so a row below
+    /// the fold carries no anchor to find. Each fixed row is asked for in turn, and the first
+    /// whose built view carries the title is the answer: the rows are tried rather than listed,
+    /// so there is no second list of titles to drift from them.
+    private func prepareToRevealSettingsRow(_ title: String) -> Bool {
+        for (index, row) in presentationRows.enumerated() {
+            switch row {
+            case .composer, .reset:
+                tableView.scrollRowToVisible(index)
+                _ = tableView.view(atColumn: 0, row: index, makeIfNecessary: true)
+                tableView.layoutSubtreeIfNeeded()
+                if SettingsRowAnchor.find(title: title, in: tableView) != nil { return true }
+            case .note, .group, .command:
+                continue
+            }
+        }
+        return false
+    }
+
     @objc private func resetAllClicked() {
         store.resetAll()
         reloadPresentationRows()
@@ -416,6 +440,16 @@ private enum KeyboardPreferencesLayout {
 }
 
 // MARK: - Strings
+
+
+/// The Keyboard page's answer to a settings search naming a row its virtual table has not built.
+private final class KeyboardSettingsRootView: NSView, SettingsRowRevealing {
+    var onReveal: ((String) -> Bool)?
+
+    func prepareToReveal(title: String) -> Bool {
+        onReveal?(title) ?? false
+    }
+}
 
 private enum Strings {
     static var heading: String { L10n.string("Keyboard") }

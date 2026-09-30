@@ -27,6 +27,10 @@ int threading_set_window_size(int master, const struct winsize *size) {
     return ioctl(master, TIOCSWINSZ, size);
 }
 
+int threading_get_window_size(int terminal, struct winsize *size) {
+    return ioctl(terminal, TIOCGWINSZ, size);
+}
+
 int threading_pidfd_open(pid_t pid) {
     return (int)syscall(SYS_pidfd_open, pid, 0);
 }

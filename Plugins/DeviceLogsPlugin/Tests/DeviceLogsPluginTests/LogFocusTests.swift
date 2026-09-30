@@ -4,6 +4,21 @@ import XCTest
 /// Focus is what an agent drives when it says "this is what matters" — so what it folds, what it
 /// keeps, and what it costs are all worth pinning.
 final class LogFocusTests: XCTestCase {
+    func testStrictProcessFilterExcludesSystemMentionsAndNeighbourRows() {
+        let rows = [
+            DeviceLogRow(time: "", level: "Info", process: "kernel", subsystem: nil, message: "Ananke is active"),
+            DeviceLogRow(time: "", level: "Info", process: "Ananke", subsystem: nil, message: "connected"),
+            DeviceLogRow(time: "", level: "Info", process: "AnankeHelper", subsystem: nil, message: "connected"),
+        ]
+        let focus = LogFocus(process: "Ananke")
+        XCTAssertEqual(LogFocusLayout.entries(rows: rows, focus: focus, showingContext: false), [.row(1)])
+        XCTAssertEqual(LogFocusLayout.entries(rows: rows, focus: focus, showingContext: true), [.row(0), .row(1), .row(2)])
+    }
+
+    func testStrictLevelAndTextFiltersDoNotLeakContextOrGapRows() {
+        let entries = LogFocusLayout.entries(rows: rows(100), focus: LogFocus(pattern: "failed", minimumSeverity: 3), showingContext: false)
+        XCTAssertEqual(entries, [.row(0), .row(50)])
+    }
 
     private func rows(_ count: Int, errorEvery: Int = 50) -> [DeviceLogRow] {
         (0..<count).map { index -> DeviceLogRow in

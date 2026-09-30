@@ -28,6 +28,7 @@ enum RemoteThemeBridge {
         var colors: [String: String] = [:]
         var mode = RemoteThemeMode(rawValue: theme.mode.rawValue)
         var glowColor: String?
+        var backdropGradient: RemoteThemeGradient?
         var material = AppTheme.Material.system
         let appearance = drawingAppearance(for: theme)
 
@@ -39,6 +40,16 @@ enum RemoteThemeBridge {
                     : .light
             }
             material = theme.variant(for: appearance)?.material ?? theme.material
+            if let gradient = material.backdrop?.gradient,
+               (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count),
+               gradient.angleDegrees.isFinite,
+               gradient.stops.allSatisfy({ (0...1).contains($0.position) }) {
+                backdropGradient = RemoteThemeGradient(
+                    stops: gradient.stops.map { .init(color: $0.color.hexString, position: $0.position) },
+                    angleDegrees: gradient.angleDegrees,
+                    drift: gradient.drift
+                )
+            }
             for role in AppThemeRole.allCases {
                 var resolved = theme.resolved(role, appearance: appearance)
                 // The Mac holds every rule to `Material.ruleInkBudget` at draw time
@@ -85,7 +96,8 @@ enum RemoteThemeBridge {
                 // remote client cannot reproduce this Mac's fallback search for itself.
                 fontFamily: material.fontFamilies.first {
                     Design.Typography.availableFamilies.contains($0)
-                }
+                },
+                backdropGradient: backdropGradient
             )
         )
     }

@@ -15,7 +15,6 @@ final class UsageWindowPreferencesViewController: NSViewController {
     typealias DecisionProvider = @MainActor (AgentAccount) -> UsageWindowDecision
 
     private enum PresentationRow {
-        case explanation
         case diagram
         case schedule
         case scheduledSend
@@ -26,7 +25,6 @@ final class UsageWindowPreferencesViewController: NSViewController {
         case account(Int)
         case ledgerCaption
         case ledger(Int)
-        case footnote
     }
 
     // MARK: - Properties
@@ -204,8 +202,10 @@ final class UsageWindowPreferencesViewController: NSViewController {
             UsageWindowPreferencesDefaults.shownRecords
         ).reversed())
 
+        // The page's two paragraphs — what a poke is, and what it does not buy — are the
+        // Schedule section's "?" rather than rows of their own, so the page opens on the diagram
+        // and ends on the ledger.
         var rows: [PresentationRow] = [
-            .explanation,
             .diagram,
             .schedule,
             .scheduledSend,
@@ -222,7 +222,6 @@ final class UsageWindowPreferencesViewController: NSViewController {
             rows.append(.ledgerCaption)
             rows.append(contentsOf: records.indices.map(PresentationRow.ledger))
         }
-        rows.append(.footnote)
         presentationRows = rows
         updateCardDecorations()
         tableView.reloadData()
@@ -268,10 +267,9 @@ final class UsageWindowPreferencesViewController: NSViewController {
                 withAnimation: []
             )
         }
-        if !records.isEmpty,
-           let insertion = presentationRows.firstIndex(where: {
-               if case .footnote = $0 { true } else { false }
-           }) {
+        if !records.isEmpty {
+            // The ledger closes the page, so it is appended.
+            let insertion = presentationRows.count
             let rows: [PresentationRow] = [.ledgerCaption]
                 + records.indices.map(PresentationRow.ledger)
             presentationRows.insert(contentsOf: rows, at: insertion)
@@ -335,12 +333,14 @@ final class UsageWindowPreferencesViewController: NSViewController {
 
         return SettingsUI.section(
             UsageWindowStrings.scheduledSendCaption,
+            // The chosen policy's consequence is the row's own second line: the row reloads
+            // when the choice changes, so a separate explanation row repeating the title said
+            // nothing this line cannot.
             SettingsCard(rows: [
-                SettingsUI.row(title: UsageWindowStrings.scheduledSendTitle, control: popUp),
-                SettingsUI.detailRow(
-                    symbol: "clock.badge.questionmark",
+                SettingsUI.row(
                     title: UsageWindowStrings.scheduledSendTitle,
-                    detail: ScheduledResetPolicy.current.explanation,
+                    subtitle: ScheduledResetPolicy.current.explanation,
+                    control: popUp,
                     localizes: false
                 )
             ])
@@ -376,11 +376,10 @@ final class UsageWindowPreferencesViewController: NSViewController {
         return SettingsUI.section(
             UsageWindowStrings.limitRecoveryCaption,
             SettingsCard(rows: [
-                SettingsUI.row(title: UsageWindowStrings.limitRecoveryTitle, control: popUp),
-                SettingsUI.detailRow(
-                    symbol: "clock.badge.exclamationmark",
+                SettingsUI.row(
                     title: UsageWindowStrings.limitRecoveryTitle,
-                    detail: LimitRecoveryPolicy.current.explanation,
+                    subtitle: LimitRecoveryPolicy.current.explanation,
+                    control: popUp,
                     localizes: false
                 )
             ])
@@ -418,7 +417,6 @@ final class UsageWindowPreferencesViewController: NSViewController {
         }
 
         let rows: [NSView] = [
-            SettingsUI.fullRow(SettingsUI.note(CurfewSettingsStrings.explanation)),
             SettingsUI.row(
                 title: CurfewSettingsStrings.windDownTitle,
                 control: choicePopUp(
@@ -488,7 +486,14 @@ final class UsageWindowPreferencesViewController: NSViewController {
             )
         ]
 
-        return SettingsUI.section(CurfewSettingsStrings.caption, SettingsCard(rows: rows))
+        return SettingsUI.section(
+            CurfewSettingsStrings.caption,
+            SettingsCard(rows: rows),
+            help: HelpTopic(
+                title: CurfewSettingsStrings.caption,
+                paragraphs: [CurfewSettingsStrings.explanation]
+            )
+        )
     }
 
     /// The wrap-up template across the card, with the one thing its author has to know under it.
@@ -724,7 +729,14 @@ final class UsageWindowPreferencesViewController: NSViewController {
             localizes: false
         ))
 
-        return SettingsUI.section(UsageWindowStrings.scheduleCaption, SettingsCard(rows: rows))
+        return SettingsUI.section(
+            UsageWindowStrings.scheduleCaption,
+            SettingsCard(rows: rows),
+            help: HelpTopic(
+                title: UsageWindowStrings.scheduleCaption,
+                paragraphs: [UsageWindowStrings.explanation, UsageWindowStrings.footnote]
+            )
+        )
     }
 
     /// The plan in plain times: when the poke fires and where the day's boundaries land. This is
@@ -1043,8 +1055,6 @@ extension UsageWindowPreferencesViewController: NSTableViewDataSource, NSTableVi
 
     private func content(for row: PresentationRow) -> NSView {
         switch row {
-        case .explanation:
-            return SettingsUI.note(UsageWindowStrings.explanation)
         case .diagram:
             return diagramSection()
         case .schedule:
@@ -1067,8 +1077,6 @@ extension UsageWindowPreferencesViewController: NSTableViewDataSource, NSTableVi
         case .ledger(let index):
             guard records.indices.contains(index) else { return NSView() }
             return ledgerRow(for: records[index])
-        case .footnote:
-            return SettingsUI.note(UsageWindowStrings.footnote)
         }
     }
 
@@ -1113,11 +1121,11 @@ extension UsageWindowPreferencesViewController: NSTableViewDataSource, NSTableVi
 
     private func bottomInset(forRowAt index: Int) -> CGFloat {
         guard presentationRows.indices.contains(index) else { return 0 }
+        // The last row closes the page with the same air the first opens it with.
+        if index == presentationRows.count - 1 { return Design.Spacing.large }
         switch presentationRows[index] {
         case .accountsCaption, .ledgerCaption:
             return Design.Spacing.small
-        case .footnote:
-            return Design.Spacing.large
         default:
             return 0
         }
@@ -1217,8 +1225,10 @@ private enum UsageWindowStrings {
     static var ledgerCaption: String { L10n.string("Recent pokes") }
 
     static var enabledTitle: String { L10n.string("Open a window before I start") }
+    /// The one caveat that has to be on the page rather than behind its "?": this spends the
+    /// weekly allowance faster and raises nothing. The rest of the footnote is the section's help.
     static var enabledSubtitle: String {
-        L10n.string("Runs on the days below, for the accounts you allow.")
+        L10n.string("Raises no limit — the extra window comes out of your weekly cap.")
     }
 
     static var startTitle: String { L10n.string("I start at") }

@@ -139,6 +139,12 @@ enum SettingsPages {
     }
 
     static let generalID = ExtensionHostSettingsPage.general.rawValue
+    /// No `hostPage` on the four pages split out of General: extensions that contribute to
+    /// General keep contributing there, and none of these subjects is a door an extension needs.
+    static let sidebarID = "sidebar"
+    static let chatsID = "chats"
+    static let notificationsID = "notifications"
+    static let integrationID = "integration"
     static let remoteAccessID = "remote-access"
     static let remoteHostsID = "remote-hosts"
     static let privacyID = "privacy"
@@ -190,10 +196,56 @@ enum SettingsPages {
             symbol: "gearshape",
             group: appGroup,
             searchTerms: terms(
-                "sessions", "agent", "attachments", "startup", "closing", "shell",
-                "branch", "compact tree", "indentation", "sidebar density",
-                "project icons", "account avatars", "Codex hooks",
-                "Claude Remote Control", "notifications", "mute", "sound", "alerts",
+                "startup", "closing", "shell",
+                "confirmations", "don't ask again", "ask before",
+                // The Startup section's own verbs, added the day a search for
+                // "automatic loading on startup" found nothing: the section relaunches and
+                // reopens sessions, and none of those words appeared here.
+                "relaunch", "reopen", "restore", "resume automatically", "running at quit",
+                // The window policy's own words, for the same reason: "dormant" is what the user
+                // sees, and none of the terms above lead to the setting that decides it.
+                "dormant", "recently used", "restore window", "restore limit", "days",
+                "updates", "beta", "nightly", "sleep", "power", "awake"
+            ),
+            // Static rows are projected from `AppSettingDefinitions`. The per-prompt
+            // confirmations are a dynamic run, so they stay page-level because a stale anchor is
+            // worse than none.
+        ) { GeneralPreferencesViewController() },
+        Page(
+            id: sidebarID,
+            hostPage: nil,
+            title: L10n.string("Sidebar"),
+            symbol: "sidebar.left",
+            group: appGroup,
+            searchTerms: terms(
+                "sessions", "sort", "order", "branch", "compact tree", "indentation",
+                "sidebar density", "hidden projects", "project icons", "account avatars",
+                "chat names"
+            ),
+        ) { SidebarPreferencesViewController() },
+        Page(
+            id: chatsID,
+            hostPage: nil,
+            title: L10n.string("Chats"),
+            symbol: "bubble.left.and.bubble.right",
+            group: appGroup,
+            searchTerms: terms(
+                "sessions", "agent", "default agent", "permission mode",
+                "conversation speed", "fast mode", "standard mode", "service tier", "credits",
+                "opening message", "first message", "instructions",
+                "attachments", "scratchpad"
+            ),
+            // The per-agent attachment toggles are a dynamic run built from `AgentKind`, so they
+            // stay page-level.
+        ) { ChatsPreferencesViewController() },
+        Page(
+            id: notificationsID,
+            hostPage: nil,
+            title: L10n.string("Notifications"),
+            symbol: "bell",
+            group: appGroup,
+            searchTerms: terms(
+                "notifications", "mute", "sound", "alerts",
                 // The bell has its own words: nobody searching for the noise a TUI makes types
                 // "notifications", and "beep" is what they will have called it.
                 "bell", "beep", "terminal bell", "alert sound",
@@ -201,24 +253,10 @@ enum SettingsPages {
                 "silence", "silence sounds",
                 // The per-event tier and the list of what has already been given a sound.
                 // Somebody hunting a mystery noise types the noise's words, not the page's.
-                "custom sounds", "per-event sounds", "customize events", "override",
-
-                "confirmations", "don't ask again", "ask before", "opening message",
-                "first message", "instructions", "conversation speed", "fast mode",
-                "standard mode", "service tier", "credits",
-                // The Startup section's own verbs, added the day a search for
-                // "automatic loading on startup" found nothing: the section relaunches and
-                // reopens sessions, and none of those words appeared here.
-                "relaunch", "reopen", "restore", "resume automatically", "running at quit",
-                // The window policy's own words, for the same reason: "dormant" is what the user
-                // sees, and none of the terms above lead to the setting that decides it.
-                "dormant", "recently used", "restore window", "restore limit", "days"
+                "custom sounds", "per-event sounds", "customize events", "override"
             ),
-            // Static rows are projected from `AppSettingDefinitions`. Dynamic runs — the
-            // per-agent attachment toggles, per-prompt confirmations, per-alert notification
-            // list and custom-sound audit — stay page-level because a stale anchor is worse
-            // than none.
-        ) { GeneralPreferencesViewController() },
+            // The per-alert list and the custom-sound audit are dynamic, so they stay page-level.
+        ) { NotificationsPreferencesViewController() },
         Page(
             id: keyboardID,
             hostPage: .keyboard,
@@ -281,6 +319,20 @@ enum SettingsPages {
                 "models", "refresh models", "missing models", "model list"
             )
         ) { AccountsPreferencesViewController() },
+        // How Threading plugs into each CLI's own configuration. Beside the logins rather than
+        // under App, because every row is about an agent rather than about Threading.
+        Page(
+            id: integrationID,
+            hostPage: nil,
+            title: L10n.string("Integration"),
+            symbol: "point.3.connected.trianglepath.dotted",
+            group: agentsGroup,
+            searchTerms: terms(
+                "hooks", "Claude hooks", "Codex hooks", "Claude Remote Control",
+                "status line", "subagents", "terminal scrolling", "alternate screen",
+                "hooks.json"
+            ),
+        ) { IntegrationPreferencesViewController() },
         Page(
             id: toolsID,
             hostPage: .tools,

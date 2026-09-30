@@ -224,11 +224,12 @@ enum MCPToolCatalog {
   private static let authoredTriggers = MCPToolGroup(
     id: "triggers",
     family: .triggers,
-    title: "Triggers",
-    summary: "Inspect event listeners, create disabled drafts, and report scoped run outcomes.",
+    title: "Automations",
+    summary: "Manage local and remote schedules, event tasks, and run history.",
     symbol: "bolt.badge.clock",
     tools: [],
     instruction: """
+      manage_automation supports the full lifecycle on this Mac and remote VPS controllers. When the user asks, configure, pause, edit or delete an automation; enable and run wait for the user's approval in a Threading sheet. The legacy draft tools below retain their activation workflow.
       Trigger tools configure the rule “when an event matches, start an agent.” You may inspect \
       sources, triggers, and runs and may create a disabled draft when the user asks. A draft \
       listens to nothing until propose_trigger_activation shows the exact revision to the user \

@@ -796,6 +796,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// Whether new content may move the view — see `ConversationAutoScroll`.
     var autoScroll = ConversationAutoScroll()
 
+    /// The timeline row the anchored viewport rises toward: the message most recently sent.
+    /// Read only while `autoScroll` is anchored, so a stale value outside that mode is inert.
+    var anchoredTimelineIndex: Int?
+
+    /// Set when the streaming placeholder is dropped and consumed by the next assistant row,
+    /// which is the finished form of text the reader already watched arrive. That row takes the
+    /// placeholder's place without an arrival animation, or the reply would blink out and fade
+    /// back in at the moment it completes.
+    var assistantRowReplacesStreaming = false
+
     /// Streaming can ask to follow once per token. One main-queue pass both lands a following
     /// transcript and refreshes the floating return control for a reader who stayed elsewhere.
     var pendingScrollToBottom = false
@@ -2504,6 +2514,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         default:
             return
         }
+        messageView.copyText = excerpt
 
         let reference = ConversationContextAttachment(
             kind: .reference,
@@ -2923,6 +2934,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// reply has arrived to put it there.
     func anchorSentMessage(at index: Int) {
         guard autoScroll.mode == .anchored else { return }
+        anchoredTimelineIndex = index
 
         // Land once immediately. Deferring the first pass leaves a newly inserted bubble below
         // the viewport until the main queue gets back to us, even though the state machine has
@@ -2949,9 +2961,56 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // bubble is visible; the measured pass below can then place it toward the top.
         tableView.scrollRowToVisible(tableRow)
         tableView.layoutSubtreeIfNeeded()
-        let target = max(0, tableView.rect(ofRow: tableRow).minY - Design.Spacing.large)
+        let target = max(0, anchorOffset(ofTableRow: tableRow))
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: target))
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    /// Lifts the sent message toward the top as the reply grows under it — see
+    /// `ConversationAutoScroll.anchoredLanding`. Coalesced by `scrollToBottom`, so it runs at
+    /// most once per main-queue turn however fast the reply streams.
+    func advanceSentMessageAnchor() {
+        guard autoScroll.mode == .anchored,
+              let index = anchoredTimelineIndex,
+              let tableRow = presentationRow(forTimelineIndex: index) else { return }
+        landMeasuringWhatItReveals {
+            ConversationAutoScroll.anchoredLanding(
+                anchorOffset: anchorOffset(ofTableRow: tableRow),
+                currentOffset: scrollView.contentView.bounds.origin.y,
+                maximumOffset: maximumConversationScrollOffsetY()
+            )
+        }
+    }
+
+    /// Lands a following view on the live end.
+    func landAtLiveEnd() {
+        landMeasuringWhatItReveals {
+            let bottom = maximumConversationScrollOffsetY()
+            let distance = abs(scrollView.contentView.bounds.origin.y - bottom)
+            return distance > ConversationDefaults.landingTolerance ? bottom : nil
+        }
+    }
+
+    /// Scrolls to `destination`, then lets the table measure the rows that landing revealed and
+    /// scrolls again if they moved it.
+    ///
+    /// A row appended below the viewport carries only its estimated height until a host shows
+    /// it, so a single landing stops short by however much the row grew once measured: a reply
+    /// delivered in one piece ended several lines under the pane's lower edge. The second pass
+    /// is bounded rather than a loop on layout: the first has already revealed — and so
+    /// measured — the rows at the destination.
+    private func landMeasuringWhatItReveals(_ destination: () -> CGFloat?) {
+        for _ in 0..<ConversationDefaults.measuredLandingPasses {
+            tableView.layoutSubtreeIfNeeded()
+            guard let landing = destination() else { return }
+            scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: landing))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    /// The clip origin that puts a row at the top of the pane with one step of air above it.
+    private func anchorOffset(ofTableRow tableRow: Int) -> CGFloat {
+        tableView.rect(ofRow: tableRow).minY - Design.Spacing.large
     }
 
     // MARK: - Events

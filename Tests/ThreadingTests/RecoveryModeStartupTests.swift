@@ -218,6 +218,39 @@ final class RecoveryModeStartupTests: XCTestCase {
         XCTAssertEqual(AppThemeLibrary.current.id, chosen.id)
     }
 
+    /// Settings deletes the theme its picker names, which in recovery is the stored choice rather
+    /// than the System the app is wearing. Deleting it must not leave the choice pointing at
+    /// nothing — the picker would fall back to System while the next launch fell back to the
+    /// default — so the default the confirmation names is what gets recorded.
+    func testDeletingTheStoredChoiceInRecoveryRecordsTheDefault() throws {
+        let original = AppThemeLibrary.storedThemeID
+        let custom = try AppThemeLibrary.duplicate(
+            AppThemeStyles.dracula,
+            name: "Recovery Delete Fixture \(UUID().uuidString.prefix(8))"
+        )
+        defer {
+            if let original, let theme = AppThemeLibrary.theme(withID: original) {
+                AppThemeLibrary.apply(theme)
+            } else {
+                AppThemeLibrary.apply(.system)
+            }
+            if AppThemeLibrary.isCustom(custom) { _ = AppThemeLibrary.delete(custom) }
+        }
+
+        AppThemeLibrary.apply(custom)
+        AppThemeLibrary.restore(.recovery)
+        XCTAssertEqual(AppThemeLibrary.current.id, AppTheme.system.id)
+
+        XCTAssertTrue(AppThemeLibrary.delete(custom))
+
+        XCTAssertEqual(
+            AppThemeLibrary.storedThemeID,
+            AppThemeLibrary.defaultTheme.id,
+            "the stored choice was left naming a deleted theme"
+        )
+        XCTAssertEqual(AppThemeLibrary.current.id, AppThemeLibrary.defaultTheme.id)
+    }
+
     /// **The trap this design exists to avoid.** In recovery the app wears System while the user's
     /// choice is something else, so an Appearance page whose selection sat on what is *in force*
     /// would put the ring on System — and clicking the entry that already looks selected records

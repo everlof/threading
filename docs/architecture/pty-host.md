@@ -145,7 +145,8 @@ app's logger. Existing Mac call sites keep their journal-backed API.
 
 macOS retains its DispatchIO reader/writer. Linux retains the DispatchIO reader and uses
 `PTYHostSocketWriter` for ordered writes through `MSG_NOSIGNAL`; the library installs no global
-signal disposition. That writer owns a close-on-exec duplicate, so read-channel cleanup cannot
+signal disposition. Both glibc and musl builds use the Linux writer; the platform imports and
+socket constants distinguish them so the daemon CLI also builds with the static Linux SDK. That writer owns a close-on-exec duplicate, so read-channel cleanup cannot
 reassign a descriptor beneath a send. Client shutdown wakes socket work before writer close;
 queued work observes cancellation rather than each starting another deadline. Queue byte
 admission remains in the shared client. Blocking writes use one monotonic whole-frame deadline
@@ -1710,13 +1711,17 @@ background daemon on somebody's Mac from a phone is not a thing this switch is g
 
 ## The command-line client
 
-`threading-ptyd status`, `sessions`, `journal` and `stop`, run from any shell against the daemon
+`threading-ptyd status`, `sessions`, `journal`, `stop`, `attach` and `send` run against the daemon
 that is already listening. It is the **same binary**: the client has to speak the framing, the
 frames and the version gate exactly as the daemon does, and a second executable would be a second
 place for all three to drift, plus one more thing to sign, embed and keep in the bundle. The
-verbs live in `PTYHostCLI.swift`, `PTYHostCLIClient.swift` and `PTYHostCLIFormatting.swift`, all
-inside the same import fence as the daemon, so the client links Foundation, Darwin, Dispatch and
-`ThreadingPTYHostKit` and nothing else.
+verbs live in `PTYHostCLI.swift`, `PTYHostCLIControl.swift` and `PTYHostCLIFormatting.swift`.
+`PTYHostCLIClient` is a shell adapter over `Packages/ThreadingPTYClient`, sharing socket setup,
+handshake, framing, session binding and bounded writes with the app. The import fence permits
+that transport package alongside Foundation, the platform C library, Dispatch and the wire kit;
+project policy, provider logic, registration and app persistence remain outside the daemon.
+The CLI sets `retiresOlderDaemon: false`; app hosts retain their default retire-on-upgrade policy.
+A real CLI invocation against an older fake host asserts that only hello crosses the socket.
 
 **The two command lines cannot collide.** `PTYHostCLI.parse` declines anything whose first
 argument begins with `-`, and declines an empty command line, so `--socket <path> --state <dir>`
@@ -1730,10 +1735,12 @@ a flag. `PTYHostCLITests/testTheDaemonCommandLineIsUnchanged` is that claim as a
 | `sessions` | one row per held session: short id, channel, pid, elapsed uptime, grid, state, exit status, executable basename. `--json` prints the same set with stable keys | 0 if the daemon answered, else 1 |
 | `journal [N]` | the last N journal lines (default 50) through `journalTail`, bounded again by the daemon's own `maximumJournalTailBytes` | 0 if the daemon answered, else 1 |
 | `stop <id-prefix>` | attach with the floor replay budget, then `kill(escalate: true)`, then wait for `exited` | 0 when the ending arrived, else 1 |
+| `attach <id-prefix> [--input] [--resize]` | live terminal output; read-only by default, Ctrl-] detaches without stopping the child | 0 on detach or observed exit, 1 on failure; external signal uses 128 + signal |
+| `send <id-prefix> [--enter]` | stdin bytes to one live PTY; optionally appends CR | 0 after a host round trip following input, else 1 |
 | `help`, `--help` | the usage, on standard output | 0 |
 | a bad verb, an option on the wrong verb, a missing value | the usage, on standard error | 64 (`EX_USAGE`) |
 
-Output is plain aligned text on standard output, one line per row, no colour and no progress; a
+List/status output is plain aligned text on standard output, one line per row; a
 refusal is one sentence on standard error and nothing on standard output. Every wait is bounded by
 a constant in `PTYHostCLIDefaults`, which is separate from `PTYHostDefaults` because the daemon's
 numbers are load-bearing for a process holding somebody's agents and these bound a tool that
@@ -1751,12 +1758,11 @@ connects, asks once and exits.
   shell would be one no surface could ever show, and the daemon's own `sessions.jsonl` would carry
   a record the app can only classify as an orphan. Putting a session *in* the daemon is what
   `PTYHostCLITests`' own wire fixture does, because the tool must not grow a verb for it.
-- **No follow mode.** `journal -f` is refused with the reason rather than silently accepted: the
+- **No journal follow mode.** `journal -f` is refused with the reason rather than silently accepted: the
   daemon's journal is an ordinary append-only file under the state directory, `status` prints its
   path, and `tail -f` on that file is better than a socket held open for the same bytes.
 
-`stop` is the one verb that changes anything, and it is `PTYHostSessionStop`'s semantics rather
-than a second dialect: attach first, because `kill` names a session and a connection may only name
+`stop` uses `PTYHostSessionStop`'s semantics: attach first, because `kill` names a session and a connection may only name
 the one it is *bound* to, so a watcher that wants to end a child it is not watching has to become
 its watcher for as long as it takes to say so. The replay is bound to
 `PTYHostReplayDefaults.minimumBudgetBytes` — something about to end a child has no use for its
@@ -1766,6 +1772,62 @@ turns. `PTYHostCLIDefaults.stopTimeout` is ten seconds rather than the page's th
 daemon's own arithmetic is `SIGTERM`, a two-second escalation grace, `SIGKILL` and up to half a
 second of output drain, and a run of this measured 2.13 s between `killRequested` and `exited` for
 a `sleep` that did not die on the first signal.
+
+### Controlling a held terminal from a shell
+
+This is a **host-only** surface whose entity is one daemon-held, typed session identity. Socket
+filesystem permissions remain the authority boundary. Threading owns prefix resolution, channel
+admission, input/resize choices and connection lifetime; no extension presentation or new
+extension permission is involved. It does not create a project record or import an orphan process.
+
+`send` accepts a pipe or file on stdin, completely reading it before attaching. Input is capped
+at 64 KiB including an optional CR and must reach EOF within five seconds. Oversize, empty input
+without `--enter`, ambiguous/unknown prefixes, exited sessions and protocol-pipe sessions are
+refused. No implicit newline, provider prompt envelope or bracketed-paste wrapper is added.
+A subsequent `list` response proves the host read past the input frame, **not** that the child
+consumed it or the agent accepted/completed a turn. Errors never trigger automatic retransmission.
+
+`attach` defaults to read-only. `--input` explicitly enables a second writer and requires stdin
+and stdout to be terminals. `--resize` requires `--input`; it applies the local grid initially
+and on SIGWINCH. Multiple clients can type simultaneously, and the last resize wins. There is
+no exclusive input lease. The default attachment never imposes a grid. Ctrl-] disconnects without
+sending kill or a fabricated detach seed; queued keystrokes preceding it are drained first.
+
+The view is **live-only**. `attached.replayByteCount` identifies every replay byte, including seeds
+and CAN, and all of them are discarded. A physical terminal automatically answers terminal
+queries, so displaying the old stream and forwarding keyboard bytes would answer historical
+queries as though they were new. An older host without this boundary is refused, with an update
+instruction; it is never retired automatically. This initial CLI does not reconstruct the current
+screen or startup terminal modes. It can initially look blank until the child produces output;
+provider-specific turn submission and a complete terminal rejoin remain separate work.
+
+Termios and mutable descriptor flags are restored on detach, disconnect, observed child exit, errors and
+handled termination signals. On an xterm-compatible terminal, the view uses the alternate screen
+and saves/restores common keyboard, mouse, focus and paste modes. Screen restoration after an
+output-device failure is best effort. SIGKILL cannot run cleanup. Read-only input is discarded
+except for the detach key, including replies automatically generated by live terminal queries.
+
+**Scaling gate:** normal output arrives in at most 64 KiB bursts; total output is unbounded.
+The CLI mailbox is capped at 4 MiB and 4,096 events including encoded control/header costs.
+Consumed payloads are released immediately, compaction is amortized per batch, and transport
+callbacks never block on terminal IO. Overflow fails the observer, leaving the agent running.
+A stalled stdout write has a five-second deadline. The stream iteration drains a Darwin
+autorelease pool per delivered event. The process tests stress 32 MiB into a consumer that never
+reads, and assert bounded observer failure plus continued child/daemon control.
+
+`PTYHostCLITests` runs the real executable on Darwin and Linux, including raw byte delivery,
+explicit Return, oversize refusal before partial delivery, channel/prefix admission, live-only
+output, resize ownership, read-only input, Ctrl-] survival, signal cleanup and stalled stdout.
+The Linux static lane runs this suite against the actual deployable binary too.
+
+Verified on 2026-09-30 after the shared-client backport: 27 CLI cases passed against both the
+SwiftPM macOS binary and the Xcode-built helper. Linux arm64 glibc passed 24 CLI cases (three
+launchd-only cases skipped); the static musl arm64 binary passed 51 CLI/daemon cases with the
+same three skips. Both static architectures built. A disposable x86_64 VPS daemon then passed
+send, live-only/read-only/interactive attach, resize, terminal restoration, detach survival and
+stop, while the installed daemon PID stayed unchanged. Incompatible-host probes against the
+Xcode helper and static x86_64 binary observed hello only, with no retirement. Full app-suite
+verification was not completed; these are executable-level controller and daemon checks.
 
 ### The registration line, and the one thing the daemon cannot link
 

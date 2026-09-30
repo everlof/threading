@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 // MARK: - App Theme Tool Parsing
 
@@ -17,7 +18,13 @@ enum AppThemeToolParsing {
     static func gradient(
         _ arguments: AppThemeGradientArguments
     ) throws -> SidebarStyle.Gradient {
-        let stops = try (arguments.stops ?? []).map { stop -> SidebarStyle.Gradient.Stop in
+        let statedStops = arguments.stops ?? []
+        guard (2...ThemeBackdropLimits.maximumGradientStops).contains(statedStops.count) else {
+            throw AppThemeEditingError.invalid(
+                "A gradient needs 2 to \(ThemeBackdropLimits.maximumGradientStops) stops."
+            )
+        }
+        let stops = try statedStops.map { stop -> SidebarStyle.Gradient.Stop in
             guard let hex = cleaned(stop.color), let color = NSColor(hex: hex) else {
                 throw AppThemeEditingError.invalid(
                     "A gradient stop's color must be #RRGGBB or #RRGGBBAA."
@@ -32,7 +39,13 @@ enum AppThemeToolParsing {
         }
         return SidebarStyle.Gradient(
             stops: stops,
-            angleDegrees: arguments.angleDegrees ?? 180
+            angleDegrees: arguments.angleDegrees ?? 180,
+            drift: arguments.drift.map {
+                ThemeGradientDrift(
+                    duration: $0.duration ?? ThemeGradientDrift.defaultDuration,
+                    distance: $0.distance ?? ThemeGradientDrift.defaultDistance
+                )
+            }
         )
     }
 
@@ -164,12 +177,16 @@ enum AppThemeToolParsing {
     static func document(_ backdrop: ThemeBackdrop) -> [String: Any] {
         var document: [String: Any] = [:]
         if let gradient = backdrop.gradient {
-            document["gradient"] = [
+            var fields: [String: Any] = [
                 "angle_degrees": gradient.angleDegrees,
                 "stops": gradient.stops.map {
                     ["color": $0.color.hexString, "position": $0.position]
                 }
             ] as [String: Any]
+            if let drift = gradient.drift {
+                fields["drift"] = ["duration": drift.duration, "distance": drift.distance]
+            }
+            document["gradient"] = fields
         }
         if let image = backdrop.image {
             document["image"] = [

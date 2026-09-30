@@ -217,14 +217,14 @@ final class ClaudeTerminalRendererTests: XCTestCase {
 
     /// The row is built rather than assumed: a pop-up that never reached the page is
     /// indistinguishable from a setting nobody set.
-    func testTheGeneralPageOffersEveryStateAndShowsTheCurrentOne() throws {
+    func testTheIntegrationPageOffersEveryStateAndShowsTheCurrentOne() throws {
         AppSettings.shared.claudeTerminalRenderer = .claudeFullscreen
 
-        let controller = GeneralPreferencesViewController()
+        let controller = IntegrationPreferencesViewController()
         let host = laidOut(controller.view)
         let popUp = try XCTUnwrap(
             rendererPopUp(in: host),
-            "the Claude Terminal row is not on the General page"
+            "the Claude Terminal row is not on the Integration page"
         )
 
         XCTAssertEqual(

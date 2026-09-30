@@ -2,18 +2,24 @@
 #
 # Creates the Sentry release that exactly matches an exported Apple app, uploads the dSYMs from
 # that same archive, associates commits, and records a deploy only after publication succeeds.
-# The auth token is supplied by the caller's secret store; this script never reads or writes it.
+# Local credentials come from the ignored repository .sentryclirc or this Mac's login Keychain.
+# The token is never printed or written; CI continues to use its injected environment.
 
 set -euo pipefail
 
+readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly DEFAULT_ORG="threading"
 readonly DEFAULT_PROJECT="threading-macos"
+readonly KEYCHAIN_SERVICE="codes.threading.release.sentry"
+readonly KEYCHAIN_ACCOUNT="threading"
+use_repository_credentials=0
 
 fail() { printf 'error: %s\n' "$1" >&2; exit 1; }
 
 usage() {
     cat >&2 <<'EOF'
 usage:
+  scripts/sentry-release.sh check
   scripts/sentry-release.sh prepare --app <App.app> --debug-files <dSYMs> --output <file>
   scripts/sentry-release.sh deploy --release-file <file> --environment <name> [--url <url>]
   scripts/sentry-release.sh release-name --app <App.app>
@@ -22,17 +28,41 @@ EOF
 }
 
 require_cli_and_credentials() {
+    local keychain_token
     command -v sentry-cli >/dev/null || fail "sentry-cli is required for release telemetry"
-    [[ -n "${SENTRY_AUTH_TOKEN:-}" ]] \
-        || fail "SENTRY_AUTH_TOKEN is unset; add the organization token to the release secret store"
+    if [[ "${CI:-}" != "true" && -f "$ROOT/.sentryclirc" ]]; then
+        use_repository_credentials=1
+    elif [[ "${CI:-}" != "true" ]] && keychain_token="$(security find-generic-password \
+        -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" -w \
+        "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null)" && [[ -n "$keychain_token" ]]; then
+        # This machine-level credential survives fresh clones and missing checkout-local files.
+        # Bind its destination as well as its token, rather than inheriting another product's URL.
+        export SENTRY_AUTH_TOKEN="$keychain_token"
+        export SENTRY_URL="https://sentry.io"
+        unset SENTRY_PROPERTIES
+    else
+        [[ -n "${SENTRY_AUTH_TOKEN:-}" ]] \
+            || fail "no Sentry credentials: configure local .sentryclirc or the Threading release Keychain item"
+    fi
     export SENTRY_ORG="${SENTRY_ORG:-$DEFAULT_ORG}"
     export SENTRY_PROJECT="${SENTRY_PROJECT:-$DEFAULT_PROJECT}"
     validate_org_binding
 }
 
+sentry_cli() (
+    # Resolve the repository's config and commit history even when invoked from elsewhere.
+    cd "$ROOT"
+    if [[ "$use_repository_credentials" == "1" ]]; then
+        # A global token for another product must not shadow this checkout's credentials.
+        # Keep the configured URL and token together; CI retains its injected environment.
+        unset SENTRY_AUTH_TOKEN SENTRY_URL SENTRY_PROPERTIES
+    fi
+    command sentry-cli "$@"
+)
+
 validate_org_binding() {
     local projects status=0
-    projects="$(sentry-cli projects list --org "$SENTRY_ORG" 2>&1)" || status=$?
+    projects="$(sentry_cli projects list --org "$SENTRY_ORG" 2>&1)" || status=$?
     if [[ "$projects" == *"rather than manually-configured organization"* ]]; then
         fail "the Sentry token is bound to a different organization than $SENTRY_ORG"
     fi
@@ -96,29 +126,30 @@ prepare_release() {
     [[ -d "$debug_files" ]] || fail "debug-file directory does not exist: $debug_files"
     find "$debug_files" -name '*.dSYM' -print -quit | grep -q . \
         || fail "the shipping archive contains no dSYM bundles: $debug_files"
+    debug_files="$(cd "$debug_files" && pwd)"
     require_cli_and_credentials
 
     local release
     release="$(release_name "$app")"
-    if sentry-cli releases info "$release" >/dev/null 2>&1; then
+    if sentry_cli releases info "$release" >/dev/null 2>&1; then
         echo "Reusing Sentry release $release"
     else
-        sentry-cli releases new -p "$SENTRY_PROJECT" "$release"
+        sentry_cli releases new -p "$SENTRY_PROJECT" "$release"
     fi
 
     # --wait-for turns server-side processing errors into build failures. Sources are developer
     # source context only; no user content or runtime files are taken from the app.
-    sentry-cli debug-files upload \
+    sentry_cli debug-files upload \
         -p "$SENTRY_PROJECT" \
         --include-sources \
         --wait-for 300 \
         "$debug_files"
-    sentry-cli releases set-commits \
+    sentry_cli releases set-commits \
         -p "$SENTRY_PROJECT" \
         --auto \
         --ignore-missing \
         "$release"
-    sentry-cli releases finalize -p "$SENTRY_PROJECT" "$release"
+    sentry_cli releases finalize -p "$SENTRY_PROJECT" "$release"
 
     mkdir -p "$(dirname "$output")"
     printf '%s\n' "$release" > "$output"
@@ -143,7 +174,7 @@ deploy_release() {
     local release deployments
     read -r release < "$release_file"
     [[ -n "$release" ]] || fail "Sentry release receipt is empty: $release_file"
-    deployments="$(sentry-cli deploys list -p "$SENTRY_PROJECT" --release "$release")"
+    deployments="$(sentry_cli deploys list -p "$SENTRY_PROJECT" --release "$release")"
     if awk -F '|' -v wanted="$environment" '
         {
             value = $2
@@ -158,7 +189,7 @@ deploy_release() {
 
     local args=(--release "$release" --env "$environment")
     [[ -z "$url" ]] || args+=(--url "$url")
-    sentry-cli deploys new "${args[@]}"
+    sentry_cli deploys new "${args[@]}"
     echo "Recorded Sentry deploy for $release in $environment"
 }
 
@@ -166,6 +197,11 @@ deploy_release() {
 command="$1"
 shift
 case "$command" in
+    check)
+        [[ $# -eq 0 ]] || usage
+        require_cli_and_credentials
+        echo "Sentry credentials verified for $SENTRY_ORG/$SENTRY_PROJECT"
+        ;;
     prepare) prepare_release "$@" ;;
     deploy) deploy_release "$@" ;;
     release-name)

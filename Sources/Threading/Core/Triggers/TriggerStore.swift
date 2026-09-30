@@ -17,7 +17,7 @@ actor TriggerStore {
 
     static let shared = TriggerStore()
 
-    private static let schemaVersion = 2
+    private static let schemaVersion = 3
     private let database: SQLiteDatabase?
     private let openingError: Error?
     private let publishesDaemonConfiguration: Bool
@@ -25,7 +25,7 @@ actor TriggerStore {
     private let decoder: JSONDecoder
 
     init(url: URL? = nil) {
-        publishesDaemonConfiguration = url == nil
+        publishesDaemonConfiguration = url == nil && !StateManager.isHostedTest
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         self.encoder = encoder
@@ -50,6 +50,8 @@ actor TriggerStore {
                     try opened.execute(Self.version1)
                 case 2:
                     try opened.execute(Self.version2)
+                case 3:
+                    try opened.execute("CREATE TABLE automation_due (id TEXT PRIMARY KEY, due REAL NOT NULL); CREATE INDEX automation_due_time ON automation_due(due,id); CREATE INDEX trigger_run_trigger ON trigger_run(trigger_id); CREATE INDEX trigger_run_trigger_state ON trigger_run(trigger_id,state);")
                 default:
                     throw SQLiteDatabase.Failure.syntheticStep(
                         "No trigger migration to schema version \(version)"
@@ -86,7 +88,7 @@ actor TriggerStore {
             .bind(6, payload)
             .run()
         if publishesDaemonConfiguration {
-            let shouldRun = try TriggerDaemonConfigurationStore.publish(try sources())
+            let shouldRun = try publishDaemonConfiguration()
             Task { @MainActor in
                 TriggerDaemonRegistrationCoordinator.shared.reconcile(shouldRun: shouldRun)
             }
@@ -118,35 +120,47 @@ actor TriggerStore {
     func saveDraft(_ definition: TriggerDefinition, revision: TriggerRevision) throws {
         let database = try readyDatabase()
         try validate(definition, revision: revision)
-        try database.transaction {
-            // The definition owns its revisions. Insert it first so the revision's
-            // foreign key remains valid for a brand-new draft.
-            let definitionWrite = try database.prepare(Self.upsertDefinition)
-            try definitionWrite
-                .bind(1, definition.id.uuidString)
-                .bind(2, definition.name)
-                .bind(3, definition.enabled ? 1 : 0)
-                .bind(4, definition.activeRevisionID?.uuidString)
-                .bind(5, revision.id.uuidString)
-                .bind(6, definition.updatedAt.timeIntervalSince1970)
-                .bind(7, encoder.encode(definition))
-                .run()
-
-            // Revisions are approval records. Their payload is immutable once written; editing a
-            // draft creates a new revision instead of changing what an earlier approval named.
-            let revisionWrite = try database.prepare(Self.insertRevision)
-            try revisionWrite
-                .bind(1, revision.id.uuidString)
-                .bind(2, revision.triggerID.uuidString)
-                .bind(3, revision.sequence)
-                .bind(4, revision.sourceInstallationID.uuidString)
-                .bind(5, revision.projectID.uuidString)
-                .bind(6, revision.eventKind)
-                .bind(7, revision.createdAt.timeIntervalSince1970)
-                .bind(8, encoder.encode(revision))
-                .run()
-        }
+        try database.transaction { try writeDraft(definition, revision: revision) }
         changed()
+    }
+
+    private func writeDraft(_ definition: TriggerDefinition, revision: TriggerRevision) throws {
+        let database = try readyDatabase()
+        if try trigger(id: definition.id) == nil {
+            let existing = try database.prepare("SELECT id FROM trigger_definition WHERE id=?")
+            defer { existing.finalize() }
+            _ = existing.bind(1, definition.id.uuidString)
+            guard try !existing.step() else { throw StoreError.invalidRecord("deleted automation ID cannot be reused") }
+            let count = try database.prepare("SELECT COUNT(*) FROM trigger_definition WHERE active_revision_id IS NOT NULL OR draft_revision_id IS NOT NULL")
+            defer { count.finalize() }
+            guard try count.step(), count.int(0) < 500 else { throw StoreError.invalidRecord("maximum 500 automations") }
+        }
+        // The definition owns its revisions. Insert it first so the revision's
+        // foreign key remains valid for a brand-new draft.
+        let definitionWrite = try database.prepare(Self.upsertDefinition)
+        try definitionWrite
+            .bind(1, definition.id.uuidString)
+            .bind(2, definition.name)
+            .bind(3, definition.enabled ? 1 : 0)
+            .bind(4, definition.activeRevisionID?.uuidString)
+            .bind(5, revision.id.uuidString)
+            .bind(6, definition.updatedAt.timeIntervalSince1970)
+            .bind(7, encoder.encode(definition))
+            .run()
+
+        // Revisions are approval records. Their payload is immutable once written; editing a
+        // draft creates a new revision instead of changing what an earlier approval named.
+        let revisionWrite = try database.prepare(Self.insertRevision)
+        try revisionWrite
+            .bind(1, revision.id.uuidString)
+            .bind(2, revision.triggerID.uuidString)
+            .bind(3, revision.sequence)
+            .bind(4, revision.sourceInstallationID.uuidString)
+            .bind(5, revision.projectID.uuidString)
+            .bind(6, revision.eventKind)
+            .bind(7, revision.createdAt.timeIntervalSince1970)
+            .bind(8, encoder.encode(revision))
+            .run()
     }
 
     func activate(triggerID: TriggerID, revisionID: TriggerRevisionID, at date: Date = Date()) throws {
@@ -154,10 +168,12 @@ actor TriggerStore {
         guard var pair = try trigger(id: triggerID), pair.revision.id == revisionID else {
             throw StoreError.missing
         }
+        if pair.definition.enabled, pair.definition.activeRevisionID == revisionID, pair.definition.draftRevisionID == nil { return }
         pair.definition.enabled = true
         pair.definition.activeRevisionID = revisionID
         pair.definition.draftRevisionID = nil
         pair.definition.updatedAt = date
+        try database.transaction {
         let statement = try database.prepare(Self.updateActivation)
         try statement
             .bind(1, revisionID.uuidString)
@@ -165,13 +181,18 @@ actor TriggerStore {
             .bind(3, encoder.encode(pair.definition))
             .bind(4, triggerID.uuidString)
             .run()
+        try resetSchedule(triggerID, at: date)
+        }
+        republishDaemonConfiguration()
         changed()
     }
 
-    func setEnabled(_ enabled: Bool, triggerID: TriggerID, at date: Date = Date()) throws {
-        guard var pair = try trigger(id: triggerID) else { throw StoreError.missing }
+    func setEnabled(_ enabled: Bool, triggerID: TriggerID, expectedRevision: TriggerRevisionID? = nil, at date: Date = Date()) throws {
+        guard var pair = try trigger(id: triggerID), expectedRevision == nil || expectedRevision == pair.revision.id else { throw StoreError.missing }
+        if pair.definition.enabled == enabled { return }
         pair.definition.enabled = enabled
         pair.definition.updatedAt = date
+        try readyDatabase().transaction {
         let statement = try readyDatabase().prepare(Self.updateDefinitionEnabled)
         try statement
             .bind(1, enabled ? 1 : 0)
@@ -179,6 +200,9 @@ actor TriggerStore {
             .bind(3, encoder.encode(pair.definition))
             .bind(4, triggerID.uuidString)
             .run()
+        try resetSchedule(triggerID, at: date)
+        }
+        republishDaemonConfiguration()
         changed()
     }
 
@@ -351,6 +375,25 @@ actor TriggerStore {
         return result
     }
 
+    struct RunPage: Encodable, Sendable { let items: [TriggerRun]; let next: Int64? }
+    func runPage(triggerID: TriggerID? = nil, before: Int64? = nil) throws -> RunPage {
+        let sql = "SELECT rowid,data FROM trigger_run WHERE rowid<?"
+            + (triggerID == nil ? "" : " AND trigger_id=?") + " ORDER BY rowid DESC LIMIT 26"
+        let statement = try readyDatabase().prepare(sql)
+        defer { statement.finalize() }
+        _ = statement.bind(1, before ?? Int64.max)
+        if let triggerID { _ = statement.bind(2, triggerID.uuidString) }
+        var items: [TriggerRun] = []
+        var last: Int64?
+        while try statement.step() {
+            if items.count == 25 { return RunPage(items: items, next: last) }
+            guard let data = statement.data(1) else { throw StoreError.invalidRecord("run data") }
+            items.append(try decoder.decode(TriggerRun.self, from: data))
+            last = Int64(statement.int(0))
+        }
+        return RunPage(items: items, next: nil)
+    }
+
     func activeRunCount(triggerID: TriggerID) throws -> Int {
         let statement = try readyDatabase().prepare(Self.selectActiveRunCount)
         defer { statement.finalize() }
@@ -487,6 +530,7 @@ actor TriggerStore {
     }
 
     private func validate(_ definition: TriggerDefinition, revision: TriggerRevision) throws {
+        try revision.automation?.schedule?.validate()
         guard definition.id == revision.triggerID,
               definition.draftRevisionID == revision.id,
               revision.sequence > 0,
@@ -752,9 +796,20 @@ actor TriggerStore {
         ORDER BY runs.queued_at ASC
         LIMIT ?
         """
+    private static let selectDueAutomations =
+        "SELECT id,due FROM automation_due WHERE due<=? ORDER BY due,id LIMIT 32"
+    private static let deleteDefinitionPointers = """
+        UPDATE trigger_definition
+        SET enabled = 0, active_revision_id = NULL, draft_revision_id = NULL, updated_at = ?, data = ?
+        WHERE id = ?
+        """
+    /// A moment more than this late is missed rather than on time.
+    static let missedScheduleGrace: TimeInterval = 90
+    /// A rule that could not be admitted is retried after this, not on every sweep.
+    static let failedAdmissionRetry: TimeInterval = 300
     private static let selectInterruptedRuns = """
         SELECT data FROM trigger_run
-        WHERE state IN ('assessing', 'fixing')
+        WHERE state IN ('assessing', 'fixing', 'running', 'finishing') OR (state='received' AND session_id IS NOT NULL)
         ORDER BY queued_at ASC
         LIMIT ?
         """
@@ -762,8 +817,246 @@ actor TriggerStore {
         SELECT COUNT(*) FROM trigger_run
         WHERE trigger_id = ?
           AND (
-            state IN ('received', 'assessing', 'fixQueued', 'fixing')
+            state IN ('received', 'assessing', 'fixQueued', 'fixing', 'running', 'finishing')
             OR (state = 'queued' AND session_id IS NOT NULL)
           )
         """
+}
+
+// MARK: Shared human / agent automation operations
+extension TriggerStore {
+    func configureAutomation(_ config: AutomationConfiguration, id: TriggerID,
+                             expectedRevision: TriggerRevisionID?, proposedBy: SessionID?,
+                             now: Date = Date()) throws -> TriggerRevision {
+        let existing = try trigger(id: id)
+        guard existing?.revision.id == expectedRevision,
+              !config.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              config.agent.supportsNativeUI, config.agent.supportsPermissionModes else {
+            throw StoreError.invalidRecord("stale revision or unsupported configuration")
+        }
+        if config.options.schedule == nil {
+            guard let sourceID = config.sourceID, try source(id: sourceID) != nil,
+                  let kind = config.eventKind, !kind.isEmpty else {
+                throw StoreError.invalidRecord("event source and kind are required")
+            }
+        } else if config.sourceID != nil || !config.conditions.isEmpty {
+            throw StoreError.invalidRecord("choose either a schedule or an event source")
+        }
+        let revisionID = TriggerRevisionID()
+        let definition = TriggerDefinition(id: id, name: config.name, enabled: false,
+            activeRevisionID: existing?.definition.activeRevisionID, draftRevisionID: revisionID,
+            createdAt: existing?.definition.createdAt ?? now, updatedAt: now)
+        var revision = TriggerRevision(id: revisionID, triggerID: id,
+            sequence: (existing?.revision.sequence ?? 0) + 1,
+            sourceInstallationID: config.sourceID ?? TriggerSourceInstallationID(id.rawValue),
+            eventKind: config.options.schedule == nil ? config.eventKind! : "schedule.due",
+            conditions: config.conditions, projectID: config.projectID, instructions: config.instructions,
+            agentKind: config.agent, accountHandleName: config.account, model: config.model,
+            reasoningEffort: config.reasoningEffort, executionMode: config.executionMode,
+            checkoutPolicy: config.checkoutPolicy, limits: .init(maximumConcurrentRuns:
+                config.options.schedule == nil ? (existing?.revision.limits.maximumConcurrentRuns ?? 1) : 1,
+                maximumRuntimeMinutes: config.maximumRuntimeMinutes),
+            quietHours: config.options.schedule == nil ? existing?.revision.quietHours : nil,
+            notifications: existing?.revision.notifications ?? .standard,
+            allowSourceResources: existing?.revision.allowSourceResources ?? false,
+            proposedBySessionID: proposedBy, createdAt: now)
+        revision.automation = config.options
+        try validate(definition, revision: revision)
+        let database = try readyDatabase()
+        // The draft and the schedule it replaces commit together: a caller never sees a saved
+        // revision reported as a failure, which an agent would answer by saving it again.
+        try database.transaction {
+            try writeDraft(definition, revision: revision)
+            try resetSchedule(id, at: now)
+        }
+        changed()
+        republishDaemonConfiguration()
+        return revision
+    }
+
+    func removeAutomation(_ id: TriggerID, expectedRevision: TriggerRevisionID, at date: Date = Date()) throws {
+        let database = try readyDatabase()
+        try database.transaction {
+            guard let pair = try trigger(id: id), pair.revision.id == expectedRevision,
+                  try activeRunCount(triggerID: id) == 0 else {
+                throw StoreError.invalidRecord("stale revision or a run is still active")
+            }
+            // Retain revisions and run history. A deleted automation is a paused definition whose
+            // editable pointers are removed; history continues to resolve its frozen revision.
+            var deleted = pair.definition
+            deleted.enabled = false; deleted.activeRevisionID = nil; deleted.draftRevisionID = nil
+            deleted.updatedAt = date
+            let statement = try database.prepare(Self.deleteDefinitionPointers)
+            try statement
+                .bind(1, date.timeIntervalSince1970)
+                .bind(2, encoder.encode(deleted))
+                .bind(3, id.uuidString)
+                .run()
+            try resetSchedule(id, at: date)
+        }
+        republishDaemonConfiguration()
+        changed()
+    }
+
+    /// The daemon's file is a projection of this database, rewritten after every committed
+    /// change and at launch. Failing to write it is logged, never thrown: a thrown error would
+    /// report a committed change as failed — and drop the dispatches a sweep just reserved.
+    private func republishDaemonConfiguration() {
+        guard publishesDaemonConfiguration else { return }
+        do {
+            let shouldRun = try publishDaemonConfiguration()
+            Task { @MainActor in TriggerDaemonRegistrationCoordinator.shared.reconcile(shouldRun: shouldRun) }
+        } catch {
+            ThreadingLogger.app.error(
+                "Trigger daemon configuration was not published: \(error.localizedDescription, privacy: .private)"
+            )
+        }
+    }
+
+    func publishDaemonConfiguration() throws -> Bool {
+        guard publishesDaemonConfiguration else { return false }
+        let statement = try readyDatabase().prepare("SELECT due FROM automation_due ORDER BY due LIMIT 1")
+        defer { statement.finalize() }
+        let next = try statement.step() ? Date(timeIntervalSince1970: statement.double(0)) : nil
+        return try TriggerDaemonConfigurationStore.publish(sources(), nextScheduleAt: next)
+    }
+
+    func nextAutomationDate(_ id: TriggerID) throws -> Date? {
+        let statement = try readyDatabase().prepare("SELECT due FROM automation_due WHERE id=?")
+        defer { statement.finalize() }
+        _ = statement.bind(1, id.uuidString)
+        guard try statement.step() else { return nil }
+        return Date(timeIntervalSince1970: statement.double(0))
+    }
+
+    func resetSchedule(_ id: TriggerID, at now: Date) throws {
+        let database = try readyDatabase()
+        let deletion = try database.prepare("DELETE FROM automation_due WHERE id=?")
+        try deletion.bind(1, id.uuidString).run()
+        if let pair = try trigger(id: id), pair.definition.enabled,
+           pair.definition.activeRevisionID == pair.revision.id,
+           let schedule = pair.revision.automation?.schedule {
+            let insertion = try database.prepare("INSERT INTO automation_due(id,due) VALUES(?,?)")
+            try insertion.bind(1, id.uuidString).bind(2, schedule.next(after: now).timeIntervalSince1970).run()
+        }
+    }
+
+    /// At most 32 due rules per sweep. Each commits its reservation, occurrence identity and
+    /// next deadline in its own transaction, so one rule that cannot be admitted is retried
+    /// later rather than failing the sweep that carries every other schedule.
+    func scheduledDispatches(now: Date = Date()) throws -> [TriggerDispatch] {
+        let database = try readyDatabase()
+        let statement = try database.prepare(Self.selectDueAutomations)
+        var due: [(String, Date)] = []
+        do {
+            defer { statement.finalize() }
+            _ = statement.bind(1, now.timeIntervalSince1970)
+            while try statement.step() {
+                guard let raw = statement.text(0) else { continue }
+                due.append((raw, Date(timeIntervalSince1970: statement.double(1))))
+            }
+        }
+        guard !due.isEmpty else { return [] }
+        var dispatches: [TriggerDispatch] = []
+        for (raw, moment) in due {
+            do {
+                let dispatch = try database.transaction { try admitScheduled(raw, moment: moment, now: now) }
+                if let dispatch, dispatch.run.state == .received { dispatches.append(dispatch) }
+            } catch {
+                ThreadingLogger.app.error(
+                    "Scheduled automation could not be admitted: \(error.localizedDescription, privacy: .private)"
+                )
+                let retry = now.addingTimeInterval(Self.failedAdmissionRetry).timeIntervalSince1970
+                _ = try? database.transaction {
+                    try database.prepare("UPDATE automation_due SET due=? WHERE id=?")
+                        .bind(1, retry).bind(2, raw).run()
+                }
+            }
+        }
+        republishDaemonConfiguration()
+        return dispatches
+    }
+
+    private func admitScheduled(_ raw: String, moment: Date, now: Date) throws -> TriggerDispatch? {
+        guard let id = TriggerID(uuidString: raw) else {
+            try readyDatabase().prepare("DELETE FROM automation_due WHERE id=?").bind(1, raw).run()
+            return nil
+        }
+        guard let pair = try trigger(id: id), pair.definition.enabled,
+              pair.definition.activeRevisionID == pair.revision.id,
+              let options = pair.revision.automation, let schedule = options.schedule else {
+            try resetSchedule(id, at: now)
+            return nil
+        }
+        let late = now.timeIntervalSince(moment) > Self.missedScheduleGrace
+        let missed = late && options.missedRunPolicy != .latest
+        // A catch-up stands for the most recent occurrence it replaces, not the oldest it missed.
+        let occurrence = late && !missed ? (try schedule.latest(onOrBefore: now) ?? moment) : moment
+        let key = "scheduled:\(pair.revision.id.uuidString):\(Int64(moment.timeIntervalSince1970))"
+        let dispatch = try reserveAutomation(pair, key: key, due: occurrence, now: now, missed: missed)
+        try resetSchedule(id, at: now)
+        return dispatch
+    }
+
+    func runAutomationNow(_ id: TriggerID, expectedRevision: TriggerRevisionID, requestKey: String,
+                          now: Date = Date()) throws -> TriggerDispatch {
+        guard !requestKey.isEmpty, requestKey.utf8.count <= 160,
+              let pair = try trigger(id: id), pair.revision.id == expectedRevision else {
+            throw StoreError.invalidRecord("current revision and a bounded request key are required")
+        }
+        return try readyDatabase().transaction {
+            try reserveAutomation(pair, key: "manual:" + requestKey, due: now, now: now, missed: false, manual: true)
+        }
+    }
+
+    private func reserveAutomation(_ pair: (definition: TriggerDefinition, revision: TriggerRevision),
+                                   key: String, due: Date, now: Date, missed: Bool, manual: Bool = false) throws -> TriggerDispatch {
+        let database = try readyDatabase()
+        let event = TriggerEvent(sourceInstallationID: pair.revision.sourceInstallationID,
+            externalID: pair.definition.id.uuidString + ":" + key, revision: pair.revision.id.uuidString,
+            kind: pair.revision.eventKind, occurredAt: due, receivedAt: now,
+            title: pair.definition.name, attributes: [:], deepLink: nil, resources: [])
+        let existing = try database.prepare("SELECT data FROM trigger_run WHERE trigger_id=? AND trigger_revision_id=? AND event_key=?")
+        defer { existing.finalize() }
+        _ = existing.bind(1, pair.definition.id.uuidString).bind(2, pair.revision.id.uuidString).bind(3, event.storageKey)
+        if try existing.step(), let data = existing.data(0) {
+            return TriggerDispatch(run: try decoder.decode(TriggerRun.self, from: data), revision: pair.revision, event: event)
+        }
+        let busy = try activeRunCount(triggerID: pair.definition.id) > 0
+        let suppressed = missed || busy
+        var run = TriggerRun(id: TriggerRunID(), triggerID: pair.definition.id,
+            triggerRevisionID: pair.revision.id, eventKey: event.storageKey,
+            state: suppressed ? .suppressed : .received, queuedAt: now, startedAt: nil,
+            settledAt: suppressed ? now : nil, sessionID: nil, managedWorkspaceID: nil,
+            holdReason: busy ? .concurrencyLimit : nil, result: nil,
+            boundedDiagnostic: missed ? "Missed schedule; skipped." : (busy ? "Previous run is still active; skipped." : nil))
+        run.initiatedManually = manual
+        let eventWrite = try database.prepare(Self.insertEvent)
+        try eventWrite.bind(1, event.storageKey).bind(2, event.sourceInstallationID.uuidString)
+            .bind(3, event.kind).bind(4, now.timeIntervalSince1970).bind(5, encoder.encode(event)).run()
+        _ = try createRun(run)
+        return TriggerDispatch(run: run, revision: pair.revision, event: event)
+    }
+
+    /// Reserves the session once, and checks pause/edit again at dispatch. Repeated timer,
+    /// notification and run-now delivery cannot create duplicate sessions.
+    func claimDispatch(_ runID: TriggerRunID) throws -> TriggerRun? {
+        try readyDatabase().transaction {
+        guard var run = try run(id: runID), run.state == .received, run.sessionID == nil else { return nil }
+        let manual = run.initiatedManually == true
+        let pair = try trigger(id: run.triggerID)
+        let authorized = manual
+            ? pair?.revision.id == run.triggerRevisionID
+            : pair?.definition.enabled == true && pair?.definition.activeRevisionID == run.triggerRevisionID && pair?.definition.draftRevisionID == nil
+        guard authorized else {
+            run.state = .suppressed; run.settledAt = Date()
+            run.boundedDiagnostic = "Automation was paused, edited or removed before dispatch."
+            try updateRun(run)
+            return nil
+        }
+        run.sessionID = SessionID()
+        try updateRun(run)
+        return run
+        }
+    }
 }

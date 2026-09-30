@@ -141,6 +141,9 @@ class LocalReleaseDriverTests(unittest.TestCase):
             'push_outer_ref "$HEAD_COMMIT:refs/heads/$RELEASE_BRANCH"'
         )
         self.assertLess(credential_recheck, branch_push)
+        credentials = source[source.index("assert_release_credentials() {"):
+                             source.index("workflow_was_disabled=0")]
+        self.assertIn('"$ROOT/scripts/sentry-release.sh" check', credentials)
 
     def test_a_partial_remote_publish_is_retryable(self) -> None:
         source = PUBLISHER.read_text()

@@ -297,8 +297,10 @@ the selection's ink rather than drawing accent on accent.
 The drawer is a **tab host** (`DrawerHostViewController`) on the same model as the display
 panel — `PaneTab` lists per session, a `ThemedTabStripView` along its top, a `+` for another
 tab. The shell is its *default first tab*, auto-created the first time the drawer opens for a
-session; the strip creates the kinds that are naturally many (shells, browsers), while the
-singleton surfaces (review, info, files) keep their one home in the display panel. One host
+session; the strip creates the kinds that are naturally many (shells, browsers). The bundled
+Device Logs singleton can also live here because the live-device panes explicitly reveal it below
+the device and the drawer can restore its stable bundled identity. Other singleton surfaces
+(review, info, files) keep their one home in the display panel. One host
 controller serves every session and is installed in the band exactly once: a session switch
 swaps which list it shows and re-parents nothing — the per-switch detach the old code did is
 what used to separate a shell from its scrollback view. Drawer tabs and the open flag persist
@@ -1179,7 +1181,7 @@ authoritative.
 
 **A reusable opening message is part of the first turn, not a turn on every launch.**
 `AppSettings.newChatOpeningPrefix` and `newChatOpeningSuffix` are optional app-wide context
-entered under Settings ▸ General, one field on each side of the task. `NewChatOpeningMessage`
+entered under Settings ▸ Chats, one field on each side of the task. `NewChatOpeningMessage`
 trims all three parts, drops the empty ones, and joins what is left with one blank line in the
 order prefix, task, suffix; `SessionCoordinator` hands the combined text through the existing
 one-shot opening handoff, so a terminal launch keeps one trailing operand while a Native launch
@@ -1312,7 +1314,7 @@ which reads to the user as the app breaking, not as a feature. See [`pty-host.md
 
 Quitting with agents running keeps the records and loses the processes — that is the app's
 premise — but it used to mean the next launch began as a sidebar of dormant rows, one resume
-per click. `AppSettings.sessionRestorePolicy` (Settings ▸ General ▸ Session Processes) closes that loop:
+per click. `AppSettings.sessionRestorePolicy` (Settings ▸ General ▸ Startup) closes that loop:
 `applicationShouldTerminate` records `AgentRuntime.runningSessionIDs` just before
 `terminateAll`, and the next launch relaunches sessions in the background, so selecting one
 attaches an agent that is already up instead of paying the resume on the click.
@@ -1630,7 +1632,7 @@ a running session out from under an in-flight turn.
 ### Permission mode, per conversation
 
 How much a session may do before it stops to ask, chosen in the composer, overridable from a
-session's `⋯` menu, defaulted in Settings ▸ General. `AgentPermissionMode` owns the whole
+session's `⋯` menu, defaulted in Settings ▸ Chats. `AgentPermissionMode` owns the whole
 translation; `AgentLauncher.permissionMode(for:)` resolves session → app default → nil.
 
 **The whole translation, including which flags each runtime takes.** `launchFlags(for:)` returns

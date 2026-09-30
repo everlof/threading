@@ -683,7 +683,7 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Shows the authority-bearing trigger workspace as a first-class content destination.
     /// Unlike Settings it uses the full pane width and leaves the project sidebar in place.
-    func showTriggers() {
+    func showTriggers(store: TriggerStore = .shared) {
         consumeComposerHandoff(for: nil)
         detachCurrentChild()
         currentComposerProjectID = nil
@@ -696,7 +696,7 @@ final class TerminalContainerViewController: NSViewController {
         hideComposerIfLoaded()
         applyPaneBackground(.chrome)
 
-        let controller = triggerCenter ?? TriggerCenterViewController()
+        let controller = triggerCenter ?? TriggerCenterViewController(store: store)
         triggerCenter = controller
         addChild(controller)
         let content = controller.view

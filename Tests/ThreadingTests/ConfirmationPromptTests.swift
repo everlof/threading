@@ -52,6 +52,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "deleteArchivedSession",
             "deleteAppTheme",
             "deleteTerminalTheme",
+            "deleteAutomation",
             "removeBrowserBaseline",
             "removeReclaimableDirectories",
             "approveAgentStorageCleanup",

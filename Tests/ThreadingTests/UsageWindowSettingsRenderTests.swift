@@ -46,13 +46,21 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
     /// This is a settings page for something that spends money, so the caveats are load-bearing
     /// copy rather than a disclaimer: it raises no limit, it draws on the weekly cap, and it is
     /// offered on one runtime for a stated reason. A future edit that trims the footnote for
-    /// length would quietly turn an honest page into a sales pitch.
+    /// length would quietly turn an honest page into a sales pitch. The switch's own line says
+    /// the first two in plain sight; the full footnote is the Schedule section's "?", which
+    /// VoiceOver reads from the button, so both are read here.
     @MainActor
     func testThePageSaysWhatThePokeDoesNotDo() {
         let controller = UsageWindowPreferencesViewController()
         laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
 
-        let text = Self.labels(in: controller.view).joined(separator: "\n")
+        let visible = Self.labels(in: controller.view).joined(separator: "\n")
+        XCTAssertTrue(
+            visible.contains("raises no limit") || visible.contains("Raises no limit"),
+            "the switch itself has to say the poke raises nothing"
+        )
+        let text = (Array(Self.labels(in: controller.view)) + Self.helpText(in: controller.view))
+            .joined(separator: "\n")
 
         XCTAssertTrue(text.contains(L10n.string("Usage Windows")))
         XCTAssertTrue(
@@ -345,6 +353,17 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
         if let field = view as? NSTextField { found.insert(field.stringValue) }
         for subview in view.subviews {
             found.formUnion(labels(in: subview))
+        }
+        return found
+    }
+
+    /// What the page's "?" buttons explain, as VoiceOver hears them.
+    @MainActor
+    private static func helpText(in view: NSView) -> [String] {
+        var found: [String] = []
+        if let button = view as? HelpPopoverButton { found.append(button.topic.spokenSummary) }
+        for subview in view.subviews {
+            found += helpText(in: subview)
         }
         return found
     }

@@ -295,7 +295,7 @@ enum ConversationSpeedPresentation {
 
     static var followGeneralTitle: String { L10n.string("Follow General Setting") }
     static var followGeneralDetail: String {
-        L10n.string("Uses the Conversation Speed choice in General settings.")
+        L10n.string("Uses the speed chosen in Settings ▸ Chats.")
     }
     static var standardTitle: String { L10n.string("Standard") }
     static var fastTitle: String { L10n.string("Fast") }

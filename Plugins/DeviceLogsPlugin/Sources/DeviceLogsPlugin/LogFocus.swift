@@ -20,6 +20,8 @@ public struct LogFocus: Equatable, Sendable {
     /// Rows kept either side of a match. A line on its own rarely explains itself; the two before
     /// it usually do, which is why `grep -C` exists.
     public let context: Int
+    /// Exact process name, not a substring of another process's message.
+    public let process: String?
 
     /// The pattern folded to lowercase bytes, once.
     ///
@@ -29,19 +31,21 @@ public struct LogFocus: Equatable, Sendable {
     /// bridges into ICU and took 158 ms. A log line is bytes.
     private let needle: [UInt8]
 
-    public init(pattern: String = "", minimumSeverity: Int = 0, context: Int = 2) {
+    public init(pattern: String = "", minimumSeverity: Int = 0, context: Int = 2, process: String? = nil) {
         self.pattern = pattern
         self.minimumSeverity = minimumSeverity
         self.context = context
+        self.process = process
         self.needle = Array(pattern.lowercased().utf8)
     }
 
     /// Nothing is folded when nothing has been asked for.
-    public var isActive: Bool { !pattern.isEmpty || minimumSeverity > 0 }
+    public var isActive: Bool { !pattern.isEmpty || minimumSeverity > 0 || process != nil }
 
     /// Whether this row is one of the ones being looked for — which is also what gets highlighted.
     /// Context rows are shown but are not matches, so the eye still lands on the reason.
     public func matches(_ row: DeviceLogRow) -> Bool {
+        guard process == nil || row.process == process else { return false }
         guard minimumSeverity == 0 || row.severity >= minimumSeverity else { return false }
         guard !pattern.isEmpty else { return true }
         return Self.contains(row.message, needle)
@@ -117,10 +121,14 @@ public enum LogFocusLayout {
     public static func entries(
         rows: [DeviceLogRow],
         focus: LogFocus,
-        expanded: Set<Int> = []
+        expanded: Set<Int> = [],
+        showingContext: Bool = true
     ) -> [LogDisplayEntry] {
         guard focus.isActive, !rows.isEmpty else {
             return rows.indices.map { .row($0) }
+        }
+        if !showingContext {
+            return rows.indices.compactMap { focus.matches(rows[$0]) ? .row($0) : nil }
         }
 
         // Matches arrive in row order, so their context windows can be merged as they are found.

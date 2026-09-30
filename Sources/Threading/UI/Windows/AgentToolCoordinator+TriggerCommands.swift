@@ -3,6 +3,14 @@ import AppKit
 typealias TriggerToolCompletion = @MainActor @Sendable (MCPToolResult) -> Void
 
 @MainActor extension AgentToolCoordinator {
+    func manageAutomation(_ arguments: AutomationToolArguments, for sessionID: SessionID, completion: @escaping TriggerToolCompletion) {
+        let approve: AutomationApprover? = presentationWindow.map { window -> AutomationApprover in
+            { request in await AutomationApprovalPresenter.ask(request, in: window) }
+        }
+        AutomationToolActions.manage(arguments, for: sessionID, projects: dependencies.projects,
+                                     approve: approve, completion: completion)
+    }
+
     func listTriggerSources(completion: @escaping TriggerToolCompletion) {
         TriggerToolActions.listTriggerSources(completion: completion)
     }

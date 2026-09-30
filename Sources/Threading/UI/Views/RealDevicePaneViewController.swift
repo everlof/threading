@@ -36,10 +36,7 @@ final class RealDevicePaneViewController: NSViewController {
     }
 
     private enum Timing {
-        /// `idevicescreenshot` is a process fallback, not the eventual media stream. One frame per
-        /// second is enough to prove the pane and keep device activity visible without pretending
-        /// this is a low-latency backend.
-        static let fallbackFrameInterval: Duration = .seconds(1)
+        static let maximumPendingInput = 32
     }
 
     private let control: any PhysicalDeviceControlling
@@ -52,6 +49,8 @@ final class RealDevicePaneViewController: NSViewController {
     private var controlSupportTask: Task<Void, Never>?
     private var captureTask: Task<Void, Never>?
     private var inputTask: Task<Void, Never>?
+    private var pendingInput: [PhysicalDeviceInput] = []
+    private var inputReady = false
     private var discoveryGeneration = 0
     private var controlSupportGeneration = 0
     private var captureGeneration = 0
@@ -158,11 +157,22 @@ final class RealDevicePaneViewController: NSViewController {
         screen.onTap = { [weak self] point in
             self?.submitInput(.tap(x: Double(point.x), y: Double(point.y)))
         }
-        screen.onTouchBegan = { [weak self] point in self?.dragOrigin = point }
-        screen.onTouchMoved = { _ in }
+        screen.onTouchBegan = { [weak self] point in
+            guard let self else { return }
+            self.dragOrigin = point
+            if self.control.supportsLiveTouch { self.submitInput(.touchDown(x: point.x, y: point.y)) }
+        }
+        screen.onTouchMoved = { [weak self] point in
+            guard let self, self.control.supportsLiveTouch else { return }
+            self.submitInput(.touchMove(x: point.x, y: point.y))
+        }
         screen.onTouchEnded = { [weak self] point in
             guard let self, let origin = self.dragOrigin else { return }
             self.dragOrigin = nil
+            if self.control.supportsLiveTouch {
+                self.submitInput(.touchUp(x: point.x, y: point.y))
+                return
+            }
             self.submitInput(.drag(
                 fromX: Double(origin.x),
                 fromY: Double(origin.y),
@@ -240,7 +250,7 @@ final class RealDevicePaneViewController: NSViewController {
 
     init(
         preferredDeviceID: PhysicalDeviceID? = nil,
-        control: any PhysicalDeviceControlling = DevicectlPhysicalDeviceControl(),
+        control: any PhysicalDeviceControlling = PersistentPhysicalDeviceControl(),
         inputAuthorizer: any PhysicalDeviceInputAuthorizing =
             PhysicalDeviceInputConsentController(),
         notificationCenter: NotificationCenter = .default
@@ -549,6 +559,7 @@ final class RealDevicePaneViewController: NSViewController {
                     return
                 }
                 self.inputFailure = approved ? nil : L10n.string("Control denied")
+                if approved { self.connectInput(for: device) }
                 self.renderState()
             }
         case .resolved(.unknown(.probeFailed)):
@@ -568,11 +579,23 @@ final class RealDevicePaneViewController: NSViewController {
     }
 
     private func submitInput(_ input: PhysicalDeviceInput) {
-        guard inputTask == nil,
-              isPresented,
+        guard isPresented, inputReady,
               let device = selectedDevice,
               inputAuthorizer.decision(for: device.id) == true,
               case .resolved(.available) = controlSupportState else { return }
+
+        if case .touchMove = input, case .touchMove? = pendingInput.last {
+            pendingInput[pendingInput.count - 1] = input
+        } else {
+            guard pendingInput.count < Timing.maximumPendingInput else {
+                revokeControl()
+                inputFailure = L10n.string("Control interrupted. Enable control again to reconnect.")
+                renderState()
+                return
+            }
+            pendingInput.append(input)
+        }
+        guard inputTask == nil else { return }
 
         inputGeneration += 1
         let generation = inputGeneration
@@ -584,7 +607,14 @@ final class RealDevicePaneViewController: NSViewController {
                 }
             }
             do {
-                try await control.sendInput(input, to: device)
+                while let self, self.isPresented, self.inputGeneration == generation,
+                      self.selectedDevice?.id == device.id,
+                      self.inputAuthorizer.decision(for: device.id) == true,
+                      !self.pendingInput.isEmpty {
+                    let next = self.pendingInput.removeFirst()
+                    try await control.sendInput(next, to: device)
+                    try Task.checkCancellation()
+                }
                 try Task.checkCancellation()
                 guard let self,
                       self.isPresented,
@@ -600,6 +630,7 @@ final class RealDevicePaneViewController: NSViewController {
                 guard let self,
                       !Task.isCancelled,
                       self.inputGeneration == generation else { return }
+                self.revokeControl()
                 self.inputFailure = error.localizedDescription
                 self.renderState()
             }
@@ -610,7 +641,37 @@ final class RealDevicePaneViewController: NSViewController {
         inputGeneration += 1
         inputTask?.cancel()
         inputTask = nil
+        pendingInput.removeAll(keepingCapacity: true)
+        inputReady = false
+        control.stopInput()
         dragOrigin = nil
+    }
+
+    private func connectInput(for device: PhysicalDevice) {
+        stopInput()
+        if !control.supportsLiveTouch {
+            inputReady = true
+            return
+        }
+        let generation = inputGeneration
+        let control = control
+        inputTask = Task { [weak self] in
+            do {
+                try await control.beginInput(of: device)
+                try Task.checkCancellation()
+                guard let self, self.isPresented, self.inputGeneration == generation,
+                      self.selectedDevice?.id == device.id,
+                      self.inputAuthorizer.decision(for: device.id) == true else { return }
+                self.inputTask = nil
+                self.inputReady = true
+                self.renderState()
+            } catch {
+                guard let self, self.inputGeneration == generation, !Task.isCancelled else { return }
+                self.revokeControl()
+                self.inputFailure = error.localizedDescription
+                self.renderState()
+            }
+        }
     }
 
     private func startCaptureLoop(for device: PhysicalDevice) {
@@ -623,6 +684,8 @@ final class RealDevicePaneViewController: NSViewController {
         captureTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
+                    let started = ContinuousClock.now
+                    if self?.captureState == .capturing { try await control.preparePreview(of: device) }
                     let data = try await control.screenshot(of: device)
                     try Task.checkCancellation()
                     guard let cgImage = await Self.decodedCGImage(from: data) else {
@@ -632,15 +695,21 @@ final class RealDevicePaneViewController: NSViewController {
                           self.isPresented,
                           self.captureGeneration == generation,
                           self.selectedDevice?.id == device.id else { return }
+                    if let previous = self.screenView.image,
+                       previous.size != NSSize(width: cgImage.width, height: cgImage.height) {
+                        self.revokeControl()
+                    }
                     self.screenView.image = NSImage(cgImage: cgImage, size: .zero)
-                    self.captureState = .live
-                    try await Task.sleep(for: Timing.fallbackFrameInterval)
+                    if self.captureState != .live { self.captureState = .live }
+                    try await Task.sleep(until: started.advanced(by: control.frameInterval), clock: .continuous)
                 } catch is CancellationError {
                     return
                 } catch {
                     guard let self,
                           !Task.isCancelled,
                           self.captureGeneration == generation else { return }
+                    self.revokeControl()
+                    control.stopPreview()
                     if error as? PhysicalDeviceControlError == .screenshotToolUnavailable {
                         self.captureState = .toolingRequired
                     } else {
@@ -656,6 +725,7 @@ final class RealDevicePaneViewController: NSViewController {
         captureGeneration += 1
         captureTask?.cancel()
         captureTask = nil
+        control.stopPreview()
         if captureState == .capturing { captureState = .idle }
     }
 
@@ -663,7 +733,12 @@ final class RealDevicePaneViewController: NSViewController {
     /// crosses back to the main actor; AppKit wraps it after the bounded decode has completed.
     private nonisolated static func decodedCGImage(from data: Data) async -> CGImage? {
         await Task.detached(priority: .userInitiated) {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  width > 0, height > 0,
+                  width <= PhysicalDeviceDefaults.maximumScreenshotPixels / height else { return nil }
             return CGImageSourceCreateImageAtIndex(source, 0, nil)
         }.value
     }
@@ -777,7 +852,7 @@ final class RealDevicePaneViewController: NSViewController {
     }
 
     private func configureScreenInteraction() {
-        guard let deviceID = selectedDeviceID,
+        guard inputReady, let deviceID = selectedDeviceID,
               inputAuthorizer.decision(for: deviceID) == true,
               case .resolved(.available) = controlSupportState else {
             screenView.interactionState = .unavailable
@@ -820,7 +895,7 @@ final class RealDevicePaneViewController: NSViewController {
                 detail = inputFailure
             } else if let deviceID = selectedDeviceID,
                       inputAuthorizer.decision(for: deviceID) == true {
-                detail = L10n.string("Control ready")
+                detail = inputReady ? L10n.string("Control ready") : L10n.string("Preparing iPhone control…")
             } else if let deviceID = selectedDeviceID,
                       inputAuthorizer.decision(for: deviceID) == false {
                 detail = L10n.string("Control denied")
@@ -828,9 +903,9 @@ final class RealDevicePaneViewController: NSViewController {
                 detail = L10n.string("Click to enable control")
             }
         }
-        let isControlReady = selectedDeviceID.map {
+        let isControlReady = inputReady && (selectedDeviceID.map {
             inputAuthorizer.decision(for: $0) == true
-        } ?? false
+        } ?? false)
         return [isControlReady ? nil : L10n.string("View only"), detail]
             .compactMap { $0 }
             .joined(separator: " · ")

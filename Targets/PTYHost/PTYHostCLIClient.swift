@@ -7,6 +7,7 @@ import Musl
 #endif
 import Foundation
 import ThreadingPTYHostKit
+import ThreadingPTYClient
 
 // MARK: - Errors
 
@@ -22,6 +23,8 @@ import ThreadingPTYHostKit
 /// here — unlike the wire and the journal, which carry tokens because they reach a support
 /// report — because the reader is a person at a shell prompt.
 enum PTYHostCLIError: Error, Equatable {
+
+    case refused(String)
 
     /// The default rendezvous could not be derived, so there is nothing to connect to.
     case noDefaultLocation
@@ -51,6 +54,7 @@ enum PTYHostCLIError: Error, Equatable {
 
     var sentence: String {
         switch self {
+        case .refused(let message): return message
         case .noDefaultLocation:
             return "Cannot work out where the background host keeps its socket."
         case .socketPathTooLong(let bytes):
@@ -78,303 +82,221 @@ enum PTYHostCLIError: Error, Equatable {
 
 // MARK: - Client
 
-/// One connection to `threading-ptyd`, for a person at a shell prompt.
-///
-/// **Blocking, on this thread, with one reader thread behind it.** A command-line invocation is a
-/// straight line — connect, greet, ask, print, exit — so the client that serves it says "wait
-/// until this frame arrives" directly rather than through a delivery queue. That is the shape
-/// `PTYHostTestClient` already has, and for the same reason; the app's `PTYHostClient` is
-/// asynchronous because a terminal's output rate has to stay off the main queue, and none of that
-/// applies here.
-///
-/// Every wait is bounded. Nothing here retires a daemon, and nothing here spawns one: the CLI
-/// observes and, at most, ends one child it was told to end.
-final class PTYHostCLIClient: @unchecked Sendable {
+/// Shell-facing request/answer adapter over the same transport the Mac uses. The library owns
+/// connect, hello, binding, framing and bounded writes. This adapter owns command deadlines and
+/// a bounded mailbox; its callbacks never block the transport's serial queue on terminal IO.
+final class PTYHostCLIClient {
+    enum Event {
+        case control(PTYHostFrame)
+        case output(Data)
+    }
 
-    // MARK: - Properties
-
-    private let descriptor: Int32
-    private let build: String
-    private let condition = NSCondition()
-    private var decoder = PTYHostFrameDecoder()
-    private var controls: [PTYHostFrame] = []
-    private var closed = false
-
-    private static let encoder = JSONEncoder()
-    private static let jsonDecoder = JSONDecoder()
-
-    /// What the daemon said about itself. Nil until the greeting has been answered.
+    private let transport: PTYHostClient
+    private let mailbox: PTYHostCLIMailbox
+    private let socketPath: String
     private(set) var peer: PTYHostHello?
 
-    // MARK: - Initialization
-
-    private init(descriptor: Int32, build: String) {
-        self.descriptor = descriptor
-        self.build = build
-        Thread.detachNewThread { [self] in read() }
+    private init(socketPath: String, build: String, timeout: TimeInterval) {
+        self.socketPath = socketPath
+        let mailbox = PTYHostCLIMailbox()
+        self.mailbox = mailbox
+        transport = PTYHostClient(
+            socketPath: socketPath, build: build,
+            events: .init(
+                frame: { mailbox.append(.control($0)) },
+                output: { mailbox.append(.output($0)) },
+                standardError: { mailbox.append(.output($0)) },
+                closed: { mailbox.finish($0) }
+            ),
+            journal: { _, _ in },
+            connectTimeout: timeout,
+            helloTimeout: PTYHostCLIDefaults.helloTimeout,
+            retiresOlderDaemon: false
+        )
     }
 
-    deinit {
-        hangUp()
-    }
+    deinit { hangUp() }
 
-    /// Connects to a rendezvous, with a deadline.
-    ///
-    /// The socket is put in non-blocking mode for the connect so a listener that has stopped
-    /// accepting costs this process a bounded wait rather than an indefinite one, and put back
-    /// afterwards because everything above this is written as blocking reads and writes.
-    ///
-    /// `SO_NOSIGPIPE` before anything else: a write to a socket the daemon has already closed
-    /// would otherwise raise `SIGPIPE` and kill the tool mid-sentence. The process-wide
-    /// `SIG_IGN` in `main()` covers it too; both are here because either one alone is a line's
-    /// edit away from being removed by somebody who saw only the other.
     static func connect(
-        socketPath: String,
-        build: String,
+        socketPath: String, build: String,
         timeout: TimeInterval = PTYHostCLIDefaults.connectTimeout
     ) throws -> PTYHostCLIClient {
         guard FileManager.default.fileExists(atPath: socketPath) else {
             throw PTYHostCLIError.socketMissing(path: socketPath)
         }
-
-        guard let address = PTYHostPOSIX.unixAddress(path: socketPath) else {
-            throw PTYHostCLIError.socketPathTooLong(bytes: socketPath.utf8.count)
-        }
-
-        let handle = socket(AF_UNIX, PTYHostPOSIX.streamSocketType, 0)
-        guard handle >= 0 else {
-            throw PTYHostCLIError.connectFailed(path: socketPath, code: errno)
-        }
-        PTYHostPOSIX.suppressBrokenPipeSignal(on: handle)
-
-        let flags = fcntl(handle, F_GETFL, 0)
-        _ = fcntl(handle, F_SETFL, flags | O_NONBLOCK)
-
-        let started = PTYHostPOSIX.connect(handle, address)
-        if started != 0 {
-            guard errno == EINPROGRESS else {
-                let code = errno
-                PTYHostPOSIX.close(handle)
-                throw PTYHostCLIError.connectFailed(path: socketPath, code: code)
-            }
-            var poller = pollfd(fd: handle, events: Int16(POLLOUT), revents: 0)
-            let milliseconds = Int32(max(timeout, 0) * 1000)
-            guard poll(&poller, 1, milliseconds) > 0 else {
-                PTYHostPOSIX.close(handle)
-                throw PTYHostCLIError.connectFailed(path: socketPath, code: ETIMEDOUT)
-            }
-            var pending: Int32 = 0
-            var size = socklen_t(MemoryLayout<Int32>.size)
-            _ = getsockopt(handle, SOL_SOCKET, SO_ERROR, &pending, &size)
-            guard pending == 0 else {
-                PTYHostPOSIX.close(handle)
-                throw PTYHostCLIError.connectFailed(path: socketPath, code: pending)
-            }
-        }
-        _ = fcntl(handle, F_SETFL, flags)
-
-        return PTYHostCLIClient(descriptor: handle, build: build)
+        return PTYHostCLIClient(socketPath: socketPath, build: build, timeout: timeout)
     }
 
-    // MARK: - Public Methods
-
-    /// Speaks first, and refuses a daemon the version gate will not admit.
-    ///
-    /// `hello` is the first frame on every connection in both directions, so nothing else may be
-    /// asked before this returns. A refusal is reported and never repaired: this tool does not
-    /// send `retire`, because retiring a daemon is the app's upgrade policy and the sessions it
-    /// is holding are somebody's working agents.
     @discardableResult
     func greet() throws -> PTYHostHello {
-        try send(.hello(PTYHostHello(build: build, pid: getpid())))
-        let frame = try waitForControl(
-            timeout: PTYHostCLIDefaults.helloTimeout,
-            what: "the greeting"
-        ) {
-            if case .hello = $0 { return true }
-            if case .helloRefused = $0 { return true }
-            return false
-        }
-        switch frame {
-        case .hello(let hello):
-            let compatibility = PTYHostCompatibility.evaluate(peer: hello)
-            guard compatibility == .compatible else {
-                throw PTYHostCLIError.incompatible(
-                    compatibility.updateTarget(evaluatedBy: .app) ?? .app
-                )
-            }
+        if let peer { return peer }
+        do {
+            let hello = try transport.connect()
             peer = hello
             return hello
-        case .helloRefused(let refusal):
-            throw PTYHostCLIError.incompatible(refusal.update)
-        default:
-            throw PTYHostCLIError.handshakeTimedOut
-        }
+        } catch { throw mapped(error) }
     }
 
-    /// What the daemon is holding.
     func list() throws -> [PTYHostSessionSummary] {
         try send(.list)
-        let frame = try waitForControl(
-            timeout: PTYHostCLIDefaults.answerTimeout,
-            what: "the session list"
-        ) {
-            if case .sessions = $0 { return true }
-            return false
+        let frame = try waitForControl(timeout: PTYHostCLIDefaults.answerTimeout, what: "the session list") {
+            if case .sessions = $0 { return true }; return false
         }
-        guard case .sessions(let summaries) = frame else {
-            throw PTYHostCLIError.answerTimedOut(what: "the session list")
-        }
-        return summaries
+        guard case .sessions(let sessions) = frame else { throw PTYHostCLIError.connectionClosed }
+        return sessions
     }
 
-    /// A bounded tail of the daemon's own journal. The daemon caps the answer again on its side.
     func journalTail(maxBytes: Int) throws -> [String] {
         try send(.journalTail(PTYHostJournalTail(maxBytes: maxBytes)))
-        let frame = try waitForControl(
-            timeout: PTYHostCLIDefaults.answerTimeout,
-            what: "the journal tail"
-        ) {
-            if case .journal = $0 { return true }
-            return false
+        let frame = try waitForControl(timeout: PTYHostCLIDefaults.answerTimeout, what: "the journal tail") {
+            if case .journal = $0 { return true }; return false
         }
-        guard case .journal(let journal) = frame else {
-            throw PTYHostCLIError.answerTimedOut(what: "the journal tail")
-        }
+        guard case .journal(let journal) = frame else { throw PTYHostCLIError.connectionClosed }
         return journal.lines
     }
 
-    /// Ends one child, the way the app's Background Sessions list ends one.
-    ///
-    /// **Attach, then kill.** `kill` names a session and the daemon only accepts a frame naming
-    /// the session this connection is *bound* to, so a watcher that wants to end a child it is
-    /// not watching has to become its watcher first. The replay that costs is bound to the floor:
-    /// something about to end a child has no use for its history, and the daemon clamps anything
-    /// smaller up to that anyway.
-    ///
-    /// Answers true when the ending arrived inside the bound. False is "it did not say so",
-    /// which is not the same as "it is still running" — that is why the caller reports the
-    /// difference rather than asserting the child is alive.
+    func attach(_ identity: PTYHostSessionIdentity) throws -> PTYHostAttached {
+        try send(.attach(PTYHostAttach(id: identity, replayBudget: PTYHostReplayDefaults.minimumBudgetBytes)))
+        let frame = try waitForControl(timeout: PTYHostCLIDefaults.answerTimeout, what: "the attach") {
+            if case .attached = $0 { return true }; return false
+        }
+        guard case .attached(let attached) = frame else { throw PTYHostCLIError.connectionClosed }
+        return attached
+    }
+
     func stop(_ identity: PTYHostSessionIdentity) throws -> PTYHostExited? {
-        try send(.attach(PTYHostAttach(
-            id: identity,
-            replayBudget: PTYHostReplayDefaults.minimumBudgetBytes
-        )))
-        let answer = try waitForControl(
-            timeout: PTYHostCLIDefaults.answerTimeout,
-            what: "the attach"
-        ) {
-            switch $0 {
-            case .attached, .exited, .error: return true
-            default: return false
-            }
-        }
-        if case .exited(let ending) = answer { return ending }
-        if case .error = answer { return nil }
-
+        _ = try attach(identity)
         try send(.kill(PTYHostKill(id: identity, escalate: true)))
-        let ending = try waitForControl(
-            timeout: PTYHostCLIDefaults.stopTimeout,
-            what: "the ending"
-        ) {
-            if case .exited = $0 { return true }
-            return false
+        let frame = try waitForControl(timeout: PTYHostCLIDefaults.stopTimeout, what: "the ending") {
+            if case .exited = $0 { return true }; return false
         }
-        guard case .exited(let body) = ending else { return nil }
-        return body
+        guard case .exited(let exited) = frame else { return nil }
+        return exited
     }
 
-    /// The `lost` set the daemon pushes after every `hello`, or nil when it pushed none.
-    ///
-    /// Read after a later answer rather than waited for: the frame is queued immediately behind
-    /// the greeting and stream delivery is ordered, so anything that came back after it has
-    /// already proved whether it was sent.
-    func reportedLoss() -> PTYHostLost? {
-        condition.lock()
-        defer { condition.unlock() }
-        for frame in controls {
-            if case .lost(let lost) = frame { return lost }
-        }
-        return nil
+    func sendInput(_ data: Data) throws {
+        do { try transport.sendInput(data) } catch { throw mapped(error) }
     }
 
-    func hangUp() {
-        condition.lock()
-        let alreadyClosed = closed
-        closed = true
-        condition.broadcast()
-        condition.unlock()
-        guard !alreadyClosed else { return }
-        PTYHostPOSIX.shutdown(descriptor, .readWrite)
+    func send(_ frame: PTYHostFrame) throws {
+        do { try transport.send(frame) } catch { throw mapped(error) }
     }
 
-    // MARK: - Private Methods
+    func reportedLoss() -> PTYHostLost? { transport.reportedLoss }
+    func hangUp() { transport.close() }
 
-    private func send(_ frame: PTYHostFrame) throws {
-        guard let payload = try? Self.encoder.encode(frame),
-              let framed = try? PTYHostFraming.encode(kind: .control, payload: payload) else {
-            throw PTYHostCLIError.connectionClosed
+    /// Used when detaching after a final keystroke: enqueueing is not socket delivery.
+    func drainInput() throws {
+        guard transport.drainWrites(until: Date().addingTimeInterval(PTYHostCLIDefaults.answerTimeout)),
+              transport.isReady else {
+            throw PTYHostCLIError.answerTimedOut(what: "input delivery")
         }
-        write(framed)
+    }
+
+    func nextEvent(timeout: TimeInterval) throws -> Event? {
+        do {
+            let event = try mailbox.next(timeout: timeout)
+            if case .control(.error(let failure))? = event {
+                throw PTYHostCLIError.refused("The background host refused the request: \(failure.code).")
+            }
+            return event
+        } catch { throw mapped(error) }
     }
 
     private func waitForControl(
-        timeout: TimeInterval,
-        what: String,
-        matching: (PTYHostFrame) -> Bool
+        timeout: TimeInterval, what: String, matching: (PTYHostFrame) -> Bool
     ) throws -> PTYHostFrame {
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if case .control(let frame)? = try nextEvent(timeout: deadline - ProcessInfo.processInfo.systemUptime),
+               matching(frame) { return frame }
+        }
+        throw PTYHostCLIError.answerTimedOut(what: what)
+    }
+
+    private func mapped(_ error: Error) -> PTYHostCLIError {
+        if let error = error as? PTYHostCLIError { return error }
+        guard let error = error as? PTYHostClientError else { return .connectionClosed }
+        switch error {
+        case .pathTooLong(let bytes): return .socketPathTooLong(bytes: bytes)
+        case .socketUnavailable(let code), .connectFailed(let code): return .connectFailed(path: socketPath, code: code)
+        case .connectTimedOut: return .connectFailed(path: socketPath, code: ETIMEDOUT)
+        case .handshakeTimedOut: return .handshakeTimedOut
+        case .incompatible(let compatibility): return .incompatible(compatibility.updateTarget(evaluatedBy: .app) ?? .app)
+        default: return .refused("The background host connection failed (\(error.token)).")
+        }
+    }
+}
+
+/// At most 4 MiB and 4,096 events, including control-frame overhead. Expected bursts are 64 KiB;
+/// a stalled terminal under an indefinite output flood fails closed rather than retaining the
+/// transcript. Cleared slots release payloads immediately; compaction is amortized per batch.
+private final class PTYHostCLIMailbox: @unchecked Sendable {
+    private enum Limits {
+        static let bytes = 4 * 1024 * 1024
+        static let events = 4096
+    }
+    private let condition = NSCondition()
+    private var pending: [(PTYHostCLIClient.Event, Int)?] = []
+    private var cursor = 0
+    private var bytes = 0
+    private var closed = false
+    private var failure: Error?
+
+    func append(_ event: PTYHostCLIClient.Event) {
+        // Controls are bounded by the wire already; measure their encoded size so large lists
+        // cannot each count as one tiny event. Bulk output never passes through JSON.
+        let cost: Int
+        switch event {
+        case .output(let data): cost = data.count + PTYHostFramingDefaults.headerBytes
+        case .control(let frame):
+            guard let encoded = try? JSONEncoder().encode(frame) else {
+                finish(PTYHostCLIError.refused("Cannot measure a host control frame.")); return
+            }
+            cost = encoded.count + PTYHostFramingDefaults.headerBytes
+        }
         condition.lock()
         defer { condition.unlock() }
-        while true {
-            if let index = controls.firstIndex(where: matching) {
-                return controls.remove(at: index)
-            }
-            if closed { throw PTYHostCLIError.connectionClosed }
-            guard condition.wait(until: deadline) else {
-                throw PTYHostCLIError.answerTimedOut(what: what)
-            }
-        }
-    }
-
-    /// The reader thread. Raw `output` frames are decoded and dropped: the only thing that
-    /// streams bytes at this tool is the replay a stop-only attach asks for, and nothing here
-    /// renders a terminal.
-    private func read() {
-        var buffer = [UInt8](repeating: 0, count: PTYHostCLIDefaults.readBufferBytes)
-        while true {
-            let count = buffer.withUnsafeMutableBytes {
-                PTYHostPOSIX.read(descriptor, $0.baseAddress, $0.count)
-            }
-            guard count > 0 else {
-                condition.lock()
-                closed = true
-                condition.broadcast()
-                condition.unlock()
-                PTYHostPOSIX.close(descriptor)
-                return
-            }
-            let incoming = Data(buffer[0..<count])
-            condition.lock()
-            switch decoder.accept(incoming) {
-            case .frames(let frames):
-                for frame in frames where frame.kind == .control {
-                    if let control = try? Self.jsonDecoder.decode(
-                        PTYHostFrame.self,
-                        from: frame.payload
-                    ) {
-                        controls.append(control)
-                    }
-                }
-            case .refused:
-                closed = true
-            }
+        guard !closed else { return }
+        guard bytes + cost <= Limits.bytes, pending.count - cursor < Limits.events else {
+            failure = PTYHostCLIError.refused("Terminal output exceeded the controller buffer; reconnect to the running agent.")
+            closed = true
+            pending.removeAll()
+            cursor = 0
+            bytes = 0
             condition.broadcast()
-            condition.unlock()
+            return
         }
+        if pending.count == Limits.events {
+            pending.removeFirst(cursor)
+            cursor = 0
+        }
+        pending.append((event, cost))
+        bytes += cost
+        condition.signal()
     }
 
-    private func write(_ data: Data) {
-        PTYHostPOSIX.writeAll(descriptor, data)
+    func finish(_ error: Error?) {
+        condition.lock()
+        defer { condition.unlock() }
+        if !closed { closed = true; failure = error }
+        condition.broadcast()
+    }
+
+    func next(timeout: TimeInterval) throws -> PTYHostCLIClient.Event? {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        while cursor == pending.count && !closed {
+            guard condition.wait(until: deadline) else { return nil }
+        }
+        if cursor < pending.count, let (event, cost) = pending[cursor] {
+            pending[cursor] = nil
+            cursor += 1
+            bytes -= cost
+            if cursor == pending.count { pending.removeAll(keepingCapacity: true); cursor = 0 }
+            return event
+        }
+        throw failure ?? PTYHostCLIError.connectionClosed
     }
 }

@@ -39,20 +39,30 @@ actor TriggerRuntime {
     func start() async {
         guard !didStart else { return }
         didStart = true
+        // The daemon's file is a projection; failing to write it must not also stop recovery and
+        // the schedule sweep below. The listener's registration is left as it was.
         do {
-            let shouldRun = try TriggerDaemonConfigurationStore.publish(try await store.sources())
+            let shouldRun = try await store.publishDaemonConfiguration()
             await MainActor.run {
                 TriggerDaemonRegistrationCoordinator.shared.reconcile(shouldRun: shouldRun)
             }
+        } catch {
+            ThreadingLogger.app.error(
+                "Trigger daemon configuration was not published: \(error.localizedDescription, privacy: .private)"
+            )
+        }
+        do {
             try await settleInterruptedRuns()
             try await publish(try await store.receivedDispatches())
             try await publishFixStages(try await store.fixStageDispatches())
+            try await publish(try await store.scheduledDispatches())
             await drainDaemonInbox()
             try await releaseQueue()
             queueTimer = Task {
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(60))
+                    try? await Task.sleep(for: .seconds(15))
                     guard !Task.isCancelled else { return }
+                    try? await self.publish(try await self.store.scheduledDispatches())
                     try? await self.releaseQueue()
                 }
             }
@@ -93,7 +103,7 @@ actor TriggerRuntime {
         try await publish(try await engine.releaseEligibleQueuedRuns())
     }
 
-    private func publish(_ dispatches: [TriggerDispatch]) async throws {
+    func publish(_ dispatches: [TriggerDispatch]) async throws {
         guard !dispatches.isEmpty else { return }
         await MainActor.run {
             for dispatch in dispatches {

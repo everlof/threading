@@ -835,6 +835,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
     /// to the whole list.
     private var presentedSections: [DashboardCollectionSection]
     private var theme: RemoteThemePalette
+    private let themeBackdrop = MobileThemeBackdropView()
     private var bottomContentInset: CGFloat
     private var content: @MainActor (DashboardCollectionItemID) -> AnyView
     private var rowConfiguration: @MainActor (String) -> DashboardUIKitRowConfiguration?
@@ -866,8 +867,9 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         )
         view.translatesAutoresizingMaskIntoConstraints = false
         view.delegate = self
-        view.backgroundColor = theme.uiGround
         view.alwaysBounceVertical = true
+        view.backgroundColor = .clear
+        view.backgroundView = themeBackdrop
         view.contentInset = UIEdgeInsets(
             top: MobileDesign.Spacing.large,
             left: 0,
@@ -916,6 +918,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = theme.uiGround
+        themeBackdrop.apply(theme)
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -933,9 +936,10 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         }
     }
 
-#if DEBUG
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        themeBackdrop.isPresentationActive = true
+#if DEBUG
         let capture = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
         guard capture == "session-dashboard-preview-accessibility-custom-light"
                 || capture == "session-dashboard-preview-collapsed-again-custom-dark",
@@ -946,8 +950,13 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         // photograph the disclosure, not just the demo banner above its offscreen rows.
         collectionView.layoutIfNeeded()
         collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
-    }
 #endif
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        themeBackdrop.isPresentationActive = false
+    }
 
     func update(
         sections: [DashboardCollectionSection],
@@ -972,7 +981,7 @@ private final class MobileDashboardCollectionViewController: UIViewController, U
         refreshAction = refresh
 
         guard isViewLoaded else { return }
-        collectionView.backgroundColor = theme.uiGround
+        themeBackdrop.apply(theme)
         collectionView.refreshControl?.tintColor = theme.uiAccent
         if bottomInsetChanged {
             collectionView.contentInset.bottom = bottomContentInset
@@ -2533,6 +2542,8 @@ enum MobileDashboardHighlightProbe {
 }
 
 struct MobileDashboardCollectionPerformanceMetrics: Equatable {
+    let backdropLayerCount: Int
+    let showsBackdropGradient: Bool
     let snapshotItemCount: Int
     let hostedContentCount: Int
     let mountedCellCount: Int
@@ -2778,10 +2789,10 @@ enum MobileDashboardTitleReuseProbe {
 enum MobileDashboardCollectionPerformanceProbe {
     static func exercise(
         rowCount: Int,
-        viewport: CGSize = CGSize(width: 393, height: 852)
+        viewport: CGSize = CGSize(width: 393, height: 852),
+        theme: RemoteThemePalette = RemoteThemePalette(nil)
     ) -> MobileDashboardCollectionPerformanceMetrics {
         precondition(rowCount >= 0)
-        let theme = RemoteThemePalette(nil)
         var rows: [String: DashboardCollectionRow] = [:]
         let items = (0..<rowCount).map { offset in
             let id = "probe:\(offset)"
@@ -3032,6 +3043,8 @@ private extension MobileDashboardCollectionViewController {
     ) -> MobileDashboardCollectionPerformanceMetrics {
         collectionView.layoutIfNeeded()
         return MobileDashboardCollectionPerformanceMetrics(
+            backdropLayerCount: themeBackdrop.layer.sublayers?.count ?? 0,
+            showsBackdropGradient: themeBackdrop.showsGradient,
             snapshotItemCount: dataSource.snapshot().numberOfItems,
             hostedContentCount: hostedContentCount,
             mountedCellCount: collectionView.visibleCells.count,

@@ -617,6 +617,9 @@ public enum AppThemeEditing {
             ink: NSColor,
             floor: CGFloat
         ) throws {
+            guard gradient.drift == nil else {
+                throw AppThemeEditingError.invalid("chrome.\(name) does not support backdrop drift.")
+            }
             guard (2...WindowChromeStyleLimits.maximumGradientStops)
                 .contains(gradient.stops.count) else {
                 throw AppThemeEditingError.invalid(
@@ -843,6 +846,14 @@ public enum AppThemeEditing {
         ground: NSColor
     ) throws {
         if let gradient = backdrop.gradient {
+            guard gradient.angleDegrees.isFinite else {
+                throw AppThemeEditingError.invalid("\(prefix).gradient angle must be finite.")
+            }
+            if let drift = gradient.drift, !drift.isValid {
+                throw AppThemeEditingError.invalid(
+                    "\(prefix).gradient.drift needs a duration of 8–120 seconds and distance of 0.02–0.25."
+                )
+            }
             guard (2...ThemeBackdropLimits.maximumGradientStops).contains(gradient.stops.count) else {
                 throw AppThemeEditingError.invalid(
                     "\(prefix).gradient needs 2 to \(ThemeBackdropLimits.maximumGradientStops) stops."

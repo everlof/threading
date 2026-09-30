@@ -37,6 +37,7 @@ struct PendingSessionArchive: Sendable, Equatable {
     let requestedByManagerID: SessionID?
 
     let requestedAt: Date
+    var requiresPromptReady: Bool = false
 }
 
 enum SessionArchiveRequestOutcome: Equatable {
@@ -135,7 +136,8 @@ final class SessionArchiveScheduler {
     func request(
         sessionID: SessionID,
         reason: String?,
-        requestedByManagerID: SessionID? = nil
+        requestedByManagerID: SessionID? = nil,
+        successfulAutomation: Bool = false
     ) -> SessionArchiveRequestOutcome {
         guard let session = session(sessionID) else {
             return .refused("This session is not in Threading's sidebar.")
@@ -144,12 +146,16 @@ final class SessionArchiveScheduler {
             return .refused("This session is already archived.")
         }
 
+        guard !successfulAutomation || Self.acceptsSuccessfulAutomation(runtime(sessionID)) else {
+            return .refused("The automation has not completed successfully at a ready prompt.")
+        }
         let wasPending = pending[sessionID] != nil
         pending[sessionID] = PendingSessionArchive(
             sessionID: sessionID,
             reason: Self.trimmed(reason),
             requestedByManagerID: requestedByManagerID,
-            requestedAt: Date()
+            requestedAt: Date(),
+            requiresPromptReady: successfulAutomation
         )
 
         // The caller's own archive request is made inside the turn that must finish before it
@@ -158,7 +164,7 @@ final class SessionArchiveScheduler {
         // already-settled state now, or an idle child with no future activity event stays pending
         // forever. If the child starts during the grace, the ordinary activity observer disarms
         // the timer and spends the request on the later, real end instead.
-        if requestedByManagerID != nil {
+        if requestedByManagerID != nil || successfulAutomation {
             reconcileActivity(for: sessionID)
         }
         return wasPending ? .alreadyPending : .scheduled
@@ -191,8 +197,16 @@ final class SessionArchiveScheduler {
     /// on one meant the request sat armed until `requestExpiry` dropped it half an hour later, so
     /// the archive the agent announced to the user simply never happened. Delegated work still
     /// holds, because it reports back into this conversation and the user is waiting to read it.
+    private static func acceptsSuccessfulAutomation(_ runtime: SessionRuntimeSnapshot) -> Bool {
+        runtime.isPromptReady && !runtime.hasPendingOutcome
+    }
+
     private func reconcileActivity(for sessionID: SessionID) {
         guard let request = pending[sessionID] else { return }
+        if request.requiresPromptReady && !Self.acceptsSuccessfulAutomation(runtime(sessionID)) {
+            cancel(sessionID: sessionID)
+            return
+        }
 
         guard !runtime(sessionID).awaitsConversationOutcome else {
             disarm(sessionID)
@@ -220,6 +234,7 @@ final class SessionArchiveScheduler {
         disarm(sessionID)
         guard let request = pending.removeValue(forKey: sessionID) else { return }
         guard let session = session(sessionID), !session.isArchived else { return }
+        guard !request.requiresPromptReady || Self.acceptsSuccessfulAutomation(runtime(sessionID)) else { return }
 
         center.post(
             SessionArchiveRequestDidBecomeDue(

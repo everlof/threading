@@ -52,7 +52,7 @@ extension SoundScope {
 
     /// This scope's own entry at one level, or nil where it says nothing there.
     ///
-    /// Never nil for the app scope's two kind keys: those are the pickers on the General page,
+    /// Never nil for the app scope's two kind keys: those are the pickers on the Notifications page,
     /// and a picker always reads *something*. That is the same fact the sheet's app-scope kind
     /// rows encode by offering no *Default* item — there is nothing above them to fall back to.
     func choice(forKey key: String) -> SoundChoice? {

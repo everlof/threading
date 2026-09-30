@@ -11,6 +11,10 @@
   "defaultOptions" : {
     "environmentVariableEntries" : [
       {
+        "key" : "THREADING_AUTOMATION_STRESS",
+        "value" : "$(THREADING_AUTOMATION_STRESS)"
+      },
+      {
         "key" : "THREADING_GITHUB_E2E_REPOSITORY",
         "value" : "$(THREADING_GITHUB_E2E_REPOSITORY)"
       },
